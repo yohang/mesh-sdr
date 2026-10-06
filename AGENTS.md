@@ -57,7 +57,7 @@ docs/adr/               architecture decision records
 
 Modules (bounded contexts):
 
-- `grid`: nodes, enrollment, internal CA / mTLS, control channel, heartbeat, capabilities, device registry, gateway routes
+- `grid`: nodes, enrollment, internal CA / mTLS, control channel, heartbeat, capabilities, device registry, embedded gateway (Caddy) and its forward auth, node media WebSocket and access-token verification
 - `identity`: users, roles, sessions, passwords, invitations, access tokens, CSRF, audit log
 - `settings`: DB settings store, config locking/precedence, retention
 - `shell`: app shell UI (layout, navigation, theming, static pages)
@@ -110,7 +110,7 @@ Goal: know everything that goes wrong or not as well as expected, plus debug inf
 Spec TECHNICAL_SPEC §7.4 is authoritative:
 
 - TOML v1.0 files, declarative only, starting with `schema_version`: `hub.toml`, `node.toml` and `hub.d/*.toml`, `node.d/*.toml` drop-ins (lexical order, recursive table merge). Default dir `/etc/meshsdr`, overridable with `--config-dir` / `MESHSDR_CONFIG_DIR`. Secrets referenced by `{ file = "…" }`.
-- Every key can be overridden by an env var: `MESHSDR_` prefix, `__` between nesting levels (`db.dsn` → `MESHSDR_DB__DSN`, `hub.listen` → `MESHSDR_HUB__LISTEN`). Env-set keys are locked like file-set keys, with origin `env:<VAR>`.
+- Every key can be overridden by an env var: `MESHSDR_` prefix, `__` between nesting levels (`db.dsn` → `MESHSDR_DB__DSN`, `gateway.tls_mode` → `MESHSDR_GATEWAY__TLS_MODE`). Env-set keys are locked like file-set keys, with origin `env:<VAR>`.
 - Precedence: env > config files > DB settings > defaults. Config/env keys are read-only (locked) in the UI, which shows their origin (`hub.toml:42`).
 - Typed Go structs are the source of truth; JSON Schema (draft 2020-12) is generated from them (`meshsdr hub|node config schema`, attached to releases by CI). Validation happens at load; invalid config is a startup error (exit code 78). `meshsdr hub|node config check` validates and prints each key's origin. See docs/adr/0005.
 - The binary never writes config files (only exception: first-start TLS bootstrap of `all`).
@@ -120,7 +120,7 @@ Spec TECHNICAL_SPEC §7.4 is authoritative:
 - Environment-specific values come from config files or `MESHSDR_*` env vars (see Configuration); never hard-coded.
 - Logs as event streams to stderr; no log files, no rotation.
 - Stateless processes; persistent state only in backing services (hub SQLite file at `db.dsn`, `/var/lib/meshsdr` volume in Docker); nodes hold no persistent state.
-- Port binding via `hub.listen` (default `0.0.0.0:8073`) / `node.listen` (default `0.0.0.0:8074`); app is self-contained (embedded assets/migrations/OpenAPI document).
+- Port binding: the hub's embedded Caddy gateway owns every public port (`gateway.https_listen`, default `:443`, and `gateway.http_listen`; TLS from `gateway.tls_mode`: acme, files, internal or off), nodes listen on `node.listen` (default `0.0.0.0:8074`); app is self-contained (embedded assets/migrations/OpenAPI document). See docs/adr/0002 and docs/adr/0012.
 - Disposability: fast start, graceful shutdown on SIGTERM/SIGINT.
 - Admin tasks as one-off subcommands of the same binary (`meshsdr hub migrate`, `meshsdr hub user …`).
 - Build/release/run separated: immutable image, config injected at runtime. Dev/prod parity through the same Dockerfile.
@@ -130,9 +130,10 @@ Spec TECHNICAL_SPEC §7.4 is authoritative:
 
 One binary; the bare role starts the process, admin tasks are subcommands of the role:
 
-- `meshsdr hub` — start the hub; `meshsdr hub migrate [up|down|status]` (bare `migrate` = `up`; `down` is dev only); `meshsdr hub config schema|check`; `meshsdr hub ca init` (hub internal CA in `<config-dir>/tls`, never overwrites); `meshsdr hub node add|list|show|token|disable|enable|remove`; `meshsdr hub user add|remove|reset-password|list|disable|enable|exists`
+- `meshsdr hub` — start the hub; `meshsdr hub migrate [up|down|status]` (bare `migrate` = `up`; `down` is dev only); `meshsdr hub config schema|check`; `meshsdr hub ca init` (hub internal CA in `<config-dir>/tls`, never overwrites); `meshsdr hub node add|list|show|token|disable|enable|revoke|remove`; `meshsdr hub user add|remove|reset-password|list|disable|enable|exists`
 - `meshsdr node` — start a node (enrolled: mTLS node API with `/control`; before enrollment: TLS 1.3 with an ephemeral self-signed certificate, every path 403, `POST /enroll` 501); `meshsdr node config schema|check`; `meshsdr node enroll` (one-off: serves `POST /enroll` until the hub enrolls the node, writes `tls.key`, `tls.cert`, `hub_trust.ca_cert`, exits). See docs/adr/0008
-- `meshsdr all` — hub + local node (auto-enrolled over loopback)
+- `meshsdr all` — hub + local node in one process (node id `local` on `127.0.0.1:8074` by default): creates the hub CA (`tls/ca.pem`, `tls/ca.key`) and the local node certificate (`tls/node.pem`, `tls/node.key`) on first start, enrolls the local node in-process; `meshsdr all config check`. See docs/adr/0012
+- Build tag `nogateway`: node-only binary without Caddy (`hub` and `all` refuse to start); Caddy code stays in `internal/grid/infra/gateway`
 - Global flags: `-c/--config-dir`, `--noninteractive`, `--silent`, `--json`, `--debug`
 
 ## Commands
@@ -141,15 +142,15 @@ Everything runs in Docker; no local Go toolchain required. Run `make help` for t
 
 - `make run` — all-in-one: build, generate, migrate, start the dev stack
 - `make clean` — stop the stack, drop volumes (caches) and remove generated files / Air output
-- `make up` / `make down` / `make logs [c=<service>]` — dev stack: Air runs `meshsdr hub` (hub.listen 8073 in the container) on http://localhost:3000 (`HTTP_PORT` to change host port), config from `.infra/docker/dev/config/` (`MESHSDR_CONFIG_DIR`)
+- `make up` / `make down` / `make logs [c=<service>]` — dev stack: Air runs `meshsdr all` (gateway with `tls_mode = off` on 8073 in the container, local node `dev`) on http://localhost:3000 (`HTTP_PORT` to change host port), config from `.infra/docker/dev/config/` (`MESHSDR_CONFIG_DIR`)
 - `make generate` — `go generate ./...` (templ, sqlc, oapi-codegen + openapi.json, tailwind)
-- `make lint` / `make test`
+- `make lint` / `make test` — both run the default and the `nogateway` builds
 - `make migrate [cmd=up|down|status]` — `meshsdr hub migrate` against the dev database
 - `make migrate-create name=<name>` — new sequential goose SQL migration in `internal/db/sqlite/migrations/`
 - `make vendor [HTMX_VERSION=x.y.z]` — refresh vendored htmx
 - `make sh` — shell in dev container
 - `make a11y` — axe-core WCAG 2.1 AA checks of the production image (CI-only container; Node never enters the app or dev image)
-- `make build-prod` — production image (distroless, nonroot; `-f .infra/docker/Dockerfile`; config dir `/etc/meshsdr`, volume `/var/lib/meshsdr`, ports 8073/8074, `CMD ["hub"]`)
+- `make build-prod` — production images (distroless, nonroot; `-f .infra/docker/Dockerfile`; config dir `/etc/meshsdr` with `tls/` linked to the volume `/var/lib/meshsdr`): target `prod` (`meshsdr`, port 443, `CMD ["all"]`) and target `prod-node` (`meshsdr-node`, `-tags nogateway`, port 8074, `CMD ["node"]`, published with a `-node` tag suffix)
 
 VS Code: "Reopen in Container" (`.devcontainer/`) attaches to the compose `app` service (Air keeps running). The dev image ships gopls, dlv, golangci-lint and the go.mod tools (templ, sqlc, goose, air, oapi-codegen) on `PATH`; rebuild the image after bumping tool versions.
 
@@ -168,7 +169,7 @@ Dev containers are rootless: the `dev` stage creates an `app` user with the host
 - Dependencies: stdlib and `golang.org/x/*` are fine; any other third-party dependency requires the owner's approval.
 - REST: every `/api/v1` endpoint is declared in `internal/http/api/openapi.yaml` first, then generated (oapi-codegen strict chi server); module handler structs are embedded in `api.Server`. One JSON error format: RFC 9457 `application/problem+json` with a stable `code` (`internal/http/problem`).
 - Git: one branch + PR per epic (`epic/<area>-<n>`), split into ordered parts when another epic needs a subset first; PR body lists `Closes #<n>` per ticket; spikes get `spike/<key>-<topic>` branches. No AI attribution in commits or PRs.
-- Dockerfile (`.infra/docker/Dockerfile`, built from the repository root) stages: `base` → `dev` (Air) / `build` → `prod` (`gcr.io/distroless/static-debian13:nonroot`).
+- Dockerfile (`.infra/docker/Dockerfile`, built from the repository root) stages: `base` → `dev` (Air) / `build` → `prod` and `prod-node` (`gcr.io/distroless/static-debian13:nonroot`).
 - `.infra/docker/Dockerfile.dockerignore` whitelists: ignore everything, then `!` what the build needs.
 
 ## UI
