@@ -44,17 +44,33 @@ func (r *Sessions) Add(ctx context.Context, s *domain.Session) error {
 	return nil
 }
 
-// Save stores the activity and revocation of a session.
-func (r *Sessions) Save(ctx context.Context, s *domain.Session) error {
-	err := sqlc.New(r.db.Writer(ctx)).UpdateSession(ctx, sqlc.UpdateSessionParams{
+// Touch stores the activity of an unrevoked session.
+func (r *Sessions) Touch(ctx context.Context, s *domain.Session) error {
+	err := sqlc.New(r.db.Writer(ctx)).TouchSession(ctx, sqlc.TouchSessionParams{
 		LastSeenAt:    ms(s.LastSeenAt()),
 		IdleExpiresAt: ms(s.IdleExpiresAt()),
-		RevokedAt:     nullMS(s.RevokedAt()),
-		RevokeReason:  nullString(string(s.RevokeReason())),
 		ID:            s.ID().Bytes(),
 	})
 	if err != nil {
-		return fmt.Errorf("update session %s: %w", s.ID(), err)
+		return fmt.Errorf("touch session %s: %w", s.ID(), err)
+	}
+
+	return nil
+}
+
+// Revoke stores the revocation of a session; an earlier one is kept.
+func (r *Sessions) Revoke(ctx context.Context, s *domain.Session) error {
+	if s.RevokedAt().IsZero() {
+		return fmt.Errorf("revoke session %s: %w", s.ID(), domain.ErrInvalidSession.WithDetail("the session is not revoked"))
+	}
+
+	err := sqlc.New(r.db.Writer(ctx)).RevokeSession(ctx, sqlc.RevokeSessionParams{
+		RevokedAt:    nullMS(s.RevokedAt()),
+		RevokeReason: nullString(string(s.RevokeReason())),
+		ID:           s.ID().Bytes(),
+	})
+	if err != nil {
+		return fmt.Errorf("revoke session %s: %w", s.ID(), err)
 	}
 
 	return nil

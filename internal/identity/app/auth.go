@@ -270,7 +270,7 @@ func (a *Auth) revokePrevious(ctx context.Context, cookie string, now time.Time)
 	}
 
 	if s.Revoke(domain.RevokeRotated, now) {
-		return a.sessions.Save(ctx, s)
+		return a.sessions.Revoke(ctx, s)
 	}
 
 	return nil
@@ -347,7 +347,7 @@ func (a *Auth) Resolve(ctx context.Context, cookie string) (Resolution, error) {
 	}
 
 	if s.Touch(now, a.sessionPol) {
-		if err := a.sessions.Save(ctx, s); err != nil {
+		if err := a.sessions.Touch(ctx, s); err != nil {
 			// Activity tracking is best effort; the session stays valid.
 			a.logger.WarnContext(ctx, "session activity not recorded", slog.String("session_id", s.ID().String()), slog.Any("error", err))
 		}
@@ -378,7 +378,7 @@ func (a *Auth) Logout(ctx context.Context, cookie string, meta RequestMeta) erro
 			return nil
 		}
 
-		if err := a.sessions.Save(ctx, s); err != nil {
+		if err := a.sessions.Revoke(ctx, s); err != nil {
 			return err
 		}
 

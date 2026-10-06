@@ -286,9 +286,14 @@ func RunSessions(t *testing.T, open Factory) {
 		}
 
 		got.Touch(t0.Add(time.Hour), domain.DefaultSessionPolicy())
+
+		if err := r.Sessions.Touch(ctx, got); err != nil {
+			t.Fatal(err)
+		}
+
 		got.Revoke(domain.RevokeLogout, t0.Add(2*time.Hour))
 
-		if err := r.Sessions.Save(ctx, got); err != nil {
+		if err := r.Sessions.Revoke(ctx, got); err != nil {
 			t.Fatal(err)
 		}
 
@@ -300,6 +305,69 @@ func RunSessions(t *testing.T, open Factory) {
 
 		if _, err := r.Sessions.ByTokenHash(ctx, domain.NewSessionToken().Hash()); !errors.Is(err, domain.ErrSessionNotFound) {
 			t.Errorf("unknown token: %v", err)
+		}
+	})
+
+	t.Run("a stale touch never resurrects a revoked session", func(t *testing.T) {
+		r, u := setup(t)
+		_, tok := start(t, r, u, t0)
+
+		// Two requests read the session; one logs out, the other then
+		// records activity from its stale copy.
+		stale, _ := r.Sessions.ByTokenHash(ctx, tok.Hash())
+		current, _ := r.Sessions.ByTokenHash(ctx, tok.Hash())
+
+		current.Revoke(domain.RevokeLogout, t0.Add(time.Minute))
+
+		if err := r.Sessions.Revoke(ctx, current); err != nil {
+			t.Fatal(err)
+		}
+
+		if !stale.Touch(t0.Add(2*time.Minute), domain.DefaultSessionPolicy()) {
+			t.Fatal("stale copy not touched")
+		}
+
+		if err := r.Sessions.Touch(ctx, stale); err != nil {
+			t.Fatal(err)
+		}
+
+		got, _ := r.Sessions.ByTokenHash(ctx, tok.Hash())
+		if got.ActiveAt(t0.Add(3*time.Minute)) || got.RevokeReason() != domain.RevokeLogout ||
+			!got.LastSeenAt().Equal(t0) {
+			t.Errorf("session after a stale touch: revoked %v (%s), last seen %v", got.RevokedAt(), got.RevokeReason(), got.LastSeenAt())
+		}
+	})
+
+	t.Run("revoke keeps the first revocation", func(t *testing.T) {
+		r, u := setup(t)
+		s, tok := start(t, r, u, t0)
+
+		stale, _ := r.Sessions.ByTokenHash(ctx, tok.Hash())
+
+		s.Revoke(domain.RevokeLogout, t0.Add(time.Minute))
+
+		if err := r.Sessions.Revoke(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+
+		stale.Revoke(domain.RevokeAdmin, t0.Add(time.Hour))
+
+		if err := r.Sessions.Revoke(ctx, stale); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := r.Sessions.RevokeAllForUser(ctx, u.ID(), domain.RevokeUserDisabled, t0.Add(2*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+
+		got, _ := r.Sessions.ByTokenHash(ctx, tok.Hash())
+		if got.RevokeReason() != domain.RevokeLogout || !got.RevokedAt().Equal(t0.Add(time.Minute)) {
+			t.Errorf("revocation = %v (%s)", got.RevokedAt(), got.RevokeReason())
+		}
+
+		unrevoked, _ := start(t, r, u, t0)
+		if err := r.Sessions.Revoke(ctx, unrevoked); err == nil {
+			t.Error("storing an unrevoked session as revoked accepted")
 		}
 	})
 
@@ -343,7 +411,7 @@ func RunSessions(t *testing.T, open Factory) {
 		revoked, revokedTok := start(t, r, u, t0.Add(39*24*time.Hour))
 
 		revoked.Revoke(domain.RevokeLogout, t0.Add(39*24*time.Hour))
-		if err := r.Sessions.Save(ctx, revoked); err != nil {
+		if err := r.Sessions.Revoke(ctx, revoked); err != nil {
 			t.Fatal(err)
 		}
 

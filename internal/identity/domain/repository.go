@@ -27,8 +27,12 @@ type UserRepository interface {
 type SessionRepository interface {
 	// Add stores a new session.
 	Add(ctx context.Context, s *Session) error
-	// Save stores the activity and revocation of a session.
-	Save(ctx context.Context, s *Session) error
+	// Touch stores the activity of a session (last_seen_at and idle expiry),
+	// only while it is not revoked: a stale copy never resurrects a session.
+	Touch(ctx context.Context, s *Session) error
+	// Revoke stores the revocation of a session. An earlier revocation is
+	// kept (time and reason).
+	Revoke(ctx context.Context, s *Session) error
 	// ByTokenHash returns a session (active or not) or ErrSessionNotFound.
 	ByTokenHash(ctx context.Context, h TokenHash) (*Session, error)
 	// RevokeAllForUser revokes every unrevoked session of a user and

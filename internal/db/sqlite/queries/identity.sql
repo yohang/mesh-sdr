@@ -62,19 +62,25 @@ INSERT INTO sessions (
     sqlc.narg(ip), sqlc.narg(user_agent), sqlc.narg(revoked_at), sqlc.narg(revoke_reason)
 );
 
--- name: UpdateSession :exec
+-- name: TouchSession :exec
 UPDATE sessions SET
     last_seen_at = sqlc.arg(last_seen_at),
-    idle_expires_at = sqlc.arg(idle_expires_at),
-    revoked_at = sqlc.narg(revoked_at),
-    revoke_reason = sqlc.narg(revoke_reason)
+    idle_expires_at = sqlc.arg(idle_expires_at)
+WHERE id = sqlc.arg(id) AND revoked_at IS NULL;
+
+-- name: RevokeSession :exec
+UPDATE sessions SET
+    revoked_at = COALESCE(revoked_at, sqlc.arg(revoked_at)),
+    revoke_reason = COALESCE(revoke_reason, sqlc.arg(revoke_reason))
 WHERE id = sqlc.arg(id);
 
 -- name: GetSessionByTokenHash :one
 SELECT * FROM sessions WHERE token_hash = sqlc.arg(token_hash);
 
 -- name: RevokeUserSessions :execrows
-UPDATE sessions SET revoked_at = sqlc.arg(revoked_at), revoke_reason = sqlc.arg(revoke_reason)
+UPDATE sessions SET
+    revoked_at = COALESCE(revoked_at, sqlc.arg(revoked_at)),
+    revoke_reason = COALESCE(revoke_reason, sqlc.arg(revoke_reason))
 WHERE user_id = sqlc.arg(user_id) AND revoked_at IS NULL;
 
 -- name: DeleteEndedSessions :execrows
