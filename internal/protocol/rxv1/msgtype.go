@@ -75,6 +75,42 @@ const (
 	TypeSessionRevoked   MessageType = "session.revoked"
 )
 
+// Control channel rx-ctl.v1, hub → node (§4.4).
+const (
+	TypeCtlHello             MessageType = "ctl.hello"
+	TypeCtlStateApply        MessageType = "ctl.state.apply"
+	TypeCtlKeysUpdate        MessageType = "ctl.keys.update"
+	TypeCtlRevocations       MessageType = "ctl.revocations"
+	TypeCtlPresetActivate    MessageType = "ctl.preset.activate"
+	TypeCtlDeviceRetune      MessageType = "ctl.device.retune"
+	TypeCtlDeviceControl     MessageType = "ctl.device.control"
+	TypeCtlCertRenew         MessageType = "ctl.cert.renew"
+	TypeCtlCapabilitiesProbe MessageType = "ctl.capabilities.probe"
+	TypeCtlPing              MessageType = "ctl.ping"
+	TypeCtlAck               MessageType = "ctl.ack"
+)
+
+// Control channel rx-ctl.v1, node → hub (§4.4, §4.9).
+const (
+	TypeCtlWelcome        MessageType = "ctl.welcome"
+	TypeNodeCapabilities  MessageType = "node.capabilities"
+	TypeNodeHeartbeat     MessageType = "node.heartbeat"
+	TypeConnectionOpened  MessageType = "connection.opened"
+	TypeConnectionClosed  MessageType = "connection.closed"
+	TypeConnectionHeart   MessageType = "connection.heartbeat"
+	TypeDecodeBatch       MessageType = "decode.batch"
+	TypeMapFeatureBatch   MessageType = "map.feature.batch"
+	TypeDiagTransition    MessageType = "diag.transition"
+	TypeFileBegin         MessageType = "file.begin"
+	TypeFileChunk         MessageType = "file.chunk"
+	TypeFileEnd           MessageType = "file.end"
+	TypeAuditEvent        MessageType = "audit.event"
+	TypeLogBatch          MessageType = "log.batch"
+	TypeCtlStateApplied   MessageType = "ctl.state.applied"
+	TypeCtlPong           MessageType = "ctl.pong"
+	TypeNodeEventsDropped MessageType = "node.events_dropped"
+)
+
 // ParseMessageType validates s against the §6.2 type grammar.
 func ParseMessageType(s string) (MessageType, error) {
 	if !validMessageType(s) {
@@ -158,6 +194,16 @@ var (
 		TypeMapSnapshot, TypeMapFeatureUpsert, TypeMapFeatureRemove, TypeDecodeNew, TypeDiagState,
 		TypeNodeStatus, TypeDeviceStatus, TypePresetChanged, TypeBookmarkChanged, TypeSettingsChanged,
 		TypeNotification, TypeFilesNew, TypeSessionRevoked, TypeAck, TypeError)
+	ctlHubToNode = newCatalogue("control hub→node",
+		TypeCtlHello, TypeCtlStateApply, TypeCtlKeysUpdate, TypeCtlRevocations, TypeCtlPresetActivate,
+		TypeCtlDeviceRetune, TypeCtlDeviceControl, TypeCtlCertRenew, TypeCtlCapabilitiesProbe,
+		TypeCtlPing, TypeCtlAck, TypeAck, TypeError)
+	ctlNodeToHub = newCatalogue("control node→hub",
+		TypeCtlWelcome, TypeNodeCapabilities, TypeNodeHeartbeat, TypeDeviceState,
+		TypeConnectionOpened, TypeConnectionClosed, TypeConnectionHeart, TypeDecodeBatch,
+		TypeMapFeatureBatch, TypeDiagTransition, TypeFileBegin, TypeFileChunk, TypeFileEnd,
+		TypeAuditEvent, TypeLogBatch, TypeCtlStateApplied, TypeCtlPong, TypeNodeEventsDropped,
+		TypeAck, TypeError)
 )
 
 // MediaClientToNode is the catalogue a node accepts on /ws (§6.4).
@@ -171,6 +217,12 @@ func HubClientToHub() Catalogue { return hubClientToHub }
 
 // HubHubToClient is the catalogue a client accepts on /api/ws (§6.6).
 func HubHubToClient() Catalogue { return hubHubToClient }
+
+// CtlHubToNode is the catalogue a node accepts on /control (§4.4).
+func CtlHubToNode() Catalogue { return ctlHubToNode }
+
+// CtlNodeToHub is the catalogue the hub accepts on a control channel (§4.4).
+func CtlNodeToHub() Catalogue { return ctlNodeToHub }
 
 // truncate bounds attacker-controlled strings echoed in error reasons.
 func truncate(s string) string {

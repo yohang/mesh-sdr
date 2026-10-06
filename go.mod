@@ -14,6 +14,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/a-h/templ v0.3.1070
 	github.com/caarlos0/env/v11 v11.4.1
+	github.com/coder/websocket v1.8.15
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/invopop/jsonschema v0.14.0
@@ -49,7 +50,6 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cli/browser v1.3.0 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/cubicdaiya/gonp v1.0.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
