@@ -79,6 +79,9 @@ Numbers refer to the questions of the design proposal. The owner accepted every 
 
 - **Error format.** Every path under `/api` answers problem+json errors, including unversioned and unknown versions.
 - **Parity.** `TestHTMLActionsHaveAPITwins` walks the router and maps every state-changing HTML route to its `/api/v1` operation. A new form without an API twin fails the test.
+  - Two forms had no twin and got one: the e-mail confirmation (`POST /api/v1/auth/email/confirm`, anonymous, with the token of the link) and the test e-mail (`POST /api/v1/mail/test`, admin).
+  - Two forms map to operations that are not one-to-one. "Sign out other sessions" is `revokeOwnSession` for each session `GET /me/sessions` lists except the current one. The audit export (CSV or JSON) is `searchAudit`, whose results the client formats.
+  - `GET /.well-known/jwks.json` stays outside `/api`: token verifiers expect it at that well-known path. It is a read, so the parity test does not see it; the contract suite checks it directly.
 - **Setup API.** The first-admin setup page was the only gap. `GET /api/v1/auth/setup/{token}` and `POST /api/v1/auth/setup` close it, with the page's network restriction, rate limit and token redaction.
 - **Contract tests.** `internal/http/api/apitest` validates exchanges with kin-openapi against `openapi.yaml`:
   - every response under `/api/v1`: status, content type and body schema;
@@ -86,7 +89,7 @@ Numbers refer to the questions of the design proposal. The owner accepted every 
   - the problem+json shape of every error.
 - **Hub-level suite.** `internal/wire/contract_test.go` runs the whole hub through `apitest`:
   - every operation is called by anonymous, listener, operator and admin callers, and by an admin outside `admin.allowed_networks`. Below its `x-meshsdr-access` level the call is refused (401 `unauthenticated`, 403 `forbidden` or `admin_network_denied`); at or above it, never. The levels are read from the document, so new operations are covered as they are declared;
-  - every operation answers a validated 2xx at least once. The node probe needs a connected node and is covered by the grid end-to-end test.
+  - every operation answers a validated 2xx at least once. The node probe needs a connected node and is covered by the grid end-to-end test. The e-mail confirmation and the test e-mail need mail, which the suite does not configure; the identity HTTP tests cover them.
 - **Dependency.** kin-openapi stays a build- and test-time dependency. depguard refuses it outside `specgen`, `apitest` and `_test.go` files, so `meshsdr` never links it.
 - **Breaking changes.** The `/api/v2` rule for breaking changes is documented only, pre-1.0. A CI diff against `main` (oasdiff) can come with the first release.
 

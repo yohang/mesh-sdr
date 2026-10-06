@@ -272,7 +272,7 @@ func TestAPIContract(t *testing.T) {
 
 	roles := map[string]identitydomain.Role{
 		"listener": identitydomain.RoleListener, "operator": identitydomain.RoleOperator, "admin": identitydomain.RoleAdmin,
-		"changer": identitydomain.RoleListener,
+		"changer": identitydomain.RoleListener, "leaver": identitydomain.RoleListener, "victim": identitydomain.RoleListener,
 	}
 	h := newContractHub(t, v, roles)
 
@@ -294,8 +294,10 @@ func TestAPIContract(t *testing.T) {
 		}
 	})
 
-	// The probe needs a connected node: TestGridEndToEnd covers it.
-	exempt := map[string]bool{"probeNodeCapabilities": true}
+	// The probe needs a connected node: TestGridEndToEnd covers it. The
+	// e-mail confirmation and the test e-mail need mail, which this hub
+	// does not configure: the identity HTTP tests cover them.
+	exempt := map[string]bool{"probeNodeCapabilities": true, "confirmEmail": true, "sendTestMail": true}
 
 	for _, id := range v.Uncovered() {
 		if !exempt[id] {
@@ -444,6 +446,7 @@ func happyPaths(t *testing.T, h *contractHub) {
 	expect(admin, http.MethodGet, "/nodes/attic/capabilities", nil, http.StatusOK)
 	expect(admin, http.MethodGet, "/devices", nil, http.StatusOK)
 	expect(admin, http.MethodGet, "/devices/hf", nil, http.StatusOK)
+	expect(admin, http.MethodPost, "/auth/token", map[string]any{"node_id": "attic", "cid": "c1"}, http.StatusOK)
 
 	// A device its node no longer reports can be forgotten.
 	dev.MarkUnavailable(now)
@@ -482,10 +485,128 @@ func happyPaths(t *testing.T, h *contractHub) {
 
 	expect(admin, http.MethodDelete, "/branding/avatar", nil, http.StatusNoContent)
 
-	// Password change, then logout.
+	// Password change.
 	changer := h.signedIn("changer", 10)
 	expect(changer, http.MethodPost, "/auth/password", map[string]any{"current_password": contractPassword, "new_password": "another contract passphrase"}, http.StatusOK)
+
+	accountPaths(t, h, admin, expect)
+
 	expect(admin, http.MethodPost, "/auth/logout", nil, http.StatusNoContent)
+}
+
+// accountPaths runs the account, user, invitation and password reset
+// operations (ADR 0011) the way a client uses them.
+func accountPaths(t *testing.T, h *contractHub, admin *apiClient, expect func(*apiClient, string, string, any, int) map[string]any) {
+	t.Helper()
+
+	anon := h.client(10)
+
+	// The signing keys stay outside /api, at their well-known path.
+	res, err := http.Get(h.url + "/.well-known/jwks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("GET /.well-known/jwks.json = %d", res.StatusCode)
+	}
+
+	// The caller's own account: e-mail (applied at once without mail),
+	// sessions, deletion.
+	leaver := h.signedIn("leaver", 10)
+	other := h.signedIn("leaver", 10)
+
+	expect(leaver, http.MethodPost, "/me/email", map[string]any{"email": "leaver@example.org", "current_password": contractPassword}, http.StatusOK)
+
+	sessions := expect(leaver, http.MethodGet, "/me/sessions", nil, http.StatusOK)
+	list, _ := sessions["sessions"].([]any)
+
+	revoked := 0
+
+	for _, s := range list {
+		if s, _ := s.(map[string]any); s["current"] == false {
+			expect(leaver, http.MethodDelete, "/me/sessions/"+s["id"].(string), nil, http.StatusNoContent)
+
+			revoked++
+		}
+	}
+
+	if status, _ := other.do(http.MethodGet, "/me", nil); revoked != 1 || status != http.StatusUnauthorized {
+		t.Errorf("revoked %d other session(s); the other one answers %d", revoked, status)
+	}
+
+	expect(leaver, http.MethodDelete, "/me", map[string]any{"current_password": contractPassword}, http.StatusNoContent)
+
+	// User administration.
+	id := userID(t, expect(admin, http.MethodGet, "/users", nil, http.StatusOK), "victim")
+	user := "/users/" + id
+
+	expect(admin, http.MethodGet, user, nil, http.StatusOK)
+	expect(admin, http.MethodGet, user+"/roles", nil, http.StatusOK)
+	expect(admin, http.MethodPut, user+"/roles", map[string]any{"grants": []any{map[string]any{"role": "operator", "device_id": "hf"}}}, http.StatusOK)
+	expect(admin, http.MethodPatch, user, map[string]any{"display_name": "Victim"}, http.StatusOK)
+
+	// A role change signs the user out: sign in after it.
+	victim := h.signedIn("victim", 10)
+
+	userSessions := expect(admin, http.MethodGet, user+"/sessions", nil, http.StatusOK)
+	if list, _ := userSessions["sessions"].([]any); len(list) != 1 {
+		t.Errorf("user sessions = %v", userSessions)
+	} else {
+		ref, _ := list[0].(map[string]any)["id"].(string)
+		expect(admin, http.MethodDelete, user+"/sessions/"+ref, nil, http.StatusNoContent)
+	}
+
+	if status, _ := victim.do(http.MethodGet, "/me", nil); status != http.StatusUnauthorized {
+		t.Errorf("revoked session answers %d", status)
+	}
+
+	expect(admin, http.MethodPost, user+"/sessions/revoke", nil, http.StatusOK)
+	expect(admin, http.MethodPost, user+"/export", nil, http.StatusOK)
+	expect(admin, http.MethodPost, user+"/password", nil, http.StatusOK)
+
+	// A password reset link, shown to copy without mail.
+	reset := expect(admin, http.MethodPost, user+"/password-reset", nil, http.StatusOK)
+	link, _ := reset["link"].(string)
+	_, token, _ := strings.Cut(link, "/password/reset/")
+	expect(anon, http.MethodPost, "/auth/password-reset/confirm", map[string]any{"token": token, "new_password": "a reset contract passphrase"}, http.StatusNoContent)
+
+	expect(admin, http.MethodPatch, user, map[string]any{"enabled": false}, http.StatusOK)
+	expect(admin, http.MethodDelete, user, nil, http.StatusNoContent)
+
+	// Invitations: one accepted, one revoked.
+	created := expect(admin, http.MethodPost, "/invitations", map[string]any{"role": "listener"}, http.StatusCreated)
+	link, _ = created["link"].(string)
+	_, token, _ = strings.Cut(link, "/invite/")
+
+	invitee := h.client(10)
+	expect(invitee, http.MethodGet, "/auth/invitations/"+token, nil, http.StatusOK)
+	expect(invitee, http.MethodPost, "/auth/invitations/"+token+"/accept", map[string]any{"username": "invitee", "password": contractPassword}, http.StatusCreated)
+
+	created = expect(admin, http.MethodPost, "/invitations", map[string]any{"role": "listener"}, http.StatusCreated)
+	inv, _ := created["invitation"].(map[string]any)
+	invID, _ := inv["id"].(string)
+	expect(admin, http.MethodDelete, "/invitations/"+invID, nil, http.StatusNoContent)
+}
+
+// userID finds the id of username in a user list.
+func userID(t *testing.T, list map[string]any, username string) string {
+	t.Helper()
+
+	users, _ := list["users"].([]any)
+	for _, u := range users {
+		if u, _ := u.(map[string]any); u["username"] == username {
+			id, _ := u["id"].(string)
+
+			return id
+		}
+	}
+
+	t.Fatalf("user %s not in %v", username, list)
+
+	return ""
 }
 
 // htmlActions maps every state-changing HTML route (htmx forms, ADR 0003
@@ -505,6 +626,35 @@ var htmlActions = map[string]string{
 	"POST /admin/site/images":         "putReceiverImage",
 	"POST /admin/site/images/remove":  "deleteReceiverImage",
 	"POST /admin/devices/{id}/forget": "forgetDevice",
+	// Account (ADR 0011).
+	"POST /account/profile":               "updateMe",
+	"POST /account/email":                 "changeMyEmail",
+	"POST /account/email/verify":          "confirmEmail",
+	"POST /account/export":                "exportMe",
+	"POST /account/delete":                "deleteMe",
+	"POST /account/sessions/{ref}/revoke": "revokeOwnSession",
+	// Not one-to-one: revokeOwnSession for each session of GET /me/sessions
+	// except the current one (ADR 0013).
+	"POST /account/sessions/revoke-others": "revokeOwnSession",
+	"POST /password/forgot":                "requestPasswordReset",
+	"POST /password/reset":                 "confirmPasswordReset",
+	"POST /invite":                         "acceptInvitation",
+	// Admin › Users, Invitations, Audit.
+	"POST /admin/users/{id}/roles":                 "setUserRoles",
+	"POST /admin/users/{id}/enable":                "updateUser",
+	"POST /admin/users/{id}/disable":               "updateUser",
+	"POST /admin/users/{id}/password":              "setGeneratedPassword",
+	"POST /admin/users/{id}/password-reset":        "issuePasswordReset",
+	"POST /admin/users/{id}/export":                "exportUser",
+	"POST /admin/users/{id}/delete":                "deleteUser",
+	"POST /admin/users/{id}/sessions/revoke":       "revokeUserSessions",
+	"POST /admin/users/{id}/sessions/{ref}/revoke": "revokeUserSession",
+	"POST /admin/invitations":                      "createInvitation",
+	"POST /admin/invitations/{id}/revoke":          "revokeInvitation",
+	"POST /admin/invitations/test-mail":            "sendTestMail",
+	// Not one-to-one: the CSV or JSON export formats the results of
+	// searchAudit (ADR 0013).
+	"POST /admin/audit/export": "searchAudit",
 }
 
 // TestHTMLActionsHaveAPITwins walks the hub router: a new unsafe HTML
