@@ -240,6 +240,17 @@ func (s *UserAdmin) Exists(ctx context.Context, username string) (bool, error) {
 	return true, nil
 }
 
+// List returns the enabled users, or every user with includeDisabled, by
+// username (AUTH-011).
+func (s *UserAdmin) List(ctx context.Context, includeDisabled bool) ([]*domain.User, error) {
+	users, err := s.users.List(ctx, includeDisabled)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+
+	return users, nil
+}
+
 // DisableResult tells what Disable changed.
 type DisableResult struct {
 	Changed         bool

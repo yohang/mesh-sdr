@@ -21,6 +21,9 @@ type UserRepository interface {
 	ByLogin(ctx context.Context, l Login) (*User, error)
 	// ByIdentity returns the user owning an identity or ErrUserNotFound.
 	ByIdentity(ctx context.Context, i Identity) (*User, error)
+	// List returns the enabled users, or every user with includeDisabled,
+	// ordered by case-insensitive username.
+	List(ctx context.Context, includeDisabled bool) ([]*User, error)
 }
 
 // SessionRepository stores sessions.
