@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -30,6 +31,11 @@ type HubOptions struct {
 	HeartbeatInterval time.Duration
 	Now               func() time.Time
 	Logger            *slog.Logger
+	// Keys are the access-token verification keys pushed with
+	// ctl.keys.update; Issuer is the token issuer (hub.url). Without Keys
+	// no ctl.keys.update is sent and nodes refuse media connects.
+	Keys   app.KeySource
+	Issuer string
 
 	// Tunables; zero values take the spec defaults.
 	ReconcileEvery time.Duration
@@ -52,7 +58,23 @@ type Manager struct {
 	mu    sync.Mutex
 	links map[domain.NodeID]*link
 	wake  chan struct{}
+
+	revMu  sync.Mutex
+	recent []recentRevocation
 }
+
+// RevocationMemory is how long revoked sessions and users are re-pushed to
+// nodes that (re)connect: longer than any access token lives (TTL ≤ 600 s
+// plus the 30 s leeway).
+const RevocationMemory = 15 * time.Minute
+
+type recentRevocation struct {
+	at       time.Time
+	sessions []string
+	users    []string
+}
+
+var _ app.RevocationBroadcaster = (*Manager)(nil)
 
 type link struct {
 	cancel context.CancelFunc
@@ -111,10 +133,16 @@ func NewManager(o HubOptions) *Manager {
 
 var _ app.Links = (*Manager)(nil)
 
-// Run reconciles the channels until ctx is done, then closes them all.
+// Run reconciles the channels until ctx is done, then closes them all. Key
+// changes are pushed to every open channel.
 func (m *Manager) Run(ctx context.Context) {
 	t := time.NewTicker(m.o.ReconcileEvery)
 	defer t.Stop()
+
+	var keysChanged <-chan struct{}
+	if m.o.Keys != nil {
+		keysChanged = m.o.Keys.Changed()
+	}
 
 	for {
 		m.reconcile(ctx)
@@ -126,8 +154,78 @@ func (m *Manager) Run(ctx context.Context) {
 			return
 		case <-t.C:
 		case <-m.wake:
+		case <-keysChanged:
+			for _, s := range m.sessions() {
+				s.pushKeys(ctx)
+			}
 		}
 	}
+}
+
+// sessions returns the open channels.
+func (m *Manager) sessions() []*hubSession {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]*hubSession, 0, len(m.links))
+
+	for _, l := range m.links {
+		if s := l.current(); s != nil {
+			out = append(out, s)
+		}
+	}
+
+	return out
+}
+
+// BroadcastRevocations implements app.RevocationBroadcaster: the revoked
+// sessions and users go to every open channel now, and to every channel
+// that opens within RevocationMemory.
+func (m *Manager) BroadcastRevocations(ctx context.Context, sessions, users []string) {
+	if len(sessions) == 0 && len(users) == 0 {
+		return
+	}
+
+	now := m.o.Now()
+
+	m.revMu.Lock()
+	m.recent = append(m.recent, recentRevocation{at: now, sessions: slices.Clone(sessions), users: slices.Clone(users)})
+	m.revMu.Unlock()
+
+	rev := ctl.Revocations{Sessions: nonNil(sessions), Users: nonNil(users), CertSerials: []string{}}
+
+	for _, s := range m.sessions() {
+		_ = send(s.conn, rxv1.TypeCtlRevocations, rxv1.CorrelationID{}, rev)
+	}
+
+	m.o.Logger.DebugContext(ctx, "revocations pushed to the nodes", slog.Int("sessions", len(sessions)), slog.Int("users", len(users)))
+}
+
+// recentRevocations returns the sessions and users revoked within
+// RevocationMemory, forgetting older ones.
+func (m *Manager) recentRevocations() (sessions, users []string) {
+	cutoff := m.o.Now().Add(-RevocationMemory)
+
+	m.revMu.Lock()
+	defer m.revMu.Unlock()
+
+	m.recent = slices.DeleteFunc(m.recent, func(r recentRevocation) bool { return r.at.Before(cutoff) })
+
+	sessions, users = []string{}, []string{}
+	for _, r := range m.recent {
+		sessions = append(sessions, r.sessions...)
+		users = append(users, r.users...)
+	}
+
+	return sessions, users
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+
+	return s
 }
 
 // Wake implements app.Links.
@@ -212,6 +310,13 @@ func (m *Manager) Drop(ctx context.Context, id domain.NodeID) {
 	if s := l.current(); s != nil {
 		s.pushRevocations(ctx)
 		s.conn.Close(rxv1.CloseForbidden, "node removed, disabled or re-enrolled")
+
+		// Let the revocations and the 4403 reach the node before the
+		// session context is cancelled.
+		select {
+		case <-s.conn.Finished():
+		case <-time.After(DropTimeout):
+		}
 	}
 
 	l.cancel()
@@ -413,6 +518,7 @@ func (s *hubSession) run(ctx context.Context, l *link) error {
 	s.boot, s.restricted = boot, decision.Restricted
 	l.set(s)
 
+	s.pushKeys(ctx)
 	s.pushRevocations(ctx)
 	s.confirmPending(ctx)
 
@@ -482,7 +588,28 @@ func (s *hubSession) pushRevocations(ctx context.Context) {
 		list = append(list, k)
 	}
 
-	_ = send(s.conn, rxv1.TypeCtlRevocations, rxv1.CorrelationID{}, ctl.Revocations{Sessions: []string{}, Users: []string{}, CertSerials: list})
+	sessions, users := s.m.recentRevocations()
+
+	_ = send(s.conn, rxv1.TypeCtlRevocations, rxv1.CorrelationID{}, ctl.Revocations{Sessions: sessions, Users: users, CertSerials: list})
+}
+
+// pushKeys sends ctl.keys.update with the current verification keys.
+func (s *hubSession) pushKeys(ctx context.Context) {
+	o := s.m.o
+	if o.Keys == nil {
+		return
+	}
+
+	keys, err := o.Keys.VerificationKeys(ctx)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "load access-token verification keys", slog.Any("error", err))
+
+		return
+	}
+
+	_ = send(s.conn, rxv1.TypeCtlKeysUpdate, rxv1.CorrelationID{}, ctl.KeysUpdate{
+		Issuer: o.Issuer, Keys: keys.Keys, RevokedKids: nonNil(keys.RevokedKids),
+	})
 }
 
 // confirmPending promotes a renewed certificate the node presents: it

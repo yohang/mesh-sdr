@@ -20,6 +20,7 @@ import (
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/media"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/probe"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
@@ -100,20 +101,25 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	holder := pki.NewCertHolder(cert)
 	revoked := pki.NewRevokedSet()
 
+	mediaServer := media.NewServer(media.Options{
+		NodeID: id.String(), Version: version.String(), GatewayIdentity: cfg.HubTrust.HubIdentity,
+		OwnSerial: holder.Serial, Agent: ag, Now: time.Now, Logger: component(logger, "grid.infra.media"),
+	})
+
 	ctlServer := control.NewNodeServer(control.NodeOptions{
-		Agent: ag, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
+		Agent: ag, Media: mediaServer, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
 		Renewer: &control.FileRenewer{NodeID: id.String(), CertFile: cfg.TLS.Cert, Roots: roots, Key: key, Holder: holder, Now: time.Now},
 		Now:     time.Now, Logger: component(logger, "grid.infra.control"),
 	})
 
-	srv := httpserver.NewServer(cfg.Node.Listen, gridhttp.NewNodeRouter(ctlServer, component(logger, "grid.http.node")))
+	srv := httpserver.NewServer(cfg.Node.Listen, gridhttp.NewNodeRouter(ctlServer, mediaServer, component(logger, "grid.http.node")))
 	srv.TLSConfig = pki.NodeServerConfig(holder, roots, revoked)
 	// Refused handshakes (foreign CA, revoked peer) are expected noise.
 	srv.ErrorLog = slog.NewLogLogger(component(logger, "grid.http.server").Handler(), slog.LevelDebug)
 
 	return &Process{
 		addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server"),
-		workers: []func(context.Context){ag.Run, ctlServer.Run},
+		workers: []func(context.Context){ag.Run, ctlServer.Run, mediaServer.Run},
 	}, nil
 }
 

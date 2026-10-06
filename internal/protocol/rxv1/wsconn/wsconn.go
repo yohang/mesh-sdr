@@ -37,6 +37,17 @@ var (
 // Accept upgrades r when it offers subprotocol. Without it, it answers 426
 // (§6.1) and returns an error. Compression is disabled.
 func Accept(w http.ResponseWriter, r *http.Request, subprotocol string) (*websocket.Conn, error) {
+	return accept(w, r, subprotocol, false)
+}
+
+// AcceptOriginChecked is Accept for a caller that has checked the Origin
+// itself against its own allow-list: the library's same-host Origin check is
+// skipped (behind the gateway, the Host is not the browser's).
+func AcceptOriginChecked(w http.ResponseWriter, r *http.Request, subprotocol string) (*websocket.Conn, error) {
+	return accept(w, r, subprotocol, true)
+}
+
+func accept(w http.ResponseWriter, r *http.Request, subprotocol string, originChecked bool) (*websocket.Conn, error) {
 	if !offers(r, subprotocol) {
 		w.Header().Set("Sec-WebSocket-Protocol", subprotocol)
 		http.Error(w, "subprotocol "+subprotocol+" required", http.StatusUpgradeRequired)
@@ -51,8 +62,9 @@ func Accept(w http.ResponseWriter, r *http.Request, subprotocol string) (*websoc
 	_ = rc.SetWriteDeadline(time.Time{})
 
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		Subprotocols:    []string{subprotocol},
-		CompressionMode: websocket.CompressionDisabled,
+		Subprotocols:       []string{subprotocol},
+		CompressionMode:    websocket.CompressionDisabled,
+		InsecureSkipVerify: originChecked,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("wsconn: accept: %w", err)
@@ -151,9 +163,14 @@ type Conn struct {
 	wake    chan struct{}
 
 	closed    chan struct{}
+	finished  chan struct{}
 	closeOnce sync.Once
 	closeErr  error
 }
+
+// FlushTimeout bounds the flush of the queued messages before a local Close
+// sends its close frame.
+const FlushTimeout = time.Second
 
 // New wraps ws and starts its writer and pinger goroutines. The connection
 // lives until Close, a transport error or ctx is done.
@@ -168,12 +185,13 @@ func New(ctx context.Context, ws *websocket.Conn, opts Options) *Conn {
 
 	cctx, cancel := context.WithCancel(ctx)
 	c := &Conn{
-		ws:     ws,
-		opts:   opts,
-		ctx:    cctx,
-		cancel: cancel,
-		wake:   make(chan struct{}, 1),
-		closed: make(chan struct{}),
+		ws:       ws,
+		opts:     opts,
+		ctx:      cctx,
+		cancel:   cancel,
+		wake:     make(chan struct{}, 1),
+		closed:   make(chan struct{}),
+		finished: make(chan struct{}),
 	}
 
 	go c.writeLoop()
@@ -332,8 +350,9 @@ func (c *Conn) Read(ctx context.Context) (rxv1.Envelope, error) {
 	return rxv1.DecodeEnvelope(b)
 }
 
-// Close sends a close frame with code and reason, then tears the connection
-// down. It is safe to call several times and from any goroutine.
+// Close sends the queued messages (within FlushTimeout), then a close frame
+// with code and reason, and tears the connection down. It is safe to call
+// several times and from any goroutine.
 func (c *Conn) Close(code rxv1.CloseCode, reason string) {
 	c.closeWith(code, reason, nil)
 }
@@ -344,14 +363,49 @@ func (c *Conn) closeWith(code rxv1.CloseCode, reason string, err error) {
 		close(c.closed)
 
 		go func() {
+			defer close(c.finished)
+
+			if err == nil {
+				c.flush()
+			}
+
 			_ = c.ws.Close(websocket.StatusCode(code), reason)
 			c.cancel()
 		}()
 	})
 }
 
+// flush writes what is still queued, best effort.
+func (c *Conn) flush() {
+	ctx, cancel := context.WithTimeout(c.ctx, FlushTimeout)
+	defer cancel()
+
+	for {
+		c.mu.Lock()
+		if len(c.queue) == 0 {
+			c.mu.Unlock()
+
+			return
+		}
+
+		b := c.queue[0]
+		c.queue[0] = nil
+		c.queue = c.queue[1:]
+		c.pending -= len(b)
+		c.mu.Unlock()
+
+		if c.ws.Write(ctx, websocket.MessageText, b) != nil {
+			return
+		}
+	}
+}
+
 // Done is closed when the connection is closed.
 func (c *Conn) Done() <-chan struct{} { return c.closed }
+
+// Finished is closed when the close handshake is over (or failed) and the
+// connection is torn down.
+func (c *Conn) Finished() <-chan struct{} { return c.finished }
 
 // Err returns why the connection closed, nil for a local Close.
 func (c *Conn) Err() error {

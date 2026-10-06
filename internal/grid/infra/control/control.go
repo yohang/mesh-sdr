@@ -23,6 +23,8 @@ const (
 	WelcomeTimeout = 10 * time.Second
 	BatchWindow    = 250 * time.Millisecond
 	BatchMax       = 500
+	// DropTimeout bounds the close handshake of a dropped channel.
+	DropTimeout = 3 * time.Second
 )
 
 // readResult is one Read outcome.

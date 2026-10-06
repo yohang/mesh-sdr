@@ -18,6 +18,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/tokenkey"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/version"
@@ -39,6 +40,7 @@ func (c caInfo) Fingerprint() (string, error) {
 
 // hubGrid is the hub side of the grid module.
 type hubGrid struct {
+	keys       *tokenkey.Ephemeral
 	ca         *pki.CA
 	hubID      string
 	nodes      *app.Nodes
@@ -147,11 +149,18 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		return nil, err
 	}
 
+	// Interim access-token key until the identity keyring (ACC-007).
+	keys, err := tokenkey.NewEphemeral()
+	if err != nil {
+		return nil, err
+	}
+
 	audit := newGridAuditor(adapter, now, logger)
 	nodeRepo := gridsqlite.NewNodeRepository(adapter)
 	revocations := gridsqlite.NewRevocationRepository(adapter)
 
 	g := &hubGrid{
+		keys:    keys,
 		ca:      ca,
 		hubID:   hubID,
 		history: app.NewHistory(),
@@ -172,6 +181,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 			HubID: hubID, CA: ca, Client: pki.NewClientSource(ca, pki.KindHub, hubID, now),
 			Nodes: nodeRepo, Revocations: revocations, Control: g.control,
 			HeartbeatInterval: timings.HeartbeatInterval, Now: now, Logger: component(logger, "grid.infra.control"),
+			Keys: keys, Issuer: cfg.Hub.URL,
 		}
 		for _, t := range tweaks {
 			t(&hubOpts)

@@ -24,9 +24,22 @@ type Renewer interface {
 	Renew(chain [][]byte) error
 }
 
+// Media is the node's media side, driven by the control channel.
+type Media interface {
+	// UpdateKeys installs the access-token keys of ctl.keys.update.
+	UpdateKeys(u ctl.KeysUpdate) error
+	// Revoke closes the media connections named by ctl.revocations.
+	Revoke(r ctl.Revocations)
+	// Withdrawn is called when the hub closed the control channel with
+	// 4403: the node was removed, disabled or re-enrolled.
+	Withdrawn()
+}
+
 // NodeOptions configures a NodeServer.
 type NodeOptions struct {
 	Agent *agent.Agent
+	// Media receives keys, revocations and withdrawals; nil ignores them.
+	Media Media
 	// HubIdentity is the expected hub id; empty accepts any hub URI SAN.
 	HubIdentity  string
 	Revoked      *pki.RevokedSet
@@ -134,6 +147,11 @@ func (s *NodeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	conn.Close(rxv1.CloseGoingAway, "node closing")
 	s.o.Logger.InfoContext(ctx, "control channel closed", slog.Any("cause", err))
+
+	if wsconn.CloseStatus(err) == rxv1.CloseForbidden && s.o.Media != nil {
+		s.o.Logger.WarnContext(ctx, "the hub withdrew this node (removed, disabled or re-enrolled): media connections closed")
+		s.o.Media.Withdrawn()
+	}
 }
 
 type nodeSession struct {
@@ -257,10 +275,17 @@ func (n *nodeSession) handle(ctx context.Context, env rxv1.Envelope, hello *time
 	case rxv1.TypeCtlRevocations:
 		if rev, err := decode[ctl.Revocations](env); err == nil {
 			o.Revoked.Add(rev.CertSerials...)
+
+			if o.Media != nil {
+				o.Media.Revoke(rev)
+			}
+
 			sendAck(n.conn, env)
 		} else {
 			sendError(n.conn, err)
 		}
+	case rxv1.TypeCtlKeysUpdate:
+		n.onKeys(ctx, env)
 	case rxv1.TypeCtlCertRenew:
 		n.onRenew(ctx, env)
 	case rxv1.TypeAck, rxv1.TypeError:
@@ -315,6 +340,33 @@ func (n *nodeSession) onHello(ctx context.Context, env rxv1.Envelope, hello *tim
 			o.Agent.SetClock(h.ServerTime, received, rtt)
 		}
 	}()
+}
+
+func (n *nodeSession) onKeys(ctx context.Context, env rxv1.Envelope) {
+	o := n.s.o
+
+	u, err := decode[ctl.KeysUpdate](env)
+	if err != nil {
+		sendError(n.conn, err)
+
+		return
+	}
+
+	if o.Media == nil {
+		sendAck(n.conn, env)
+
+		return
+	}
+
+	if err := o.Media.UpdateKeys(u); err != nil {
+		o.Logger.ErrorContext(ctx, "access-token keys rejected", slog.Any("error", err))
+		replyError(n.conn, env, rxv1.CodeInvalidPayload, "invalid access-token keys")
+
+		return
+	}
+
+	o.Logger.DebugContext(ctx, "access-token keys installed", slog.Int("keys", len(u.Keys)))
+	sendAck(n.conn, env)
 }
 
 func (n *nodeSession) onRenew(ctx context.Context, env rxv1.Envelope) {
