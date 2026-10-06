@@ -1,15 +1,13 @@
+// Command meshsdr is the single MeshSDR binary: meshsdr hub, meshsdr node.
 package main
 
 import (
-	"log/slog"
+	"context"
 	"os"
 
 	"github.com/yohang/mesh-sdr/internal/cli"
 )
 
 func main() {
-	if err := cli.Execute(); err != nil {
-		slog.Error("command failed", slog.Any("error", err))
-		os.Exit(1)
-	}
+	os.Exit(cli.Execute(context.Background(), os.Args[1:]))
 }
