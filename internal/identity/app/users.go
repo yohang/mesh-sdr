@@ -14,34 +14,38 @@ import (
 // UserAdmin runs the account administration done from the command line on
 // the hub host (AUTH-008, AUTH-012, AUTH-013, AUTH-014).
 type UserAdmin struct {
-	users    domain.UserRepository
-	sessions domain.SessionRepository
-	audit    domain.AuditLog
-	tx       Transactor
-	hasher   PasswordHasher
-	ids      IDGenerator
-	now      Clock
-	policy   Policies
-	logger   *slog.Logger
+	invitations domain.InvitationRepository
+	users       domain.UserRepository
+	sessions    domain.SessionRepository
+	audit       domain.AuditLog
+	tx          Transactor
+	hasher      PasswordHasher
+	ids         IDGenerator
+	now         Clock
+	policy      Policies
+	logger      *slog.Logger
 }
 
 // UserAdminDeps are the dependencies of UserAdmin.
 type UserAdminDeps struct {
-	Users    domain.UserRepository
-	Sessions domain.SessionRepository
-	Audit    domain.AuditLog
-	Tx       Transactor
-	Hasher   PasswordHasher
-	IDs      IDGenerator
-	Now      Clock
-	Policy   Policies
-	Logger   *slog.Logger
+	// Invitations lets Remove clear the address of redeemed invitations.
+	Invitations domain.InvitationRepository
+	Users       domain.UserRepository
+	Sessions    domain.SessionRepository
+	Audit       domain.AuditLog
+	Tx          Transactor
+	Hasher      PasswordHasher
+	IDs         IDGenerator
+	Now         Clock
+	Policy      Policies
+	Logger      *slog.Logger
 }
 
 // NewUserAdmin returns the service.
 func NewUserAdmin(d UserAdminDeps) *UserAdmin {
 	return &UserAdmin{
-		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs,
+		invitations: d.Invitations,
+		users:       d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs,
 		now: d.Now, policy: d.Policy, logger: d.Logger,
 	}
 }
@@ -143,7 +147,7 @@ func (s *UserAdmin) Add(ctx context.Context, in AddUserInput) (AddUserResult, er
 		}
 
 		return s.appendAudit(ctx, domain.ActionUserCreate, u, nil, map[string]string{
-			"username": u.Username().String(), "role": u.Role().String(),
+			"role":                 u.Role().String(),
 			"must_change_password": strconv.FormatBool(u.MustChangePassword()),
 		})
 	})

@@ -151,8 +151,29 @@ func TestUserCommands(t *testing.T) {
 		t.Errorf("list --all --json = %+v (%+v)", r, listed)
 	}
 
-	for _, cmd := range []string{"disable", "enable", "reset-password"} {
-		r := run(t, ctx, env, "--json", "--noninteractive", "hub", "user", cmd, "nobody")
+	if r := run(t, ctx, env, "--noninteractive", "hub", "user", "remove", "gina"); r.code != ExitFailure || !strings.Contains(r.stderr, "--yes") {
+		t.Errorf("remove without --yes = %+v", r)
+	}
+
+	if r := runIn(t, ctx, env, "nope\n", "hub", "user", "remove", "gina"); r.code != ExitFailure || !strings.Contains(r.stderr, "not confirmed") {
+		t.Errorf("remove not confirmed = %+v", r)
+	}
+
+	if r := runIn(t, ctx, env, "gina\n", "hub", "user", "remove", "gina"); r.code != ExitOK || !strings.Contains(r.stdout, "user gina removed") {
+		t.Errorf("remove = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "user", "exists", "gina"); r.code != ExitFailure {
+		t.Errorf("gina still exists = %+v", r)
+	}
+
+	for _, cmd := range []string{"disable", "enable", "reset-password", "remove"} {
+		args := []string{"--json", "--noninteractive", "hub", "user", cmd, "nobody"}
+		if cmd == "remove" {
+			args = append(args, "--yes")
+		}
+
+		r := run(t, ctx, env, args...)
 		if r.code != ExitFailure || !strings.Contains(r.stderr, `"code":"user_not_found"`) {
 			t.Errorf("%s nobody = %+v", cmd, r)
 		}

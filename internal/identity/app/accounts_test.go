@@ -9,6 +9,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 )
 
 // recRevocations records published revocations.
@@ -20,7 +21,7 @@ func (r *recRevocations) PublishRevocation(_ context.Context, rv app.Revocation)
 
 func (e *env) accounts(rv app.RevocationPublisher) *app.Accounts {
 	return app.NewAccounts(app.AccountsDeps{
-		Hasher: e.hasher, Policies: app.NewPolicies(nil, nil),
+		Hasher: e.hasher, Policies: app.NewPolicies(nil, nil), Invitations: sqlite.NewInvitations(e.db), Passwords: e.passwords(),
 		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Now: e.clock.Now, Revocations: rv,
 		Logger: slog.New(slog.DiscardHandler),
 	})

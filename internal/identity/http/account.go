@@ -60,6 +60,7 @@ type accountView struct {
 	Profile     notice
 	Email       notice
 	SessionsMsg notice
+	Data        notice
 }
 
 func (m *Module) accountView(r *http.Request) (accountView, error) {

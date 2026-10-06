@@ -25,6 +25,10 @@ type Accounts interface {
 	SetEnabled(ctx context.Context, by app.Actor, id domain.UserID, enabled bool) (bool, error)
 	SetDisplayName(ctx context.Context, by app.Actor, id domain.UserID, name string) error
 	SetGeneratedPassword(ctx context.Context, by app.Actor, id domain.UserID) (string, error)
+	Delete(ctx context.Context, by app.Actor, id domain.UserID) error
+	DeleteOwn(ctx context.Context, by app.Actor, currentPassword string) error
+	ExportUser(ctx context.Context, by app.Actor, id domain.UserID) (app.Export, error)
+	ExportOwn(ctx context.Context, by app.Actor) (app.Export, error)
 }
 
 // Profile is the account page service used by the /me endpoints.
@@ -455,3 +459,70 @@ func (j jsonOK) VisitListUsersResponse(w http.ResponseWriter) error            {
 func (j jsonOK) VisitGetUserResponse(w http.ResponseWriter) error              { return j.write(w) }
 func (j jsonOK) VisitUpdateUserResponse(w http.ResponseWriter) error           { return j.write(w) }
 func (j jsonOK) VisitSetGeneratedPasswordResponse(w http.ResponseWriter) error { return j.write(w) }
+
+// ExportMe implements StrictServerInterface.
+func (h AccountHandlers) ExportMe(ctx context.Context, _ ExportMeRequestObject) (ExportMeResponseObject, error) {
+	e, err := h.accounts.ExportOwn(ctx, h.sessions.Actor(ctx))
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{e}, nil
+}
+
+// ExportUser implements StrictServerInterface.
+func (h AccountHandlers) ExportUser(ctx context.Context, req ExportUserRequestObject) (ExportUserResponseObject, error) {
+	id, err := parseUserID(req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	e, err := h.accounts.ExportUser(ctx, h.sessions.Actor(ctx), id)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{e}, nil
+}
+
+// DeleteMe implements StrictServerInterface.
+func (h AccountHandlers) DeleteMe(ctx context.Context, req DeleteMeRequestObject) (DeleteMeResponseObject, error) {
+	err := h.accounts.DeleteOwn(ctx, h.sessions.Actor(ctx), req.Body.CurrentPassword)
+
+	var rl *domain.RateLimitError
+	if errors.As(err, &rl) {
+		return rateLimited{err: rl}, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := h.sessions.Logout(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return logoutResponse{cookie: c}, nil
+}
+
+// DeleteUser implements StrictServerInterface.
+func (h AccountHandlers) DeleteUser(ctx context.Context, req DeleteUserRequestObject) (DeleteUserResponseObject, error) {
+	id, err := parseUserID(req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := h.accounts.Delete(ctx, h.sessions.Actor(ctx), id); err != nil {
+		return nil, err
+	}
+
+	return noContent{}, nil
+}
+
+func (j jsonOK) VisitExportMeResponse(w http.ResponseWriter) error   { return j.write(w) }
+func (j jsonOK) VisitExportUserResponse(w http.ResponseWriter) error { return j.write(w) }
+
+func (n noContent) VisitDeleteUserResponse(w http.ResponseWriter) error { return n.write(w) }
+
+func (r rateLimited) VisitDeleteMeResponse(w http.ResponseWriter) error { return r.write(w) }

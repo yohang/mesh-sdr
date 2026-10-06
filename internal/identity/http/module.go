@@ -90,6 +90,10 @@ type AccountService interface {
 	UserSessions(ctx context.Context, id domain.UserID) ([]app.SessionView, error)
 	RevokeUserSession(ctx context.Context, by app.Actor, id domain.UserID, ref string) error
 	RevokeUserSessions(ctx context.Context, by app.Actor, id domain.UserID) (int, error)
+	Delete(ctx context.Context, by app.Actor, id domain.UserID) error
+	DeleteOwn(ctx context.Context, by app.Actor, currentPassword string) error
+	ExportUser(ctx context.Context, by app.Actor, id domain.UserID) (app.Export, error)
+	ExportOwn(ctx context.Context, by app.Actor) (app.Export, error)
 }
 
 // InvitationService runs invitations (ACC-002).
@@ -241,6 +245,8 @@ func (m *Module) Routes(r chi.Router) {
 	listener.Post(AccountPath+"/email", m.emailAction)
 	listener.Post(AccountPath+"/sessions/revoke-others", m.revokeOthersAction)
 	listener.Post(AccountPath+"/sessions/{ref}/revoke", m.revokeSessionAction)
+	listener.Get(AccountPath+"/export", m.exportOwnAction)
+	listener.Post(AccountPath+"/delete", m.deleteOwnAction)
 
 	r.Get(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
 	r.Head(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
@@ -259,6 +265,8 @@ func (m *Module) Routes(r chi.Router) {
 	admin.Post(UsersPath+"/{id}/password", m.userPasswordAction)
 	admin.Post(UsersPath+"/{id}/sessions/revoke", m.userRevokeAllAction)
 	admin.Post(UsersPath+"/{id}/sessions/{ref}/revoke", m.userRevokeAction)
+	admin.Get(UsersPath+"/{id}/export", m.userExportAction)
+	admin.Post(UsersPath+"/{id}/delete", m.userDeleteAction)
 	admin.Get(InvitationsPath, m.invitationsPage)
 	admin.Head(InvitationsPath, m.invitationsPage)
 	admin.Post(InvitationsPath, m.createInvitationAction)

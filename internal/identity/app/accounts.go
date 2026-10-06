@@ -50,6 +50,9 @@ type Accounts struct {
 	policies    Policies
 	users       domain.UserRepository
 	sessions    domain.SessionRepository
+	invitations domain.InvitationRepository
+	erasers     []UserEraser
+	passwords   PasswordChecker
 	audit       domain.AuditLog
 	tx          Transactor
 	now         Clock
@@ -64,11 +67,17 @@ type AccountsDeps struct {
 	Policies    Policies
 	Users       domain.UserRepository
 	Sessions    domain.SessionRepository
+	Invitations domain.InvitationRepository
 	Audit       domain.AuditLog
 	Tx          Transactor
 	Now         Clock
 	Revocations RevocationPublisher
-	Logger      *slog.Logger
+	// Passwords checks the current password before an own deletion.
+	Passwords PasswordChecker
+	// Erasers remove a deleted user's personal data kept by other modules
+	// (SR-64: connections, …).
+	Erasers []UserEraser
+	Logger  *slog.Logger
 }
 
 // NewAccounts returns the service.
@@ -79,8 +88,9 @@ func NewAccounts(d AccountsDeps) *Accounts {
 
 	return &Accounts{
 		hasher: d.Hasher, policies: d.Policies,
-		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, now: d.Now, revocations: d.Revocations,
-		logger: d.Logger,
+		users: d.Users, sessions: d.Sessions, invitations: d.Invitations, erasers: d.Erasers, passwords: d.Passwords, audit: d.Audit, tx: d.Tx, now: d.Now,
+		revocations: d.Revocations,
+		logger:      d.Logger,
 	}
 }
 

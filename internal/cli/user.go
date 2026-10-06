@@ -66,9 +66,24 @@ func (a *app) newUserCmd() *cobra.Command {
 	}
 	listCmd.Flags().BoolVar(&listAll, "all", false, "include disabled users")
 
+	var removeYes bool
+
+	removeCmd := &cobra.Command{
+		Use:   "remove <username>",
+		Short: "Delete a user, its sessions and its personal data",
+		Long: "Delete a user: its sessions end at once and its personal data is removed;\n" +
+			"audit entries keep only its id. Asks for confirmation on a terminal; --yes\n" +
+			"(required with --noninteractive) skips it. The last enabled admin cannot be\n" +
+			"removed.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error { return a.userRemove(cmd.Context(), args[0], removeYes) },
+	}
+	removeCmd.Flags().BoolVar(&removeYes, "yes", false, "do not ask for confirmation")
+
 	cmd.AddCommand(
 		addCmd,
 		listCmd,
+		removeCmd,
 		&cobra.Command{
 			Use:   "exists <username>",
 			Short: "Exit with status 0 when the user exists, 1 otherwise",
@@ -366,6 +381,37 @@ func (a *app) userList(ctx context.Context, all bool) error {
 		}
 
 		return tw.Flush()
+	})
+}
+
+func (a *app) userRemove(ctx context.Context, name string, yes bool) error {
+	if !yes {
+		if a.noninteractive {
+			return errors.New("--yes is required with --noninteractive")
+		}
+
+		answer, err := a.prompt(fmt.Sprintf("Delete user %s and its personal data for good? Type its name to confirm: ", name))
+		if err != nil {
+			return err
+		}
+
+		if answer != name {
+			return errors.New("not confirmed")
+		}
+	}
+
+	return a.withUserAdmin(ctx, func(s *identityapp.UserAdmin) error {
+		if err := s.Remove(ctx, name); err != nil {
+			return err
+		}
+
+		if a.json {
+			return a.printJSON(map[string]any{"username": name, "removed": true})
+		}
+
+		a.print("user %s removed", name)
+
+		return nil
 	})
 }
 

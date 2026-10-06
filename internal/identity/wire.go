@@ -118,7 +118,8 @@ func UserAdmin(d Deps) *app.UserAdmin {
 	r := newRepos(d)
 
 	return app.NewUserAdmin(app.UserAdminDeps{
-		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
+		Invitations: r.invitations,
+		Users:       r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
 		Now: d.Now, Policy: policies(nil), Logger: component(d.Logger, "identity.app.users"),
 	})
 }
@@ -192,7 +193,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 
 	accounts := app.NewAccounts(app.AccountsDeps{
 		Hasher: r.hasher, Policies: passwords,
-		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Now: d.Now,
+		Users: r.users, Sessions: r.sessions, Invitations: r.invitations, Audit: r.audit, Tx: d.DB, Now: d.Now, Passwords: changer,
 		Logger: component(d.Logger, "identity.app.accounts"),
 	})
 

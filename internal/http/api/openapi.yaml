@@ -829,6 +829,32 @@ paths:
                 $ref: "#/components/schemas/Me"
         default:
           $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteMe
+      x-meshsdr-access: listener
+      summary: Delete the caller's account
+      description: |
+        Needs the current password. Removes the account and its personal
+        data; audit entries keep the user id as a pseudonymous id. The last
+        enabled admin cannot be deleted (409 `last_admin`).
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountDeletion"
+      responses:
+        "204":
+          description: Deleted. The session cookie is cleared.
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
     patch:
       operationId: updateMe
       x-meshsdr-access: listener
@@ -1134,6 +1160,20 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteUser
+      x-meshsdr-access: admin
+      summary: Delete a user (sessions revoked, personal data removed)
+      tags: [users]
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
     patch:
       operationId: updateUser
       x-meshsdr-access: admin
@@ -1181,6 +1221,40 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /users/{id}/export:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      operationId: exportUser
+      x-meshsdr-access: admin
+      summary: Export a user's data (GDPR request)
+      tags: [users]
+      responses:
+        "200":
+          description: The data, as a JSON document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountExport"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /me/export:
+    get:
+      operationId: exportMe
+      x-meshsdr-access: listener
+      summary: Export the caller's data (account and sessions)
+      tags: [account]
+      responses:
+        "200":
+          description: The data, as a JSON document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountExport"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     LinkToken:
@@ -1215,6 +1289,18 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    AccountDeletion:
+      type: object
+      additionalProperties: false
+      required: [current_password]
+      properties:
+        current_password:
+          type: string
+          maxLength: 1024
+    AccountExport:
+      type: object
+      description: Account data export (ACC-009); see `app.Export` for the fields.
+      additionalProperties: true
     UserList:
       type: object
       required: [users]
