@@ -77,17 +77,68 @@ allowed_networks = ["0.0.0.0/0", "::/0"]
 # the right-most hop that is not a trusted proxy. Default: none.
 trusted_proxies = []
 
-# Admin settings (MESHSDR_SETTINGS__<TABLE>__<KEY>). Each key set here or in
-# the env is locked: read-only in the admin UI, which shows its origin. Leave
-# a key commented out to keep it admin-editable (DB setting, then default).
-[settings.ui]
-# Theme mode: light | dark | auto (follows the visitor's prefers-color-scheme).
-# A change applies on the next full page load.
-# theme_mode = "auto"
+# Admin settings (ADR 0010), MESHSDR_SETTINGS__<TABLE>__<KEY>. Each key set
+# here or in the env is locked: read-only in the admin UI, which shows its
+# origin. Leave a key commented out to keep it admin-editable (DB setting,
+# then the default shown). Every change applies live.
+[settings]
+# anonymous | registered (a device can override it in its node config).
+# listen_policy = "anonymous"
 
 [settings.receiver]
+# name = "MeshSDR"                       # station name (top bar, titles)
+# location = "Lille, France"
+# altitude_m = 0                         # antenna altitude, m (-500..9000)
+# admin_email = "admin@example.org"
+# admin_email_public = false
+# gps = { lat = 50.63, lon = 3.06 }      # env: "50.63,3.06"
+# country = "FR"                         # ISO 3166-1 alpha-2
+# help_url = "https://example.org/help"
+# photo_title = "View from the roof"
+# photo_desc = "Markdown text"
 # Usage policy shown at /policy, in Markdown (raw HTML is not rendered).
 # Unset: the built-in default policy.
 # usage_policy_text = """
 # This receiver is open to everyone. Be nice.
 # """
+# usage_policy_url = "/policy"           # footer link: a path or an http(s) URL
+
+[settings.bandplan]
+# region = 0                             # IARU region 1, 2, 3, or 0 for all
+
+[settings.ui]
+# Theme mode: light | dark | auto (follows the visitor's prefers-color-scheme).
+# A change applies on the next full page load.
+# theme_mode = "auto"
+# shortcut_set = "default"               # default | off
+# tuning_precision = 2                   # 0..6 decimal digits
+# recorder_enabled = true
+
+[settings.ui.layout]
+# side_panel_open = true
+# default_tab = "decoders"               # decoders | bookmarks | info
+# spectrum = false
+# bandplan = true
+# frequency_format = "radio"             # radio | locale
+
+[settings.bookmarks]
+# eibi_range_km = 0                      # 0 disables EIBi auto-bookmarks
+# repeater_range_km = 0
+
+[settings.session]
+# idle_timeout = "24h"
+# absolute_timeout = "24h"
+# remember_me_timeout = "30d"            # "Keep me signed in"
+
+[settings.auth]
+# login_rate_limit = "5/1m"              # sign-in attempts per client address
+
+[settings.auth.lockout]
+# delay_after = 5                        # failures before progressive delays
+# lock_after = 10                        # failures that lock the account
+# lock_for = "15m"                       # doubled on each further failure
+# max_lock = "24h"
+
+[settings.retention]
+# sessions = "30d"                       # ended sessions (at least 1d)
+# audit_log = "365d"                     # audit log (at least 30d)

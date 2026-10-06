@@ -36,7 +36,7 @@ type Hub struct {
 	Nodes map[string]ConfigNode `toml:"nodes" env:"-" jsonschema:"description=Nodes declared in the hub config\\, keyed by node id. They are locked in Admin > Nodes. File-only (no env override)."`
 	Log   Log                   `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
 
-	Settings Settings `toml:"settings" envPrefix:"SETTINGS__" jsonschema:"description=Locked admin settings. Each key set in a file or the env is locked (read-only in the admin UI); unset keys fall back to the DB setting, then to the default."`
+	Settings Settings `toml:"settings" envPrefix:"SETTINGS__" jsonschema_description:"Admin settings (ADR 0010). Each key set in a file or the env is locked (read-only in the admin UI); unset keys fall back to the DB setting, then to the default."`
 
 	Auth  Auth  `toml:"auth" envPrefix:"AUTH__" jsonschema:"description=Authentication (password hashing)."`
 	Admin Admin `toml:"admin" envPrefix:"ADMIN__" jsonschema:"description=Admin access restrictions."`
@@ -48,25 +48,6 @@ type ConfigNode struct {
 	URL             string `toml:"url" env:"-" jsonschema:"description=Required. Base URL the hub dials: https://host:port (node API and control WebSocket)."`
 	Name            string `toml:"name" env:"-" jsonschema:"description=Display name (defaults to the node id)."`
 	EnrollmentToken Secret `toml:"enrollment_token" env:"-" jsonschema:"description=Enrollment token of the node: 32 random bytes in unpadded base64url (43 characters)\\, used until the node is enrolled."`
-}
-
-// Settings is the [settings] table: admin settings locked by config
-// (TECHNICAL_SPEC §7.4 "Locking semantics"). Each leaf maps 1:1 to a DB
-// settings key. Until the settings store exists (ADM-002) the effective value
-// is the config value or the default.
-type Settings struct {
-	UI       SettingsUI       `toml:"ui" envPrefix:"UI__" jsonschema:"description=Look and feel."`
-	Receiver SettingsReceiver `toml:"receiver" envPrefix:"RECEIVER__" jsonschema:"description=Receiver identity and policies."`
-}
-
-// SettingsReceiver is the [settings.receiver] table.
-type SettingsReceiver struct {
-	UsagePolicyText string `toml:"usage_policy_text" env:"USAGE_POLICY_TEXT" jsonschema:"maxLength=20000,description=Usage policy shown at /policy (UI-003), in Markdown (raw HTML is not rendered). Empty: the built-in default policy."`
-}
-
-// SettingsUI is the [settings.ui] table.
-type SettingsUI struct {
-	ThemeMode string `toml:"theme_mode" env:"THEME_MODE" jsonschema:"enum=light,enum=dark,enum=auto,description=Theme mode (UI-001): light or dark, or auto to follow the visitor's prefers-color-scheme. A change applies on the next full page load."`
 }
 
 // Auth is the [auth] table.
@@ -204,15 +185,13 @@ type EventBuffer struct {
 // DefaultHub returns the hub defaults.
 func DefaultHub() Hub {
 	return Hub{
-		Hub: HubSection{Listen: "0.0.0.0:8073"},
-		DB:  DB{DSN: "sqlite:///var/lib/meshsdr/hub.db", MaxReadConnections: 4},
-		Log: defaultLog(),
-		Settings: Settings{
-			UI: SettingsUI{ThemeMode: "auto"},
-		},
-		Auth:  Auth{Argon2: Argon2{MemoryKiB: 65536, Iterations: 3, Parallelism: 1}},
-		Admin: Admin{AllowedNetworks: []string{"0.0.0.0/0", "::/0"}},
-		HTTP:  HTTP{TrustedProxies: []string{}},
+		Hub:      HubSection{Listen: "0.0.0.0:8073"},
+		DB:       DB{DSN: "sqlite:///var/lib/meshsdr/hub.db", MaxReadConnections: 4},
+		Log:      defaultLog(),
+		Settings: DefaultSettings(),
+		Auth:     Auth{Argon2: Argon2{MemoryKiB: 65536, Iterations: 3, Parallelism: 1}},
+		Admin:    Admin{AllowedNetworks: []string{"0.0.0.0/0", "::/0"}},
+		HTTP:     HTTP{TrustedProxies: []string{}},
 	}
 }
 

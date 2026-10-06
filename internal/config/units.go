@@ -85,12 +85,18 @@ func (d Duration) String() string {
 
 	var b strings.Builder
 
+	// Weeks only for a whole number of weeks: "30d" rather than "4w2d".
+	const week = 7 * 24 * time.Hour
+	if d.d%week == 0 {
+		return strconv.FormatInt(int64(d.d/week), 10) + "w"
+	}
+
 	rest := d.d
 	for _, u := range []struct {
 		name string
 		d    time.Duration
 	}{
-		{"w", 7 * 24 * time.Hour}, {"d", 24 * time.Hour}, {"h", time.Hour},
+		{"d", 24 * time.Hour}, {"h", time.Hour},
 		{"m", time.Minute}, {"s", time.Second}, {"ms", time.Millisecond},
 	} {
 		if n := rest / u.d; n > 0 {
