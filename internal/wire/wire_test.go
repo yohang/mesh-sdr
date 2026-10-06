@@ -282,3 +282,34 @@ func TestLoginPageInShell(t *testing.T) {
 		t.Errorf("GET /logout = %d, Allow %q", resp.StatusCode, resp.Header.Get("Allow"))
 	}
 }
+
+// ACC-001: the hub works without any account. Visitors browse the public
+// pages, see a discreet "Sign in" entry, and protected pages ask them to
+// sign in.
+func TestHubWithoutAccounts(t *testing.T) {
+	cfg := config.DefaultHub()
+	cfg.Hub.Listen = "127.0.0.1:0"
+
+	addr := serve(t, hub(t, cfg, dbtest.NewSQLite(t)))
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	for _, path := range []string{"/", "/policy", "/login", "/password/forgot"} {
+		status, _, b := get(t, c, "http://"+addr+path)
+		if status != http.StatusOK || !strings.Contains(string(b), `href="/login"`) && path != "/login" {
+			t.Errorf("GET %s = %d", path, status)
+		}
+	}
+
+	_, _, b := get(t, c, "http://"+addr+"/api/v1/auth/session")
+
+	var s map[string]any
+	if err := json.Unmarshal(b, &s); err != nil || s["authenticated"] != false {
+		t.Errorf("session = %s", b)
+	}
+
+	for _, path := range []string{"/account", "/admin/users"} {
+		if status, _, _ := get(t, c, "http://"+addr+path); status != http.StatusSeeOther {
+			t.Errorf("GET %s = %d, want a redirect to sign in", path, status)
+		}
+	}
+}
