@@ -70,6 +70,8 @@ func StatusOf(k shared.Kind) int {
 		return http.StatusUnauthorized
 	case shared.KindUnavailable:
 		return http.StatusServiceUnavailable
+	case shared.KindRateLimited:
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusInternalServerError
 	}

@@ -31,6 +31,7 @@ func TestFromError(t *testing.T) {
 		{"forbidden", shared.NewError(shared.KindForbidden, "f", ""), http.StatusForbidden, "f", "", 0},
 		{"unauthenticated", shared.NewError(shared.KindUnauthenticated, "u", ""), http.StatusUnauthorized, "u", "", 0},
 		{"unavailable", shared.NewError(shared.KindUnavailable, "v", ""), http.StatusServiceUnavailable, "v", "", 0},
+		{"rate limited", shared.NewError(shared.KindRateLimited, "rate_limited", ""), http.StatusTooManyRequests, "rate_limited", "", 0},
 		{"infra error does not leak", errors.New("sqlite: disk I/O error at /var/lib"), http.StatusInternalServerError, "internal_error", "", 0},
 	}
 

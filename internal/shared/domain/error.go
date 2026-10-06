@@ -16,6 +16,8 @@ const (
 	KindForbidden
 	KindUnauthenticated
 	KindUnavailable
+	// KindRateLimited means the caller must wait before retrying.
+	KindRateLimited
 )
 
 // String returns the snake_case name of the kind.
@@ -33,6 +35,8 @@ func (k Kind) String() string {
 		return "unauthenticated"
 	case KindUnavailable:
 		return "unavailable"
+	case KindRateLimited:
+		return "rate_limited"
 	default:
 		return "unknown"
 	}
