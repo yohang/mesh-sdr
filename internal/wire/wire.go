@@ -235,8 +235,8 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, fmt.Errorf("settings: %w", err)
 	}
 
-	viewer := &adminViewer{}
-	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, Viewer: viewer, User: userOf, Logger: logger})
+	adminGate := &roleGate{role: identitydomain.RoleAdmin}
+	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, AdminGate: adminGate, User: userOf, Logger: logger})
 
 	ideps := identityDeps(cfg, logger, adapter)
 	ideps.Settings = settingsModule.Store
@@ -259,7 +259,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		idm.RunKeyMaintenance(ctx, now, component(logger, "identity.infra.keyring"))
 	})
 
-	viewer.authz = idm.HTTP
+	adminGate.authz = idm.HTTP
 	identityHTTP = idm.HTTP
 
 	scheduler, retention, err := jobs(adapter, idm, settingsModule.Store, auditLog, logger)
@@ -298,7 +298,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		gridhttp.NewAdminModule(gridhttp.AdminDeps{
 			Render: shellModule.Renderer, Devices: g.devices, Nodes: g.nodes,
 			Operator: idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
-			IsAdmin: viewer.IsAdmin, Logger: component(logger, "grid.http.admin"),
+			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Logger: component(logger, "grid.http.admin"),
 		}),
 		shellModule.HTTP,
 	)

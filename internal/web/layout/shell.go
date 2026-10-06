@@ -51,9 +51,6 @@ func (t Theme) ThemeColor() string {
 
 // Shell is the per-request data of the app shell, built by the shell module.
 type Shell struct {
-	// User is the signed-in user of the request; nil for an anonymous
-	// visitor, who gets a discreet "Sign in" link (ACC-001).
-	User *User
 	// SiteName is shown in the top bar and the document title.
 	SiteName string
 	// Theme is the admin-chosen theme mode. A change applies on the next
@@ -61,12 +58,15 @@ type Shell struct {
 	Theme Theme
 	// FooterLinks are the footer links, in order.
 	FooterLinks []Link
-	// Nav are the top bar sections the visitor may open, in order (UI-006
-	// adds the full navigation; for now only Admin, for admins).
+	// Nav are the top-level sections the visitor may open, in order
+	// (UI-006). Below 768 px the same nav is the bottom tab bar.
 	Nav []Link
+	// User is the signed-in visitor of the user menu (UI-010); nil for an
+	// anonymous visitor, who gets a "Sign in" link.
+	User *User
 }
 
-// Link is a navigation link. Section, for a top bar section, matches
+// Link is a navigation link. Section, for a top-level section, matches
 // Page.Section to mark the current one.
 type Link struct {
 	Label   string
@@ -74,8 +74,22 @@ type Link struct {
 	Section string
 }
 
-// Admin section of the top bar.
-const SectionAdmin = "admin"
+// Top-level sections (UI-006): Page.Section and Link.Section values.
+const (
+	SectionReceiver = "receiver"
+	SectionMap      = "map"
+	SectionDecodes  = "decodes"
+	SectionFiles    = "files"
+	SectionAdmin    = "admin"
+)
+
+// User is the signed-in visitor shown in the user menu: the name, the role
+// badge and the account links of the identity module (account).
+type User struct {
+	Name  string
+	Role  string
+	Links []Link
+}
 
 // Page describes the page being rendered.
 type Page struct {
@@ -93,11 +107,4 @@ func (s Shell) DocumentTitle(p Page) string {
 	}
 
 	return p.Title + " · " + s.SiteName
-}
-
-// User is the signed-in user shown in the top bar, with the links of the
-// user menu (account, admin pages).
-type User struct {
-	Name  string
-	Links []Link
 }

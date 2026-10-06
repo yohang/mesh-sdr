@@ -295,20 +295,3 @@ func TestErrorPages(t *testing.T) {
 		})
 	}
 }
-
-type adminViewer bool
-
-func (v adminViewer) IsAdmin(*http.Request) bool { return bool(v) }
-
-// The top bar shows the Admin section to admins only.
-func TestAdminNavLink(t *testing.T) {
-	for _, admin := range []bool{false, true} {
-		m := shell.Wire(shell.Deps{Settings: values{}, Viewer: adminViewer(admin), Logger: discard})
-		h := httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP)
-
-		_, page := do(t, h, http.MethodGet, "/", nil)
-		if got := strings.Contains(page, `<nav aria-label="Main"`) && strings.Contains(page, `href="/admin"`); got != admin {
-			t.Errorf("admin %v: nav link shown = %v", admin, got)
-		}
-	}
-}

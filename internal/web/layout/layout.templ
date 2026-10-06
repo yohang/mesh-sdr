@@ -9,8 +9,9 @@ import "strconv"
 // audio engine, the live region) survives client-side navigation. Back/forward
 // restores only the [hx-history-elt] element.
 //
-// Slots for later tickets: the top bar gets the nav (UI-006), the UTC clock and
-// notifications (UI-006, UI-011) and the user menu (UI-010).
+// The top bar holds the logo and site name, the section nav (a bottom tab bar
+// below 768 px), the UTC clock, the notifications area and the user menu
+// (UI-006, UI-010).
 templ Document(s Shell, p Page, content templ.Component) {
 	<!DOCTYPE html>
 	<html lang="en" data-theme={ string(s.Theme) }>
@@ -34,32 +35,18 @@ templ Document(s Shell, p Page, content templ.Component) {
 			<script src="/static/js/shell.js" type="module" nonce={ templ.GetNonce(ctx) }></script>
 		</head>
 		<body
-			class="flex min-h-dvh flex-col bg-bg text-fg antialiased"
+			class="flex min-h-dvh flex-col bg-bg pb-16 text-fg antialiased md:pb-0"
 			hx-boost:inherited='target:"#main" select:"#main" swap:"outerHTML"'
 		>
 			<a href="#main" class="skip-link">Skip to main content</a>
 			<header class="sticky top-0 z-10 border-b border-border bg-surface">
 				<div class="mx-auto flex h-14 max-w-screen-2xl items-center gap-4 px-4">
-					<a href="/" class="font-semibold tracking-tight text-fg no-underline">{ s.SiteName }</a>
-					<div class="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1">
-					if len(s.Nav) > 0 {
-						<nav aria-label="Main">
-							<ul class="flex gap-4">
-								for _, l := range s.Nav {
-									<li>
-										<a
-											href={ templ.URL(l.Href) }
-											data-section={ l.Section }
-											class="font-medium"
-											if l.Section != "" && l.Section == p.Section {
-												aria-current="page"
-											}
-										>{ l.Label }</a>
-									</li>
-								}
-							</ul>
-						</nav>
-					}
+					<a href="/" class="flex min-w-0 items-center gap-2 font-semibold tracking-tight text-fg no-underline">
+						<img src="/static/icons/icon.svg" alt="" width="28" height="28" class="size-7 shrink-0"/>
+						<span class="truncate">{ s.SiteName }</span>
+					</a>
+					@mainNav(s.Nav, p.Section)
+					<div class="ml-auto flex items-center gap-3 text-sm">
 						@userMenu(s.User)
 					</div>
 				</div>
@@ -79,10 +66,41 @@ templ Document(s Shell, p Page, content templ.Component) {
 	</html>
 }
 
+// mainNav is the section navigation (UI-006): inline in the top bar from 768
+// px, a bottom tab bar below (CSS only, ADR 0003). Labels stay visible next
+// to the icons, so the icons are decorative. static/js/navigation.js keeps
+// aria-current in sync after boosted navigation.
+templ mainNav(nav []Link, current string) {
+	if len(nav) > 0 {
+		<nav
+			aria-label="Main"
+			class="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-surface md:static md:border-0 md:bg-transparent"
+		>
+			<ul class="flex h-16 items-stretch justify-around md:h-14 md:justify-start md:gap-1">
+				for _, l := range nav {
+					<li class="flex flex-1 md:flex-none">
+						<a
+							href={ templ.URL(l.Href) }
+							data-section={ l.Section }
+							class="nav-link"
+							if l.Section != "" && l.Section == current {
+								aria-current="page"
+							}
+						>
+							@sectionIcon(l.Section)
+							<span>{ l.Label }</span>
+						</a>
+					</li>
+				}
+			</ul>
+		</nav>
+	}
+}
+
 // userMenu is the account area of the top bar (UI-010 slot): a discreet
 // sign-in link for anonymous visitors (ACC-001), otherwise the user's name,
-// the account and admin links and sign out. Sign out is a POST (CSRF
-// header from the shell), answered with a full page load.
+// the account links and sign out. Sign out is a POST (CSRF header from the
+// shell), answered with a full page load.
 templ userMenu(u *User) {
 	<nav class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm" aria-label="Account">
 		if u == nil {

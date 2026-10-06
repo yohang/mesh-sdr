@@ -12,32 +12,25 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/yohang/mesh-sdr/internal/shell/app"
+	"github.com/yohang/mesh-sdr/internal/shell/domain"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 //go:generate go tool templ generate
 
-// Viewer tells what the visitor of a request may open.
-type Viewer interface {
-	// IsAdmin reports whether the visitor may open the admin area (admin
-	// role, from an allowed network).
-	IsAdmin(r *http.Request) bool
-}
-
 // ShellSource builds the per-request shell data from the look and feel and
-// the visitor.
+// the sections the visitor may open.
 type ShellSource struct {
 	lookAndFeel *app.LookAndFeel
-	viewer      Viewer
+	nav         *app.Navigation
 	user        func(r *http.Request) *layout.User
 }
 
-// NewShellSource returns a ShellSource. viewer may be nil (no navigation);
-// user returns the signed-in user of a request for the top bar (nil:
-// anonymous) and may be nil.
-func NewShellSource(lookAndFeel *app.LookAndFeel, viewer Viewer, user func(r *http.Request) *layout.User) *ShellSource {
-	return &ShellSource{lookAndFeel: lookAndFeel, viewer: viewer, user: user}
+// NewShellSource returns a ShellSource. user returns the signed-in user of
+// a request for the top bar (nil: anonymous) and may be nil.
+func NewShellSource(lookAndFeel *app.LookAndFeel, nav *app.Navigation, user func(r *http.Request) *layout.User) *ShellSource {
+	return &ShellSource{lookAndFeel: lookAndFeel, nav: nav, user: user}
 }
 
 // Shell implements render.ShellSource.
@@ -54,8 +47,8 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 	}
 
 	var nav []layout.Link
-	if s.viewer != nil && s.viewer.IsAdmin(r) {
-		nav = append(nav, layout.Link{Label: "Admin", Href: "/admin", Section: layout.SectionAdmin})
+	for _, sec := range s.nav.Sections(r.Context()) {
+		nav = append(nav, layout.Link{Label: sec.Label(), Href: sec.Path(), Section: sec.ID()})
 	}
 
 	var user *layout.User
@@ -103,7 +96,10 @@ func (m *Module) Routes(r chi.Router) {
 		r.Head(pattern, h)
 	}
 
-	get("/", m.home)
+	get("/", m.receiver)
+	get(domain.SectionMap.Path(), m.placeholder(domain.SectionMap, "The live map is not available yet."))
+	get(domain.SectionDecodes.Path(), m.placeholder(domain.SectionDecodes, "Decoded messages are not available yet."))
+	get(domain.SectionFiles.Path(), m.placeholder(domain.SectionFiles, "Received files are not available yet."))
 	get("/robots.txt", robots)
 	get("/policy", m.policyPage)
 	get("/manifest.webmanifest", m.manifest)
@@ -136,10 +132,21 @@ func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	m.render.MethodNotAllowed(w, r)
 }
 
-// home is a placeholder home page until the Receiver section (UI-006) takes
-// over "/".
-func (m *Module) home(w http.ResponseWriter, r *http.Request) {
-	m.render.Page(w, r, http.StatusOK, layout.Page{}, homePage(m.shell.Shell(r).SiteName), nil)
+// receiver is the Receiver section's entry page. Until the receiver exists
+// (M1), it shows the station and says so.
+func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
+	page := layout.Page{Section: domain.SectionReceiver.ID()}
+	m.render.Page(w, r, http.StatusOK, page, receiverPage(m.shell.Shell(r).SiteName), nil)
+}
+
+// placeholder serves the entry page of a section whose module does not
+// exist yet (Map, Decodes, Files): its heading and a short notice. The
+// section's module takes the route over when it lands.
+func (m *Module) placeholder(sec domain.Section, notice string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		page := layout.Page{Title: sec.Label(), Section: sec.ID()}
+		m.render.Page(w, r, http.StatusOK, page, placeholderPage(sec.Label(), notice), nil)
+	}
 }
 
 // policyPage serves the usage policy (UI-003), public.

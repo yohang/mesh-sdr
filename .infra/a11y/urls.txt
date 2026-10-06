@@ -2,6 +2,9 @@
 # Every feature adds its pages here (UI-009 definition of done). Pages marked
 # signed-in are checked after signing in as the seeded admin.
 / 200
+/map 200
+/decodes 200
+/files 200
 /policy 200
 /no-such-page 404
 /login 200
