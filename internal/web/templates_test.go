@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -29,6 +30,37 @@ var templateRules = []struct {
 // request nonce.
 var externalScript = regexp.MustCompile(`^<script\s+src="/static/[^"]+"[^>]*\snonce=\{\s*templ\.GetNonce\(ctx\)\s*\}[^>]*>$`)
 
+// violations returns the rule violations of a template source, as
+// "line: rule: match". Rules match across lines (a tag may span several);
+// // comment lines are ignored.
+func violations(src string) []string {
+	// Blank out comment lines, keeping offsets and line numbers.
+	lines := strings.Split(src, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "//") {
+			lines[i] = strings.Repeat(" ", len(line))
+		}
+	}
+
+	code := strings.Join(lines, "\n")
+
+	var out []string
+
+	for _, rule := range templateRules {
+		for _, loc := range rule.re.FindAllStringIndex(code, -1) {
+			m := code[loc[0]:loc[1]]
+			if strings.HasPrefix(m, "<script") && externalScript.MatchString(m) {
+				continue
+			}
+
+			line := strings.Count(code[:loc[0]], "\n") + 1
+			out = append(out, fmt.Sprintf("%d: %s: %s", line, rule.name, strings.Join(strings.Fields(m), " ")))
+		}
+	}
+
+	return out
+}
+
 func TestTemplateRules(t *testing.T) {
 	var files int
 
@@ -44,20 +76,8 @@ func TestTemplateRules(t *testing.T) {
 			return err
 		}
 
-		for i, line := range strings.Split(string(src), "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "//") {
-				continue
-			}
-
-			for _, rule := range templateRules {
-				for _, m := range rule.re.FindAllString(line, -1) {
-					if strings.HasPrefix(m, "<script") && externalScript.MatchString(m) {
-						continue
-					}
-
-					t.Errorf("%s:%d: %s: %s", path, i+1, rule.name, strings.TrimSpace(line))
-				}
-			}
+		for _, v := range violations(string(src)) {
+			t.Errorf("%s:%s", path, v)
 		}
 
 		return nil
@@ -72,35 +92,45 @@ func TestTemplateRules(t *testing.T) {
 }
 
 func TestTemplateRulesDetect(t *testing.T) {
-	bad := []string{
-		`<button hx-on:click="x()">`,
-		`<div hx-vals='js:{a: 1}'>`,
-		`<p style="color: red">`,
-		`<style>p{}</style>`,
-		`<script>alert(1)</script>`,
-		`<script src="/static/js/x.js"></script>`,
-		"css red() {",
-		"script hello() {",
+	bad := []struct {
+		src  string
+		line int
+	}{
+		{`<button hx-on:click="x()">`, 1},
+		{`<div hx-vals='js:{a: 1}'>`, 1},
+		{`<p style="color: red">`, 1},
+		{`<style>p{}</style>`, 1},
+		{`<script>alert(1)</script>`, 1},
+		{`<script src="/static/js/x.js"></script>`, 1},
+		{"css red() {", 1},
+		{"script hello() {", 1},
+		{"<div>\n\t<p\n\t\tclass=\"x\"\n\t\tstyle=\"color: red\"\n\t>", 4},
+		{"<div>\n<script\n\ttype=\"module\"\n>alert(1)</script>", 2},
+		{"<button\n\thx-on::after-request=\"x()\"\n>", 2},
 	}
 
-	for _, line := range bad {
-		matched := false
+	for _, tt := range bad {
+		v := violations(tt.src)
+		if len(v) == 0 {
+			t.Errorf("rules miss %q", tt.src)
 
-		for _, rule := range templateRules {
-			for _, m := range rule.re.FindAllString(line, -1) {
-				if !strings.HasPrefix(m, "<script") || !externalScript.MatchString(m) {
-					matched = true
-				}
-			}
+			continue
 		}
 
-		if !matched {
-			t.Errorf("rules miss %q", line)
+		if want := fmt.Sprintf("%d: ", tt.line); !strings.HasPrefix(v[0], want) {
+			t.Errorf("%q: violation %q, want line %d", tt.src, v[0], tt.line)
 		}
 	}
 
-	ok := `<script src="/static/js/shell.js" type="module" nonce={ templ.GetNonce(ctx) }>`
-	if !externalScript.MatchString(ok) {
-		t.Errorf("rules reject %q", ok)
+	ok := []string{
+		`<script src="/static/js/shell.js" type="module" nonce={ templ.GetNonce(ctx) }></script>`,
+		"<script\n\tsrc=\"/static/vendor/htmx.min.js\"\n\tnonce={ templ.GetNonce(ctx) }\n\tdefer\n></script>",
+		"// a comment about style=\"\" and hx-on",
+	}
+
+	for _, src := range ok {
+		if v := violations(src); len(v) != 0 {
+			t.Errorf("rules reject %q: %v", src, v)
+		}
 	}
 }
