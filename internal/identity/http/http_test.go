@@ -98,8 +98,9 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 	}
 
 	srv := api.Server{
-		HealthHandlers: api.NewHealthHandlers(d.DB, logger),
-		AuthHandlers:   api.NewAuthHandlers(m.HTTP),
+		HealthHandlers:  api.NewHealthHandlers(d.DB, logger),
+		AuthHandlers:    api.NewAuthHandlers(m.HTTP),
+		AccountHandlers: api.NewAccountHandlers(m.HTTP, m.Accounts),
 	}
 
 	return &hub{

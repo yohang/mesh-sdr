@@ -32,6 +32,7 @@ type Server struct {
 	SettingsHandlers
 	RetentionHandlers
 	BrandingHandlers
+	AccountHandlers
 }
 
 var _ StrictServerInterface = Server{}

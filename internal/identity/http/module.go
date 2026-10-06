@@ -453,6 +453,11 @@ func (m *Module) meta(ctx context.Context) app.RequestMeta {
 	}
 }
 
+// Actor returns who makes the request, with its request metadata.
+func (m *Module) Actor(ctx context.Context) app.Actor {
+	return app.Actor{Principal: FromContext(ctx).Principal(), Meta: m.meta(ctx)}
+}
+
 // Principal returns who makes the request.
 func (m *Module) Principal(ctx context.Context) domain.Principal { return FromContext(ctx).Principal() }
 

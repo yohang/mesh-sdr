@@ -116,6 +116,7 @@ func UserAdmin(d Deps) *app.UserAdmin {
 
 // Module is the wired identity module of the hub.
 type Module struct {
+	Accounts *app.Accounts
 	Notifier app.Notifier
 	Auth     *app.Auth
 	Setup    *app.Setup
@@ -186,7 +187,13 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		return nil, fmt.Errorf("identity http: %w", err)
 	}
 
+	accounts := app.NewAccounts(app.AccountsDeps{
+		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Now: d.Now,
+		Logger: component(d.Logger, "identity.app.accounts"),
+	})
+
 	return &Module{
+		Accounts:    accounts,
 		Notifier:    notifier,
 		Auth:        auth,
 		Setup:       setup,

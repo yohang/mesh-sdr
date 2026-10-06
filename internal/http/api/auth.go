@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/yohang/mesh-sdr/internal/http/problem"
+	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 )
 
@@ -22,6 +23,8 @@ type Sessions interface {
 	// ChangePassword changes the caller's password and replaces its
 	// session: it returns the new CSRF token and the cookie to set.
 	ChangePassword(ctx context.Context, current, newPassword string) (domain.Principal, string, *http.Cookie, bool, error)
+	// Actor returns who makes the request, for account operations.
+	Actor(ctx context.Context) app.Actor
 }
 
 // AuthHandlers serve /auth/session, /auth/login and /auth/logout.

@@ -60,7 +60,7 @@ func TestUserCommands(t *testing.T) {
 	withPw := maps.Clone(env)
 	withPw["MESHSDR_PASSWORD"] = "from the environment"
 
-	if r := run(t, ctx, withPw, "--noninteractive", "hub", "user", "add", "dave"); r.code != ExitOK || strings.Contains(r.stdout, "password:") {
+	if r := run(t, ctx, withPw, "--noninteractive", "hub", "user", "add", "dave", "--role", "admin"); r.code != ExitOK || strings.Contains(r.stdout, "password:") {
 		t.Errorf("add --noninteractive with MESHSDR_PASSWORD = %+v", r)
 	}
 

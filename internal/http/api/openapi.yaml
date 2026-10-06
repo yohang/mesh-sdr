@@ -656,8 +656,79 @@ paths:
           description: Removed (or already the default)
         default:
           $ref: "#/components/responses/Problem"
+  /roles:
+    get:
+      operationId: listRoles
+      x-meshsdr-access: admin
+      summary: List the roles
+      tags: [users]
+      responses:
+        "200":
+          description: Roles, lowest rank first. listener is implicit for every account; anonymous is never granted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleList"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/roles:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      operationId: getUserRoles
+      x-meshsdr-access: admin
+      summary: Role grants of a user
+      tags: [users]
+      responses:
+        "200":
+          description: Grants (empty for a listener)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleGrants"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setUserRoles
+      x-meshsdr-access: admin
+      summary: Replace the role grants of a user
+      description: |
+        Any change revokes every session of the user (strict SR-01). The
+        last enabled admin cannot lose the admin role (409 `last_admin`).
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleGrants"
+      responses:
+        "200":
+          description: The stored grants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleGrants"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
+    UserID:
+      name: id
+      in: path
+      required: true
+      description: User id (UUID).
+      schema:
+        type: string
+        maxLength: 36
     NodeID:
       name: id
       in: path
@@ -666,6 +737,48 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    RoleList:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoleInfo"
+    RoleInfo:
+      type: object
+      required: [name, rank, grantable]
+      properties:
+        name:
+          type: string
+          enum: [listener, operator, admin]
+        rank:
+          type: integer
+        grantable:
+          type: boolean
+          description: False for listener, which every account holds implicitly.
+    RoleGrants:
+      type: object
+      additionalProperties: false
+      required: [grants]
+      properties:
+        grants:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/RoleGrant"
+    RoleGrant:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [operator, admin]
+        device_id:
+          type: string
+          description: Device scope of an operator grant; absent means every device. Admin is always global.
+          maxLength: 64
     ConnectionList:
       type: object
       required: [count]

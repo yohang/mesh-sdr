@@ -264,9 +264,22 @@ func (s *UserAdmin) Disable(ctx context.Context, username string) (DisableResult
 
 	err := s.withUser(ctx, username, func(ctx context.Context, u *domain.User) error {
 		now := s.now()
-		if !u.Disable(now) {
+		if !u.Enabled() {
 			return nil
 		}
+
+		if u.IsAdmin() {
+			n, err := s.users.CountEnabledAdmins(ctx)
+			if err != nil {
+				return err
+			}
+
+			if n <= 1 {
+				return domain.ErrLastAdmin
+			}
+		}
+
+		u.Disable(now)
 
 		if err := s.users.Save(ctx, u); err != nil {
 			return err
