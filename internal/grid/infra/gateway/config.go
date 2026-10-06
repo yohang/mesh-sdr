@@ -40,8 +40,13 @@ func buildConfig(c Config, binding string) ([]byte, error) {
 		obj{"handle": []any{obj{"handler": "meshsdr_hub", "binding": binding}}},
 	}
 
+	// No HTTP/3 (no UDP listener); HTTP/2 needs TLS.
 	timeouts := func(s obj) obj {
 		s["protocols"] = []string{"h1", "h2"}
+		if _, ok := s["tls_connection_policies"]; !ok {
+			s["protocols"] = []string{"h1"}
+		}
+
 		s["read_header_timeout"] = "10s"
 		s["idle_timeout"] = "2m"
 

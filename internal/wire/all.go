@@ -62,6 +62,7 @@ type AllProcess struct {
 	g       *hubGrid
 	nodeCfg config.Node
 	logger  *slog.Logger
+	root    *slog.Logger
 	now     func() time.Time
 }
 
@@ -107,7 +108,7 @@ func All(ctx context.Context, hubCfg config.Hub, origins config.Origins, nodeCfg
 		return nil, err
 	}
 
-	return &AllProcess{hub: hub, g: g, nodeCfg: nodeCfg, logger: component(logger, "wire.all"), now: time.Now}, nil
+	return &AllProcess{hub: hub, g: g, nodeCfg: nodeCfg, logger: component(logger, "wire.all"), root: logger, now: time.Now}, nil
 }
 
 // Hub returns the hub process.
@@ -176,7 +177,7 @@ func (a *AllProcess) Run(ctx context.Context) error {
 	run(a.hub.Run)
 
 	if runNode {
-		node, err := Node(a.nodeCfg, a.logger, a.now())
+		node, err := Node(a.nodeCfg, a.root, a.now())
 		if err != nil {
 			cancel()
 			wg.Wait()
