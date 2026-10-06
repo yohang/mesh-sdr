@@ -52,10 +52,11 @@ max_read_connections = 3
 	})
 
 	cfg, meta, err := LoadHub(Options{Dir: dir, Env: map[string]string{
-		"MESHSDR_LOG__LEVEL": "debug",
-		"MESHSDR_NODE__ID":   "attic", // another role's key is not an error
-		"MESHSDR_CONFIG_DIR": dir,
-		"HOME":               "/root",
+		"MESHSDR_LOG__LEVEL":  "debug",
+		"MESHSDR_LOG__FORMAT": "",      // empty: unset, not locked
+		"MESHSDR_NODE__ID":    "attic", // another role's key is not an error
+		"MESHSDR_CONFIG_DIR":  dir,
+		"HOME":                "/root",
 	}})
 	if err != nil {
 		t.Fatalf("LoadHub: %v", err)

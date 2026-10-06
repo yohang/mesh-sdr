@@ -378,9 +378,10 @@ func (l *loader) applyEnv(cfg any) {
 		Prefix:      EnvPrefix,
 		Environment: l.env,
 		// OnSet fires for every field, set or not: keep only the variables
-		// present in the environment.
+		// present and non-empty (caarlos0/env leaves the field untouched for
+		// an empty value, so an empty variable is treated as unset).
 		OnSet: func(tag string, _ any, isDefault bool) {
-			if _, present := l.env[tag]; !present || isDefault {
+			if v := l.env[tag]; v == "" || isDefault {
 				return
 			}
 
