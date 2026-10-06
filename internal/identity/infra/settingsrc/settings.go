@@ -6,6 +6,7 @@
 package settingsrc
 
 import (
+	"context"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/app"
@@ -24,6 +25,7 @@ const (
 	KeyLockoutMaxLock   = "auth.lockout.max_lock"
 	KeyRetentionSession = "retention.sessions"
 	KeyRetentionAudit   = "retention.audit_log"
+	KeyPasswordMin      = "auth.password_min_length"
 )
 
 // Default login rate per client address (TECHNICAL_SPEC §5.12): 5 per
@@ -46,7 +48,11 @@ type Values interface {
 // Policies adapts the settings store to the identity ports.
 type Policies struct{ values Values }
 
-var _ app.SessionPolicies = Policies{}
+var (
+	_ app.SessionPolicies = Policies{}
+	_ app.Settings        = Policies{}
+	_ app.Retention       = Policies{}
+)
 
 // New returns the adapter.
 func New(values Values) Policies { return Policies{values: values} }
@@ -88,4 +94,14 @@ func (p Policies) SessionRetention() time.Duration {
 // (never less than 30 days).
 func (p Policies) AuditRetention() time.Duration {
 	return max(p.values.Duration(KeyRetentionAudit), minAuditRetention)
+}
+
+// PasswordMinLength implements app.Settings (auth.password_min_length; the
+// domain enforces the floor of 8).
+func (p Policies) PasswordMinLength(context.Context) int {
+	if n := p.values.Int(KeyPasswordMin); n > 0 {
+		return n
+	}
+
+	return domain.DefaultPasswordMinLength
 }

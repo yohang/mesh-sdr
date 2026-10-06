@@ -3,6 +3,7 @@ package wire_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -396,5 +397,21 @@ func TestRetentionAPI(t *testing.T) {
 
 	if status, v, _ = b.json(http.MethodPost, "/api/v1/retention/files/purge", ""); status != 404 || v["code"] != "unknown_store" {
 		t.Errorf("unknown store = %d %v", status, v)
+	}
+}
+
+// auth.password_min_length (ADR 0011) is read from the settings store.
+func TestPasswordMinLengthSetting(t *testing.T) {
+	h := newAdminHub(t, nil)
+
+	if status, p, _ := h.browser("root").json(http.MethodPatch, "/api/v1/settings", `{"values":{"auth.password_min_length":30}}`); status != 200 {
+		t.Fatalf("PATCH = %d %v", status, p)
+	}
+
+	b := h.browser("lis")
+
+	status, p, _ := b.json(http.MethodPost, "/api/v1/auth/password", `{"current_password":"`+testPassword+`","new_password":"a much longer passphrase"}`)
+	if status != 422 || !strings.Contains(fmt.Sprint(p["errors"]), "too_short") {
+		t.Errorf("24-character password = %d %v", status, p)
 	}
 }

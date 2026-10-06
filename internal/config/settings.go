@@ -82,8 +82,9 @@ type SettingsSession struct {
 // SettingsAuth is the [settings.auth] table: login throttling (AUTH-002,
 // ADR 0009). It is not the config-only [auth] bootstrap table.
 type SettingsAuth struct {
-	LoginRateLimit Rate                `toml:"login_rate_limit" env:"LOGIN_RATE_LIMIT" jsonschema_extras:"x-label=Sign-in attempts per client address" jsonschema_description:"Sign-in attempts allowed per client address: <count>/<window> (for example 5/1m), at most 100 per window of at least 1m."`
-	Lockout        SettingsAuthLockout `toml:"lockout" envPrefix:"LOCKOUT__" jsonschema:"description=Per-account throttling after failed sign-ins."`
+	PasswordMinLength int                 `toml:"password_min_length" env:"PASSWORD_MIN_LENGTH" jsonschema:"minimum=8,maximum=256" jsonschema_extras:"x-label=Minimum password length" jsonschema_description:"Minimum length of a new password, in characters (8 to 256; ADR 0011). Existing passwords are not affected."`
+	LoginRateLimit    Rate                `toml:"login_rate_limit" env:"LOGIN_RATE_LIMIT" jsonschema_extras:"x-label=Sign-in attempts per client address" jsonschema_description:"Sign-in attempts allowed per client address: <count>/<window> (for example 5/1m), at most 100 per window of at least 1m."`
+	Lockout           SettingsAuthLockout `toml:"lockout" envPrefix:"LOCKOUT__" jsonschema:"description=Per-account throttling after failed sign-ins."`
 }
 
 // SettingsAuthLockout is the [settings.auth.lockout] table.
@@ -114,7 +115,8 @@ func DefaultSettings() Settings {
 			IdleTimeout: MustDuration("24h"), AbsoluteTimeout: MustDuration("24h"), RememberMeTimeout: MustDuration("30d"),
 		},
 		Auth: SettingsAuth{
-			LoginRateLimit: MustRate("5/1m"),
+			PasswordMinLength: 10,
+			LoginRateLimit:    MustRate("5/1m"),
 			Lockout: SettingsAuthLockout{
 				DelayAfter: 5, LockAfter: 10, LockFor: MustDuration("15m"), MaxLock: MustDuration("24h"),
 			},

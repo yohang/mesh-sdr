@@ -84,10 +84,15 @@ var commonPasswords = sync.OnceValue(func() *commonpw.List {
 	return l
 })
 
-// policies returns the password policy source: settings (defaults until the
-// settings store is wired) and the bundled common-password list.
-func policies() app.Policies {
-	return app.NewPolicies(settings.Defaults{}, commonPasswords())
+// policies returns the password policy source: the settings (the settings
+// store in the hub, the defaults for CLI commands without one) and the
+// bundled common-password list.
+func policies(s app.Settings) app.Policies {
+	if s == nil {
+		s = settings.Defaults{}
+	}
+
+	return app.NewPolicies(s, commonPasswords())
 }
 
 // UserAdmin builds the user administration service used by the CLI.
@@ -96,7 +101,7 @@ func UserAdmin(d Deps) *app.UserAdmin {
 
 	return app.NewUserAdmin(app.UserAdminDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
-		Now: d.Now, Policy: policies(), Logger: component(d.Logger, "identity.app.users"),
+		Now: d.Now, Policy: policies(nil), Logger: component(d.Logger, "identity.app.users"),
 	})
 }
 
@@ -124,12 +129,13 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	var (
 		lifetimes app.SessionPolicies = app.DefaultSessionPolicies()
 		retention app.Retention       = app.FixedRetention{Sessions: app.DefaultSessionRetention, Audit: 365 * 24 * time.Hour}
+		passwords                     = policies(nil)
 		limiter   *memory.IPLimiter
 	)
 
 	if d.Settings != nil {
 		p := settingsrc.New(d.Settings)
-		lifetimes, retention = p, p
+		lifetimes, retention, passwords = p, p, policies(p)
 		limiter = memory.NewDynamicIPLimiter(p.LoginRate, memory.DefaultCapacity)
 	} else {
 		limiter = memory.NewIPLimiter(loginIPEvery, loginIPBurst, memory.DefaultCapacity)
@@ -144,19 +150,19 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Logger:          component(d.Logger, "identity.app.auth"),
 	})
 
-	passwords := app.NewPasswords(app.PasswordsDeps{
+	changer := app.NewPasswords(app.PasswordsDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
-		Policies: policies(), SessionPolicies: lifetimes,
+		Policies: passwords, SessionPolicies: lifetimes,
 		Logger: component(d.Logger, "identity.app.passwords"),
 	})
 
 	setup := app.NewSetup(app.SetupDeps{
-		Users: r.users, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now, Policies: policies(),
+		Users: r.users, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now, Policies: passwords,
 		Auth: auth, Limiter: memory.NewIPLimiter(setupIPEvery, setupIPBurst, memory.DefaultCapacity),
 		HubURL: d.Config.Hub.URL, Logger: component(d.Logger, "identity.app.setup"),
 	})
 
-	h, err := identityhttp.New(auth, passwords, setup, pages, identityhttp.Config{
+	h, err := identityhttp.New(auth, changer, setup, pages, identityhttp.Config{
 		HubURL:           d.Config.Hub.URL,
 		TrustedProxies:   config.Prefixes(d.Config.HTTP.TrustedProxies),
 		AdminNetworks:    config.Prefixes(d.Config.Admin.AllowedNetworks),

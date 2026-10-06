@@ -41,6 +41,7 @@ var formPages = []formPage{
 			{ID: "listening", Title: "Listening", Keys: []string{"listen_policy", "ui.recorder_enabled"}},
 			{ID: "sessions", Title: "Sessions", Description: "New lifetimes apply to sessions opened from now on; activity extends open sessions with the new idle timeout.",
 				Keys: []string{"session.idle_timeout", "session.absolute_timeout", "session.remember_me_timeout"}},
+			{ID: "passwords", Title: "Passwords", Keys: []string{"auth.password_min_length"}},
 			{ID: "sign-in", Title: "Sign-in throttling", Keys: []string{
 				"auth.login_rate_limit", "auth.lockout.delay_after", "auth.lockout.lock_after", "auth.lockout.lock_for", "auth.lockout.max_lock",
 			}},

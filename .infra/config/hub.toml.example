@@ -131,6 +131,7 @@ trusted_proxies = []
 # remember_me_timeout = "30d"            # "Keep me signed in"
 
 [settings.auth]
+# password_min_length = 10               # new passwords (8..256 characters)
 # login_rate_limit = "5/1m"              # sign-in attempts per client address
 
 [settings.auth.lockout]

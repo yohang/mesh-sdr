@@ -1,6 +1,7 @@
 package settingsrc_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -48,6 +49,14 @@ func TestPolicies(t *testing.T) {
 
 	if p.SessionRetention() != 30*24*time.Hour {
 		t.Errorf("session retention default: %s", p.SessionRetention())
+	}
+
+	if n := settingsrc.New(values{ints: map[string]int{settingsrc.KeyPasswordMin: 14}}).PasswordMinLength(context.Background()); n != 14 {
+		t.Errorf("password min length = %d", n)
+	}
+
+	if n := settingsrc.New(values{}).PasswordMinLength(context.Background()); n != 10 {
+		t.Errorf("default password min length = %d", n)
 	}
 
 	if every, burst := settingsrc.New(values{}).LoginRate(); every != 12*time.Second || burst != 5 {
