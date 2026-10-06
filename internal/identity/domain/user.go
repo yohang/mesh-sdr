@@ -266,6 +266,52 @@ func (u *User) ReplacePasswordHash(h PasswordHash, now time.Time) error {
 	return nil
 }
 
+// ChangePassword sets a new password chosen by the user: it clears
+// must_change_password and the login throttling.
+func (u *User) ChangePassword(h PasswordHash, now time.Time) error {
+	if h.IsZero() {
+		return ErrInvalidHash
+	}
+
+	if !u.HasLocalIdentity() {
+		return ErrInvalidUser.WithDetail("the user has no local identity")
+	}
+
+	u.passwordHash = h
+	u.mustChangePassword = false
+	u.ClearLoginFailures(now)
+
+	return nil
+}
+
+// ResetPassword sets a password chosen for the user (CLI or admin reset):
+// mustChange flags a generated password that the user must replace at the
+// next sign-in. It clears the login throttling, so that a locked-out user
+// can sign in with the new password.
+func (u *User) ResetPassword(h PasswordHash, mustChange bool, now time.Time) error {
+	if h.IsZero() {
+		return ErrInvalidHash
+	}
+
+	if !u.HasLocalIdentity() {
+		return ErrInvalidUser.WithDetail("the user has no local identity")
+	}
+
+	u.passwordHash = h
+	u.mustChangePassword = mustChange
+	u.ClearLoginFailures(now)
+
+	return nil
+}
+
+// ClearLoginFailures resets the login throttling (after a password check
+// other than a login succeeded, or a password reset).
+func (u *User) ClearLoginFailures(now time.Time) {
+	u.failedLogins = 0
+	u.lockedUntil = time.Time{}
+	u.touch(now)
+}
+
 // Disable disables the account. The caller revokes its sessions. It
 // returns false when the account was already disabled.
 func (u *User) Disable(now time.Time) bool {

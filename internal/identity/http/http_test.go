@@ -600,7 +600,7 @@ func TestAdminRequiresRoleAndNetwork(t *testing.T) {
 }
 
 func TestAuthorize(t *testing.T) {
-	m, err := identityhttp.New(nil, pages{}, identityhttp.Config{
+	m, err := identityhttp.New(nil, nil, pages{}, identityhttp.Config{
 		HubURL: hubURL, AdminNetworks: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 	}, slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -617,13 +617,13 @@ func TestAuthorize(t *testing.T) {
 		t.Errorf("listener operation, anonymous caller: %v", err)
 	}
 
-	if _, err := identityhttp.New(nil, pages{}, identityhttp.Config{HubURL: "not a url"}, slog.New(slog.DiscardHandler)); err == nil {
+	if _, err := identityhttp.New(nil, nil, pages{}, identityhttp.Config{HubURL: "not a url"}, slog.New(slog.DiscardHandler)); err == nil {
 		t.Error("invalid hub.url accepted")
 	}
 
 	var logs bytes.Buffer
 
-	if _, err := identityhttp.New(nil, pages{}, identityhttp.Config{HubURL: "http://lan.example"}, slog.New(slog.NewTextHandler(&logs, nil))); err != nil {
+	if _, err := identityhttp.New(nil, nil, pages{}, identityhttp.Config{HubURL: "http://lan.example"}, slog.New(slog.NewTextHandler(&logs, nil))); err != nil {
 		t.Fatal(err)
 	}
 

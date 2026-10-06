@@ -47,6 +47,14 @@ type Authenticator interface {
 	SessionPolicy() domain.SessionPolicy
 }
 
+// PasswordChanger changes the password of the signed-in user.
+type PasswordChanger interface {
+	Change(ctx context.Context, in app.ChangePasswordInput) (app.ChangePasswordResult, error)
+	// MinLength returns the minimum password length in force, shown on the
+	// forms.
+	MinLength(ctx context.Context) int
+}
+
 // Pages renders HTML pages in the app shell.
 type Pages interface {
 	// Page writes a page; fragment, when not nil, is written alone for htmx
@@ -70,19 +78,20 @@ type Config struct {
 
 // Module is the identity router module (internal/http.Module).
 type Module struct {
-	auth     Authenticator
-	pages    Pages
-	logger   *slog.Logger
-	resolver *clientip.Resolver
-	cop      *http.CrossOriginProtection
-	admin    []netip.Prefix
-	secure   bool
-	preKey   []byte
-	routes   chi.Routes
+	auth      Authenticator
+	passwords PasswordChanger
+	pages     Pages
+	logger    *slog.Logger
+	resolver  *clientip.Resolver
+	cop       *http.CrossOriginProtection
+	admin     []netip.Prefix
+	secure    bool
+	preKey    []byte
+	routes    chi.Routes
 }
 
 // New returns the module.
-func New(auth Authenticator, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
+func New(auth Authenticator, passwords PasswordChanger, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
 	u, err := url.Parse(cfg.HubURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("hub.url %q: not an absolute URL", cfg.HubURL)
@@ -100,14 +109,15 @@ func New(auth Authenticator, pages Pages, cfg Config, logger *slog.Logger) (*Mod
 	}
 
 	return &Module{
-		auth:     auth,
-		pages:    pages,
-		logger:   logger,
-		resolver: clientip.NewResolver(cfg.TrustedProxies),
-		cop:      cop,
-		admin:    cfg.AdminNetworks,
-		secure:   secure,
-		preKey:   []byte(rand.Text()),
+		auth:      auth,
+		passwords: passwords,
+		pages:     pages,
+		logger:    logger,
+		resolver:  clientip.NewResolver(cfg.TrustedProxies),
+		cop:       cop,
+		admin:     cfg.AdminNetworks,
+		secure:    secure,
+		preKey:    []byte(rand.Text()),
 	}, nil
 }
 
@@ -126,6 +136,10 @@ func (m *Module) Routes(r chi.Router) {
 	r.Head("/login", m.loginPage)
 	r.Post("/login", m.loginAction)
 	r.Post("/logout", m.logoutAction)
+
+	r.With(m.Require(domain.RoleListener)).Get(PasswordChangePath, m.passwordPage)
+	r.With(m.Require(domain.RoleListener)).Head(PasswordChangePath, m.passwordPage)
+	r.With(m.Require(domain.RoleListener)).Post(PasswordChangePath, m.passwordAction)
 }
 
 // Cookie names (TECHNICAL_SPEC §5.6). Without TLS (http hub.url, LAN or
@@ -276,7 +290,7 @@ func isAPI(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/api/")
 func limitAuthBodies(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/login" || p == "/logout" || strings.HasPrefix(p, "/api/v1/auth/") {
+		if p == "/login" || p == "/logout" || p == PasswordChangePath || strings.HasPrefix(p, "/api/v1/auth/") {
 			r.Body = http.MaxBytesReader(w, r.Body, AuthBodyLimit)
 		}
 
@@ -442,6 +456,29 @@ func (m *Module) Login(ctx context.Context, login, password string, remember boo
 	}
 
 	return res.Principal, res.Session.CSRFSecret().Token(res.Token), cookies, nil
+}
+
+// ChangePassword changes the password of the request's user, and returns
+// the principal, the CSRF token of the new session (the request's session
+// is replaced) and the cookie to set. forced tells whether the change was
+// required.
+func (m *Module) ChangePassword(ctx context.Context, current, newPassword string) (p domain.Principal, csrf string, cookie *http.Cookie, forced bool, err error) {
+	st := FromContext(ctx)
+	if st.session == nil {
+		return domain.Principal{}, "", nil, false, domain.ErrUnauthenticated
+	}
+
+	res, err := m.passwords.Change(ctx, app.ChangePasswordInput{Session: st.session, Current: current, New: newPassword, Meta: m.meta(ctx)})
+	if err != nil {
+		return domain.Principal{}, "", nil, false, err
+	}
+
+	maxAge := 0
+	if res.Remember {
+		maxAge = max(1, int(res.Session.AbsoluteExpiresAt().Sub(res.Session.CreatedAt()).Seconds()))
+	}
+
+	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge), res.Forced, nil
 }
 
 // Logout ends the request's session and returns the cookie to clear it.

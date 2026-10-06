@@ -66,6 +66,7 @@ const (
 	ActionLoginLockout   = "auth.login.lockout"
 	ActionLogout         = "auth.logout"
 	ActionSessionsRevoke = "auth.session.revoke"
+	ActionPasswordChange = "auth.password.change"
 	ActionUserCreate     = "user.create"
 	ActionUserDisable    = "user.disable"
 	ActionUserEnable     = "user.enable"

@@ -117,7 +117,13 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Logger: component(d.Logger, "identity.app.auth"),
 	})
 
-	h, err := identityhttp.New(auth, pages, identityhttp.Config{
+	passwords := app.NewPasswords(app.PasswordsDeps{
+		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
+		Policies: policies(), Throttle: domain.DefaultThrottlePolicy(), SessionPolicy: domain.DefaultSessionPolicy(),
+		Logger: component(d.Logger, "identity.app.passwords"),
+	})
+
+	h, err := identityhttp.New(auth, passwords, pages, identityhttp.Config{
 		HubURL:         d.Config.Hub.URL,
 		TrustedProxies: config.Prefixes(d.Config.HTTP.TrustedProxies),
 		AdminNetworks:  config.Prefixes(d.Config.Admin.AllowedNetworks),

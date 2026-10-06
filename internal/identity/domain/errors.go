@@ -31,6 +31,9 @@ var (
 	// ErrInvalidCredentials is the one generic login error (SR-06): unknown
 	// identifier, wrong password, disabled account or no local identity.
 	ErrInvalidCredentials = shared.NewError(shared.KindUnauthenticated, "invalid_credentials", "incorrect username, e-mail or password")
+	// ErrInvalidCurrentPassword means the current password given to change
+	// it is wrong.
+	ErrInvalidCurrentPassword = shared.NewError(shared.KindInvalid, "invalid_current_password", "the current password is incorrect")
 	// ErrUnauthenticated means the request needs a valid session.
 	ErrUnauthenticated = shared.NewError(shared.KindUnauthenticated, "unauthenticated", "sign in required")
 	// ErrForbidden means the principal lacks the required role.
