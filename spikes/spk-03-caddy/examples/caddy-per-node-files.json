@@ -1,0 +1,334 @@
+{
+  "admin": {
+    "config": {
+      "persist": false
+    },
+    "listen": "unix//run/meshsdr/caddy-admin.sock"
+  },
+  "apps": {
+    "http": {
+      "https_port": 443,
+      "servers": {
+        "rx": {
+          "automatic_https": {
+            "disable": true
+          },
+          "listen": [
+            ":443"
+          ],
+          "protocols": [
+            "h1",
+            "h2"
+          ],
+          "routes": [
+            {
+              "handle": [
+                {
+                  "@id": "node-routes",
+                  "handler": "subroute",
+                  "routes": [
+                    {
+                      "@id": "node-n-roof",
+                      "handle": [
+                        {
+                          "handler": "headers",
+                          "request": {
+                            "delete": [
+                              "X-Rx-Access-Token",
+                              "X-Rx-Node-Id",
+                              "X-Rx-Cid"
+                            ]
+                          }
+                        },
+                        {
+                          "handle_response": [
+                            {
+                              "match": {
+                                "status_code": [
+                                  2
+                                ]
+                              },
+                              "routes": [
+                                {
+                                  "handle": [
+                                    {
+                                      "handler": "headers",
+                                      "request": {
+                                        "set": {
+                                          "X-Rx-Access-Token": [
+                                            "{http.reverse_proxy.header.X-Rx-Access-Token}"
+                                          ],
+                                          "X-Rx-Cid": [
+                                            "{http.reverse_proxy.header.X-Rx-Cid}"
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ],
+                          "handler": "reverse_proxy",
+                          "headers": {
+                            "request": {
+                              "set": {
+                                "X-Forwarded-Method": [
+                                  "{http.request.method}"
+                                ],
+                                "X-Forwarded-Uri": [
+                                  "{http.request.uri}"
+                                ]
+                              }
+                            }
+                          },
+                          "rewrite": {
+                            "method": "GET",
+                            "uri": "/internal/gateway/authz?node=n-roof"
+                          },
+                          "upstreams": [
+                            {
+                              "dial": "unix//run/meshsdr/hub-authz.sock"
+                            }
+                          ]
+                        },
+                        {
+                          "handler": "rewrite",
+                          "uri": "/ws"
+                        },
+                        {
+                          "flush_interval": -1,
+                          "handler": "reverse_proxy",
+                          "headers": {
+                            "request": {
+                              "set": {
+                                "X-Rx-Node-Id": [
+                                  "n-roof"
+                                ]
+                              }
+                            }
+                          },
+                          "stream_close_delay": "2h0m0s",
+                          "stream_timeout": "24h0m0s",
+                          "transport": {
+                            "dial_timeout": "3s",
+                            "protocol": "http",
+                            "tls": {
+                              "ca": {
+                                "pem_files": [
+                                  "/etc/meshsdr/tls/hub-ca.pem"
+                                ],
+                                "provider": "file"
+                              },
+                              "client_certificate_file": "/etc/meshsdr/tls/gateway.crt",
+                              "client_certificate_key_file": "/etc/meshsdr/tls/gateway.key",
+                              "server_name": "n-roof.nodes.rx.internal"
+                            },
+                            "versions": [
+                              "1.1"
+                            ]
+                          },
+                          "upstreams": [
+                            {
+                              "dial": "10.8.0.12:7443"
+                            }
+                          ]
+                        }
+                      ],
+                      "match": [
+                        {
+                          "path": [
+                            "/nodes/n-roof/ws"
+                          ]
+                        }
+                      ],
+                      "terminal": true
+                    },
+                    {
+                      "@id": "node-n-shack",
+                      "handle": [
+                        {
+                          "handler": "headers",
+                          "request": {
+                            "delete": [
+                              "X-Rx-Access-Token",
+                              "X-Rx-Node-Id",
+                              "X-Rx-Cid"
+                            ]
+                          }
+                        },
+                        {
+                          "handle_response": [
+                            {
+                              "match": {
+                                "status_code": [
+                                  2
+                                ]
+                              },
+                              "routes": [
+                                {
+                                  "handle": [
+                                    {
+                                      "handler": "headers",
+                                      "request": {
+                                        "set": {
+                                          "X-Rx-Access-Token": [
+                                            "{http.reverse_proxy.header.X-Rx-Access-Token}"
+                                          ],
+                                          "X-Rx-Cid": [
+                                            "{http.reverse_proxy.header.X-Rx-Cid}"
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ],
+                          "handler": "reverse_proxy",
+                          "headers": {
+                            "request": {
+                              "set": {
+                                "X-Forwarded-Method": [
+                                  "{http.request.method}"
+                                ],
+                                "X-Forwarded-Uri": [
+                                  "{http.request.uri}"
+                                ]
+                              }
+                            }
+                          },
+                          "rewrite": {
+                            "method": "GET",
+                            "uri": "/internal/gateway/authz?node=n-shack"
+                          },
+                          "upstreams": [
+                            {
+                              "dial": "unix//run/meshsdr/hub-authz.sock"
+                            }
+                          ]
+                        },
+                        {
+                          "handler": "rewrite",
+                          "uri": "/ws"
+                        },
+                        {
+                          "flush_interval": -1,
+                          "handler": "reverse_proxy",
+                          "headers": {
+                            "request": {
+                              "set": {
+                                "X-Rx-Node-Id": [
+                                  "n-shack"
+                                ]
+                              }
+                            }
+                          },
+                          "stream_close_delay": "2h0m0s",
+                          "stream_timeout": "24h0m0s",
+                          "transport": {
+                            "dial_timeout": "3s",
+                            "protocol": "http",
+                            "tls": {
+                              "ca": {
+                                "pem_files": [
+                                  "/etc/meshsdr/tls/hub-ca.pem"
+                                ],
+                                "provider": "file"
+                              },
+                              "client_certificate_file": "/etc/meshsdr/tls/gateway.crt",
+                              "client_certificate_key_file": "/etc/meshsdr/tls/gateway.key",
+                              "server_name": "n-shack.nodes.rx.internal"
+                            },
+                            "versions": [
+                              "1.1"
+                            ]
+                          },
+                          "upstreams": [
+                            {
+                              "dial": "10.8.0.13:7443"
+                            }
+                          ]
+                        }
+                      ],
+                      "match": [
+                        {
+                          "path": [
+                            "/nodes/n-shack/ws"
+                          ]
+                        }
+                      ],
+                      "terminal": true
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "status_code": 404
+                }
+              ],
+              "match": [
+                {
+                  "path": [
+                    "/nodes/*"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "meshsdr_hub",
+                  "name": "hub"
+                }
+              ]
+            }
+          ],
+          "tls_connection_policies": [
+            {}
+          ]
+        }
+      }
+    },
+    "tls": {
+      "certificates": {
+        "load_files": [
+          {
+            "certificate": "/etc/meshsdr/tls/public.crt",
+            "key": "/etc/meshsdr/tls/public.key"
+          }
+        ]
+      }
+    }
+  },
+  "logging": {
+    "logs": {
+      "default": {
+        "encoder": {
+          "format": "json"
+        },
+        "level": "DEBUG",
+        "writer": {
+          "name": "log",
+          "output": "slog"
+        }
+      }
+    },
+    "sink": {
+      "writer": {
+        "name": "log",
+        "output": "slog"
+      }
+    }
+  },
+  "storage": {
+    "module": "file_system",
+    "root": "/data/caddy"
+  }
+}
