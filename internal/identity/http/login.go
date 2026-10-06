@@ -69,7 +69,14 @@ func (m *Module) loginAction(w http.ResponseWriter, r *http.Request) {
 	noIndex(w)
 
 	if err := r.ParseForm(); err != nil {
-		m.pages.Error(w, r, http.StatusBadRequest)
+		status := http.StatusBadRequest
+
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			status = http.StatusRequestEntityTooLarge
+		}
+
+		m.pages.Error(w, r, status)
 
 		return
 	}

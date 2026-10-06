@@ -35,6 +35,10 @@ import (
 // CSRFHeader carries the CSRF token on state-changing requests.
 const CSRFHeader = "X-CSRF-Token"
 
+// AuthBodyLimit bounds the request body of the authentication endpoints
+// (/login, /logout, /api/v1/auth/*): they take a login and a password.
+const AuthBodyLimit = 64 << 10
+
 // Authenticator is the identity application service used by the HTTP layer.
 type Authenticator interface {
 	Login(ctx context.Context, in app.LoginInput) (app.LoginResult, error)
@@ -104,7 +108,7 @@ func New(auth Authenticator, pages Pages, cfg Config, logger *slog.Logger) (*Mod
 // Middlewares implements internal/http.Module: client address, session,
 // CSRF protection, JSON-only API bodies.
 func (m *Module) Middlewares() []func(http.Handler) http.Handler {
-	return []func(http.Handler) http.Handler{m.resolver.Middleware, m.session, m.csrf, m.requireJSON}
+	return []func(http.Handler) http.Handler{m.resolver.Middleware, limitAuthBodies, m.session, m.csrf, m.requireJSON}
 }
 
 // Routes implements internal/http.Module.
@@ -259,6 +263,18 @@ func isSafe(method string) bool {
 }
 
 func isAPI(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/api/") }
+
+// limitAuthBodies caps the body of the authentication endpoints.
+func limitAuthBodies(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "/login" || p == "/logout" || strings.HasPrefix(p, "/api/v1/auth/") {
+			r.Body = http.MaxBytesReader(w, r.Body, AuthBodyLimit)
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 
 // csrf protects every state-changing request: the cross-origin check of
 // net/http (Sec-Fetch-Site, Origin vs Host or hub.url), then the CSRF token

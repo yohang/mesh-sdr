@@ -57,6 +57,10 @@ func NewAuth(d AuthDeps) *Auth {
 // SessionPolicy returns the session lifetimes.
 func (a *Auth) SessionPolicy() domain.SessionPolicy { return a.sessionPol }
 
+// MaxPasswordBytes bounds the password of a login attempt (the policy
+// allows 256 characters, at most 1024 bytes in UTF-8).
+const MaxPasswordBytes = 1024
+
 // LoginInput is a password login attempt.
 type LoginInput struct {
 	Login    string
@@ -89,10 +93,11 @@ func (a *Auth) Login(ctx context.Context, in LoginInput) (LoginResult, error) {
 		return LoginResult{}, domain.NewRateLimitError(wait)
 	}
 
+	// Malformed or oversized input is refused before any lookup or hash: it
+	// tells nothing about accounts.
 	login, err := domain.NewLogin(in.Login)
-	if err != nil {
-		// Still pay for one verification: same timing as a wrong password.
-		login, _ = domain.NewLogin("-")
+	if err != nil || len(in.Password) > MaxPasswordBytes {
+		return LoginResult{}, domain.ErrInvalidCredentials
 	}
 
 	known, err := a.users.ByLogin(ctx, login)

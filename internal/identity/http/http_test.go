@@ -499,6 +499,24 @@ func TestLoginPage(t *testing.T) {
 	}
 }
 
+func TestAuthBodiesAreBounded(t *testing.T) {
+	h := newHub(t)
+	c := h.client()
+	c.session()
+
+	big := strings.Repeat("a", identityhttp.AuthBodyLimit)
+	hdr := map[string]string{identityhttp.CSRFHeader: c.token}
+
+	if res := c.do(http.MethodPost, "/login", "application/x-www-form-urlencoded", "login=alice&password="+big, hdr); res.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("large form = %d", res.StatusCode)
+	}
+
+	res := c.do(http.MethodPost, "/api/v1/auth/login", "application/json", `{"login":"alice","password":"`+big+`"}`, hdr)
+	if res.StatusCode != http.StatusBadRequest || !strings.Contains(decode(t, res)["detail"].(string), "too large") {
+		t.Errorf("large JSON body = %d", res.StatusCode)
+	}
+}
+
 func TestSafeNext(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/", func(http.ResponseWriter, *http.Request) {})

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/netip"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -228,7 +229,6 @@ func TestLoginFailuresAreUniform(t *testing.T) {
 		{"unknown user", "nobody", password},
 		{"unknown e-mail", "nobody@example.org", password},
 		{"disabled user", "bob", password},
-		{"empty login", "   ", password},
 	}
 
 	for _, tt := range tests {
@@ -248,6 +248,25 @@ func TestLoginFailuresAreUniform(t *testing.T) {
 				t.Errorf("%d verifications, want 1", n)
 			}
 		})
+	}
+}
+
+func TestOversizedLoginInputIsRefusedBeforeVerification(t *testing.T) {
+	e := newEnv(t, nil)
+	e.addUser(t, "alice", "", domain.RoleListener)
+
+	for name, in := range map[string][2]string{
+		"empty login":   {"   ", password},
+		"long login":    {strings.Repeat("a", 255), password},
+		"long password": {"alice", strings.Repeat("p", app.MaxPasswordBytes+1)},
+	} {
+		if _, err := e.login(in[0], in[1]); !errors.Is(err, domain.ErrInvalidCredentials) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	if n := e.hasher.count(); n != 0 {
+		t.Errorf("%d verifications for malformed input", n)
 	}
 }
 
