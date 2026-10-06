@@ -191,6 +191,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	})
 
 	accounts := app.NewAccounts(app.AccountsDeps{
+		Hasher: r.hasher, Policies: passwords,
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Now: d.Now,
 		Logger: component(d.Logger, "identity.app.accounts"),
 	})

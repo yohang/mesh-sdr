@@ -81,6 +81,15 @@ type AccountService interface {
 	OwnSessions(ctx context.Context, by app.Actor) ([]app.SessionView, error)
 	RevokeOwnSession(ctx context.Context, by app.Actor, ref string) error
 	RevokeOtherSessions(ctx context.Context, by app.Actor) (int, error)
+
+	Search(ctx context.Context, q domain.UserQuery) ([]*domain.User, error)
+	User(ctx context.Context, id domain.UserID) (*domain.User, error)
+	SetRoles(ctx context.Context, by app.Actor, id domain.UserID, grants []domain.RoleGrant) (app.RolesResult, error)
+	SetEnabled(ctx context.Context, by app.Actor, id domain.UserID, enabled bool) (bool, error)
+	SetGeneratedPassword(ctx context.Context, by app.Actor, id domain.UserID) (string, error)
+	UserSessions(ctx context.Context, id domain.UserID) ([]app.SessionView, error)
+	RevokeUserSession(ctx context.Context, by app.Actor, id domain.UserID, ref string) error
+	RevokeUserSessions(ctx context.Context, by app.Actor, id domain.UserID) (int, error)
 }
 
 // InvitationService runs invitations (ACC-002).
@@ -105,6 +114,7 @@ type ResetService interface {
 	Request(ctx context.Context, login string, meta app.RequestMeta) error
 	Check(ctx context.Context, token string, meta app.RequestMeta) error
 	Confirm(ctx context.Context, token, password string, meta app.RequestMeta) error
+	IssueByAdmin(ctx context.Context, by app.Actor, id domain.UserID) (app.AdminResult, error)
 }
 
 // Services are the application services behind the identity pages.
@@ -190,7 +200,7 @@ func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, e
 		accounts:    svc.Accounts,
 		invitations: svc.Invitations,
 		resets:      svc.Resets,
-		adminLinks:  []layout.Link{{Label: "Invitations", Href: InvitationsPath}},
+		adminLinks:  []layout.Link{{Label: "Users", Href: UsersPath}, {Label: "Invitations", Href: InvitationsPath}},
 		pages:       pages,
 		logger:      logger,
 		resolver:    clientip.NewResolver(cfg.TrustedProxies),
@@ -238,6 +248,17 @@ func (m *Module) Routes(r chi.Router) {
 	r.Post(AccountPath+"/email/verify", m.emailVerifyAction)
 
 	admin := r.With(m.Require(domain.RoleAdmin))
+	admin.Get(UsersPath, m.usersPage)
+	admin.Head(UsersPath, m.usersPage)
+	admin.Get(UsersPath+"/{id}", m.userPage)
+	admin.Head(UsersPath+"/{id}", m.userPage)
+	admin.Post(UsersPath+"/{id}/roles", m.userRolesAction)
+	admin.Post(UsersPath+"/{id}/enable", m.userEnableAction(true))
+	admin.Post(UsersPath+"/{id}/disable", m.userEnableAction(false))
+	admin.Post(UsersPath+"/{id}/password-reset", m.userResetAction)
+	admin.Post(UsersPath+"/{id}/password", m.userPasswordAction)
+	admin.Post(UsersPath+"/{id}/sessions/revoke", m.userRevokeAllAction)
+	admin.Post(UsersPath+"/{id}/sessions/{ref}/revoke", m.userRevokeAction)
 	admin.Get(InvitationsPath, m.invitationsPage)
 	admin.Head(InvitationsPath, m.invitationsPage)
 	admin.Post(InvitationsPath, m.createInvitationAction)

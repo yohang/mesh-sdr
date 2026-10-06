@@ -21,6 +21,10 @@ type Accounts interface {
 	RevokeAllOwnSessions(ctx context.Context, by app.Actor) (int, error)
 	RevokeUserSession(ctx context.Context, by app.Actor, id domain.UserID, ref string) error
 	RevokeUserSessions(ctx context.Context, by app.Actor, id domain.UserID) (int, error)
+	Search(ctx context.Context, q domain.UserQuery) ([]*domain.User, error)
+	SetEnabled(ctx context.Context, by app.Actor, id domain.UserID, enabled bool) (bool, error)
+	SetDisplayName(ctx context.Context, by app.Actor, id domain.UserID, name string) error
+	SetGeneratedPassword(ctx context.Context, by app.Actor, id domain.UserID) (string, error)
 }
 
 // Profile is the account page service used by the /me endpoints.
@@ -329,3 +333,125 @@ func (noContent) write(w http.ResponseWriter) error {
 
 func (n noContent) VisitRevokeOwnSessionResponse(w http.ResponseWriter) error  { return n.write(w) }
 func (n noContent) VisitRevokeUserSessionResponse(w http.ResponseWriter) error { return n.write(w) }
+
+func user(u *domain.User) User {
+	return User{
+		Id: u.ID().String(), Username: u.Username().String(), DisplayName: optString(u.DisplayName().String()),
+		Email: optString(u.Email().String()), EmailVerified: !u.EmailVerifiedAt().IsZero(),
+		Roles: strings.Split(app.GrantNames(u.Grants()), ","), Enabled: u.Enabled(), MustChangePassword: u.MustChangePassword(),
+		CreatedAt: u.CreatedAt(), LastLoginAt: optTime(u.LastLoginAt()),
+	}
+}
+
+// ListUsers implements StrictServerInterface.
+func (h AccountHandlers) ListUsers(ctx context.Context, req ListUsersRequestObject) (ListUsersResponseObject, error) {
+	q := domain.UserQuery{Limit: 50}
+	p := req.Params
+
+	if p.Q != nil {
+		q.Text = *p.Q
+	}
+
+	if p.Role != nil {
+		r, err := domain.ParseRole(string(*p.Role))
+		if err != nil {
+			return nil, err
+		}
+
+		q.Role = r
+	}
+
+	q.Enabled = p.Enabled
+
+	if p.NeverSignedIn != nil {
+		q.NeverLoggedIn = *p.NeverSignedIn
+	}
+
+	if p.After != nil {
+		q.After = *p.After
+	}
+
+	if p.Limit != nil {
+		q.Limit = *p.Limit
+	}
+
+	users, err := h.accounts.Search(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+
+	out := UserList{Users: make([]User, 0, len(users))}
+	for _, u := range users {
+		out.Users = append(out.Users, user(u))
+	}
+
+	if len(users) == q.Limit {
+		out.NextAfter = optString(users[len(users)-1].Username().Key())
+	}
+
+	return jsonOK{out}, nil
+}
+
+// GetUser implements StrictServerInterface.
+func (h AccountHandlers) GetUser(ctx context.Context, req GetUserRequestObject) (GetUserResponseObject, error) {
+	id, err := parseUserID(req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	u, err := h.accounts.User(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{user(u)}, nil
+}
+
+// UpdateUser implements StrictServerInterface.
+func (h AccountHandlers) UpdateUser(ctx context.Context, req UpdateUserRequestObject) (UpdateUserResponseObject, error) {
+	id, err := parseUserID(req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	by := h.sessions.Actor(ctx)
+
+	if req.Body.DisplayName != nil {
+		if err := h.accounts.SetDisplayName(ctx, by, id, *req.Body.DisplayName); err != nil {
+			return nil, err
+		}
+	}
+
+	if req.Body.Enabled != nil {
+		if _, err := h.accounts.SetEnabled(ctx, by, id, *req.Body.Enabled); err != nil {
+			return nil, err
+		}
+	}
+
+	u, err := h.accounts.User(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{user(u)}, nil
+}
+
+// SetGeneratedPassword implements StrictServerInterface.
+func (h AccountHandlers) SetGeneratedPassword(ctx context.Context, req SetGeneratedPasswordRequestObject) (SetGeneratedPasswordResponseObject, error) {
+	id, err := parseUserID(req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	pw, err := h.accounts.SetGeneratedPassword(ctx, h.sessions.Actor(ctx), id)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{GeneratedPassword{Password: pw}}, nil
+}
+
+func (j jsonOK) VisitListUsersResponse(w http.ResponseWriter) error            { return j.write(w) }
+func (j jsonOK) VisitGetUserResponse(w http.ResponseWriter) error              { return j.write(w) }
+func (j jsonOK) VisitUpdateUserResponse(w http.ResponseWriter) error           { return j.write(w) }
+func (j jsonOK) VisitSetGeneratedPasswordResponse(w http.ResponseWriter) error { return j.write(w) }

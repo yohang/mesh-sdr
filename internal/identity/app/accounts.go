@@ -46,6 +46,8 @@ func (NoRevocations) PublishRevocation(context.Context, Revocation) {}
 // Accounts runs the account administration of the web UI and API: roles
 // (ACC-006), and the user management of ACC-008.
 type Accounts struct {
+	hasher      PasswordHasher
+	policies    Policies
 	users       domain.UserRepository
 	sessions    domain.SessionRepository
 	audit       domain.AuditLog
@@ -57,6 +59,9 @@ type Accounts struct {
 
 // AccountsDeps are the dependencies of Accounts.
 type AccountsDeps struct {
+	// Hasher and Policies set generated passwords (ACC-008).
+	Hasher      PasswordHasher
+	Policies    Policies
 	Users       domain.UserRepository
 	Sessions    domain.SessionRepository
 	Audit       domain.AuditLog
@@ -73,6 +78,7 @@ func NewAccounts(d AccountsDeps) *Accounts {
 	}
 
 	return &Accounts{
+		hasher: d.Hasher, policies: d.Policies,
 		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, now: d.Now, revocations: d.Revocations,
 		logger: d.Logger,
 	}

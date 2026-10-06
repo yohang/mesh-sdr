@@ -20,6 +20,7 @@ func (r *recRevocations) PublishRevocation(_ context.Context, rv app.Revocation)
 
 func (e *env) accounts(rv app.RevocationPublisher) *app.Accounts {
 	return app.NewAccounts(app.AccountsDeps{
+		Hasher: e.hasher, Policies: app.NewPolicies(nil, nil),
 		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Now: e.clock.Now, Revocations: rv,
 		Logger: slog.New(slog.DiscardHandler),
 	})

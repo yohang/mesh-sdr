@@ -20,3 +20,4 @@
 /invite/not-a-valid-token 404
 /password/forgot 200
 /password/reset/not-a-valid-token 404
+/admin/users 200 signed-in

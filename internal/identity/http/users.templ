@@ -1,0 +1,202 @@
+package http
+
+import (
+	"github.com/yohang/mesh-sdr/internal/identity/app"
+	"github.com/yohang/mesh-sdr/internal/identity/domain"
+)
+
+func lastLogin(u *domain.User) string {
+	if u.LastLoginAt().IsZero() {
+		return "never"
+	}
+
+	return when(u.LastLoginAt())
+}
+
+func userURL(u *domain.User) string { return "/admin/users/" + u.ID().String() }
+
+// usersPage is Admin › Users (ACC-008): search and filters, then the list.
+templ usersPage(v usersView) {
+	<section class="flex w-full max-w-5xl flex-col gap-6 p-4" aria-labelledby="users-title">
+		<div class="flex flex-wrap items-center gap-4">
+			<h1 id="users-title" class="text-2xl font-bold">Users</h1>
+			<a href="/admin/invitations">Invite a user</a>
+		</div>
+		<form class="flex flex-wrap items-end gap-3" method="get" action="/admin/users" role="search">
+			<label class="flex flex-col gap-1">
+				<span>Search</span>
+				<input class="rounded border px-2 py-1" type="search" name="q" value={ v.Query.Text }/>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span>Role</span>
+				<select class="rounded border px-2 py-1" name="role">
+					<option value="" selected?={ v.Query.Role == "" }>Any</option>
+					<option value="listener" selected?={ v.Query.Role == "listener" }>Listener</option>
+					<option value="operator" selected?={ v.Query.Role == "operator" }>Operator</option>
+					<option value="admin" selected?={ v.Query.Role == "admin" }>Admin</option>
+				</select>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span>State</span>
+				<select class="rounded border px-2 py-1" name="state">
+					<option value="" selected?={ v.Query.State == "" }>Any</option>
+					<option value="enabled" selected?={ v.Query.State == "enabled" }>Enabled</option>
+					<option value="disabled" selected?={ v.Query.State == "disabled" }>Disabled</option>
+				</select>
+			</label>
+			<label class="flex items-center gap-2">
+				<input type="checkbox" name="never" value="1" checked?={ v.Query.Never }/>
+				<span>Never signed in</span>
+			</label>
+			<button class="rounded border px-3 py-1 font-semibold" type="submit">Filter</button>
+		</form>
+		if len(v.Users) == 0 {
+			<p>No user matches.</p>
+		} else {
+			<div class="overflow-x-auto">
+				<table class="w-full text-left text-sm">
+					<thead>
+						<tr><th scope="col">Username</th><th scope="col">Display name</th><th scope="col">E-mail</th><th scope="col">Roles</th><th scope="col">State</th><th scope="col">Last sign-in</th></tr>
+					</thead>
+					<tbody>
+						for _, u := range v.Users {
+							<tr>
+								<td><a href={ templ.SafeURL(userURL(u)) }>{ u.Username().String() }</a></td>
+								<td>{ u.DisplayName().String() }</td>
+								<td>{ u.Email().String() }</td>
+								<td>{ app.GrantNames(u.Grants()) }</td>
+								<td>
+									if u.Enabled() {
+										enabled
+									} else {
+										disabled
+									}
+								</td>
+								<td>{ lastLogin(u) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+		if v.NextQS != "" {
+			<p><a href={ templ.SafeURL("/admin/users?" + v.NextQS) }>Next page</a></p>
+		}
+	</section>
+}
+
+// userPage is Admin › Users › {user}: details, roles, state, password and
+// sessions.
+templ userPage(v userView) {
+	<section class="flex w-full max-w-3xl flex-col gap-6 p-4" aria-labelledby="user-title">
+		<p><a href="/admin/users">All users</a></p>
+		<h1 id="user-title" class="text-2xl font-bold">{ v.User.Username().String() }</h1>
+		@noticeView("user-notice", v.Notice)
+		if v.Password != "" {
+			<label class="flex flex-col gap-1 rounded border p-3">
+				<span>Generated password (shown once)</span>
+				<input class="rounded border px-2 py-1 font-mono" type="text" readonly value={ v.Password }/>
+			</label>
+		}
+		if v.ResetLink != "" {
+			<label class="flex flex-col gap-1 rounded border p-3">
+				<span>Password reset link (shown once)</span>
+				<input class="rounded border px-2 py-1 font-mono text-sm" type="text" readonly value={ v.ResetLink }/>
+			</label>
+		}
+		<dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+			<dt>Display name</dt><dd>{ v.User.DisplayName().String() }</dd>
+			<dt>E-mail</dt>
+			<dd>
+				{ v.User.Email().String() }
+				if !v.User.Email().IsZero() && v.User.EmailVerifiedAt().IsZero() {
+					(not confirmed)
+				}
+			</dd>
+			<dt>Roles</dt><dd>{ app.GrantNames(v.User.Grants()) }</dd>
+			<dt>State</dt>
+			<dd>
+				if v.User.Enabled() {
+					enabled
+				} else {
+					disabled
+				}
+				if v.User.MustChangePassword() {
+					, must change the password
+				}
+			</dd>
+			<dt>Created</dt><dd>{ when(v.User.CreatedAt()) }</dd>
+			<dt>Last sign-in</dt><dd>{ lastLogin(v.User) }</dd>
+		</dl>
+		<section class="flex flex-col gap-3" aria-labelledby="user-roles-title">
+			<h2 id="user-roles-title" class="text-xl font-semibold">Roles</h2>
+			<p class="text-sm">Any change signs the user out everywhere.</p>
+			<form class="flex flex-col gap-3" method="post" action={ templ.SafeURL(userURL(v.User) + "/roles") }>
+				<label class="flex flex-col gap-1">
+					<span>Role on every device</span>
+					<select class="rounded border px-2 py-1" name="role">
+						<option value="listener" selected?={ v.Role == "listener" }>Listener</option>
+						<option value="operator" selected?={ v.Role == "operator" }>Operator</option>
+						<option value="admin" selected?={ v.Role == "admin" }>Admin</option>
+					</select>
+				</label>
+				<label class="flex flex-col gap-1">
+					<span>Operator on these devices only (listener; device ids, comma-separated)</span>
+					<input class="rounded border px-2 py-1" type="text" name="devices" value={ v.Devices }/>
+				</label>
+				<button class="self-start rounded border px-3 py-1 font-semibold" type="submit">Save roles</button>
+			</form>
+		</section>
+		<section class="flex flex-col gap-3" aria-labelledby="user-access-title">
+			<h2 id="user-access-title" class="text-xl font-semibold">Access</h2>
+			<div class="flex flex-wrap gap-3">
+				if v.User.Enabled() {
+					<form method="post" action={ templ.SafeURL(userURL(v.User) + "/disable") }>
+						<button class="rounded border px-3 py-1" type="submit">Disable the account</button>
+					</form>
+				} else {
+					<form method="post" action={ templ.SafeURL(userURL(v.User) + "/enable") }>
+						<button class="rounded border px-3 py-1" type="submit">Enable the account</button>
+					</form>
+				}
+				<form method="post" action={ templ.SafeURL(userURL(v.User) + "/password-reset") }>
+					<button class="rounded border px-3 py-1" type="submit">
+						if v.MailEnabled && !v.User.Email().IsZero() {
+							Send a password reset e-mail
+						} else {
+							Create a password reset link
+						}
+					</button>
+				</form>
+				<form method="post" action={ templ.SafeURL(userURL(v.User) + "/password") }>
+					<button class="rounded border px-3 py-1" type="submit">Set a generated password</button>
+				</form>
+			</div>
+		</section>
+		<section class="flex flex-col gap-3" aria-labelledby="user-sessions-title">
+			<h2 id="user-sessions-title" class="text-xl font-semibold">Sessions</h2>
+			if len(v.Sessions) == 0 {
+				<p>No active session.</p>
+			} else {
+				<ul class="flex flex-col gap-3">
+					for _, s := range v.Sessions {
+						<li class="flex flex-wrap items-center gap-x-4 gap-y-1 rounded border p-2">
+							<span class="font-medium">{ s.Browser } on { s.System }</span>
+							<span class="text-sm">Last seen { when(s.LastSeenAt) }</span>
+							if s.IP != "" {
+								<span class="text-sm">from { s.IP }</span>
+							}
+							<form class="ml-auto" method="post" action={ templ.SafeURL(userURL(v.User) + "/sessions/" + s.Ref + "/revoke") }>
+								<button class="rounded border px-2 py-0.5 text-sm" type="submit" aria-label={ "Sign out the " + s.Browser + " session last seen " + when(s.LastSeenAt) }>Sign out</button>
+							</form>
+						</li>
+					}
+				</ul>
+				<form method="post" action={ templ.SafeURL(userURL(v.User) + "/sessions/revoke") }>
+					<button class="rounded border px-3 py-1 font-semibold" type="submit">Sign out everywhere</button>
+				</form>
+			}
+		</section>
+		{ children... }
+	</section>
+}

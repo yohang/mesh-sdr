@@ -1067,6 +1067,120 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /users:
+    get:
+      operationId: listUsers
+      x-meshsdr-access: admin
+      summary: List users, with search and filters
+      tags: [users]
+      parameters:
+        - name: q
+          in: query
+          description: Substring of the username, e-mail or display name.
+          schema:
+            type: string
+            maxLength: 254
+        - name: role
+          in: query
+          description: Highest global role.
+          schema:
+            type: string
+            enum: [listener, operator, admin]
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+        - name: never_signed_in
+          in: query
+          schema:
+            type: boolean
+        - name: after
+          in: query
+          description: Username of the last user of the previous page.
+          schema:
+            type: string
+            maxLength: 64
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Users by username
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserList"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      operationId: getUser
+      x-meshsdr-access: admin
+      summary: User detail
+      tags: [users]
+      responses:
+        "200":
+          description: The user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateUser
+      x-meshsdr-access: admin
+      summary: Enable or disable a user, or change its display name
+      description: Disabling revokes every session; the last enabled admin cannot be disabled (409 `last_admin`).
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200":
+          description: The user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/password:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      operationId: setGeneratedPassword
+      x-meshsdr-access: admin
+      summary: Give a user a generated password to change at the next sign-in
+      description: Revokes every session of the user. The password is returned only here.
+      tags: [users]
+      responses:
+        "200":
+          description: The generated password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratedPassword"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     LinkToken:
@@ -1101,6 +1215,61 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    UserList:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        next_after:
+          type: string
+          description: Value of `after` for the next page, when there may be one.
+    User:
+      type: object
+      required: [id, username, email_verified, roles, enabled, must_change_password, created_at]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: string
+        email_verified:
+          type: boolean
+        roles:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+        must_change_password:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+    UserUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled:
+          type: boolean
+        display_name:
+          type: string
+          description: Empty removes it.
+          maxLength: 256
+    GeneratedPassword:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
     PasswordResetRequest:
       type: object
       additionalProperties: false
