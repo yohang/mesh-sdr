@@ -145,13 +145,25 @@ The error code for a locked key is `setting_locked` (Q18). Path, query and heade
 
 ### Devices (Q12)
 
-ADM-008 and ADM-009 need the grid device registry of `epic/grid-2`. They are implemented in this part only if grid-2 has merged by then, with these grid additions in a migration of this part: a `missing_since` marker on `devices` (set when an online node's report omits the device), the node-config flags of the device in the registry, and operator read access on `GET /devices/{id}`. Otherwise #66 and #67 stay open and the needs are listed in the pull request.
+grid-2 merged first, so ADM-008 and ADM-009 are part of this epic part. They need no migration:
+
+- The node-config flags of a device (`enabled`, `listen_policy`, `operator_can_retune`, `always_on`, `scheduler_enabled`) are already mirrored into the registry by grid-2 (`devices.capabilities` JSON).
+- The "no longer reported" marker already exists: when an online node reports its devices without one, grid-2 sets `runtime_state = 'unavailable'` with `runtime_reason = 'not_reported'` and the time in `runtime_state_at`. `Device.Missing()` reads it; a device of an offline node is not missing. `GET /devices/{id}` exposes it as `missing_since`.
+- `GET /devices/{id}` is readable by operators (ADM-008); `GET /devices` stays admin-only.
+- `DELETE /devices/{id}` (admin) forgets a missing device. The deletion is conditional in SQL, so a device reported again meanwhile is kept; otherwise it answers 409 `device_reported`. It is audited (`device.forget`). Presets are device-independent and schedules do not exist yet, so nothing else changes.
+- `/admin/devices` lists the registry and `/admin/devices/{id}` shows a device read-only, "defined in the node config of <node>". Operators open both (their admin section list holds only Devices); the "Forget this device" action (`POST /admin/devices/{id}/forget`) is for admins. The list is the minimum needed to reach the detail; ADM-007 (device list with capabilities, active preset and listener count) stays its own ticket. The presets compatible with a device come with the presets epic.
 
 ### Accessibility (Q13)
 
 The a11y job seeds an admin (`meshsdr --noninteractive hub user add`, compose service `seed`), signs in once per hub through the login page, checks the pages marked `admin` in `urls.txt` in every theme mode, and checks a rejected admin form (inline errors and summary).
 
 ## Implementation notes
+
+- `/api/v1` authorises an operation (x-meshsdr-access) before reading its body and bounds every JSON body to 1 MiB (413 beyond); uploads keep their own caps. The strict policy middleware checks the access level again after decoding.
+- Receiver images: each slot caps the pixel count before decoding (avatar 1024 × 1024, panorama 40 MP), 16-bit colour models are refused, and one image is decoded at a time.
+- An invalid DB setting is ignored but keeps its row version, so the UI or the API can replace or reset it.
+- `audit.purge` records each purge that deleted entries (`retention.purge`, system actor). The scheduler ends, as failed, the runs a stopped hub left in progress, and holds one lock per job.
+- `auth.login_rate_limit` allows at most 100 attempts per window of at least one minute.
 
 - The new admin settings keys and their defaults are documented in `.infra/config/hub.toml.example`.
 - `config.Duration` formats whole weeks with `w` and other values from days down (`30d`, not `4w2d`). A default of 24 hours shows as `1d`.
