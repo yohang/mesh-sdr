@@ -18,6 +18,9 @@ const (
 	EnvPrefix = "MESHSDR_"
 	// EnvConfigDir overrides the config directory.
 	EnvConfigDir = EnvPrefix + "CONFIG_DIR"
+	// EnvPassword gives the password of `meshsdr hub user add
+	// --noninteractive` (AUTH-008). It is not a config key.
+	EnvPassword = EnvPrefix + "PASSWORD"
 )
 
 // Options tells Load where to read from.
@@ -354,7 +357,7 @@ func knownEnvVars() []string {
 		}
 	}
 
-	return append(names, EnvConfigDir)
+	return append(names, EnvConfigDir, EnvPassword)
 }
 
 func (l *loader) applyEnv(cfg any) {

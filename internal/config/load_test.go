@@ -257,6 +257,33 @@ func TestLoadErrors(t *testing.T) {
 			code:  CodeInvalidValue, origin: "hub.toml:5",
 		},
 		{
+			name: "argon2 memory below floor", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[auth.argon2]\nmemory_kib = 1024\n"},
+			code:  CodeInvalidValue, origin: "hub.toml:6",
+		},
+		{
+			name: "argon2 iterations below floor", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub},
+			env:   map[string]string{"MESHSDR_AUTH__ARGON2__ITERATIONS": "1"},
+			code:  CodeInvalidValue, origin: "env:MESHSDR_AUTH__ARGON2__ITERATIONS",
+		},
+		{
+			name: "argon2 parallelism zero", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[auth.argon2]\nparallelism = 0\n"},
+			code:  CodeInvalidValue,
+		},
+		{
+			name: "bad admin network", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[admin]\nallowed_networks = [\"10.0.0.1\"]\n"},
+			code:  CodeInvalidValue, origin: "hub.toml:6",
+		},
+		{
+			name: "bad trusted proxy", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub},
+			env:   map[string]string{"MESHSDR_HTTP__TRUSTED_PROXIES": "10.0.0.0/8,nope"},
+			code:  CodeInvalidValue, origin: "env:MESHSDR_HTTP__TRUSTED_PROXIES",
+		},
+		{
 			name: "bad log level", role: RoleNode,
 			files: map[string]string{"node.toml": "schema_version = 1\nnode.id = \"attic\"\nlog.level = \"trace\"\n"},
 			code:  CodeInvalidValue, origin: "node.toml:3",
@@ -451,5 +478,29 @@ func TestEnvNamesFollowKeys(t *testing.T) {
 				t.Errorf("%s: env = %q, want %q", lf.key, lf.env, want)
 			}
 		}
+	}
+}
+
+func TestAuthDefaultsAndEnvLists(t *testing.T) {
+	dir := writeFiles(t, map[string]string{"hub.toml": minimalHub})
+
+	cfg, _, err := LoadHub(Options{Dir: dir, Env: map[string]string{
+		"MESHSDR_HTTP__TRUSTED_PROXIES": "10.0.0.0/8,::ffff:192.168.1.0/120",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if a := cfg.Auth.Argon2; a.MemoryKiB != 65536 || a.Iterations != 3 || a.Parallelism != 1 {
+		t.Errorf("argon2 defaults = %+v", a)
+	}
+
+	if got := cfg.Admin.AllowedNetworks; len(got) != 2 || got[0] != "0.0.0.0/0" || got[1] != "::/0" {
+		t.Errorf("admin.allowed_networks = %v", got)
+	}
+
+	got := Prefixes(cfg.HTTP.TrustedProxies)
+	if len(got) != 2 || got[0].String() != "10.0.0.0/8" || got[1].String() != "192.168.1.0/24" {
+		t.Errorf("trusted proxies = %v", got)
 	}
 }

@@ -26,7 +26,7 @@ func (a *app) newHubCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error { return a.runHub(cmd.Context()) },
 	}
 
-	cmd.AddCommand(a.newMigrateCmd(), a.newConfigCmd(config.RoleHub))
+	cmd.AddCommand(a.newMigrateCmd(), a.newConfigCmd(config.RoleHub), a.newUserCmd())
 
 	return cmd
 }
@@ -70,7 +70,12 @@ func (a *app) runHub(ctx context.Context) error {
 
 	logger.InfoContext(ctx, "hub starting", slog.String("listen", cfg.Hub.Listen), slog.String("url", cfg.Hub.URL))
 
-	if err := wire.Hub(cfg, logger, adapter).Run(ctx); err != nil {
+	hub, err := wire.Hub(ctx, cfg, logger, adapter)
+	if err != nil {
+		return err
+	}
+
+	if err := hub.Run(ctx); err != nil {
 		return err
 	}
 

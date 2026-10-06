@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
@@ -20,6 +21,9 @@ import (
 	gridinfra "github.com/yohang/mesh-sdr/internal/grid/infra"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/http/api"
+	"github.com/yohang/mesh-sdr/internal/identity"
+	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
@@ -51,11 +55,13 @@ func OpenDB(ctx context.Context, cfg config.DB, logger *slog.Logger) (db.Adapter
 	}
 }
 
-// Process is a role's network process: one HTTP(S) server.
+// Process is a role's network process: one HTTP(S) server and its
+// background workers.
 type Process struct {
-	addr   string
-	server *http.Server
-	logger *slog.Logger
+	addr    string
+	server  *http.Server
+	logger  *slog.Logger
+	workers []func(ctx context.Context)
 }
 
 // Addr returns the configured listen address.
@@ -86,9 +92,23 @@ func (p *Process) Listen(ctx context.Context) (net.Listener, error) {
 	return ln, nil
 }
 
-// Serve serves on ln until ctx is done, then shuts down gracefully.
+// Serve starts the background workers and serves on ln until ctx is done,
+// then shuts down gracefully and waits for the workers.
 func (p *Process) Serve(ctx context.Context, ln net.Listener) error {
-	return httpserver.Run(ctx, p.logger, p.server, ln)
+	ctx, cancel := context.WithCancel(ctx)
+
+	var wg sync.WaitGroup
+
+	for _, w := range p.workers {
+		wg.Go(func() { w(ctx) })
+	}
+
+	err := httpserver.Run(ctx, p.logger, p.server, ln)
+
+	cancel()
+	wg.Wait()
+
+	return err
 }
 
 // Run listens and serves until ctx is done.
@@ -101,26 +121,46 @@ func (p *Process) Run(ctx context.Context) error {
 	return p.Serve(ctx, ln)
 }
 
-// Hub builds the hub: web UI and REST API on hub.listen, backed by adapter.
-// The caller checks the schema version before (see db.Migrator.Check).
-func Hub(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) *Process {
-	apiServer := api.Server{
-		HealthHandlers: api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
+// identityDeps returns the dependencies of the identity module.
+func identityDeps(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) identity.Deps {
+	return identity.Deps{Config: cfg, Logger: logger, DB: adapter, IDs: shared.NewUUIDv7Generator(), Now: time.Now}
+}
+
+// UserAdmin builds the user administration service of the hub CLI
+// (meshsdr hub user …), backed by adapter.
+func UserAdmin(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) *identityapp.UserAdmin {
+	return identity.UserAdmin(identityDeps(cfg, logger, adapter))
+}
+
+// Hub builds the hub: web UI and REST API on hub.listen, backed by adapter,
+// and the session reaper. The caller checks the schema version before (see
+// db.Migrator.Check).
+func Hub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Adapter) (*Process, error) {
+	shellModule := shell.Wire(shell.Deps{Settings: cfg.Settings, Logger: logger})
+
+	idm, err := identity.Wire(ctx, identityDeps(cfg, logger, adapter), pages{shellModule.Renderer})
+	if err != nil {
+		return nil, fmt.Errorf("identity: %w", err)
 	}
 
-	shellModule := shell.Wire(shell.Deps{Settings: cfg.Settings, Logger: logger})
+	apiServer := api.Server{
+		HealthHandlers: api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
+		AuthHandlers:   api.NewAuthHandlers(idm.HTTP),
+	}
 
 	router := httpserver.NewRouter(
 		component(logger, "http.router"),
-		api.NewHandler(apiServer, component(logger, "http.api")),
+		api.NewHandler(apiServer, idm.HTTP, component(logger, "http.api")),
+		idm.HTTP,
 		shellModule.HTTP,
 	)
 
 	return &Process{
-		addr:   cfg.Hub.Listen,
-		server: httpserver.NewServer(cfg.Hub.Listen, router),
-		logger: component(logger, "http.server"),
-	}
+		addr:    cfg.Hub.Listen,
+		server:  httpserver.NewServer(cfg.Hub.Listen, router),
+		logger:  component(logger, "http.server"),
+		workers: []func(context.Context){func(ctx context.Context) { idm.Reaper.Run(ctx, identityapp.SessionReapEvery) }},
+	}, nil
 }
 
 // Node builds a node. Until enrollment exists (GRID-006/GRID-007) the node

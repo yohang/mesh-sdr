@@ -7,6 +7,8 @@
 #   Keys set in a file or the env are locked and shown with their origin.
 # - The config dir is /etc/meshsdr, or --config-dir / MESHSDR_CONFIG_DIR.
 # - JSON Schema: `meshsdr hub config schema`. Validate: `meshsdr hub config check`.
+# - MESHSDR_PASSWORD is not a config key: it gives the password of
+#   `meshsdr --noninteractive hub user add <name>`.
 # - Secret keys take { file = "/etc/meshsdr/secrets/x" } or { env = "VAR" };
 #   an inline value needs allow_inline_secrets = true in the same file.
 #   Secret files must not be group/world-writable nor world-readable.
@@ -36,6 +38,23 @@ max_read_connections = 4
 level = "info"
 # text | json. --json overrides it.
 format = "json"
+
+[auth.argon2]
+# Argon2id password hashing. Floors: memory_kib >= 19456, iterations >= 2.
+# Stored hashes with other parameters are re-hashed at the next login.
+memory_kib = 65536
+iterations = 3
+parallelism = 1
+
+[admin]
+# Client networks (CIDR) allowed to use the admin endpoints, checked on every
+# admin request against the resolved client address. Default: any.
+allowed_networks = ["0.0.0.0/0", "::/0"]
+
+[http]
+# Reverse proxies (CIDR) trusted for X-Forwarded-For. The client address is
+# the right-most hop that is not a trusted proxy. Default: none.
+trusted_proxies = []
 
 # Admin settings (MESHSDR_SETTINGS__<TABLE>__<KEY>). Each key set here or in
 # the env is locked: read-only in the admin UI, which shows its origin. Leave

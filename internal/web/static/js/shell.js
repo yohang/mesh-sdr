@@ -7,6 +7,7 @@
 // htmx inserts them (navigation, history restore, fragments), and their
 // disconnectedCallback cleans up.
 
+import "./csrf.js";
 import { installNavigation } from "./navigation.js";
 
 installNavigation();

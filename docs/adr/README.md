@@ -10,3 +10,5 @@ ADRs are written with Status `Proposed` (spikes) and switch to `Accepted` once t
 | [0004](0004-websocket-library-and-rxv1-framing.md) | WebSocket library and rx.v1 framing | Accepted |
 | [0005](0005-configuration-loading.md) | Configuration loading | Accepted |
 | [0006](0006-db-adapter-layout.md) | Database adapter layout and migrations | Accepted |
+| [0007](0007-ui-shell-implementation.md) | UI shell implementation | Accepted |
+| [0009](0009-identity-core.md) | Identity core (users, sessions, CSRF, authorisation) | Accepted |

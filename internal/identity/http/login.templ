@@ -1,0 +1,49 @@
+package http
+
+// loginPage is the sign-in page (AUTH-001, FEATURE_SPEC §10.3): a centred
+// single-column form. There is no sign-up link (invitation only) and no
+// "Forgot password?" link until SMTP exists. The CSRF header of the form is
+// added by static/js/csrf.js, imported by the shell entry module.
+templ loginPage(f loginForm) {
+	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="login-title">
+		<h1 id="login-title" class="text-2xl font-bold">Sign in</h1>
+		@loginFormView(f)
+	</section>
+}
+
+// loginFormView is the form, also returned alone (htmx fragment) with the
+// error after a failed attempt.
+templ loginFormView(f loginForm) {
+	<form id="login-form" class="flex flex-col gap-3" method="post" action="/login" hx-post="/login" hx-target="this" hx-swap="outerHTML">
+		if f.Error != "" {
+			<p id="login-error" class="font-semibold" role="alert">{ f.Error }</p>
+		}
+		<input type="hidden" name="next" value={ f.Next }/>
+		<label class="flex flex-col gap-1">
+			<span>Username or e-mail</span>
+			<input
+				class="rounded border px-2 py-1"
+				type="text"
+				name="login"
+				value={ f.Login }
+				autocomplete="username"
+				autocapitalize="none"
+				spellcheck="false"
+				required
+				if f.Error != "" {
+					aria-describedby="login-error"
+					aria-invalid="true"
+				}
+			/>
+		</label>
+		<label class="flex flex-col gap-1">
+			<span>Password</span>
+			<input class="rounded border px-2 py-1" type="password" name="password" autocomplete="current-password" required/>
+		</label>
+		<label class="flex items-center gap-2">
+			<input type="checkbox" name="remember_me" value="1" checked?={ f.Remember }/>
+			<span>Keep me signed in</span>
+		</label>
+		<button class="rounded border px-3 py-1 font-semibold" type="submit">Sign in</button>
+	</form>
+}

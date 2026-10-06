@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,21 @@ func serve(t *testing.T, p *wire.Process) string {
 	return ln.Addr().String()
 }
 
+func hub(t *testing.T, cfg config.Hub, a db.Adapter) *wire.Process {
+	t.Helper()
+
+	cfg.Hub.URL = "http://" + cfg.Hub.Listen
+	cfg.Hub.AllowInsecureURL = true
+	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
+
+	p, err := wire.Hub(context.Background(), cfg, discard, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return p
+}
+
 func get(t *testing.T, c *http.Client, url string) (int, string, []byte) {
 	t.Helper()
 
@@ -78,7 +94,7 @@ func TestHub(t *testing.T) {
 	cfg := config.DefaultHub()
 	cfg.Hub.Listen = "127.0.0.1:0"
 
-	addr := serve(t, wire.Hub(cfg, discard, dbtest.NewSQLite(t)))
+	addr := serve(t, hub(t, cfg, dbtest.NewSQLite(t)))
 	base := "http://" + addr
 
 	tests := []struct {
@@ -92,6 +108,8 @@ func TestHub(t *testing.T) {
 		{"/api/v1/nope", 404, "application/problem+json"},
 		{"/", 200, "text/html; charset=utf-8"},
 		{"/nope", 404, "text/html; charset=utf-8"},
+		{"/login", 200, "text/html; charset=utf-8"},
+		{"/api/v1/auth/session", 200, "application/json"},
 	}
 
 	for _, tt := range tests {
@@ -126,7 +144,7 @@ func TestHubNotReady(t *testing.T) {
 	cfg := config.DefaultHub()
 	cfg.Hub.Listen = "127.0.0.1:0"
 
-	addr := serve(t, wire.Hub(cfg, discard, downDB{dbtest.NewSQLite(t)}))
+	addr := serve(t, hub(t, cfg, downDB{dbtest.NewSQLite(t)}))
 
 	status, _, body := get(t, http.DefaultClient, "http://"+addr+"/api/v1/healthz/ready")
 	if status != http.StatusServiceUnavailable || !json.Valid(body) {
@@ -195,5 +213,72 @@ func TestOpenDB(t *testing.T) {
 
 	if _, err := wire.OpenDB(ctx, config.DB{DSN: "postgres://x/y"}, discard); !errors.Is(err, db.ErrEngineUnsupported) {
 		t.Errorf("postgres: err = %v", err)
+	}
+}
+
+// The login page renders in the app shell, with the shell's security
+// headers, and coexists with the shell's HEAD and 405 handling.
+func TestLoginPageInShell(t *testing.T) {
+	cfg := config.DefaultHub()
+	cfg.Hub.Listen = "127.0.0.1:0"
+	base := "http://" + serve(t, hub(t, cfg, dbtest.NewSQLite(t)))
+
+	do := func(method, path string) (*http.Response, string) {
+		t.Helper()
+
+		req, err := http.NewRequestWithContext(context.Background(), method, base+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		defer func() { _ = resp.Body.Close() }()
+
+		b, _ := io.ReadAll(resp.Body)
+
+		return resp, string(b)
+	}
+
+	resp, body := do(http.MethodGet, "/login")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /login = %d", resp.StatusCode)
+	}
+
+	for _, h := range []string{"Content-Security-Policy", "Permissions-Policy", "Referrer-Policy"} {
+		if resp.Header.Get(h) == "" {
+			t.Errorf("GET /login without %s", h)
+		}
+	}
+
+	if !strings.Contains(resp.Header.Get("Content-Security-Policy"), "'nonce-") || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Errorf("headers = %v", resp.Header)
+	}
+
+	for _, want := range []string{`id="main"`, `/static/js/shell.js`, `<title>Sign in`, `id="login-form"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("login page misses %s", want)
+		}
+	}
+
+	if resp, body := do(http.MethodHead, "/login"); resp.StatusCode != http.StatusOK || body != "" {
+		t.Errorf("HEAD /login = %d %q", resp.StatusCode, body)
+	}
+
+	// Safe methods get the shell's 405 with Allow; unsafe ones meet the
+	// CSRF check before routing.
+	if resp, _ := do(http.MethodOptions, "/login"); resp.StatusCode != http.StatusMethodNotAllowed || resp.Header.Get("Allow") != "GET, HEAD, POST" {
+		t.Errorf("OPTIONS /login = %d, Allow %q", resp.StatusCode, resp.Header.Get("Allow"))
+	}
+
+	if resp, _ := do(http.MethodPut, "/login"); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("PUT /login without a CSRF token = %d", resp.StatusCode)
+	}
+
+	if resp, _ := do(http.MethodGet, "/logout"); resp.StatusCode != http.StatusMethodNotAllowed || resp.Header.Get("Allow") != "POST" {
+		t.Errorf("GET /logout = %d, Allow %q", resp.StatusCode, resp.Header.Get("Allow"))
 	}
 }
