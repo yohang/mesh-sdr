@@ -302,6 +302,30 @@ func testNodes(t *testing.T, r Repos) {
 		t.Errorf("runtime after SaveStatus = %+v", rt)
 	}
 
+	// Save never writes the status: an admin change from a stale copy keeps
+	// the status recorded meanwhile.
+	stale := must(repo.Get(ctx, g.ID()))
+	sv := stale.Version()
+
+	if err := repo.SaveStatus(ctx, g.ID(), domain.StatusDegraded, "clock_offset"); err != nil {
+		t.Fatal(err)
+	}
+
+	disabled := true
+	if err := stale.Update(domain.NodePatch{Disabled: &disabled}, sv, t0); err != nil {
+		t.Fatal(err)
+	}
+
+	stale.SetStatus(domain.StatusOffline, "")
+
+	if err := repo.Save(ctx, stale, sv); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := must(repo.Get(ctx, g.ID())); !got.Disabled() || got.Runtime().Status != domain.StatusDegraded || got.Runtime().StatusHint != "clock_offset" {
+		t.Errorf("after an admin save: disabled %v, status %s %q", got.Disabled(), got.Runtime().Status, got.Runtime().StatusHint)
+	}
+
 	if err := repo.SaveStatus(ctx, domain.MustNodeID("nope"), domain.StatusOnline, ""); !errors.Is(err, domain.ErrNodeNotFound) {
 		t.Errorf("status of an unknown node = %v", err)
 	}

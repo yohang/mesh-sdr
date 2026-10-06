@@ -29,8 +29,6 @@ UPDATE nodes SET
     cert_pending_fingerprint = sqlc.arg(cert_pending_fingerprint),
     cert_pending_serial = sqlc.arg(cert_pending_serial),
     cert_pending_not_after = sqlc.arg(cert_pending_not_after),
-    status = sqlc.arg(status),
-    status_hint = sqlc.arg(status_hint),
     origin = sqlc.arg(origin),
     locked_fields = sqlc.arg(locked_fields),
     disabled = sqlc.arg(disabled),

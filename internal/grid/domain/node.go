@@ -579,7 +579,8 @@ type NodeRepository interface {
 	Get(ctx context.Context, id NodeID) (*Node, error)
 	// List returns every node ordered by id.
 	List(ctx context.Context) ([]*Node, error)
-	// Save writes n if the stored version is expectedVersion, otherwise
+	// Save writes the admin-managed fields of n (not the runtime state nor
+	// the status) if the stored version is expectedVersion, otherwise
 	// ErrVersionConflict.
 	Save(ctx context.Context, n *Node, expectedVersion int) error
 	// SaveRuntime writes only the runtime columns of n.

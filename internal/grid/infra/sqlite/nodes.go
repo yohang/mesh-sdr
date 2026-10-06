@@ -163,7 +163,9 @@ func (r *NodeRepository) List(ctx context.Context) ([]*domain.Node, error) {
 	return out, nil
 }
 
-// Save implements domain.NodeRepository.
+// Save implements domain.NodeRepository. It writes the admin-managed
+// columns only: the runtime state and the status belong to SaveRuntime and
+// SaveStatus, so a copy read outside the transaction never overwrites them.
 func (r *NodeRepository) Save(ctx context.Context, n *domain.Node, expectedVersion int) error {
 	s := n.Snapshot()
 
@@ -176,7 +178,7 @@ func (r *NodeRepository) Save(ctx context.Context, n *domain.Node, expectedVersi
 		Name: s.Name, Url: s.URL, EnrollmentState: string(s.Enrollment),
 		EnrollmentTokenDigest: s.EnrollmentKey, EnrollmentTokenExpiresAt: nullMS(s.KeyExpiresAt),
 		EnrolledAt: nullMS(s.EnrolledAt), CertFingerprint: s.CertFingerprint, CertSerial: nullString(s.CertSerial),
-		CertNotAfter: nullMS(s.CertNotAfter), Status: string(s.Runtime.Status), StatusHint: nullString(s.Runtime.StatusHint),
+		CertNotAfter:           nullMS(s.CertNotAfter),
 		CertPendingFingerprint: s.PendingCert.Fingerprint, CertPendingSerial: nullString(s.PendingCert.Serial),
 		CertPendingNotAfter: nullMS(s.PendingCert.NotAfter),
 		Origin:              string(s.Origin), LockedFields: string(locked), Disabled: boolInt(s.Disabled),
