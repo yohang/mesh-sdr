@@ -1,11 +1,11 @@
 # ADR 0003: App shell with templ + htmx
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Deciders:** project owner
 - **Spike:** SPK-06 (#6). Unblocks UI-001 (#70) and AUTH-001 (#28). Related: UI-006 (#75), UI-008 (#77), UI-009 (#78), AUTH-019 (#46).
 
-This ADR comes from a spike. It describes the options, a recommendation and the open questions. **The owner makes the decisions.** It does not change the product specification.
+This ADR comes from a spike. It describes the options, the spike's recommendation and the owner's **Decision**. It does not change the product specification. Divergences from it are listed under "Divergences from the specification".
 
 ## Context
 
@@ -207,45 +207,89 @@ Prototyped:
 
 Not covered: automated WCAG checks (axe-core / Lighthouse / pa11y). They need a browser runtime, and the project has no Node.
 
-## Recommendation
+## Recommendation (from the spike)
 
-1. **Navigation: 1A.** Use `hx-boost` on `<body>` with a boost config that swaps `#main` (`hx-select` + `outerHTML`) and `hx-history-elt` on `<main>`. Always render full pages. Put the audio engine in a shell-level module outside `#main`. Use `hx-boost="false"` or `HX-Refresh` for login, logout and downloads. Keep 1B (partial rendering) as a later optimisation. Use the CSS bottom tab bar below 768 px.
-2. **Tokens: 2A.** Use `light-dark()` + `color-scheme`, `--msdr-*` tokens mapped into Tailwind `@theme inline`, and `@property`-registered color tokens for canvases. Fall back to 2B only if the supported-browser floor (see Q3) is older than 2024 browsers.
-3. **CSP: 3A.** Use a nonce-only `script-src` and no eval-based htmx features. Behaviour lives in ES modules and custom elements. Add a test or lint rule that rejects `hx-on`, `js:`, `style=` and inline `<script>` in `.templ` files. Keep 3C (hx-csp) in reserve.
-4. **CSRF: 4A, with 4C kept for the API.** Render the token in a `<meta>` tag and inject `X-CSRF-Token` in `htmx:before:request` and in `apiFetch`. Make login/logout full reloads. Keep `CrossOriginProtection` (with `AddTrustedOrigin` from config) and add the explicit `Origin`/`Referer` allow-list check of §5.7 for WS upgrades. For bodies, the choice between **4D** and **4E** is an owner decision (Q1). The prototype implements 4D.
-5. **Islands: 5A** for initial state, then live updates over the WebSocket. Use 5C when the data is large or already streamed.
-6. **Accessibility:** adopt the baseline above as the shell contract and add automated checks once Q6 is settled.
+This is the spike's recommendation, kept for the record. Where it differs from the Decision below, the Decision wins.
 
-## Open questions for the owner
+1. **Navigation: 1A.** Use `hx-boost` on `<body>` with a boost config that swaps `#main` and `hx-history-elt` on `<main>`. Render full pages, and put the audio engine outside `#main`.
+2. **Tokens: 2A.** Use `light-dark()`, `@property` color tokens and the Tailwind `@theme inline` mapping.
+3. **CSP: 3A.** Use a nonce-only `script-src` and no eval-based htmx features.
+4. **CSRF: 4A (meta tag), with 4C kept for the API.** Add an explicit `Origin`/`Referer` allow-list next to `CrossOriginProtection`. Bodies (4D vs 4E) were left to the owner.
+5. **Islands: 5A.**
+6. **Accessibility:** adopt the baseline.
 
-1. **JSON-only bodies.** Should htmx HTML endpoints also be JSON-only (4D, as AUTH-019 says; then how are Files uploads handled: multipart exception or JSON/base64?), or only the `/api/v1` JSON endpoints (4E, as the §5.7 wording reads)?
-2. **CSRF token delivery.** Is rendering the session-bound token in `<meta name="csrf-token">` acceptable alongside `GET /api/v1/auth/session` (§5.7), or must the page always fetch it from the API? Does the same meta mechanism carry the anonymous pre-session token on `/login`?
-3. **Browser floor.** Which browsers must we support? 2A needs browsers from 2024 (Chrome/Edge 123+, Firefox 128+, Safari 17.5+). Is that acceptable, or do we need 2B?
-4. **`script-src`.** Nonce-only (3A), or `'self'` + nonce (3B)? And do we forbid `hx-on`/`js:` for good, or vendor the htmx `hx-csp` extension (3C, an extra JS asset)?
-5. **CSP extras.** Should we add Trusted Types (`require-trusted-types-for 'script'`) and a CSP violation report endpoint now, or later (M5 Hardening)?
-6. **Automated a11y checks.** Which tool, given "no Node" (e.g. Lighthouse/pa11y in a CI-only container, or manual audits per milestone)?
-7. **Mobile nav pattern.** Bottom tab bar (prototyped) or a menu below 768 px? UI-006 allows both.
-8. **URL namespace.** Where do htmx action endpoints that return HTML fragments live (next to pages, e.g. `POST /admin/…`), and how do they relate to the REST `/api/v1` endpoints (JSON)?
-9. **Theme change in open tabs.** Is "applies on next full page load" enough when the admin changes `ui_theme`, or should a hub event (`/api/ws`) update `data-theme` live?
-10. **Same-origin check.** Is `CrossOriginProtection` + `AddTrustedOrigin(hub.url, extra_origins)` enough for REST, given that it lets through requests without `Origin`/`Sec-Fetch-Site`? Or do we require an explicit `Origin`/`Referer` match on every unsafe request, as §5.7 says?
+## Decision
+
+The owner decided on 2026-10-06:
+
+1. **Navigation: 1A.** Use `hx-boost` on `<body>`, configured to swap `#main` (`hx-select="#main"`, `outerHTML`), with `hx-history-elt` on `<main>`.
+   - **Full pages for navigation.** Boosted navigation gets the full page from the server.
+   - **Audio outside `#main`.** The receiver audio engine and other long-lived resources live in shell-level modules outside `#main`.
+   - **Full reloads.** Login, logout and downloads are full page loads (`hx-boost="false"`, or `HX-Refresh`/`HX-Redirect`).
+   - **Mobile nav.** Below 768 px the nav is a **bottom tab bar** (CSS only).
+2. **htmx fragments.** A fragment uses the same URL as its page. The handler returns the fragment when the `HX-Request` header is present. Actions live on page-scoped paths (for example `POST /admin/...`), not under `/api/v1`. See "Consequences" for how this combines with boosted navigation.
+3. **Tokens and theme: 2A.**
+   - **Tokens.** `--msdr-*` tokens are defined once with `light-dark()`, set by `color-scheme` from the server-rendered `data-theme`. Color tokens are registered with `@property`, and Tailwind maps them with `@theme inline`.
+   - **Browser floor.** The 2024 browser floor is accepted: Chrome/Edge 123+, Firefox 128+, Safari 17.5+.
+   - **Theme changes.** A change of `ui_theme` applies on the next full page load. There is no live update.
+4. **CSP: 3A.**
+   - **Policy.** `script-src` is nonce-only (per-request nonce via `templ.WithNonce`), with no `'self'` and no `'unsafe-eval'`.
+   - **Banned in templates.** `hx-on:*` and `js:` expressions are **banned for good**, as are inline `<script>` (except `templ.JSONScript`), `style=""` and templ `css`/`script` components.
+   - **Deferred.** Trusted Types and a CSP violation report endpoint are deferred to M5 (Hardening).
+5. **CSRF token delivery: 4C.** The token comes only from the session API, `GET /api/v1/auth/session`. There is **no meta tag**.
+   - **Client.** Shell JS fetches the token before the first unsafe request and adds `X-CSRF-Token` to unsafe same-origin htmx requests (in `htmx:before:request`) and to island `fetch` calls.
+   - **Anonymous pre-session.** Login, password reset and invitation acceptance get a double-submit token bound to a pre-session cookie, through the same endpoint.
+6. **Bodies: 4E.** `Content-Type: application/json` is required only on `/api/v1` JSON endpoints. htmx HTML endpoints accept `application/x-www-form-urlencoded` and `multipart/form-data`, and are protected by the CSRF header.
+7. **Origin check.** Use the stdlib `http.CrossOriginProtection` only (with `AddTrustedOrigin` for `hub.url` and `gateway.extra_origins` when the hub sits behind a gateway that rewrites `Host`). There is no hand-written `Origin`/`Referer` allow-list for HTTP requests.
+   - **WebSocket upgrades** are GETs, so `CrossOriginProtection` does not cover them. They need their own origin check: the origin verification of `coder/websocket`'s `Accept` (`AcceptOptions.OriginPatterns`), the library chosen in SPK-07.
+8. **Islands: 5A.** `templ.JSONScript` carries the initial state. Islands are custom elements in ES modules under `/static/js/`, and render untrusted text with `textContent` only. Live updates come over the WebSocket.
+9. **Accessibility.** The baseline in section 6 is adopted as the shell contract. Automated checks use **axe-core in a CI-only container**. Node stays out of the app image and the dev image.
+
+### Divergences from the specification
+
+These are recorded here only. No spec change and no GitHub issue were made.
+
+- **TECHNICAL_SPEC §5.7, Origin check.** §5.7 requires the `Origin` (or `Referer`) header to match `hub.url` + `gateway.extra_origins` on every unsafe request and every WS upgrade. The decision uses `http.CrossOriginProtection` instead. It relies on `Sec-Fetch-Site`, or on comparing the `Origin` host with `Host`. It lets through requests that carry neither header (non-browser clients) and never falls back to `Referer`. Those requests still need a valid session-bound CSRF token. WS upgrades keep an origin check, through `coder/websocket`.
+- **AUTH-019 (#46), JSON-only bodies.** AUTH-019 asks for "JSON-only bodies with a strict `Content-Type` check". The decision requires JSON only on `/api/v1` JSON endpoints, which matches the §5.7 wording ("JSON endpoints MUST require `Content-Type: application/json`"). htmx HTML endpoints accept form and multipart bodies. On those endpoints the CSRF header is the defence.
+- **§5.7, token source.** No divergence: the token comes from `GET /api/v1/auth/session`, as §5.7 says.
+
+## Questions raised by the spike (resolved)
+
+| # | Question | Resolution |
+|---|---|---|
+| 1 | JSON-only bodies everywhere or only on `/api/v1`? | Only on `/api/v1` (4E). |
+| 2 | CSRF token in a meta tag or from the session API? | Session API only (4C). The pre-session token uses the same endpoint. |
+| 3 | Browser floor for `light-dark()`/`@property`? | 2024 floor accepted (2A). |
+| 4 | Nonce-only `script-src`, and `hx-on`/`js:`? | Nonce-only (3A). `hx-on`/`js:` banned for good. No `hx-csp`. |
+| 5 | Trusted Types and CSP reporting? | Deferred to M5. |
+| 6 | Automated a11y checks without Node? | axe-core in a CI-only container. |
+| 7 | Mobile nav pattern? | Bottom tab bar. |
+| 8 | Where do htmx action/fragment endpoints live? | Same URL as the page, fragment when `HX-Request` is present. Actions on page-scoped paths. |
+| 9 | Theme change in open tabs? | Applies on the next full page load. |
+| 10 | `CrossOriginProtection` only, or an explicit Origin/Referer allow-list? | `CrossOriginProtection` only. WS upgrades checked by `coder/websocket`. Divergence recorded above. |
 
 ## Consequences
 
-If the recommendation is accepted:
-
 - **Shell persistence.** Everything outside `#main` (top bar, audio engine, clock, notifications, the WebSocket connections) survives navigation. Feature pages must not own long-lived resources in their DOM. They attach to shell-level modules.
-- **Page handlers.** Every page handler renders the full layout. Shared shell data (theme, CSRF token, role-filtered nav) is built per request. Today that is `pages.shell()`. It will move to a shell/UI module wired in `internal/wire`.
-- **Template rules.** Templates follow strict rules: no inline scripts or styles, no `hx-on`/`js:`. JS lives in `/static/js/` as ES modules and islands are custom elements. A lint/test rule should enforce this.
-- **Login/logout.** Login and logout are full page loads.
+- **Full page vs fragment.** Boosted navigation also sends `HX-Request`, and its target is `#main` with `hx-select`. So a handler must return the **full page** for boosted requests (`HX-Boosted: true`, or `HX-Request-Type: full`) and a **fragment** for other htmx requests.
+  - **Caching.** Responses that differ by these headers must send `Vary: HX-Request, HX-Boosted` (or not be cacheable).
+  - **Shared helper.** A shared render helper will make this decision, so that pages do not reimplement it.
+- **Shell data.** Shared shell data (theme, role-filtered nav) is built per request. It will move from the prototype's `pages.shell()` to a shell/UI module wired in `internal/wire`.
+- **CSRF in JS.** The shell JS owns the CSRF token. It fetches `GET /api/v1/auth/session` lazily, caches the token for the page's lifetime, and re-fetches after a 403 caused by an expired or rotated session.
+  - **Session expired.** If the session itself has expired, the shell shows a "session expired, reload" notification (UI-011).
+  - **Login/logout.** Both are full page loads, so the token cache starts fresh.
+- **No JSON conversion.** htmx forms post as form or multipart bodies. Nothing converts them to JSON.
+- **Template rules.** No inline scripts or styles, no `hx-on`/`js:`, no templ `css`/`script` components. A lint/test rule over `.templ` files enforces this.
 - **Error pages.** Error pages (403/404/500) render inside the shell, because htmx 4 swaps them into `#main`.
-- **Spike code to replace.** These `// SPIKE` items must be replaced:
-  - the fake session store, with DB sessions (AUTH-003/004): hashed id, persisted `csrf_secret`, `__Host-` cookie with TLS, and a pre-session for anonymous visitors;
-  - the hardcoded theme, with the `ui_theme` setting (UI-001);
-  - role-gated nav (UI-006);
-  - trusted origins from config;
-  - the audio probe and the demo form/endpoint, which are removed;
+- **CI.** CI gains an accessibility job: axe-core in a dedicated container against the running app. The app and dev images stay Node-free.
+- **Prototype vs decision.** The prototype on branch `spike/spk-06-app-shell` stays as a reference for the UI epic and **does not match every decision**. It renders a `<meta name="csrf-token">` (decided: session API). It converts every unsafe htmx body to JSON and enforces `requireJSON` on an htmx endpoint (decided: JSON only on `/api/v1`). It always renders full pages (decided: fragment when `HX-Request` is present, except for boosted navigation). It also keeps the `// SPIKE` shortcuts:
+  - the fake in-memory session store, to be replaced by DB sessions (AUTH-003/004): hashed id, persisted `csrf_secret`, `__Host-` cookie with TLS, and a pre-session for anonymous visitors;
+  - the hardcoded theme, to be replaced by the `ui_theme` setting (UI-001);
+  - the nav, which shows every section, to be gated by role (UI-006);
+  - trusted origins, still to be read from config;
+  - the audio probe and the demo form/endpoint, to be removed;
   - the skeleton pages, which move to their modules' `http/` packages.
-- **Dependencies.** No new Go dependency is needed. htmx stays the only vendored JS.
+- **Dependencies.** No new Go dependency in the app shell. htmx stays the only vendored JS. `coder/websocket` comes from SPK-07.
 
 ## References
 
@@ -255,5 +299,7 @@ If the recommendation is accepted:
 - htmx 4: <https://four.htmx.org/docs/whats-new-in-htmx-4> (removed `allowEval`, constructable indicator styles, explicit `:inherited`, `HX-Request-Type`, no history cache); `hx-csp` extension: <https://four.htmx.org/extensions/hx-csp>; events guide (`htmx:config:request`, `htmx:before:request`): <https://four.htmx.org/docs/htmx-events-guide>.
 - templ CSP nonce and `JSONScript`: <https://templ.guide/security/content-security-policy>, <https://templ.guide/syntax-and-usage/script-templates>.
 - Go `net/http.CrossOriginProtection` (Go 1.25): <https://pkg.go.dev/net/http#CrossOriginProtection>.
+- `coder/websocket` `AcceptOptions` (origin verification on upgrade, SPK-07): <https://pkg.go.dev/github.com/coder/websocket#AcceptOptions>.
+- axe-core: <https://github.com/dequelabs/axe-core>.
 - CSS `light-dark()`: <https://developer.mozilla.org/en-US/docs/Web/CSS/color_value/light-dark>; `@property`: <https://developer.mozilla.org/en-US/docs/Web/CSS/@property>.
 - WCAG 2.1: <https://www.w3.org/TR/WCAG21/>.
