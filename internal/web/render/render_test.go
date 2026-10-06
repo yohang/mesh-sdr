@@ -174,6 +174,23 @@ func TestDocument(t *testing.T) {
 	}
 }
 
+// TestFooterLinkSanitized: footer links may become admin-set URLs
+// (receiver.usage_policy_url), so the layout sanitizes them.
+func TestFooterLinkSanitized(t *testing.T) {
+	rd := render.New(shellSource{
+		SiteName:    "TestSDR",
+		Theme:       layout.ThemeAuto,
+		FooterLinks: []layout.Link{{Label: "Policy", Href: "javascript:alert(1)"}},
+	}, slog.New(slog.DiscardHandler))
+
+	rec := httptest.NewRecorder()
+	rd.Page(rec, httptest.NewRequest(http.MethodGet, "/", nil), http.StatusOK, layout.Page{}, text("<h1>x</h1>"), nil)
+
+	if body := rec.Body.String(); strings.Contains(body, "javascript:") || !strings.Contains(body, "about:invalid") {
+		t.Errorf("unsafe footer link rendered:\n%s", body)
+	}
+}
+
 func TestError(t *testing.T) {
 	rd := newRenderer(layout.ThemeAuto)
 
