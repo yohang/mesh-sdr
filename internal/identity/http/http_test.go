@@ -539,7 +539,7 @@ func TestAuthBodiesAreBounded(t *testing.T) {
 	}
 
 	res := c.do(http.MethodPost, "/api/v1/auth/login", "application/json", `{"login":"alice","password":"`+big+`"}`, hdr)
-	if res.StatusCode != http.StatusBadRequest || !strings.Contains(decode(t, res)["detail"].(string), "too large") {
+	if res.StatusCode != http.StatusRequestEntityTooLarge || !strings.Contains(decode(t, res)["detail"].(string), "too large") {
 		t.Errorf("large JSON body = %d", res.StatusCode)
 	}
 }
