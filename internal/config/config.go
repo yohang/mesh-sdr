@@ -8,6 +8,8 @@
 // and a jsonschema description.
 package config
 
+import "path/filepath"
+
 // SchemaVersion is the only config schema_version this binary accepts.
 const SchemaVersion = 1
 
@@ -30,6 +32,7 @@ type Hub struct {
 
 	Hub HubSection `toml:"hub" envPrefix:"HUB__" jsonschema:"description=Hub bootstrap."`
 	DB  DB         `toml:"db" envPrefix:"DB__" jsonschema:"description=Database (through the DB adapter)."`
+	TLS HubTLS     `toml:"tls" envPrefix:"TLS__" jsonschema:"description=Hub internal CA for hub <-> node mTLS (ADR 0008). Without it the grid is disabled."`
 	Log Log        `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
 
 	Settings Settings `toml:"settings" envPrefix:"SETTINGS__" jsonschema:"description=Locked admin settings. Each key set in a file or the env is locked (read-only in the admin UI); unset keys fall back to the DB setting, then to the default."`
@@ -86,6 +89,13 @@ type HTTP struct {
 	TrustedProxies []string `toml:"trusted_proxies" env:"TRUSTED_PROXIES" jsonschema:"description=Reverse proxies (CIDR) trusted for X-Forwarded-For. The client address is the right-most untrusted hop; forwarding headers from other peers are ignored."`
 }
 
+// HubTLS is the [tls] table of the hub: the internal CA. The hub client
+// certificate is minted in memory from the CA key.
+type HubTLS struct {
+	CACert string `toml:"ca_cert" env:"CA_CERT" jsonschema:"description=PEM file of the hub internal CA certificate (relative paths are resolved against the config dir). Created by meshsdr hub ca init."`
+	CAKey  Secret `toml:"ca_key" env:"CA_KEY" jsonschema:"description=Private key of the hub internal CA (PEM)\\, required with tls.ca_cert. Signs node certificates."`
+}
+
 // HubSection is the [hub] table.
 type HubSection struct {
 	Listen           string `toml:"listen" env:"LISTEN" jsonschema:"description=Hub HTTP listen address (host:port). The address decides IPv4 or IPv6."`
@@ -110,8 +120,43 @@ type Node struct {
 	SchemaVersion      int  `toml:"schema_version" env:"-" jsonschema:"required,enum=1,description=Config schema version. Required in every file."`
 	AllowInlineSecrets bool `toml:"allow_inline_secrets" env:"-" jsonschema:"description=Accept inline secret values in this file (startup warning). Applies only to the file that sets it."`
 
-	Node NodeSection `toml:"node" envPrefix:"NODE__" jsonschema:"description=Node bootstrap."`
-	Log  Log         `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
+	Node     NodeSection `toml:"node" envPrefix:"NODE__" jsonschema:"description=Node bootstrap."`
+	TLS      NodeTLS     `toml:"tls" envPrefix:"TLS__" jsonschema:"description=Node certificate for hub <-> node mTLS\\, written by meshsdr node enroll."`
+	HubTrust HubTrust    `toml:"hub_trust" envPrefix:"HUB_TRUST__" jsonschema:"description=Trust in the hub: CA\\, expected hub identity\\, enrollment token."`
+	Log      Log         `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
+}
+
+// NodeTLS is the [tls] table of the node.
+type NodeTLS struct {
+	Cert string `toml:"cert" env:"CERT" jsonschema:"description=PEM file of the node certificate issued by the hub CA (relative paths are resolved against the config dir). Written by meshsdr node enroll\\, rewritten on renewal."`
+	Key  string `toml:"key" env:"KEY" jsonschema:"description=PEM file of the node private key (mode 0600). Written by meshsdr node enroll."`
+}
+
+// HubTrust is the [hub_trust] table of the node.
+type HubTrust struct {
+	CACert          string `toml:"ca_cert" env:"CA_CERT" jsonschema:"description=PEM file of the hub CA certificate. Only hub certificates from this CA are accepted. Written by meshsdr node enroll."`
+	CAFingerprint   string `toml:"ca_fingerprint" env:"CA_FINGERPRINT" jsonschema:"description=SHA-256 fingerprint of the hub CA certificate (hex\\, colons optional)\\, shown by the hub with the enrollment token."`
+	HubIdentity     string `toml:"hub_identity" env:"HUB_IDENTITY" jsonschema:"description=Expected hub id (host of hub.url) in the hub client certificate. Empty accepts any hub certificate from the CA."`
+	EnrollmentToken Secret `toml:"enrollment_token" env:"ENROLLMENT_TOKEN" jsonschema:"description=Single-use enrollment token issued by the hub\\, used by meshsdr node enroll."`
+}
+
+// ResolvePath returns path resolved against the config dir dir.
+func ResolvePath(dir, path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+
+	return filepath.Join(dir, path)
+}
+
+func (h *Hub) resolvePaths(dir string) {
+	h.TLS.CACert = ResolvePath(dir, h.TLS.CACert)
+}
+
+func (n *Node) resolvePaths(dir string) {
+	n.TLS.Cert = ResolvePath(dir, n.TLS.Cert)
+	n.TLS.Key = ResolvePath(dir, n.TLS.Key)
+	n.HubTrust.CACert = ResolvePath(dir, n.HubTrust.CACert)
 }
 
 // NodeSection is the [node] table.

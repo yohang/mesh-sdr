@@ -103,6 +103,14 @@ func (h *Hub) validate(o Origins) []Problem {
 		c.fail("db.max_read_connections", CodeInvalidValue, fmt.Sprintf("invalid value %d: want 1..64", n))
 	}
 
+	if h.TLS.CACert != "" && !h.TLS.CAKey.IsSet() {
+		c.fail("tls.ca_key", CodeRequired, "tls.ca_key is required with tls.ca_cert")
+	}
+
+	if h.TLS.CACert == "" && h.TLS.CAKey.IsSet() {
+		c.fail("tls.ca_cert", CodeRequired, "tls.ca_cert is required with tls.ca_key")
+	}
+
 	c.log(h.Log)
 	c.enum("settings.ui.theme_mode", h.Settings.UI.ThemeMode, "light", "dark", "auto")
 
@@ -172,7 +180,25 @@ func (n *Node) validate(o Origins) []Problem {
 	}
 
 	c.listen("node.listen", n.Node.Listen)
+
+	if (n.TLS.Cert == "") != (n.TLS.Key == "") {
+		c.fail("tls.key", CodeRequired, "tls.cert and tls.key go together")
+	}
+
+	if fp := n.HubTrust.CAFingerprint; fp != "" && !validFingerprint(fp) {
+		c.fail("hub_trust.ca_fingerprint", CodeInvalidValue, "want a SHA-256 fingerprint: 64 hex digits, colons optional")
+	}
+
 	c.log(n.Log)
 
 	return c.problems
+}
+
+func validFingerprint(s string) bool {
+	s = strings.ReplaceAll(s, ":", "")
+	if len(s) != 64 {
+		return false
+	}
+
+	return strings.Trim(strings.ToLower(s), "0123456789abcdef") == ""
 }

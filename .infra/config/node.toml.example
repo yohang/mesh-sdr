@@ -4,8 +4,9 @@
 # drop-ins merged in lexical order, MESHSDR_<TABLE>__<KEY> env overrides
 # (node.id → MESHSDR_NODE__ID). JSON Schema: `meshsdr node config schema`.
 #
-# Until enrollment ships, the node serves only the pre-enrollment API on
-# node.listen, over TLS with an ephemeral self-signed certificate.
+# Until it is enrolled (`meshsdr node enroll`), the node serves only the
+# pre-enrollment API on node.listen, over TLS with an ephemeral self-signed
+# certificate. Relative paths are resolved against the config dir.
 #
 # Values below are the defaults unless marked "required".
 
@@ -17,6 +18,24 @@ schema_version = 1
 id = "attic"
 # Node API and WebSocket listen address (host:port). TLS only.
 listen = "0.0.0.0:8074"
+
+# Node certificate and key, written by `meshsdr node enroll` (key 0600) and
+# rewritten when the hub renews the certificate.
+# [tls]
+# cert = "tls/node.pem"
+# key = "tls/node.key"
+
+# Trust in the hub.
+# [hub_trust]
+# Hub CA certificate, written by `meshsdr node enroll`.
+# ca_cert = "tls/ca.pem"
+# SHA-256 fingerprint of the hub CA, shown by the hub with the token.
+# ca_fingerprint = "AB:CD:…"
+# Expected hub id (host of the hub's hub.url); empty accepts any hub
+# certificate from the CA.
+# hub_identity = "sdr.example.org"
+# Single-use enrollment token issued by the hub (secret).
+# enrollment_token = { file = "/etc/meshsdr/secrets/enrollment.token" }
 
 [log]
 # debug | info | warn | error. --debug overrides it.

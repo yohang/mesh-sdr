@@ -118,6 +118,12 @@ type validator interface {
 	validate(o Origins) []Problem
 }
 
+// pathResolver is implemented by configs holding file paths, resolved
+// against the config dir before validation.
+type pathResolver interface {
+	resolvePaths(dir string)
+}
+
 type loader struct {
 	role     Role
 	dir      string
@@ -164,6 +170,10 @@ func load[T any, PT interface {
 	}
 
 	if len(l.problems) == 0 {
+		if r, ok := any(cfg).(pathResolver); ok {
+			r.resolvePaths(l.dir)
+		}
+
 		l.problems = append(l.problems, cfg.validate(l.origins)...)
 	}
 

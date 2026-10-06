@@ -33,6 +33,14 @@ dsn = "sqlite:///var/lib/meshsdr/hub.db"
 # Size of the read-only connection pool (1..64).
 max_read_connections = 4
 
+# Hub internal CA for hub <-> node mTLS (ADR 0008). Create it with
+# `meshsdr hub ca init` (writes tls/ca.pem and tls/ca.key in the config dir).
+# Relative paths are resolved against the config dir. Without [tls] the hub
+# runs with the grid disabled: no enrollment, no control channels.
+# [tls]
+# ca_cert = "tls/ca.pem"
+# ca_key = { file = "tls/ca.key" }
+
 [log]
 # debug | info | warn | error. --debug overrides it.
 level = "info"

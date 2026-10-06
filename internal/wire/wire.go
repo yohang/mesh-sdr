@@ -18,7 +18,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db/sqlite"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
-	gridinfra "github.com/yohang/mesh-sdr/internal/grid/infra"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/http/api"
 	"github.com/yohang/mesh-sdr/internal/identity"
@@ -172,7 +172,12 @@ func Node(cfg config.Node, logger *slog.Logger, now time.Time) (*Process, error)
 		return nil, fmt.Errorf("node.id: %w", err)
 	}
 
-	cert, err := gridinfra.SelfSignedCertificate(id, cfg.Node.Listen, now)
+	key, err := pki.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+
+	cert, err := pki.SelfSigned(key, id.String(), cfg.Node.Listen, now)
 	if err != nil {
 		return nil, err
 	}
