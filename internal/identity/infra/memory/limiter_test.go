@@ -40,8 +40,15 @@ func TestIPLimiter(t *testing.T) {
 		t.Error("another client is limited")
 	}
 
-	if ok, _ := l.Allow(netip.Addr{}, t0); !ok {
-		t.Error("unknown address limited")
+	// Unknown addresses share one bucket.
+	for i := range 5 {
+		if ok, _ := l.Allow(netip.Addr{}, t0); !ok {
+			t.Fatalf("unknown address: attempt %d refused", i+1)
+		}
+	}
+
+	if ok, _ := l.Allow(netip.Addr{}, t0); ok {
+		t.Error("unknown addresses not limited")
 	}
 }
 

@@ -87,7 +87,13 @@ func NewIPLimiter(every time.Duration, burst, capacity int) *IPLimiter {
 	return &IPLimiter{limit: rate.Every(every), burst: max(burst, 1), cache: newLRU[netip.Prefix, *rate.Limiter](capacity)}
 }
 
+// ipKey is the bucket of a client. Requests whose address is unknown share
+// one bucket.
 func ipKey(ip netip.Addr) netip.Prefix {
+	if !ip.IsValid() {
+		return netip.Prefix{}
+	}
+
 	ip = ip.Unmap().WithZone("")
 	if ip.Is4() {
 		return netip.PrefixFrom(ip, 32)
@@ -101,10 +107,6 @@ func ipKey(ip netip.Addr) netip.Prefix {
 // Allow takes one token for ip. When none is left it returns false and the
 // wait until the next one.
 func (l *IPLimiter) Allow(ip netip.Addr, now time.Time) (bool, time.Duration) {
-	if !ip.IsValid() {
-		return true, 0
-	}
-
 	key := ipKey(ip)
 
 	l.mu.Lock()

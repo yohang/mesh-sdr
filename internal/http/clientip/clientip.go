@@ -54,23 +54,44 @@ func (res *Resolver) Resolve(r *http.Request) netip.Addr {
 	}
 
 	// Right to left: the last hop appended by each trusted proxy.
-	hops := forwardedFor(r.Header.Values("X-Forwarded-For"))
-	client := peer
+	var last netip.Addr // right-most hop that parsed
 
+	hops := forwardedFor(r.Header.Values("X-Forwarded-For"))
 	for i := len(hops) - 1; i >= 0; i-- {
-		a, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
-		if err != nil {
-			// A malformed hop: keep the last address a trusted proxy vouched for.
-			return client
+		a, ok := parseHop(hops[i])
+		if !ok {
+			// A malformed hop: keep the right-most hop that parsed, never
+			// the proxy itself (unknown when none parsed).
+			return last
 		}
 
-		client = Canonical(a)
-		if !In(client, res.trusted) {
-			return client
+		last = a
+		if !In(a, res.trusted) {
+			return a
 		}
 	}
 
-	return client
+	if last.IsValid() {
+		return last
+	}
+
+	return peer // no forwarding header: the proxy is the client
+}
+
+// parseHop parses an X-Forwarded-For hop: an address, "ip:port" or
+// "[v6]:port".
+func parseHop(h string) (netip.Addr, bool) {
+	h = strings.TrimSpace(h)
+
+	if a, err := netip.ParseAddr(h); err == nil {
+		return Canonical(a), true
+	}
+
+	if ap, err := netip.ParseAddrPort(h); err == nil {
+		return Canonical(ap.Addr()), true
+	}
+
+	return netip.Addr{}, false
 }
 
 func forwardedFor(values []string) []string {
