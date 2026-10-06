@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
@@ -113,7 +114,52 @@ func (h *Hub) validate(o Origins) []Problem {
 		}
 	}
 
+	if a := h.Auth.Argon2; a.MemoryKiB < Argon2MinMemoryKiB {
+		c.fail("auth.argon2.memory_kib", CodeInvalidValue, fmt.Sprintf("invalid value %d: want >= %d", a.MemoryKiB, Argon2MinMemoryKiB))
+	}
+
+	if a := h.Auth.Argon2; a.Iterations < Argon2MinIterations {
+		c.fail("auth.argon2.iterations", CodeInvalidValue, fmt.Sprintf("invalid value %d: want >= %d", a.Iterations, Argon2MinIterations))
+	}
+
+	if h.Auth.Argon2.Parallelism < 1 {
+		c.fail("auth.argon2.parallelism", CodeInvalidValue, "invalid value 0: want 1..255")
+	}
+
+	c.cidrs("admin.allowed_networks", h.Admin.AllowedNetworks)
+	c.cidrs("http.trusted_proxies", h.HTTP.TrustedProxies)
+
 	return c.problems
+}
+
+// cidrs checks a list of CIDR prefixes (for example "10.0.0.0/8").
+func (c *checker) cidrs(key string, v []string) {
+	for _, s := range v {
+		if _, err := netip.ParsePrefix(s); err != nil {
+			c.fail(key, CodeInvalidValue, fmt.Sprintf("invalid CIDR %q", s))
+		}
+	}
+}
+
+// Prefixes parses a list of CIDR prefixes validated at load, masked and with
+// IPv4-mapped IPv6 prefixes canonicalised to IPv4.
+func Prefixes(v []string) []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(v))
+
+	for _, s := range v {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			continue
+		}
+
+		if p.Addr().Is4In6() && p.Bits() >= 96 {
+			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+		}
+
+		out = append(out, p.Masked())
+	}
+
+	return out
 }
 
 func (n *Node) validate(o Origins) []Problem {

@@ -37,6 +37,23 @@ level = "info"
 # text | json. --json overrides it.
 format = "json"
 
+[auth.argon2]
+# Argon2id password hashing. Floors: memory_kib >= 19456, iterations >= 2.
+# Stored hashes with other parameters are re-hashed at the next login.
+memory_kib = 65536
+iterations = 3
+parallelism = 1
+
+[admin]
+# Client networks (CIDR) allowed to use the admin endpoints, checked on every
+# admin request against the resolved client address. Default: any.
+allowed_networks = ["0.0.0.0/0", "::/0"]
+
+[http]
+# Reverse proxies (CIDR) trusted for X-Forwarded-For. The client address is
+# the right-most hop that is not a trusted proxy. Default: none.
+trusted_proxies = []
+
 # Admin settings (MESHSDR_SETTINGS__<TABLE>__<KEY>). Each key set here or in
 # the env is locked: read-only in the admin UI, which shows its origin. Leave
 # a key commented out to keep it admin-editable (DB setting, then default).

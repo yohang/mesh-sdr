@@ -33,6 +33,10 @@ type Hub struct {
 	Log Log        `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
 
 	Settings Settings `toml:"settings" envPrefix:"SETTINGS__" jsonschema:"description=Locked admin settings. Each key set in a file or the env is locked (read-only in the admin UI); unset keys fall back to the DB setting, then to the default."`
+
+	Auth  Auth  `toml:"auth" envPrefix:"AUTH__" jsonschema:"description=Authentication (password hashing)."`
+	Admin Admin `toml:"admin" envPrefix:"ADMIN__" jsonschema:"description=Admin access restrictions."`
+	HTTP  HTTP  `toml:"http" envPrefix:"HTTP__" jsonschema:"description=HTTP front: reverse proxies."`
 }
 
 // Settings is the [settings] table: admin settings locked by config
@@ -52,6 +56,34 @@ type SettingsReceiver struct {
 // SettingsUI is the [settings.ui] table.
 type SettingsUI struct {
 	ThemeMode string `toml:"theme_mode" env:"THEME_MODE" jsonschema:"enum=light,enum=dark,enum=auto,description=Theme mode (UI-001): light or dark, or auto to follow the visitor's prefers-color-scheme. A change applies on the next full page load."`
+}
+
+// Auth is the [auth] table.
+type Auth struct {
+	Argon2 Argon2 `toml:"argon2" envPrefix:"ARGON2__" jsonschema:"description=Argon2id password hashing parameters. A stored hash with other parameters is re-hashed at the next successful login."`
+}
+
+// Argon2 is the [auth.argon2] table.
+type Argon2 struct {
+	MemoryKiB   uint32 `toml:"memory_kib" env:"MEMORY_KIB" jsonschema:"minimum=19456,description=Argon2id memory cost in KiB (minimum 19456)."`
+	Iterations  uint32 `toml:"iterations" env:"ITERATIONS" jsonschema:"minimum=2,description=Argon2id time cost (minimum 2)."`
+	Parallelism uint8  `toml:"parallelism" env:"PARALLELISM" jsonschema:"minimum=1,maximum=255,description=Argon2id lanes (1..255)."`
+}
+
+// Argon2 parameter floors (TECHNICAL_SPEC §7.4 "Validation at startup", SR-03).
+const (
+	Argon2MinMemoryKiB  = 19456
+	Argon2MinIterations = 2
+)
+
+// Admin is the [admin] table.
+type Admin struct {
+	AllowedNetworks []string `toml:"allowed_networks" env:"ALLOWED_NETWORKS" jsonschema:"description=Client networks (CIDR) allowed to use admin endpoints and admin WebSocket topics. Checked on every admin request against the resolved client address."`
+}
+
+// HTTP is the [http] table.
+type HTTP struct {
+	TrustedProxies []string `toml:"trusted_proxies" env:"TRUSTED_PROXIES" jsonschema:"description=Reverse proxies (CIDR) trusted for X-Forwarded-For. The client address is the right-most untrusted hop; forwarding headers from other peers are ignored."`
 }
 
 // HubSection is the [hub] table.
@@ -97,6 +129,9 @@ func DefaultHub() Hub {
 		Settings: Settings{
 			UI: SettingsUI{ThemeMode: "auto"},
 		},
+		Auth:  Auth{Argon2: Argon2{MemoryKiB: 65536, Iterations: 3, Parallelism: 1}},
+		Admin: Admin{AllowedNetworks: []string{"0.0.0.0/0", "::/0"}},
+		HTTP:  HTTP{TrustedProxies: []string{}},
 	}
 }
 
