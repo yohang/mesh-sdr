@@ -27,7 +27,7 @@ func (v values) String(key string) string {
 		return s
 	}
 
-	return map[string]string{"ui.theme_mode": "auto", "receiver.name": "MeshSDR", "receiver.usage_policy_url": "/policy"}[key]
+	return map[string]string{"ui.theme_mode": "auto", "receiver.name": "MeshSDR", "receiver.usage_policy_url": "/policy", "ui.shortcut_set": "default"}[key]
 }
 
 // router serves the shell module the way the hub does, with a stub API.

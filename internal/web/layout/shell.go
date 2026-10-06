@@ -60,6 +60,12 @@ type Shell struct {
 	Theme Theme
 	// FooterLinks are the footer links, in order.
 	FooterLinks []Link
+	// HelpURL is the help and documentation link (UI-002), opened in a new
+	// tab from the top bar, the user menu, the footer and key H; "" hides
+	// it.
+	HelpURL string
+	// Shortcuts tells whether single-key shortcuts are on (ui.shortcut_set).
+	Shortcuts bool
 	// Product is the version, licence and source code location shown in
 	// the footer (AGPL-3.0 section 13).
 	Product Product
@@ -88,6 +94,8 @@ type Link struct {
 	Label   string
 	Href    string
 	Section string
+	// External links open in a new tab (never a named window, RX-001).
+	External bool
 }
 
 // Top-level sections (UI-006): Page.Section and Link.Section values.
@@ -131,3 +139,13 @@ func (s Shell) ClockText() string { return s.Now.UTC().Format("15:04") }
 // ClockDateTime returns the datetime attribute of the UTC clock (a valid
 // global date and time string, to the minute).
 func (s Shell) ClockDateTime() string { return s.Now.UTC().Format("2006-01-02T15:04Z") }
+
+// ShortcutsAttr is the body's data-shortcuts value: static/js/shortcuts.js
+// ignores keys when it is off.
+func (s Shell) ShortcutsAttr() string {
+	if s.Shortcuts {
+		return "default"
+	}
+
+	return "off"
+}

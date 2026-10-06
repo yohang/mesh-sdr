@@ -23,13 +23,26 @@ func (s settings) PolicyURL(context.Context) (string, error) {
 	return "https://example.org/rules", s.err
 }
 
+func (s settings) HelpLink(context.Context) (domain.HelpLink, error) {
+	h, _ := domain.NewHelpLink("https://docs.example.org")
+
+	return h, s.err
+}
+
+func (s settings) ShortcutSet(context.Context) (domain.ShortcutSet, error) {
+	set, _ := domain.NewShortcutSet("off")
+
+	return set, s.err
+}
+
 func TestLookAndFeel(t *testing.T) {
 	var logs bytes.Buffer
 
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 
 	v := app.NewLookAndFeel(settings{mode: domain.MustThemeMode("dark")}, logger).View(context.Background())
-	if !v.ThemeMode.IsDark() || v.SiteName != "F4XYZ" || v.PolicyURL != "https://example.org/rules" {
+	if !v.ThemeMode.IsDark() || v.SiteName != "F4XYZ" || v.PolicyURL != "https://example.org/rules" ||
+		v.Help.String() != "https://docs.example.org" || v.Shortcuts.Enabled() {
 		t.Errorf("view = %+v", v)
 	}
 
@@ -38,7 +51,8 @@ func TestLookAndFeel(t *testing.T) {
 	}
 
 	v = app.NewLookAndFeel(settings{err: errors.New("db down")}, logger).View(context.Background())
-	if !v.ThemeMode.IsAuto() || v.SiteName != app.DefaultSiteName || v.PolicyURL != app.DefaultPolicyURL {
+	if !v.ThemeMode.IsAuto() || v.SiteName != app.DefaultSiteName || v.PolicyURL != app.DefaultPolicyURL ||
+		!v.Help.IsZero() || !v.Shortcuts.Enabled() {
 		t.Errorf("fallback = %s, want auto", v.ThemeMode)
 	}
 

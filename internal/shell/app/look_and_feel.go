@@ -23,6 +23,8 @@ type Settings interface {
 	ThemeMode(ctx context.Context) (domain.ThemeMode, error)
 	SiteName(ctx context.Context) (string, error)
 	PolicyURL(ctx context.Context) (string, error)
+	HelpLink(ctx context.Context) (domain.HelpLink, error)
+	ShortcutSet(ctx context.Context) (domain.ShortcutSet, error)
 }
 
 // LookAndFeel returns the admin-set look and feel of the shell.
@@ -41,6 +43,10 @@ type View struct {
 	SiteName  string
 	ThemeMode domain.ThemeMode
 	PolicyURL string
+	// Help is the help link (UI-002); zero when unset.
+	Help domain.HelpLink
+	// Shortcuts is the keyboard shortcut set.
+	Shortcuts domain.ShortcutSet
 }
 
 // View returns the current look and feel. A failing settings source never
@@ -65,6 +71,18 @@ func (l *LookAndFeel) View(ctx context.Context) View {
 		l.logger.WarnContext(ctx, "usage policy link unavailable, using the default", slog.Any("error", err))
 	} else {
 		v.PolicyURL = u
+	}
+
+	if h, err := l.settings.HelpLink(ctx); err != nil {
+		l.logger.WarnContext(ctx, "help link unavailable, hiding it", slog.Any("error", err))
+	} else {
+		v.Help = h
+	}
+
+	if set, err := l.settings.ShortcutSet(ctx); err != nil {
+		l.logger.WarnContext(ctx, "shortcut set unavailable, using the default", slog.Any("error", err))
+	} else {
+		v.Shortcuts = set
 	}
 
 	return v

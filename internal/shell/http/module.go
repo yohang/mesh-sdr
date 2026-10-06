@@ -66,7 +66,9 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 		User:        user,
 		SiteName:    v.SiteName,
 		Theme:       theme,
-		FooterLinks: []layout.Link{{Label: "Usage policy", Href: v.PolicyURL}, {Label: "About", Href: AboutPath}},
+		FooterLinks: footerLinks(v),
+		HelpURL:     v.Help.String(),
+		Shortcuts:   v.Shortcuts.Enabled(),
 		Product:     product(),
 		Nav:         nav,
 		Now:         s.now(),
@@ -183,4 +185,15 @@ func product() layout.Product {
 // to the source code of this build (AGPL-3.0 section 13), public.
 func (m *Module) aboutPage(w http.ResponseWriter, r *http.Request) {
 	m.render.Page(w, r, http.StatusOK, layout.Page{Title: "About"}, aboutPage(product()), nil)
+}
+
+// footerLinks are the information links of the footer and the user menu:
+// help (when set), the usage policy and About.
+func footerLinks(v app.View) []layout.Link {
+	var links []layout.Link
+	if !v.Help.IsZero() {
+		links = append(links, layout.Link{Label: "Help", Href: v.Help.String(), External: true})
+	}
+
+	return append(links, layout.Link{Label: "Usage policy", Href: v.PolicyURL}, layout.Link{Label: "About", Href: AboutPath})
 }

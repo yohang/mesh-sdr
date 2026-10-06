@@ -213,3 +213,46 @@ func TestAbout(t *testing.T) {
 		t.Errorf("HEAD /about = %d", res.StatusCode)
 	}
 }
+
+// TestHelp covers UI-002: with receiver.help_url set, the help link opens in
+// a new tab from the top bar (key H through data-shortcut), the user menu
+// and the footer; unset, every entry is hidden. ui.shortcut_set = off turns
+// single-key shortcuts off.
+func TestHelp(t *testing.T) {
+	user := func(*http.Request) *layout.User { return &layout.User{Name: "ada", Role: "Listener"} }
+
+	page := func(v values) string {
+		t.Helper()
+
+		m := shell.Wire(shell.Deps{Settings: v, User: user, Logger: discard})
+		_, body := do(t, httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP), http.MethodGet, "/map", nil)
+
+		return body
+	}
+
+	body := page(values{"receiver.help_url": "https://docs.example.org/rx"})
+	for _, want := range []string{
+		`<a href="https://docs.example.org/rx" target="_blank" rel="noopener noreferrer" hx-boost="false" class="icon-button" data-shortcut="h" aria-label="Help (opens in a new tab)" aria-keyshortcuts="h">`,
+		`<a href="https://docs.example.org/rx" class="menu-item" target="_blank" rel="noopener noreferrer" hx-boost="false">Help<span class="sr-only"> (opens in a new tab)</span></a>`,
+		`<li><a href="https://docs.example.org/rx" target="_blank" rel="noopener noreferrer" hx-boost="false">Help<span class="sr-only"> (opens in a new tab)</span></a></li>`,
+		`data-shortcuts="default"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page lacks %s", want)
+		}
+	}
+
+	body = page(values{"ui.shortcut_set": "off"})
+	if strings.Contains(body, "docs.example.org") || strings.Contains(body, `data-shortcut="h"`) || strings.Contains(body, ">Help") {
+		t.Error("help entries shown without a help link")
+	}
+
+	if !strings.Contains(body, `data-shortcuts="off"`) {
+		t.Error("shortcuts not turned off")
+	}
+
+	// An invalid stored value hides the link rather than rendering it.
+	if body := page(values{"receiver.help_url": "javascript:alert(1)"}); strings.Contains(body, "javascript:") {
+		t.Error("invalid help link rendered")
+	}
+}

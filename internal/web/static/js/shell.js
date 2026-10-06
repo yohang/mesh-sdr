@@ -13,6 +13,8 @@ import "./utc-clock.js";
 import "./token-url.js";
 import "./download.js";
 import { installNavigation } from "./navigation.js";
+import { installShortcuts } from "./shortcuts.js";
 
 installNavigation();
+installShortcuts();
 installAdminForms();
