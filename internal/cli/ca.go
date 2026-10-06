@@ -49,24 +49,28 @@ func (a *app) caInit() error {
 	certPath := filepath.Join(dir, "tls", "ca.pem")
 	keyPath := filepath.Join(dir, "tls", "ca.key")
 
-	for _, p := range []string{certPath, keyPath} {
-		if _, err := os.Stat(p); err == nil {
-			return fmt.Errorf("%s already exists: refusing to overwrite the hub CA", p)
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("check %s: %w", p, err)
-		}
-	}
-
 	certPEM, keyPEM, err := pki.GenerateCA("MeshSDR hub CA", time.Now())
 	if err != nil {
 		return err
 	}
 
-	if err := pki.WriteFileAtomic(keyPath, keyPEM, 0o600); err != nil {
+	// Exclusive creation: an existing CA is never replaced, even by a
+	// concurrent run.
+	if err := pki.WriteFileExclusive(keyPath, keyPEM, 0o600); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("%s already exists: refusing to overwrite the hub CA", keyPath)
+		}
+
 		return err
 	}
 
-	if err := pki.WriteFileAtomic(certPath, certPEM, 0o644); err != nil {
+	if err := pki.WriteFileExclusive(certPath, certPEM, 0o644); err != nil {
+		_ = os.Remove(keyPath)
+
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("%s already exists: refusing to overwrite the hub CA", certPath)
+		}
+
 		return err
 	}
 

@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -235,5 +236,56 @@ func TestSelfSigned(t *testing.T) {
 
 	if len(cert.Leaf.DNSNames) != 1 || cert.Leaf.DNSNames[0] != "node.example.org" {
 		t.Errorf("DNS = %v", cert.Leaf.DNSNames)
+	}
+}
+
+func TestWriteFileExclusive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ca.key")
+
+	if err := pki.WriteFileExclusive(path, []byte("one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := pki.WriteFileExclusive(path, []byte("two"), 0o600); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("second write = %v, want ErrExist", err)
+	}
+
+	if b, _ := os.ReadFile(path); string(b) != "one" {
+		t.Errorf("content = %q", b)
+	}
+
+	if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 1 {
+		t.Errorf("temporary files left: %v", entries)
+	}
+}
+
+func TestWriteFilesAtomicLeavesTargetsOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a")
+
+	if err := os.WriteFile(a, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The second file cannot be staged: nothing is renamed.
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := pki.WriteFilesAtomic(
+		pki.File{Path: a, Data: []byte("new"), Perm: 0o600},
+		pki.File{Path: filepath.Join(blocker, "b"), Data: []byte("x"), Perm: 0o600},
+	)
+	if err == nil {
+		t.Fatal("batch with an unwritable file succeeded")
+	}
+
+	if b, _ := os.ReadFile(a); string(b) != "old" {
+		t.Errorf("a = %q, want it untouched", b)
+	}
+
+	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
+		t.Errorf("temporary files left: %v", entries)
 	}
 }

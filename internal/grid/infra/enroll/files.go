@@ -13,24 +13,24 @@ type Paths struct {
 	Key, Cert, CA string
 }
 
-// WriteFiles writes the node key (0600), certificate chain and hub CA
-// atomically. The key goes first, so a certificate never exists without it.
+// WriteFiles writes the hub CA, the node key (0600) and the certificate
+// chain. All three are staged before any is renamed into place; the
+// certificate goes last, because its presence marks the node as enrolled:
+// a crash in between leaves a node that is not enrolled yet, and
+// `meshsdr node enroll` rewrites the key.
 func WriteFiles(p Paths, key *ecdsa.PrivateKey, res Result) error {
 	keyPEM, err := pki.EncodeKeyPEM(key)
 	if err != nil {
 		return err
 	}
 
-	if err := pki.WriteFileAtomic(p.Key, keyPEM, 0o600); err != nil {
-		return fmt.Errorf("tls.key: %w", err)
-	}
-
-	if err := pki.WriteFileAtomic(p.CA, pki.EncodeCertsPEM(res.CA.Raw), 0o644); err != nil {
-		return fmt.Errorf("hub_trust.ca_cert: %w", err)
-	}
-
-	if err := pki.WriteFileAtomic(p.Cert, pki.EncodeCertsPEM(res.Chain...), 0o644); err != nil {
-		return fmt.Errorf("tls.cert: %w", err)
+	err = pki.WriteFilesAtomic(
+		pki.File{Path: p.CA, Data: pki.EncodeCertsPEM(res.CA.Raw), Perm: 0o644},
+		pki.File{Path: p.Key, Data: keyPEM, Perm: 0o600},
+		pki.File{Path: p.Cert, Data: pki.EncodeCertsPEM(res.Chain...), Perm: 0o644},
+	)
+	if err != nil {
+		return fmt.Errorf("write node identity: %w", err)
 	}
 
 	return nil
