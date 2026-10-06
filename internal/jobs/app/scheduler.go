@@ -16,8 +16,10 @@ import (
 	"github.com/yohang/mesh-sdr/internal/jobs/domain"
 )
 
-// StaleAfter is how long a run may last before it is considered dead (the
-// process stopped during the run) and another run may start.
+// StaleAfter is how long a run recorded by another process may last before
+// it is considered dead and another run may start. Within the hub, a job
+// never overlaps itself whatever its duration (one lock per job), and the
+// runs a previous hub process left in progress are ended at start.
 const StaleAfter = time.Hour
 
 // Job is a periodic unit of work. Run deletes or updates in bounded batches
@@ -39,6 +41,7 @@ type scheduled struct {
 	name  domain.Name
 	job   Job
 	every time.Duration
+	lock  *sync.Mutex
 }
 
 // Scheduler runs registered jobs at start then every period, never two runs
@@ -71,7 +74,7 @@ func (s *Scheduler) Register(job Job, every time.Duration) {
 		panic(fmt.Sprintf("jobs: invalid registration of %s", name))
 	}
 
-	s.jobs[name.String()] = scheduled{name: name, job: job, every: every}
+	s.jobs[name.String()] = scheduled{name: name, job: job, every: every, lock: &sync.Mutex{}}
 }
 
 // Run runs every job at start, then on its period, until ctx is done. It is
@@ -84,6 +87,12 @@ func (s *Scheduler) Run(ctx context.Context) {
 		jobs = append(jobs, j)
 	}
 	s.mu.Unlock()
+
+	for _, j := range jobs {
+		if err := s.abandon(ctx, j.name); err != nil {
+			s.logger.ErrorContext(ctx, "end interrupted job run", slog.String("job", j.name.String()), slog.Any("error", err))
+		}
+	}
 
 	var wg sync.WaitGroup
 
@@ -145,8 +154,30 @@ func (s *Scheduler) LastRun(ctx context.Context, name string) (*domain.Run, erro
 	return r, nil
 }
 
+// abandon ends the run of a job left in progress by a previous hub process
+// (the hub is the only process running jobs).
+func (s *Scheduler) abandon(ctx context.Context, name domain.Name) error {
+	return s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		r, err := s.repo.Get(ctx, name)
+		if err != nil || r == nil || !r.Abandon(s.now()) {
+			return err
+		}
+
+		s.logger.WarnContext(ctx, "job run interrupted by a hub stop", slog.String("job", name.String()))
+
+		return s.repo.Save(ctx, r)
+	})
+}
+
 // run takes the job's run atomically, runs it and records the outcome.
 func (s *Scheduler) run(ctx context.Context, j scheduled) (int64, error) {
+	if !j.lock.TryLock() {
+		s.logger.DebugContext(ctx, "job already running, skipped", slog.String("job", j.name.String()))
+
+		return 0, domain.ErrJobRunning.WithDetail("job " + j.name.String() + " is already running")
+	}
+	defer j.lock.Unlock()
+
 	var run *domain.Run
 
 	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {

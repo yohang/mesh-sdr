@@ -128,22 +128,61 @@ func TestJobNeverOverlaps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A run left running by a stopped process is dead after StaleAfter.
-	j2 := &fakeJob{name: "test.dead", started: make(chan struct{}, 1), release: make(chan struct{})}
+	// A run longer than StaleAfter still blocks a second run in the hub.
+	j2 := &fakeJob{name: "test.long", started: make(chan struct{}, 1), release: make(chan struct{})}
 	s.Register(j2, time.Hour)
 
-	go func() { _, _ = s.RunNow(ctx, "test.dead") }()
+	done2 := make(chan error, 1)
+
+	go func() {
+		_, err := s.RunNow(ctx, "test.long")
+		done2 <- err
+	}()
 
 	<-j2.started
-	c.Advance(app.StaleAfter)
+	c.Advance(2 * app.StaleAfter)
 
-	j2.started = nil
-
-	if _, err := s.RunNow(ctx, "test.dead"); err != nil {
-		t.Errorf("run after a dead run: %v", err)
+	if _, err := s.RunNow(ctx, "test.long"); !errors.Is(err, domain.ErrJobRunning) {
+		t.Errorf("overlap after StaleAfter: %v", err)
 	}
 
 	close(j2.release)
+
+	if err := <-done2; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A run left in progress by a stopped hub is ended at start.
+func TestSchedulerEndsInterruptedRuns(t *testing.T) {
+	ctx := context.Background()
+	a := dbtest.NewSQLite(t)
+	c := &clock{now: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)}
+	repo := sqlite.NewRuns(a)
+
+	r := domain.NewRun(domain.MustName("test.start"))
+	_ = r.Start(c.Now(), time.Hour)
+	_ = repo.Save(ctx, r)
+
+	s := app.NewScheduler(repo, a, c.Now, slog.New(slog.DiscardHandler))
+	j := &fakeJob{name: "test.start", started: make(chan struct{}, 1), release: make(chan struct{})}
+	s.Register(j, time.Hour)
+
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+
+	go func() { s.Run(runCtx); close(done) }()
+
+	// The run at start is not refused as overlapping.
+	<-j.started
+	close(j.release)
+	cancel()
+	<-done
+
+	got, _ := s.LastRun(ctx, "test.start")
+	if got.Running() || got.Status() != domain.StatusOK {
+		t.Errorf("run = %+v", got)
+	}
 }
 
 func TestSchedulerRunsAtStart(t *testing.T) {

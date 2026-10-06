@@ -47,3 +47,18 @@ func TestRunLifecycle(t *testing.T) {
 		t.Errorf("rehydrate: %v", err)
 	}
 }
+
+func TestAbandon(t *testing.T) {
+	t0 := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	r := domain.NewRun(domain.MustName("audit.purge"))
+
+	if r.Abandon(t0) {
+		t.Error("an idle run was abandoned")
+	}
+
+	_ = r.Start(t0, time.Hour)
+
+	if !r.Abandon(t0.Add(time.Minute)) || r.Running() || r.Status() != domain.StatusError || r.LastError() != domain.Interrupted {
+		t.Errorf("abandoned run = %+v", r)
+	}
+}

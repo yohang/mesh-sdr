@@ -119,6 +119,21 @@ func (r *Run) Finish(now time.Time, rows int64, err error) {
 	}
 }
 
+// Interrupted is the error recorded for a run that the hub stopped.
+const Interrupted = "interrupted: the hub stopped during the run"
+
+// Abandon ends a run left in progress by a stopped process, as failed. It
+// reports whether the run was in progress.
+func (r *Run) Abandon(now time.Time) bool {
+	if r.runningSince.IsZero() {
+		return false
+	}
+
+	r.runningSince, r.lastFinished, r.status, r.lastError = time.Time{}, now.UTC(), StatusError, Interrupted
+
+	return true
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
