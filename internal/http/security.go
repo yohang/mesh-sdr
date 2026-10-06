@@ -38,7 +38,6 @@ func ContentSecurityPolicy(nonce string) string {
 // them; a feature that needs one adds it here explicitly. Only features
 // Chromium recognizes are listed, so the header logs no parse warnings.
 const PermissionsPolicy = "accelerometer=(), " +
-	"bluetooth=(), " +
 	"camera=(), " +
 	"display-capture=(), " +
 	"encrypted-media=(), " +

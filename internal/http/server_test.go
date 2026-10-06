@@ -126,7 +126,7 @@ func TestPermissionsPolicy(t *testing.T) {
 		directives[feature] = true
 	}
 
-	for _, f := range []string{"camera", "microphone", "geolocation", "usb", "serial", "bluetooth", "hid", "payment", "display-capture", "midi"} {
+	for _, f := range []string{"camera", "microphone", "geolocation", "usb", "serial", "hid", "payment", "display-capture", "midi"} {
 		if !directives[f] {
 			t.Errorf("Permissions-Policy does not deny %s", f)
 		}
