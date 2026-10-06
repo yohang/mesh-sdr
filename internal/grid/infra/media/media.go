@@ -81,13 +81,16 @@ type Server struct {
 	keys      *token.KeySet
 	withdrawn bool
 	sessions  map[string]*session
+	// used remembers every cid until its token can no longer be valid
+	// (exp + leeway): a cid serves one connection only (§5.8).
+	used map[string]time.Time
 	revSess   map[string]time.Time
 	revUsers  map[string]time.Time
 }
 
 // NewServer returns the server. Until Run binds it, upgrades are refused.
 func NewServer(o Options) *Server {
-	return &Server{o: o, sessions: map[string]*session{}, revSess: map[string]time.Time{}, revUsers: map[string]time.Time{}}
+	return &Server{o: o, sessions: map[string]*session{}, used: map[string]time.Time{}, revSess: map[string]time.Time{}, revUsers: map[string]time.Time{}}
 }
 
 // Run binds the sessions to ctx; when ctx is done every session is closed
@@ -226,6 +229,25 @@ func (s *Server) revokedLocked(c token.Claims) bool {
 	return false
 }
 
+// forgetUsed forgets the cids whose tokens have all expired.
+func (s *Server) forgetUsed(now time.Time) {
+	for cid, until := range s.used {
+		if now.After(until) {
+			delete(s.used, cid)
+		}
+	}
+}
+
+// extendUsed keeps cid used until the end of a refreshed token.
+func (s *Server) extendUsed(cid string, exp time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if until := exp.Add(token.Leeway); until.After(s.used[cid]) {
+		s.used[cid] = until
+	}
+}
+
 // keep records revocations with the hub time of each, never moving an
 // entry to a later time.
 func keep(known map[string]time.Time, revoked []ctl.Revoked) {
@@ -334,8 +356,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ss := &session{s: s, cur: claims, logger: s.o.Logger.With(slog.String("cid", claims.ConnectionID))}
 
 	s.mu.Lock()
-	_, used := s.sessions[claims.ConnectionID]
+	s.forgetUsed(s.o.Now())
+
+	_, used := s.used[claims.ConnectionID]
 	if !used {
+		s.used[claims.ConnectionID] = claims.ExpiresAt.Add(token.Leeway)
 		s.sessions[claims.ConnectionID] = ss
 	}
 	s.mu.Unlock()

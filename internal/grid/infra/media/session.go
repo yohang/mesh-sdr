@@ -247,15 +247,32 @@ func (ss *session) refresh(ctx context.Context, env rxv1.Envelope, expire *time.
 		ss.reply(env, rxv1.CodeTokenInvalid, "access token of another connection")
 
 		return
+	case !sameHolder(ss.claims(), c):
+		ss.logger.WarnContext(ctx, "refresh refused: access token of another user or session")
+		ss.reply(env, rxv1.CodeTokenInvalid, "access token of another user or session")
+
+		return
 	}
 
 	ss.mu.Lock()
 	ss.cur = c
 	ss.mu.Unlock()
 
+	ss.s.extendUsed(c.ConnectionID, c.ExpiresAt)
+
 	expire.Reset(ss.expiry())
 	ss.logger.DebugContext(ctx, "access token refreshed", slog.Time("exp", c.ExpiresAt))
 	ss.ack(env)
+}
+
+// sameHolder reports whether next may replace cur: same subject and
+// session, or an anonymous connection whose visitor signed in.
+func sameHolder(cur, next token.Claims) bool {
+	if cur.Subject == token.AnonymousSubject {
+		return true
+	}
+
+	return next.Subject == cur.Subject && next.SessionID == cur.SessionID
 }
 
 // scoped checks a device-scoped message against the token scope. Device
