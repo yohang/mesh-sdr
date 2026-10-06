@@ -1255,6 +1255,67 @@ paths:
                 $ref: "#/components/schemas/AccountExport"
         default:
           $ref: "#/components/responses/Problem"
+  /audit:
+    get:
+      operationId: searchAudit
+      x-meshsdr-access: admin
+      summary: Search the audit log
+      description: Newest first, paged by `before` (the id of the last entry of the previous page). Read-only.
+      tags: [audit]
+      parameters:
+        - name: actor
+          in: query
+          description: Username of the actor.
+          schema:
+            type: string
+            maxLength: 64
+        - name: action
+          in: query
+          description: Action prefix, for example `auth.login.`.
+          schema:
+            type: string
+            maxLength: 64
+        - name: target_type
+          in: query
+          schema:
+            type: string
+            maxLength: 32
+        - name: target_id
+          in: query
+          schema:
+            type: string
+            maxLength: 128
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: before
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditPage"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     LinkToken:
@@ -1289,6 +1350,59 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    AuditPage:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEntry"
+        next_before:
+          type: integer
+          format: int64
+          description: Value of `before` for the next page, when there is one.
+    AuditEntry:
+      type: object
+      required: [id, at, actor_kind, actor, action, result]
+      properties:
+        id:
+          type: integer
+          format: int64
+        at:
+          type: string
+          format: date-time
+        actor_kind:
+          type: string
+          enum: [user, anonymous, system, node, cli]
+        actor_id:
+          type: string
+        actor:
+          type: string
+          description: Username, "deleted user <id>", or the actor kind.
+        actor_ip:
+          type: string
+        action:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+        target:
+          type: string
+        result:
+          type: string
+          enum: [ok, denied, error]
+        before:
+          type: object
+          additionalProperties:
+            type: string
+        after:
+          type: object
+          additionalProperties:
+            type: string
+        request_id:
+          type: string
     AccountDeletion:
       type: object
       additionalProperties: false

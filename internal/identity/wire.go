@@ -126,6 +126,7 @@ func UserAdmin(d Deps) *app.UserAdmin {
 
 // Module is the wired identity module of the hub.
 type Module struct {
+	Audit       *app.AuditView
 	Resets      *app.Resets
 	Invitations *app.Invitations
 	Profile     *app.Profile
@@ -218,7 +219,10 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Logger:   component(d.Logger, "identity.app.resets"),
 	})
 
+	auditView := app.NewAuditView(r.audit, r.users)
+
 	h, err := identityhttp.New(identityhttp.Services{
+		Audit:       auditView,
 		Resets:      resets,
 		Invitations: invitations,
 		Auth:        auth, Passwords: changer, Setup: setup, Profile: profile, Accounts: accounts,
@@ -233,6 +237,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	}
 
 	return &Module{
+		Audit:       auditView,
 		Resets:      resets,
 		Invitations: invitations,
 		Profile:     profile,

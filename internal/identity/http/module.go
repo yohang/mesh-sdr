@@ -121,8 +121,15 @@ type ResetService interface {
 	IssueByAdmin(ctx context.Context, by app.Actor, id domain.UserID) (app.AdminResult, error)
 }
 
+// AuditService reads the audit log (ACC-010).
+type AuditService interface {
+	Search(ctx context.Context, f app.AuditFilter) ([]app.AuditRow, int64, error)
+	Each(ctx context.Context, f app.AuditFilter, fn func(app.AuditRow) error) error
+}
+
 // Services are the application services behind the identity pages.
 type Services struct {
+	Audit       AuditService
 	Resets      ResetService
 	Invitations InvitationService
 	Auth        Authenticator
@@ -165,6 +172,7 @@ type Module struct {
 	accounts    AccountService
 	invitations InvitationService
 	resets      ResetService
+	audit       AuditService
 	// adminLinks are the admin pages of the user menu.
 	adminLinks []layout.Link
 	pages      Pages
@@ -204,7 +212,8 @@ func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, e
 		accounts:    svc.Accounts,
 		invitations: svc.Invitations,
 		resets:      svc.Resets,
-		adminLinks:  []layout.Link{{Label: "Users", Href: UsersPath}, {Label: "Invitations", Href: InvitationsPath}},
+		audit:       svc.Audit,
+		adminLinks:  []layout.Link{{Label: "Users", Href: UsersPath}, {Label: "Invitations", Href: InvitationsPath}, {Label: "Audit log", Href: AuditPath}},
 		pages:       pages,
 		logger:      logger,
 		resolver:    clientip.NewResolver(cfg.TrustedProxies),
@@ -254,6 +263,9 @@ func (m *Module) Routes(r chi.Router) {
 	r.Post(AccountPath+"/email/verify", m.emailVerifyAction)
 
 	admin := r.With(m.Require(domain.RoleAdmin))
+	admin.Get(AuditPath, m.auditPage)
+	admin.Head(AuditPath, m.auditPage)
+	admin.Get(AuditPath+"/export", m.auditExport)
 	admin.Get(UsersPath, m.usersPage)
 	admin.Head(UsersPath, m.usersPage)
 	admin.Get(UsersPath+"/{id}", m.userPage)

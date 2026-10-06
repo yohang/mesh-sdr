@@ -256,6 +256,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		AccountHandlers:    api.NewAccountHandlers(idm.HTTP, idm.Accounts, idm.Profile),
 		InvitationHandlers: api.NewInvitationHandlers(idm.HTTP, idm.HTTP, idm.Invitations),
 		ResetHandlers:      api.NewResetHandlers(idm.HTTP, idm.Resets),
+		AuditHandlers:      api.NewAuditHandlers(idm.Audit),
 	}
 
 	router := httpserver.NewRouter(
