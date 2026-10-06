@@ -21,7 +21,7 @@ type UserAdmin struct {
 	hasher   PasswordHasher
 	ids      IDGenerator
 	now      Clock
-	policy   domain.PasswordPolicy
+	policy   Policies
 	logger   *slog.Logger
 }
 
@@ -34,7 +34,7 @@ type UserAdminDeps struct {
 	Hasher   PasswordHasher
 	IDs      IDGenerator
 	Now      Clock
-	Policy   domain.PasswordPolicy
+	Policy   Policies
 	Logger   *slog.Logger
 }
 
@@ -107,7 +107,7 @@ func (s *UserAdmin) Add(ctx context.Context, in AddUserInput) (AddUserResult, er
 		plain = generated
 	}
 
-	pw, err := domain.NewPassword(plain, s.policy)
+	pw, err := domain.NewPassword(plain, s.policy.Password(ctx))
 	if err != nil {
 		return AddUserResult{}, err
 	}

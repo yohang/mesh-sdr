@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
@@ -15,7 +16,9 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/argon2"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/commonpw"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/settings"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -61,13 +64,30 @@ func newRepos(d Deps) repos {
 	}
 }
 
+// commonPasswords is the embedded common-password list, decoded once. A
+// decoding failure is a build defect (covered by the commonpw tests).
+var commonPasswords = sync.OnceValue(func() *commonpw.List {
+	l, err := commonpw.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	return l
+})
+
+// policies returns the password policy source: settings (defaults until the
+// settings store is wired) and the bundled common-password list.
+func policies() app.Policies {
+	return app.NewPolicies(settings.Defaults{}, commonPasswords())
+}
+
 // UserAdmin builds the user administration service used by the CLI.
 func UserAdmin(d Deps) *app.UserAdmin {
 	r := newRepos(d)
 
 	return app.NewUserAdmin(app.UserAdminDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
-		Now: d.Now, Policy: domain.DefaultPasswordPolicy(), Logger: component(d.Logger, "identity.app.users"),
+		Now: d.Now, Policy: policies(), Logger: component(d.Logger, "identity.app.users"),
 	})
 }
 

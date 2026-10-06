@@ -10,6 +10,9 @@ A11Y    := $(COMPOSE) -f .infra/a11y/compose.yaml
 A11Y_HUBS := hub-auto hub-light hub-dark
 
 HTMX_VERSION ?= 4.0.0
+# Common-password list (ACC-011): SecLists commit and SHA-256 of the list.
+SECLISTS_COMMIT ?= 49c3b2d1d2481572bd7b0cb5af875a73cdf9d08e
+SECLISTS_SHA256 ?= 1472aafa2561df5e3293aee252aee3ca660c12b399a283cf808bb01b39be388b
 IMAGE        ?= mesh-sdr
 
 .PHONY: help
@@ -79,6 +82,10 @@ migrate-create: ## Create a SQL migration (name=...)
 .PHONY: vendor
 vendor: ## Download vendored JS assets (HTMX_VERSION=...)
 	$(RUN) curl -fsSL -o internal/web/static/vendor/htmx.min.js https://cdn.jsdelivr.net/npm/htmx.org@$(HTMX_VERSION)/dist/htmx.min.js
+
+.PHONY: vendor-passwords
+vendor-passwords: ## Download the common-password list (SECLISTS_COMMIT=..., SECLISTS_SHA256=...)
+	$(RUN) go run ./internal/identity/infra/commonpw/vendor -commit $(SECLISTS_COMMIT) -sha256 $(SECLISTS_SHA256)
 
 .PHONY: build-prod
 build-prod: ## Build the production image

@@ -115,7 +115,7 @@ func newEnv(t *testing.T, ipLimiter app.IPLimiter) *env {
 	})
 	e.admin = app.NewUserAdmin(app.UserAdminDeps{
 		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: a, Hasher: e.hasher, IDs: ids, Now: c.Now,
-		Policy: domain.DefaultPasswordPolicy(), Logger: logger,
+		Policy: app.NewPolicies(nil, nil), Logger: logger,
 	})
 
 	return e
