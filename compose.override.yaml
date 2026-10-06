@@ -5,9 +5,9 @@ services:
       args:
         UID: ${UID:-1000}
         GID: ${GID:-1000}
-    # Replaces the base environment: the committed dev config
-    # (hub.toml, node.toml) holds every value.
-    environment: !override
+    environment:
+      # Dev config (hub.toml with http://localhost:3000 and
+      # allow_insecure_url, node.toml) committed in the repository.
       MESHSDR_CONFIG_DIR: /app/.infra/docker/dev/config
     volumes:
       - .:/app

@@ -4,12 +4,11 @@ services:
       context: .
       dockerfile: .infra/docker/Dockerfile
       target: prod
+    # Production-like settings come from .env (MESHSDR_* vars, at least
+    # MESHSDR_HUB__URL); development defaults live in compose.override.yaml.
     env_file:
       - path: .env
         required: false
-    environment:
-      MESHSDR_HUB__URL: ${MESHSDR_HUB__URL:-http://localhost:${HTTP_PORT:-3000}}
-      MESHSDR_HUB__ALLOW_INSECURE_URL: ${MESHSDR_HUB__ALLOW_INSECURE_URL:-true}
     ports:
       - "${HTTP_PORT:-3000}:8073"
     volumes:
