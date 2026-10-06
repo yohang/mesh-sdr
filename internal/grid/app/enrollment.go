@@ -95,7 +95,7 @@ func (s *Enrollment) Attempt(ctx context.Context, t EnrollmentTarget) error {
 		}
 
 		v := n.Version()
-		if err := n.CompleteEnrollment(cert, s.now()); err != nil {
+		if err := n.CompleteEnrollment(t.Key, t.URL, cert, s.now()); err != nil {
 			return err
 		}
 

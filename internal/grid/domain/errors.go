@@ -13,6 +13,7 @@ var (
 	ErrInvalidNodeURL          = shared.NewError(shared.KindInvalid, "invalid_node_url", "node url must be https://host:port")
 	ErrInvalidEnrollmentToken  = shared.NewError(shared.KindInvalid, "enrollment_token_invalid", "enrollment token must be 22 to 256 printable ASCII characters")
 	ErrEnrollmentTokenExpired  = shared.NewError(shared.KindConflict, "enrollment_token_expired", "the enrollment token has expired")
+	ErrEnrollmentSuperseded    = shared.NewError(shared.KindConflict, "enrollment_superseded", "the enrollment token or node URL changed during the exchange")
 	ErrNodeNotPending          = shared.NewError(shared.KindConflict, "node_not_pending", "the node is not waiting for enrollment")
 	ErrNodeNotEnrolled         = shared.NewError(shared.KindConflict, "node_not_enrolled", "the node is not enrolled")
 	ErrNodeRevoked             = shared.NewError(shared.KindConflict, "node_revoked", "the node is revoked")

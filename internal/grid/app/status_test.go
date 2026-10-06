@@ -24,7 +24,7 @@ func TestStatusEvaluate(t *testing.T) {
 	enrolled.IssueEnrollmentKey(tok.Key(), time.Time{}, now)
 
 	cert, _ := domain.NewCertInfo(make([]byte, 32), "01", now.Add(time.Hour))
-	_ = enrolled.CompleteEnrollment(cert, now)
+	_ = enrolled.CompleteEnrollment(tok.Key(), enrolled.URL(), cert, now)
 
 	ok := domain.Compatibility{Level: domain.CompatOK}
 	live := app.LinkState{Connected: true, EverWelcomed: true, Compat: ok, WelcomedAt: now.Add(-time.Minute), LastHeartbeat: now.Add(-5 * time.Second), NTPSynced: true}

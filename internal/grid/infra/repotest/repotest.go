@@ -258,7 +258,7 @@ func testNodes(t *testing.T, r Repos) {
 	cert := must(domain.NewCertInfo(make([]byte, 32), "0A1B", t0.Add(90*24*time.Hour)))
 	v := g.Version()
 
-	if err := g.CompleteEnrollment(cert, t0.Add(time.Minute)); err != nil {
+	if err := g.CompleteEnrollment(key, g.URL(), cert, t0.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 

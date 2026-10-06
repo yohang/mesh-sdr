@@ -22,7 +22,7 @@ func enrolledNode(t *testing.T, e *env) *domain.Node {
 	n.IssueEnrollmentKey(tok.Key(), time.Time{}, e.clock.now())
 
 	cert, _ := domain.NewCertInfo(make([]byte, 32), "0A", e.clock.now().Add(90*24*time.Hour))
-	if err := n.CompleteEnrollment(cert, e.clock.now()); err != nil {
+	if err := n.CompleteEnrollment(tok.Key(), n.URL(), cert, e.clock.now()); err != nil {
 		t.Fatal(err)
 	}
 

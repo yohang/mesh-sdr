@@ -112,11 +112,7 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 		t.Errorf("expired key: %v", err)
 	}
 
-	if err := n.CompleteEnrollment(cert, t0.Add(2*time.Hour)); !errors.Is(err, domain.ErrEnrollmentTokenExpired) {
-		t.Errorf("late completion: %v", err)
-	}
-
-	if err := n.CompleteEnrollment(cert, t0.Add(time.Minute)); err != nil {
+	if err := n.CompleteEnrollment(key, n.URL(), cert, t0.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,7 +120,7 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 		t.Errorf("enrolled = %+v", n.Snapshot())
 	}
 
-	if err := n.CompleteEnrollment(cert, t0.Add(time.Minute)); !errors.Is(err, domain.ErrNodeNotPending) {
+	if err := n.CompleteEnrollment(key, n.URL(), cert, t0.Add(time.Minute)); !errors.Is(err, domain.ErrNodeNotPending) {
 		t.Errorf("token reuse: %v", err)
 	}
 

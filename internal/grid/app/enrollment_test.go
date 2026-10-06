@@ -79,3 +79,53 @@ func TestEnrollmentAttempt(t *testing.T) {
 		t.Errorf("audit results = %+v", e.audit.records)
 	}
 }
+
+// An in-flight exchange whose token was rotated meanwhile must not enroll
+// the node.
+func TestEnrollmentAbortsWhenTokenRotated(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+
+	tok, _ := domain.NewEnrollmentToken()
+	n := domain.NewNode(domain.MustNodeID("attic"), domain.MustNodeName("Attic"), domain.MustNodeURL("https://x:1"), e.clock.now())
+	n.IssueEnrollmentKey(tok.Key(), e.clock.now().Add(time.Hour), e.clock.now())
+
+	if err := e.nodes.Create(ctx, n); err != nil {
+		t.Fatal(err)
+	}
+
+	cert, _ := domain.NewCertInfo(make([]byte, 32), "0F", e.clock.now().Add(90*24*time.Hour))
+	rotated, _ := domain.NewEnrollmentToken()
+
+	// The admin rotates the token while the exchange runs.
+	f := &rotatingEnroller{cert: cert, rotate: func() {
+		got, _ := e.nodes.Get(ctx, n.ID())
+		v := got.Version()
+		got.IssueEnrollmentKey(rotated.Key(), e.clock.now().Add(time.Hour), e.clock.now())
+
+		if err := e.nodes.Save(ctx, got, v); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	s := app.NewEnrollment(e.nodes, e.db, f, e.audit, e.clock.now, time.Second, discard)
+
+	targets, _ := s.Targets(ctx)
+	if err := s.Attempt(ctx, targets[0]); !errors.Is(err, domain.ErrEnrollmentSuperseded) {
+		t.Fatalf("attempt = %v, want enrollment_superseded", err)
+	}
+
+	if got, _ := e.nodes.Get(ctx, n.ID()); got.Enrollment() != domain.EnrollmentPending {
+		t.Errorf("node enrolled with a rotated token: %+v", got.Snapshot())
+	}
+}
+
+type rotatingEnroller struct {
+	cert   domain.CertInfo
+	rotate func()
+}
+
+func (r *rotatingEnroller) Enroll(context.Context, app.EnrollmentTarget) (domain.CertInfo, error) {
+	r.rotate()
+
+	return r.cert, nil
+}

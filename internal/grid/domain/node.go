@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"crypto/hmac"
 	"slices"
 	"time"
 
@@ -106,7 +107,7 @@ func NewNode(id NodeID, name NodeName, url NodeURL, now time.Time) *Node {
 }
 
 // NewConfigNode declares a node from the hub config: name and url are
-// locked; key, when set, is the config token's key (no expiry).
+// locked; key, when set, is the config token's key (no expiry, ADR 0008).
 func NewConfigNode(id NodeID, name NodeName, url NodeURL, key *EnrollmentKey, now time.Time) *Node {
 	n := NewNode(id, name, url, now)
 	n.origin = OriginConfig
@@ -175,9 +176,8 @@ func (n *Node) touch(now time.Time) {
 	n.version++
 }
 
-// ApplyConfig syncs a config-declared node with the hub config. The key is
-// stored only while the node is pending. It reports whether anything
-// changed.
+// ApplyConfig syncs a config-declared node with the hub config. It reports
+// whether anything changed.
 func (n *Node) ApplyConfig(name NodeName, url NodeURL, key *EnrollmentKey, now time.Time) bool {
 	changed := n.origin != OriginConfig || n.name != name || n.url != url || !slices.Equal(n.locked, []string{FieldName, FieldURL})
 	n.origin = OriginConfig
@@ -185,7 +185,10 @@ func (n *Node) ApplyConfig(name NodeName, url NodeURL, key *EnrollmentKey, now t
 	n.name = name
 	n.url = url
 
-	if n.enrollment == EnrollmentPending && key != nil && (n.key == nil || *n.key != *key || !n.keyExpires.IsZero()) {
+	// The config token only seeds a pending node that has no key yet: it
+	// never replaces an admin-issued key, and is never revived after an
+	// enrollment or a revocation.
+	if n.enrollment == EnrollmentPending && key != nil && n.key == nil {
 		n.key = key
 		n.keyExpires = time.Time{}
 		changed = true
@@ -244,9 +247,18 @@ func (n *Node) EnrollmentKey(now time.Time) (EnrollmentKey, error) {
 }
 
 // CompleteEnrollment records the issued certificate and consumes the key.
-func (n *Node) CompleteEnrollment(cert CertInfo, now time.Time) error {
-	if _, err := n.EnrollmentKey(now); err != nil {
-		return err
+//
+// The exchange must have used the key and URL still stored: a token rotated
+// or a URL changed while it was in flight aborts it. The TTL is checked when
+// the attempt starts (EnrollmentKey), not here, so an exchange that started
+// in time does not leave the node half-enrolled.
+func (n *Node) CompleteEnrollment(key EnrollmentKey, url NodeURL, cert CertInfo, now time.Time) error {
+	if n.enrollment != EnrollmentPending || n.key == nil {
+		return ErrNodeNotPending
+	}
+
+	if !hmac.Equal(n.key.k[:], key.k[:]) || n.url != url {
+		return ErrEnrollmentSuperseded
 	}
 
 	if cert.IsZero() {
