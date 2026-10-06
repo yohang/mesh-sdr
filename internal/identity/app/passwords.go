@@ -24,6 +24,7 @@ type Passwords struct {
 	policies  Policies
 	lifetimes SessionPolicies
 	notifier  Notifier
+	revoked   RevocationPublisher
 	logger    *slog.Logger
 }
 
@@ -43,14 +44,16 @@ type PasswordsDeps struct {
 	// Notifier tells the account's address about the change (SR-04);
 	// optional.
 	Notifier Notifier
-	Logger   *slog.Logger
+	// Revocations tells nodes that the user's sessions ended; optional.
+	Revocations RevocationPublisher
+	Logger      *slog.Logger
 }
 
 // NewPasswords returns the service.
 func NewPasswords(d PasswordsDeps) *Passwords {
 	return &Passwords{
 		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs, now: d.Now,
-		policies: d.Policies, lifetimes: d.SessionPolicies, notifier: d.Notifier, logger: d.Logger,
+		policies: d.Policies, lifetimes: d.SessionPolicies, notifier: d.Notifier, revoked: d.Revocations, logger: d.Logger,
 	}
 }
 
@@ -148,6 +151,10 @@ func (s *Passwords) Change(ctx context.Context, in ChangePasswordInput) (ChangeP
 
 	s.logger.InfoContext(ctx, "password changed", slog.String("user_id", uid.String()), slog.Bool("forced", res.Forced),
 		slog.Int("revoked_sessions", res.RevokedSessions))
+
+	if s.revoked != nil {
+		s.revoked.PublishRevocation(ctx, Revocation{Users: []domain.UserID{uid}})
+	}
 
 	s.notify(ctx, res.email)
 

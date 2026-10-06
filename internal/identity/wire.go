@@ -69,6 +69,9 @@ type Deps struct {
 	Devices app.DeviceAccess
 	// Binder checks media connection ids (GRID-011); optional.
 	Binder app.ConnectionBinder
+	// Revocations tells nodes about revoked sessions and users
+	// (ctl.revocations); nil publishes nothing.
+	Revocations app.RevocationPublisher
 }
 
 // noDevices is the device access without a grid.
@@ -211,7 +214,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	changer := app.NewPasswords(app.PasswordsDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
 		Policies: passwords, SessionPolicies: lifetimes,
-		Notifier: notifier, Logger: component(d.Logger, "identity.app.passwords"),
+		Notifier: notifier, Revocations: d.Revocations, Logger: component(d.Logger, "identity.app.passwords"),
 	})
 
 	setup := app.NewSetup(app.SetupDeps{
@@ -223,7 +226,8 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	accounts := app.NewAccounts(app.AccountsDeps{
 		Hasher: r.hasher, Policies: passwords,
 		Users: r.users, Sessions: r.sessions, Invitations: r.invitations, Audit: r.audit, Tx: d.DB, Now: d.Now, Passwords: changer,
-		Logger: component(d.Logger, "identity.app.accounts"),
+		Revocations: d.Revocations,
+		Logger:      component(d.Logger, "identity.app.accounts"),
 	})
 
 	profile := app.NewProfile(app.ProfileDeps{
@@ -243,8 +247,8 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Now: d.Now, Settings: values, Policies: passwords, Notifier: notifier, Links: app.NewLinks(d.Config.Hub.URL),
 		Requests: memory.NewIPLimiter(resetIPEvery, resetIPBurst, memory.DefaultCapacity),
 		Accounts: memory.NewKeyLimiter(resetIPEvery, resetIPBurst, memory.DefaultCapacity),
-		Confirms: memory.NewIPLimiter(inviteIPEvery, inviteIPBurst, memory.DefaultCapacity),
-		Logger:   component(d.Logger, "identity.app.resets"),
+		Confirms: memory.NewIPLimiter(inviteIPEvery, inviteIPBurst, memory.DefaultCapacity), Revocations: d.Revocations,
+		Logger: component(d.Logger, "identity.app.resets"),
 	})
 
 	auditView := app.NewAuditView(r.audit, r.users)
