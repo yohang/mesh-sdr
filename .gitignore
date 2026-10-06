@@ -27,3 +27,6 @@
 
 # Backlog import map (local only)
 /.handoff/
+
+# Claude Code agent worktrees
+/.claude/worktrees/
