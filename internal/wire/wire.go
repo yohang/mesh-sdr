@@ -238,7 +238,8 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	adminGate := &roleGate{role: identitydomain.RoleAdmin}
 	shellModule := shell.Wire(shell.Deps{
-		Settings: settingsModule.Store, AdminGate: adminGate, Images: stationImages{b: images}, User: userOf, Logger: logger,
+		Settings: settingsModule.Store, AdminGate: adminGate, User: userOf, Logger: logger,
+		Images: stationImages{b: images, logger: component(logger, "shell.infra.station_images")},
 	})
 
 	ideps := identityDeps(cfg, logger, adapter)
