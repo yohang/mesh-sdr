@@ -1,6 +1,6 @@
 # ADR 0004: WebSocket library and rx.v1 framing
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Deciders:** project owner
 - **Spike:** SPK-07 (#7). Unblocks GRID-008 (#16, control channel) and RX-002 (#101, receiver WS connect).
@@ -37,7 +37,8 @@ This spike delivers:
 1. a library comparison, backed by the docs and a prototype for each candidate;
 2. a codec package for the protocol that does not depend on any WebSocket
    library. It lives at `internal/protocol/rxv1/` and is meant to be kept;
-3. a throwaway prototype in a separate module, `spikes/spk-07-ws/`. It
+3. a throwaway prototype in a separate module, `spikes/spk-07-ws/`, kept
+   only on branch `spike/spk-07-websocket` (not merged). It
    implements subprotocol negotiation and the §6.8 send queue, and was
    measured against a deliberately slow client. The full numbers are in
    `spikes/spk-07-ws/README.md`.
@@ -151,7 +152,7 @@ The package is pure: no I/O, no goroutines, no logging, stdlib only.
   connection. It can be revisited when `encoding/json/v2` leaves
   `GOEXPERIMENT` (it is case-sensitive and rejects duplicate keys natively).
 
-## Recommendation (for the owner to decide)
+## Recommendation (from the spike)
 
 **Adopt `github.com/coder/websocket` for all three channels**, together with
 the following design:
@@ -182,7 +183,7 @@ Why coder over gorilla:
 The measured throughput difference is within noise at our rates. Gorilla
 remains a viable fallback: the adapter in the spike is about 120 lines.
 
-## Open questions for the owner
+## Open questions raised by the spike (answered in Decision)
 
 1. **Library:** confirm coder/websocket, or prefer gorilla for its longer track record?
 2. **"Audio backlog above cap for > 10 s"** (§6.8) cannot happen literally: drop-oldest keeps the backlog at or below the cap. The spike implements "overflow drops with no drop-free gap of at least 1 s for longer than 10 s". Accept this interpretation, or specify another one (for example drop ratio over 10 s)?
@@ -201,6 +202,37 @@ remains a viable fallback: the adapter in the spike is about 120 lines.
 8. **"≤ 64 KiB per binary frame":** does that include the 24-byte header? (The codec assumes it does.)
 9. **Placement:** `internal/protocol/rxv1` (outside any bounded context, like `internal/shared`), and where the send queue should live: `internal/protocol/rxv1/sendq`, or a module's `infra`?
 10. **Spec issues below:** the issue rules say spec changes go into separate issues. Should they be opened (this spike does not touch GitHub)?
+
+## Decision
+
+The project owner decided as follows (2026-10-06).
+
+1. **Library:** `github.com/coder/websocket` for the hub events WS, the node media WS and the `rx-ctl.v1` control channel, server and client side.
+2. **Transport buffering:** the node caps send buffering on `/ws` sockets with `TCP_NOTSENT_LOWAT`, configurable, defaulting to about 16 KiB. Clients treat an abnormal close (1006/EOF) like 4413: reconnect with a lower FFT rate.
+3. **Protocol choices** (the spike's picks, accepted as is):
+   - **Audio slow-consumer rule:** overflow drops that continue with no drop-free pause of at least 1 s for more than 10 s → close 4413.
+   - **Send order:** JSON control → audio → `demod.meter` → FFT.
+   - **FFT `seq` under fps halving:** renumbered per connection, so decimation creates no gaps.
+   - **Envelope:**
+     - `id` is 1–64 Unicode code points, any characters;
+     - unknown top-level keys are ignored;
+     - duplicate keys are rejected;
+     - key names are case-sensitive;
+     - a non-integer `v` → `invalid_envelope`, while an integer other than 1 → `unsupported_version`.
+   - **Reserved frame types, codecs and flag bits:** the receiver drops the frame silently and logs at debug level. `ParseFrame` stays structural; receivers call `Validate`.
+   - **Frame size:** the 64 KiB binary frame limit includes the 24-byte header.
+   - **Codec placement:** the codec lives in `internal/protocol/rxv1` as shared code used by every module that speaks `rx.v1`/`rx-ctl.v1`.
+4. **Spec problems:** recorded in the "Spec issues" section of this ADR only. No separate issues are opened for now.
+
+Rules that follow from the decision, for the implementation:
+
+- coder's "expired context closes the connection" behaviour applies:
+  - the 4408 handshake timeout uses a timer that calls `Close(4408)`;
+  - the writer goroutine uses the session context, and a slow-consumer watcher closes with 4413.
+- Check for the subprotocol before `Accept` and answer 426 when it is absent.
+- Set `SetReadLimit` explicitly: 16 KiB for `rx.v1` inbound, 64 KiB for `rx-ctl.v1` and for binary frames on clients.
+- Compression is disabled on the media and control channels.
+- The §6.8 send queue is project code, independent of the library. The spike's `sendq` is the model. Where it lives will be settled by the first ticket that needs it (RX-002 / GRID-008).
 
 ## Spec issues
 
@@ -243,18 +275,19 @@ Negative / costs:
   This is acceptable for control traffic, and can be revisited with
   `encoding/json/v2`.
 
-Follow-ups if accepted:
+Follow-ups:
 
 - Move `sendq` into production code with its tests.
 - Write the WS adapter for chi routes (`/api/ws`, node `/ws`, `/control`) with the 426 pre-check and the Origin check.
 - Expose `queue_depth`, drops and 4413 counts in `node.heartbeat` metrics.
-- Open the spec issues listed above.
+- Make the `TCP_NOTSENT_LOWAT` value configurable on the node (default ≈ 16 KiB; a `node.toml` key with its `MESHSDR_` env override, documented in the sample configs under `.infra/`), and validate it on target hardware.
+- Spec issues stay recorded in this ADR; amend the spec when the relevant tickets touch it.
 
 ## References
 
 - TECHNICAL_SPEC §4.3–4.5 (mTLS, control channel, heartbeat), §5.8 (access tokens), §5.16 (media WS connect), §6.1–6.9 (Protocol v1).
 - Issues #7 (SPK-07), #16 (GRID-008), #101 (RX-002).
-- Spike code and full measurements: `spikes/spk-07-ws/README.md`.
+- Spike code and full measurements: `spikes/spk-07-ws/README.md` on branch `spike/spk-07-websocket` (throwaway, not merged).
 - Codec: `internal/protocol/rxv1/`.
 - coder/websocket docs (`AcceptOptions`, `CompressionMode`, `Conn.Write`/`Read`/`Close`/`CloseRead`, `SetReadLimit`): https://github.com/coder/websocket, https://pkg.go.dev/github.com/coder/websocket
 - gorilla/websocket docs (`Upgrader`, concurrency contract, `WriteControl`, `SetReadLimit`, `FormatCloseMessage`): https://github.com/gorilla/websocket, https://pkg.go.dev/github.com/gorilla/websocket
