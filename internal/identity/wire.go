@@ -116,6 +116,7 @@ func UserAdmin(d Deps) *app.UserAdmin {
 
 // Module is the wired identity module of the hub.
 type Module struct {
+	Profile  *app.Profile
 	Accounts *app.Accounts
 	Notifier app.Notifier
 	Auth     *app.Auth
@@ -177,7 +178,19 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		HubURL: d.Config.Hub.URL, Logger: component(d.Logger, "identity.app.setup"),
 	})
 
-	h, err := identityhttp.New(auth, changer, setup, pages, identityhttp.Config{
+	accounts := app.NewAccounts(app.AccountsDeps{
+		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Now: d.Now,
+		Logger: component(d.Logger, "identity.app.accounts"),
+	})
+
+	profile := app.NewProfile(app.ProfileDeps{
+		Users: r.users, Tokens: r.emailChanges, Audit: r.audit, Tx: d.DB, IDs: d.IDs, Now: d.Now, Passwords: changer,
+		Notifier: notifier, Links: app.NewLinks(d.Config.Hub.URL), Logger: component(d.Logger, "identity.app.profile"),
+	})
+
+	h, err := identityhttp.New(identityhttp.Services{
+		Auth: auth, Passwords: changer, Setup: setup, Profile: profile, Accounts: accounts,
+	}, pages, identityhttp.Config{
 		HubURL:           d.Config.Hub.URL,
 		TrustedProxies:   config.Prefixes(d.Config.HTTP.TrustedProxies),
 		AdminNetworks:    config.Prefixes(d.Config.Admin.AllowedNetworks),
@@ -187,12 +200,8 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		return nil, fmt.Errorf("identity http: %w", err)
 	}
 
-	accounts := app.NewAccounts(app.AccountsDeps{
-		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Now: d.Now,
-		Logger: component(d.Logger, "identity.app.accounts"),
-	})
-
 	return &Module{
+		Profile:     profile,
 		Accounts:    accounts,
 		Notifier:    notifier,
 		Auth:        auth,

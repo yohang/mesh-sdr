@@ -202,6 +202,10 @@ func (s *Accounts) record(ctx context.Context, by Actor, action string, target d
 
 // wrap keeps domain errors as they are and adds context to the others.
 func wrap(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+
 	var de *shared.Error
 	if errors.As(err, &de) {
 		return err

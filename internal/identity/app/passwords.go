@@ -119,44 +119,10 @@ func (s *Passwords) Change(ctx context.Context, in ChangePasswordInput) (ChangeP
 	}
 
 	uid := in.Session.UserID()
-	now := s.now()
 
-	// Reserve the attempt before verifying the current password, as login
-	// does: parallel guesses cannot exceed the throttle thresholds.
-	var current domain.PasswordHash
-
-	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		u, err := s.users.ByID(ctx, uid)
-		if err != nil {
-			return err
-		}
-
-		if blocked, until := u.BlockedAt(now); blocked {
-			return domain.NewRateLimitError(until.Sub(now))
-		}
-
-		if !u.CanPasswordLogin() {
-			return domain.ErrInvalidCurrentPassword
-		}
-
-		current = u.PasswordHash()
-		u.RecordLoginFailure(now, s.lifetimes.ThrottlePolicy())
-
-		return s.users.Save(ctx, u)
-	})
+	current, err := s.verifyCurrent(ctx, uid, in.Current, in.Meta, domain.ActionPasswordChange)
 	if err != nil {
-		return ChangePasswordResult{}, s.wrap(err)
-	}
-
-	ok, err := s.hasher.Verify(ctx, normalizePassword(in.Current), current)
-	if err != nil {
-		return ChangePasswordResult{}, fmt.Errorf("verify current password: %w", err)
-	}
-
-	if !ok {
-		s.record(ctx, in.Meta, uid, domain.ResultDenied, map[string]string{"reason": "invalid_current_password"})
-
-		return ChangePasswordResult{}, domain.ErrInvalidCurrentPassword
+		return ChangePasswordResult{}, err
 	}
 
 	same, err := s.hasher.Verify(ctx, pw.Reveal(), current)
@@ -287,6 +253,70 @@ func (s *Passwords) apply(ctx context.Context, in ChangePasswordInput, verified,
 	return res, err
 }
 
+// verifyCurrent checks the current password of a user and returns the
+// verified hash. The attempt is reserved first, as login does: it counts as
+// a failed login until the caller clears it, so parallel guesses cannot
+// exceed the throttle thresholds (SR-05). A wrong password is audited under
+// action.
+func (s *Passwords) verifyCurrent(ctx context.Context, uid domain.UserID, password string, meta RequestMeta, action string) (domain.PasswordHash, error) {
+	if len(password) > MaxPasswordBytes {
+		return domain.PasswordHash{}, domain.ErrInvalidCurrentPassword
+	}
+
+	now := s.now()
+
+	var current domain.PasswordHash
+
+	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		u, err := s.users.ByID(ctx, uid)
+		if err != nil {
+			return err
+		}
+
+		if blocked, until := u.BlockedAt(now); blocked {
+			return domain.NewRateLimitError(until.Sub(now))
+		}
+
+		if !u.CanPasswordLogin() {
+			return domain.ErrInvalidCurrentPassword
+		}
+
+		current = u.PasswordHash()
+		u.RecordLoginFailure(now, s.lifetimes.ThrottlePolicy())
+
+		return s.users.Save(ctx, u)
+	})
+	if err != nil {
+		return domain.PasswordHash{}, s.wrap(err)
+	}
+
+	ok, err := s.hasher.Verify(ctx, normalizePassword(password), current)
+	if err != nil {
+		return domain.PasswordHash{}, fmt.Errorf("verify current password: %w", err)
+	}
+
+	if !ok {
+		s.record(ctx, meta, uid, action, domain.ResultDenied, map[string]string{"reason": "invalid_current_password"})
+
+		return domain.PasswordHash{}, domain.ErrInvalidCurrentPassword
+	}
+
+	return current, nil
+}
+
+// CheckCurrent checks the current password of a user before a sensitive
+// change (e-mail change, account deletion: SR-04), with the throttling of
+// login. action is audited when the password is wrong.
+func (s *Passwords) CheckCurrent(ctx context.Context, uid domain.UserID, password string, meta RequestMeta, action string) error {
+	if _, err := s.verifyCurrent(ctx, uid, password, meta, action); err != nil {
+		return err
+	}
+
+	s.clearFailures(ctx, uid)
+
+	return nil
+}
+
 // clearFailures resets the throttling counted by the reservation once the
 // current password is known to be right. A failure is only logged: the next
 // successful check resets it.
@@ -306,14 +336,14 @@ func (s *Passwords) clearFailures(ctx context.Context, id domain.UserID) {
 	}
 }
 
-func (s *Passwords) record(ctx context.Context, meta RequestMeta, id domain.UserID, result domain.AuditResult, after map[string]string) {
-	e, err := domain.NewAuditEntry(s.now(), domain.UserActor(id, meta.IP), domain.ActionPasswordChange, result)
+func (s *Passwords) record(ctx context.Context, meta RequestMeta, id domain.UserID, action string, result domain.AuditResult, after map[string]string) {
+	e, err := domain.NewAuditEntry(s.now(), domain.UserActor(id, meta.IP), action, result)
 	if err == nil {
 		err = s.audit.Append(ctx, e.WithTarget("user", id.String()).WithRequestID(meta.RequestID).WithAfter(after))
 	}
 
 	if err != nil {
-		s.logger.WarnContext(ctx, "audit entry not written", slog.String("action", domain.ActionPasswordChange), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "audit entry not written", slog.String("action", action), slog.Any("error", err))
 	}
 }
 

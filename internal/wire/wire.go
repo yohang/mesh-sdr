@@ -27,12 +27,14 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/mail"
 	"github.com/yohang/mesh-sdr/internal/settings"
 	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shell"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 func component(logger *slog.Logger, name string) *slog.Logger {
@@ -193,6 +195,18 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	auditLog := identitysqlite.NewAuditLog(adapter)
 
+	// The top bar shows the signed-in user: the identity module, built
+	// after the shell (it renders its pages with the shell), fills it in.
+	var identityHTTP *identityhttp.Module
+
+	userOf := func(r *http.Request) *layout.User {
+		if identityHTTP == nil {
+			return nil
+		}
+
+		return identityHTTP.ShellUser(r)
+	}
+
 	settingsModule, err := settings.Wire(ctx, settings.Deps{
 		Config: cfg, Origins: origins, DB: adapter, Now: now, Logger: logger,
 		Audit: settingsAuditor{log: auditLog},
@@ -202,7 +216,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	}
 
 	viewer := &adminViewer{}
-	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, Viewer: viewer, Logger: logger})
+	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, Viewer: viewer, User: userOf, Logger: logger})
 
 	ideps := identityDeps(cfg, logger, adapter)
 	ideps.Settings = settingsModule.Store
@@ -221,6 +235,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	}
 
 	viewer.authz = idm.HTTP
+	identityHTTP = idm.HTTP
 
 	scheduler, retention, err := jobs(adapter, idm, settingsModule.Store, auditLog, logger)
 	if err != nil {
@@ -238,7 +253,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		SettingsHandlers:  api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
 		RetentionHandlers: api.NewRetentionHandlers(retention, settingsActor),
 		BrandingHandlers:  api.NewBrandingHandlers(images, settingsActor),
-		AccountHandlers:   api.NewAccountHandlers(idm.HTTP, idm.Accounts),
+		AccountHandlers:   api.NewAccountHandlers(idm.HTTP, idm.Accounts, idm.Profile),
 	}
 
 	router := httpserver.NewRouter(

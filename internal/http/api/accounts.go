@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
@@ -21,16 +23,88 @@ type Accounts interface {
 	RevokeUserSessions(ctx context.Context, by app.Actor, id domain.UserID) (int, error)
 }
 
-// AccountHandlers serve /roles and /users/….
+// Profile is the account page service used by the /me endpoints.
+type Profile interface {
+	Me(ctx context.Context, by app.Actor) (*domain.User, error)
+	SetDisplayName(ctx context.Context, by app.Actor, name string) (*domain.User, error)
+	ChangeEmail(ctx context.Context, by app.Actor, email, currentPassword string) (app.EmailChangeResult, error)
+}
+
+// AccountHandlers serve /me, /roles and /users/….
 type AccountHandlers struct {
 	sessions Sessions
 	accounts Accounts
+	profile  Profile
 }
 
 // NewAccountHandlers returns the handlers.
-func NewAccountHandlers(s Sessions, a Accounts) AccountHandlers {
-	return AccountHandlers{sessions: s, accounts: a}
+func NewAccountHandlers(s Sessions, a Accounts, p Profile) AccountHandlers {
+	return AccountHandlers{sessions: s, accounts: a, profile: p}
 }
+
+func me(u *domain.User) Me {
+	out := Me{
+		Id: u.ID().String(), Username: u.Username().String(), EmailVerified: !u.EmailVerifiedAt().IsZero(),
+		Roles: strings.Split(app.GrantNames(u.Grants()), ","), MustChangePassword: u.MustChangePassword(),
+		Identities: []string{},
+	}
+
+	if d := u.DisplayName(); !d.IsZero() {
+		s := d.String()
+		out.DisplayName = &s
+	}
+
+	if e := u.Email(); !e.IsZero() {
+		s := e.String()
+		out.Email = &s
+	}
+
+	for _, i := range u.Identities() {
+		out.Identities = append(out.Identities, i.Provider().String())
+	}
+
+	return out
+}
+
+// GetMe implements StrictServerInterface.
+func (h AccountHandlers) GetMe(ctx context.Context, _ GetMeRequestObject) (GetMeResponseObject, error) {
+	u, err := h.profile.Me(ctx, h.sessions.Actor(ctx))
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{me(u)}, nil
+}
+
+// UpdateMe implements StrictServerInterface.
+func (h AccountHandlers) UpdateMe(ctx context.Context, req UpdateMeRequestObject) (UpdateMeResponseObject, error) {
+	u, err := h.profile.SetDisplayName(ctx, h.sessions.Actor(ctx), req.Body.DisplayName)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{me(u)}, nil
+}
+
+// ChangeMyEmail implements StrictServerInterface.
+func (h AccountHandlers) ChangeMyEmail(ctx context.Context, req ChangeMyEmailRequestObject) (ChangeMyEmailResponseObject, error) {
+	res, err := h.profile.ChangeEmail(ctx, h.sessions.Actor(ctx), req.Body.Email, req.Body.CurrentPassword)
+
+	var rl *domain.RateLimitError
+	if errors.As(err, &rl) {
+		return rateLimited{err: rl}, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{EmailChangeResult{Pending: res.Pending}}, nil
+}
+
+func (j jsonOK) VisitGetMeResponse(w http.ResponseWriter) error         { return j.write(w) }
+func (j jsonOK) VisitUpdateMeResponse(w http.ResponseWriter) error      { return j.write(w) }
+func (j jsonOK) VisitChangeMyEmailResponse(w http.ResponseWriter) error { return j.write(w) }
 
 // parseUserID maps an invalid id to user_not_found: ids are opaque.
 func parseUserID(s string) (domain.UserID, error) {

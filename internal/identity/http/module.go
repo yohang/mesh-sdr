@@ -29,6 +29,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 //go:generate go tool templ generate
@@ -64,6 +65,32 @@ type Bootstrapper interface {
 	MinLength(ctx context.Context) int
 }
 
+// ProfileService runs the account page (ACC-004).
+type ProfileService interface {
+	Me(ctx context.Context, by app.Actor) (*domain.User, error)
+	MailEnabled() bool
+	SetDisplayName(ctx context.Context, by app.Actor, name string) (*domain.User, error)
+	ChangeEmail(ctx context.Context, by app.Actor, email, currentPassword string) (app.EmailChangeResult, error)
+	CheckEmailToken(ctx context.Context, token string) error
+	ConfirmEmail(ctx context.Context, token string, meta app.RequestMeta) error
+}
+
+// AccountService runs session lists and the account administration.
+type AccountService interface {
+	OwnSessions(ctx context.Context, by app.Actor) ([]app.SessionView, error)
+	RevokeOwnSession(ctx context.Context, by app.Actor, ref string) error
+	RevokeOtherSessions(ctx context.Context, by app.Actor) (int, error)
+}
+
+// Services are the application services behind the identity pages.
+type Services struct {
+	Auth      Authenticator
+	Passwords PasswordChanger
+	Setup     Bootstrapper
+	Profile   ProfileService
+	Accounts  AccountService
+}
+
 // Pages renders HTML pages in the app shell.
 type Pages interface {
 	// Page writes a page; fragment, when not nil, is written alone for htmx
@@ -93,19 +120,23 @@ type Module struct {
 	auth      Authenticator
 	passwords PasswordChanger
 	setup     Bootstrapper
-	pages     Pages
-	logger    *slog.Logger
-	resolver  *clientip.Resolver
-	cop       *http.CrossOriginProtection
-	admin     []netip.Prefix
-	secure    bool
-	preKey    []byte
-	routes    chi.Routes
-	upload    func(r *http.Request) bool
+	profile   ProfileService
+	accounts  AccountService
+	// adminLinks are the admin pages of the user menu.
+	adminLinks []layout.Link
+	pages      Pages
+	logger     *slog.Logger
+	resolver   *clientip.Resolver
+	cop        *http.CrossOriginProtection
+	admin      []netip.Prefix
+	secure     bool
+	preKey     []byte
+	routes     chi.Routes
+	upload     func(r *http.Request) bool
 }
 
 // New returns the module.
-func New(auth Authenticator, passwords PasswordChanger, setup Bootstrapper, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
+func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
 	u, err := url.Parse(cfg.HubURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("hub.url %q: not an absolute URL", cfg.HubURL)
@@ -123,9 +154,11 @@ func New(auth Authenticator, passwords PasswordChanger, setup Bootstrapper, page
 	}
 
 	return &Module{
-		auth:      auth,
-		passwords: passwords,
-		setup:     setup,
+		auth:      svc.Auth,
+		passwords: svc.Passwords,
+		setup:     svc.Setup,
+		profile:   svc.Profile,
+		accounts:  svc.Accounts,
 		pages:     pages,
 		logger:    logger,
 		resolver:  clientip.NewResolver(cfg.TrustedProxies),
@@ -158,6 +191,19 @@ func (m *Module) Routes(r chi.Router) {
 	r.Get(app.SetupPath, m.setupLanding)
 	r.Head(app.SetupPath, m.setupLanding)
 	r.Post(app.SetupPath, m.setupAction)
+
+	listener := r.With(m.Require(domain.RoleListener))
+	listener.Get(AccountPath, m.accountPage)
+	listener.Head(AccountPath, m.accountPage)
+	listener.Post(AccountPath+"/profile", m.profileAction)
+	listener.Post(AccountPath+"/email", m.emailAction)
+	listener.Post(AccountPath+"/sessions/revoke-others", m.revokeOthersAction)
+	listener.Post(AccountPath+"/sessions/{ref}/revoke", m.revokeSessionAction)
+
+	r.Get(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
+	r.Head(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
+	r.Get(AccountPath+"/email/verify", m.emailVerifyLanding)
+	r.Post(AccountPath+"/email/verify", m.emailVerifyAction)
 
 	r.With(m.Require(domain.RoleListener)).Get(PasswordChangePath, m.passwordPage)
 	r.With(m.Require(domain.RoleListener)).Head(PasswordChangePath, m.passwordPage)

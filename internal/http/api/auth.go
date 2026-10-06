@@ -150,6 +150,8 @@ func (r rateLimited) VisitLoginResponse(w http.ResponseWriter) error { return r.
 
 func (r rateLimited) VisitChangePasswordResponse(w http.ResponseWriter) error { return r.write(w) }
 
+func (r rateLimited) VisitChangeMyEmailResponse(w http.ResponseWriter) error { return r.write(w) }
+
 func (r rateLimited) write(w http.ResponseWriter) error {
 	w.Header().Set("Retry-After", strconv.Itoa(int(r.err.RetryAfter().Seconds())))
 	problem.Write(w, problem.FromError(r.err))

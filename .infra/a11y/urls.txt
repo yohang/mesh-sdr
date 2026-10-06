@@ -14,3 +14,5 @@
 /admin/retention 200 signed-in
 /admin/system 200 signed-in
 /admin/devices 200 signed-in
+/account 200 signed-in
+/account/email/verify/not-a-valid-token 404

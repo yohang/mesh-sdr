@@ -27,6 +27,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
+	"github.com/yohang/mesh-sdr/internal/mail"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -70,6 +71,7 @@ func (a adminPage) Routes(r chi.Router) {
 type hub struct {
 	t       *testing.T
 	logs    *syncBuffer
+	mail    *outbox
 	handler http.Handler
 	admin   *app.UserAdmin
 	setup   *app.Setup
@@ -90,7 +92,8 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	d := identity.Deps{Config: cfg, Logger: logger, DB: dbtest.NewSQLite(t), IDs: shared.NewUUIDv7Generator(), Now: time.Now}
+	mails := &outbox{}
+	d := identity.Deps{Mail: mails, Config: cfg, Logger: logger, DB: dbtest.NewSQLite(t), IDs: shared.NewUUIDv7Generator(), Now: time.Now}
 
 	m, err := identity.Wire(ctx, d, pages{})
 	if err != nil {
@@ -100,16 +103,52 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 	srv := api.Server{
 		HealthHandlers:  api.NewHealthHandlers(d.DB, logger),
 		AuthHandlers:    api.NewAuthHandlers(m.HTTP),
-		AccountHandlers: api.NewAccountHandlers(m.HTTP, m.Accounts),
+		AccountHandlers: api.NewAccountHandlers(m.HTTP, m.Accounts, m.Profile),
 	}
 
 	return &hub{
 		t:       t,
 		logs:    logs,
+		mail:    mails,
 		handler: httpserver.NewRouter(logger, api.NewHandler(srv, m.HTTP, logger), m.HTTP, adminPage{m.HTTP}),
 		admin:   identity.UserAdmin(d),
 		setup:   m.Setup,
 	}
+}
+
+// outbox records the queued e-mails.
+type outbox struct {
+	mu   sync.Mutex
+	sent []mail.Message
+}
+
+func (o *outbox) Enqueue(m mail.Message) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	o.sent = append(o.sent, m)
+
+	return nil
+}
+
+// last returns the last message sent to an address, and the path of the
+// first hub link in it.
+func (o *outbox) last(to string) (mail.Message, string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	for i := len(o.sent) - 1; i >= 0; i-- {
+		if m := o.sent[i]; m.To == to {
+			link := ""
+			if _, after, ok := strings.Cut(m.Body, hubURL); ok {
+				link, _, _ = strings.Cut(after, "\n")
+			}
+
+			return m, link
+		}
+	}
+
+	return mail.Message{}, ""
 }
 
 // syncBuffer is a log sink safe for concurrent writes.
@@ -632,7 +671,7 @@ func TestAdminRequiresRoleAndNetwork(t *testing.T) {
 }
 
 func TestAuthorize(t *testing.T) {
-	m, err := identityhttp.New(nil, nil, nil, pages{}, identityhttp.Config{
+	m, err := identityhttp.New(identityhttp.Services{}, pages{}, identityhttp.Config{
 		HubURL: hubURL, AdminNetworks: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 	}, slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -649,13 +688,13 @@ func TestAuthorize(t *testing.T) {
 		t.Errorf("listener operation, anonymous caller: %v", err)
 	}
 
-	if _, err := identityhttp.New(nil, nil, nil, pages{}, identityhttp.Config{HubURL: "not a url"}, slog.New(slog.DiscardHandler)); err == nil {
+	if _, err := identityhttp.New(identityhttp.Services{}, pages{}, identityhttp.Config{HubURL: "not a url"}, slog.New(slog.DiscardHandler)); err == nil {
 		t.Error("invalid hub.url accepted")
 	}
 
 	var logs bytes.Buffer
 
-	if _, err := identityhttp.New(nil, nil, nil, pages{}, identityhttp.Config{HubURL: "http://lan.example"}, slog.New(slog.NewTextHandler(&logs, nil))); err != nil {
+	if _, err := identityhttp.New(identityhttp.Services{}, pages{}, identityhttp.Config{HubURL: "http://lan.example"}, slog.New(slog.NewTextHandler(&logs, nil))); err != nil {
 		t.Fatal(err)
 	}
 

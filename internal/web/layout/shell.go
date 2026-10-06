@@ -51,6 +51,9 @@ func (t Theme) ThemeColor() string {
 
 // Shell is the per-request data of the app shell, built by the shell module.
 type Shell struct {
+	// User is the signed-in user of the request; nil for an anonymous
+	// visitor, who gets a discreet "Sign in" link (ACC-001).
+	User *User
 	// SiteName is shown in the top bar and the document title.
 	SiteName string
 	// Theme is the admin-chosen theme mode. A change applies on the next
@@ -90,4 +93,11 @@ func (s Shell) DocumentTitle(p Page) string {
 	}
 
 	return p.Title + " · " + s.SiteName
+}
+
+// User is the signed-in user shown in the top bar, with the links of the
+// user menu (account, admin pages).
+type User struct {
+	Name  string
+	Links []Link
 }

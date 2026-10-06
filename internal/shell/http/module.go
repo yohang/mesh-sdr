@@ -30,11 +30,14 @@ type Viewer interface {
 type ShellSource struct {
 	lookAndFeel *app.LookAndFeel
 	viewer      Viewer
+	user        func(r *http.Request) *layout.User
 }
 
-// NewShellSource returns a ShellSource. viewer may be nil (no navigation).
-func NewShellSource(lookAndFeel *app.LookAndFeel, viewer Viewer) *ShellSource {
-	return &ShellSource{lookAndFeel: lookAndFeel, viewer: viewer}
+// NewShellSource returns a ShellSource. viewer may be nil (no navigation);
+// user returns the signed-in user of a request for the top bar (nil:
+// anonymous) and may be nil.
+func NewShellSource(lookAndFeel *app.LookAndFeel, viewer Viewer, user func(r *http.Request) *layout.User) *ShellSource {
+	return &ShellSource{lookAndFeel: lookAndFeel, viewer: viewer, user: user}
 }
 
 // Shell implements render.ShellSource.
@@ -55,7 +58,13 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 		nav = append(nav, layout.Link{Label: "Admin", Href: "/admin", Section: layout.SectionAdmin})
 	}
 
+	var user *layout.User
+	if s.user != nil {
+		user = s.user(r)
+	}
+
 	return layout.Shell{
+		User:        user,
 		SiteName:    v.SiteName,
 		Theme:       theme,
 		FooterLinks: []layout.Link{{Label: "Usage policy", Href: v.PolicyURL}},

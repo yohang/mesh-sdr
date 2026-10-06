@@ -1,0 +1,166 @@
+package http
+
+import (
+	"time"
+
+	"github.com/yohang/mesh-sdr/internal/identity/app"
+)
+
+func when(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") }
+
+// accountPage is the account page (ACC-004, FEATURE_SPEC §10.3): one
+// section per concern, each with its own form; a form re-renders only its
+// section (htmx), or the page without htmx.
+templ accountPage(v accountView) {
+	<section class="mx-auto flex w-full max-w-2xl flex-col gap-8 p-4" aria-labelledby="account-title">
+		<h1 id="account-title" class="text-2xl font-bold">Account</h1>
+		@profileSection(v)
+		@emailSection(v)
+		<section id="account-security" class="flex flex-col gap-2" aria-labelledby="account-security-title">
+			<h2 id="account-security-title" class="text-xl font-semibold">Security</h2>
+			<p><a href="/account/password">Change your password</a>. Your other sessions are signed out when you do.</p>
+		</section>
+		@sessionsSection(v)
+	</section>
+}
+
+templ noticeView(id string, n notice) {
+	if n.Text != "" {
+		if n.Error {
+			<p id={ id } class="font-semibold" role="alert">{ n.Text }</p>
+		} else {
+			<p id={ id } class="font-semibold" role="status">{ n.Text }</p>
+		}
+	}
+}
+
+templ profileSection(v accountView) {
+	<section id="account-profile" class="flex flex-col gap-3" aria-labelledby="account-profile-title">
+		<h2 id="account-profile-title" class="text-xl font-semibold">Profile</h2>
+		<p>Username: <strong>{ v.User.Username().String() }</strong></p>
+		<form class="flex flex-col gap-3" method="post" action="/account/profile" hx-post="/account/profile" hx-target="#account-profile" hx-swap="outerHTML">
+			@noticeView("account-profile-notice", v.Profile)
+			<label class="flex flex-col gap-1">
+				<span>Display name (optional)</span>
+				<input
+					class="rounded border px-2 py-1"
+					type="text"
+					name="display_name"
+					value={ v.User.DisplayName().String() }
+					autocomplete="nickname"
+					maxlength="64"
+					if v.Profile.Error {
+						aria-describedby="account-profile-notice"
+						aria-invalid="true"
+					}
+				/>
+			</label>
+			<button class="self-start rounded border px-3 py-1 font-semibold" type="submit">Save</button>
+		</form>
+	</section>
+}
+
+templ emailSection(v accountView) {
+	<section id="account-email" class="flex flex-col gap-3" aria-labelledby="account-email-title">
+		<h2 id="account-email-title" class="text-xl font-semibold">E-mail address</h2>
+		if v.User.Email().IsZero() {
+			<p>No e-mail address. Without one, you cannot reset a forgotten password yourself.</p>
+		} else if v.User.EmailVerifiedAt().IsZero() {
+			<p>Current address: <strong>{ v.User.Email().String() }</strong> (not confirmed)</p>
+		} else {
+			<p>Current address: <strong>{ v.User.Email().String() }</strong> (confirmed)</p>
+		}
+		<form class="flex flex-col gap-3" method="post" action="/account/email" hx-post="/account/email" hx-target="#account-email" hx-swap="outerHTML">
+			@noticeView("account-email-notice", v.Email)
+			<label class="flex flex-col gap-1">
+				<span>New address (empty to remove it)</span>
+				<input
+					class="rounded border px-2 py-1"
+					type="email"
+					name="email"
+					autocomplete="email"
+					if v.Email.Field == "email" {
+						aria-describedby="account-email-notice"
+						aria-invalid="true"
+					}
+				/>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span>Current password</span>
+				<input
+					class="rounded border px-2 py-1"
+					type="password"
+					name="current_password"
+					autocomplete="current-password"
+					required
+					if v.Email.Field == "current_password" {
+						aria-describedby="account-email-notice"
+						aria-invalid="true"
+					}
+				/>
+			</label>
+			if v.MailEnabled {
+				<p class="text-sm">We send a link to the new address; it applies once you open it.</p>
+			}
+			<button class="self-start rounded border px-3 py-1 font-semibold" type="submit">Change address</button>
+		</form>
+	</section>
+}
+
+templ sessionsSection(v accountView) {
+	<section id="account-sessions" class="flex flex-col gap-3" aria-labelledby="account-sessions-title">
+		<h2 id="account-sessions-title" class="text-xl font-semibold">Sessions</h2>
+		@noticeView("account-sessions-notice", v.SessionsMsg)
+		<ul class="flex flex-col gap-3">
+			for _, s := range v.Sessions {
+				@sessionItem(s)
+			}
+		</ul>
+		if len(v.Sessions) > 1 {
+			<form method="post" action="/account/sessions/revoke-others" hx-post="/account/sessions/revoke-others" hx-target="#account-sessions" hx-swap="outerHTML">
+				<button class="rounded border px-3 py-1 font-semibold" type="submit">Sign out all other sessions</button>
+			</form>
+		}
+	</section>
+}
+
+templ sessionItem(s app.SessionView) {
+	<li class="flex flex-wrap items-center gap-x-4 gap-y-1 rounded border p-2">
+		<span class="font-medium">{ s.Browser } on { s.System }</span>
+		if s.Current {
+			<span class="text-sm font-semibold">(this session)</span>
+		}
+		<span class="text-sm">Last seen { when(s.LastSeenAt) }</span>
+		if s.IP != "" {
+			<span class="text-sm">from { s.IP }</span>
+		}
+		<form class="ml-auto" method="post" action={ templ.SafeURL("/account/sessions/" + s.Ref + "/revoke") } hx-post={ "/account/sessions/" + s.Ref + "/revoke" } hx-target="#account-sessions" hx-swap="outerHTML">
+			<button class="rounded border px-2 py-0.5 text-sm" type="submit" aria-label={ "Sign out the " + s.Browser + " session last seen " + when(s.LastSeenAt) }>Sign out</button>
+		</form>
+	</li>
+}
+
+// emailVerifyPage asks to confirm a new address (a GET never changes
+// state). The token moves into a hidden field (token-url.js).
+templ emailVerifyPage(token string) {
+	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="email-verify-title" data-replace-url="/account/email/verify">
+		<h1 id="email-verify-title" class="text-2xl font-bold">Confirm your e-mail address</h1>
+		<form class="flex flex-col gap-3" method="post" action="/account/email/verify">
+			<input type="hidden" name="token" value={ token }/>
+			<button class="rounded border px-3 py-1 font-semibold" type="submit">Confirm this address</button>
+		</form>
+	</section>
+}
+
+templ emailVerifyResult(ok bool, msg string) {
+	<section class="mx-auto flex w-full max-w-prose flex-col gap-4 p-4" aria-labelledby="email-verify-title">
+		<h1 id="email-verify-title" class="text-2xl font-bold">E-mail address</h1>
+		if ok {
+			<p role="status">{ msg }</p>
+		} else {
+			<p role="alert">{ msg }</p>
+		}
+		<p><a href="/account">Back to your account</a></p>
+	</section>
+}
+

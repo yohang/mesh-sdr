@@ -814,6 +814,74 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /me:
+    get:
+      operationId: getMe
+      x-meshsdr-access: listener
+      summary: The caller's account
+      tags: [account]
+      responses:
+        "200":
+          description: Account (no per-user preferences in v1)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateMe
+      x-meshsdr-access: listener
+      summary: Change the caller's display name
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeUpdate"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /me/email:
+    post:
+      operationId: changeMyEmail
+      x-meshsdr-access: listener
+      summary: Change the caller's e-mail address
+      description: |
+        Needs the current password (SR-04; a wrong one counts as a failed
+        login). With mail configured, a single-use link confirms the new
+        address and the change is pending until it is opened; otherwise
+        the address applies at once, unconfirmed. An empty address removes
+        it. The previous address is told.
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailChange"
+      responses:
+        "200":
+          description: Applied, or pending confirmation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailChangeResult"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     SessionRef:
@@ -840,6 +908,60 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    Me:
+      type: object
+      required: [id, username, email_verified, roles, identities, must_change_password]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: string
+        email_verified:
+          type: boolean
+        roles:
+          type: array
+          description: Grants, device scope after '@' ("operator@rtl-1"); "listener" when none.
+          items:
+            type: string
+        identities:
+          type: array
+          description: Login methods (provider ids, `local` in v1).
+          items:
+            type: string
+        must_change_password:
+          type: boolean
+    MeUpdate:
+      type: object
+      additionalProperties: false
+      required: [display_name]
+      properties:
+        display_name:
+          type: string
+          description: Empty removes it.
+          maxLength: 256
+    EmailChange:
+      type: object
+      additionalProperties: false
+      required: [email, current_password]
+      properties:
+        email:
+          type: string
+          description: New address; empty removes it.
+          maxLength: 254
+        current_password:
+          type: string
+          maxLength: 1024
+    EmailChangeResult:
+      type: object
+      required: [pending]
+      properties:
+        pending:
+          type: boolean
+          description: True when a confirmation link was sent to the new address.
     SessionList:
       type: object
       required: [sessions]
