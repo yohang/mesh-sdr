@@ -241,4 +241,37 @@ func TestHubNeedsGateway(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "hub.db")); err == nil {
 		t.Fatal("the hub opened its database")
 	}
+
+	if err := os.WriteFile(filepath.Join(dir, "node.toml"), []byte("schema_version = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r = run(t, context.Background(), map[string]string{"MESHSDR_CONFIG_DIR": dir}, "all")
+	if r.code != ExitFailure || !strings.Contains(r.stderr, "nogateway") {
+		t.Fatalf("all = %+v", r)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "tls", "ca.pem")); err == nil {
+		t.Fatal("all created its CA")
+	}
+}
+
+// The all role validates hub.toml and node.toml with its defaults: no
+// node.id is needed, and the CA files may not exist yet.
+func TestAllConfigCheck(t *testing.T) {
+	dir := hubDir(t)
+
+	if err := os.WriteFile(filepath.Join(dir, "node.toml"), []byte("schema_version = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := run(t, context.Background(), map[string]string{"MESHSDR_CONFIG_DIR": dir}, "all", "config", "check")
+	if r.code != ExitOK || !strings.Contains(r.stdout, "all configuration is valid") {
+		t.Fatalf("all config check = %+v", r)
+	}
+
+	r = run(t, context.Background(), map[string]string{"MESHSDR_CONFIG_DIR": dir}, "node", "config", "check")
+	if r.code != ExitConfig {
+		t.Fatalf("node config check without node.id = %+v", r)
+	}
 }

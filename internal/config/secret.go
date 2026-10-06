@@ -41,6 +41,16 @@ func (s Secret) IsSet() bool { return s.source != secretUnset }
 // Reveal returns the resolved value. Pass it only to the code that needs it.
 func (s Secret) Reveal() string { return s.value }
 
+// FilePath returns the file of a { file = "…" } reference, resolved against
+// configDir; ok is false for other secrets.
+func (s Secret) FilePath(configDir string) (string, bool) {
+	if s.source != secretFile {
+		return "", false
+	}
+
+	return ResolvePath(configDir, s.ref), true
+}
+
 // String returns a redacted placeholder.
 func (s Secret) String() string {
 	if !s.IsSet() {

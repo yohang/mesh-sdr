@@ -82,7 +82,7 @@ func (a *app) newRootCmd() *cobra.Command {
 	f.BoolVar(&a.silent, "silent", false, "print errors only")
 	f.BoolVar(&a.noninteractive, "noninteractive", false, "never prompt (read secrets from the environment instead)")
 
-	cmd.AddCommand(a.newHubCmd(), a.newNodeCmd())
+	cmd.AddCommand(a.newHubCmd(), a.newNodeCmd(), a.newAllCmd())
 
 	return cmd
 }

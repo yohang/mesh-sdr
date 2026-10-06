@@ -1,4 +1,5 @@
-# Air hot reload of the hub (dev stack). Run from the repository root:
+# Air hot reload of `meshsdr all`, the hub and its local node (dev stack).
+# Run from the repository root:
 # air -c .infra/docker/dev/air.toml
 # The hub refuses to start while migrations are pending: run `make migrate`.
 root = "."
@@ -6,7 +7,7 @@ tmp_dir = "tmp"
 
 [build]
 cmd = "go generate ./... && go build -o ./tmp/meshsdr ./cmd/meshsdr"
-entrypoint = ["./tmp/meshsdr", "hub"]
+entrypoint = ["./tmp/meshsdr", "all"]
 include_ext = ["go", "templ", "sql", "css", "js", "yaml", "toml"]
 exclude_dir = ["tmp", "var", "internal/db/sqlite/sqlc"]
 exclude_file = ["internal/web/static/css/app.css", "internal/http/api/openapi.json"]

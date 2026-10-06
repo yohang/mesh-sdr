@@ -89,6 +89,25 @@ type Process struct {
 	startup  []func(ctx context.Context) error
 	workers  []func(ctx context.Context)
 	setupURL string
+	// started is set once the startup tasks ran.
+	started bool
+}
+
+// runStartup runs the startup tasks once.
+func (p *Process) runStartup(ctx context.Context) error {
+	if p.started {
+		return nil
+	}
+
+	for _, task := range p.startup {
+		if err := task(ctx); err != nil {
+			return err
+		}
+	}
+
+	p.started = true
+
+	return nil
 }
 
 // Addr returns the configured listen address.
@@ -127,12 +146,10 @@ func (p *Process) Listen(ctx context.Context) (net.Listener, error) {
 // Serve runs the startup tasks, starts the workers, then serves on ln
 // until ctx is done, shuts down gracefully and waits for the workers.
 func (p *Process) Serve(ctx context.Context, ln net.Listener) error {
-	for _, task := range p.startup {
-		if err := task(ctx); err != nil {
-			_ = ln.Close()
+	if err := p.runStartup(ctx); err != nil {
+		_ = ln.Close()
 
-			return err
-		}
+		return err
 	}
 
 	wctx, cancel := context.WithCancel(ctx)
@@ -168,10 +185,8 @@ func (p *Process) Run(ctx context.Context) error {
 // runFront runs the startup tasks and the workers, starts the front, and
 // stops it when ctx is done.
 func (p *Process) runFront(ctx context.Context) error {
-	for _, task := range p.startup {
-		if err := task(ctx); err != nil {
-			return err
-		}
+	if err := p.runStartup(ctx); err != nil {
+		return err
 	}
 
 	wctx, cancel := context.WithCancel(ctx)

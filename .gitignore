@@ -13,6 +13,9 @@
 /var/*
 !/var/.gitkeep
 
+# Dev hub CA and local node certificate, created by `meshsdr all`
+/.infra/docker/dev/config/tls/
+
 # SQLite databases (incl. WAL/SHM/journal files)
 *.db
 *.db-*

@@ -41,6 +41,8 @@ func (c caInfo) Fingerprint() (string, error) {
 // hubGrid is the hub side of the grid module.
 type hubGrid struct {
 	keys          *tokenkey.Ephemeral
+	caPath        string
+	revocations   domain.RevocationRepository
 	nodeRepo      domain.NodeRepository
 	deviceRepo    domain.DeviceRepository
 	gatewayClient *pki.ClientSource
@@ -174,7 +176,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 	capRepo := gridsqlite.NewCapabilityRepository(adapter)
 	connRepo := gridsqlite.NewConnectionRepository(adapter)
 	deviceRepo := gridsqlite.NewDeviceRepository(adapter)
-	g.nodeRepo, g.deviceRepo = nodeRepo, deviceRepo
+	g.nodeRepo, g.deviceRepo, g.revocations, g.caPath = nodeRepo, deviceRepo, revocations, cfg.TLS.CACert
 	g.devices = app.NewDevices(deviceRepo, audit, component(logger, "grid.app.devices"))
 
 	if ca != nil {

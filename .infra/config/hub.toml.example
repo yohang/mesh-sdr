@@ -71,7 +71,10 @@ max_read_connections = 4
 # Hub internal CA for hub <-> node mTLS (ADR 0008). Create it with
 # `meshsdr hub ca init` (writes tls/ca.pem and tls/ca.key in the config dir).
 # Relative paths are resolved against the config dir. Without [tls] the hub
-# runs with the grid disabled: no enrollment, no control channels.
+# runs with the grid disabled: no enrollment, no control channels. Under
+# `meshsdr all` they default to tls/ca.pem and tls/ca.key, created at first
+# start, and node.toml configures the local node (default id "local",
+# listen 127.0.0.1:8074, certificate in tls/node.pem and tls/node.key).
 # [tls]
 # ca_cert = "tls/ca.pem"
 # ca_key = { file = "tls/ca.key" }

@@ -85,10 +85,7 @@ func (a *app) runHub(ctx context.Context) error {
 	}
 
 	if u := hub.SetupURL(); u != "" {
-		// Not through the logger: the URL carries a secret token.
-		_, _ = fmt.Fprintf(a.stderr, "\nNo admin account exists. Open this one-time URL within %d minutes to create the first admin:\n\n    %s\n\n"+
-			"Or create one on this host with `meshsdr hub user add <name> --role admin`. A restart issues a new URL.\n\n",
-			int(identityapp.SetupTTL.Minutes()), u)
+		a.printSetupURL(u)
 	}
 
 	if err := hub.Run(ctx); err != nil {
@@ -98,6 +95,14 @@ func (a *app) runHub(ctx context.Context) error {
 	logger.InfoContext(ctx, "hub stopped")
 
 	return nil
+}
+
+// printSetupURL prints the first-admin setup URL, not through the logger:
+// it carries a secret token.
+func (a *app) printSetupURL(u string) {
+	_, _ = fmt.Fprintf(a.stderr, "\nNo admin account exists. Open this one-time URL within %d minutes to create the first admin:\n\n    %s\n\n"+
+		"Or create one on this host with `meshsdr hub user add <name> --role admin`. A restart issues a new URL.\n\n",
+		int(identityapp.SetupTTL.Minutes()), u)
 }
 
 func (a *app) newMigrateCmd() *cobra.Command {

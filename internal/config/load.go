@@ -29,6 +29,10 @@ type Options struct {
 	Dir string
 	// Env is the environment. Nil means the process environment.
 	Env map[string]string
+	// DeferSecrets leaves secret references unresolved (no file is read):
+	// the all role uses it to find the paths of the files it creates on
+	// first start, before the real load.
+	DeferSecrets bool
 }
 
 // Meta describes a loaded configuration.
@@ -106,6 +110,38 @@ func LoadHub(opts Options) (Hub, Meta, error) {
 	return cfg, meta, err
 }
 
+// LoadAll loads the hub.toml and node.toml of the all role (hub and local
+// node in one process, GRID-003) with the all-role defaults: the hub CA at
+// tls/ca.pem and tls/ca.key, the local node "local" on 127.0.0.1:8074 with
+// its certificate at tls/node.pem and tls/node.key, all relative to the
+// config dir and created at first start (TECHNICAL_SPEC §7.4). The node
+// trusts the hub CA file unless hub_trust.ca_cert is set.
+func LoadAll(opts Options) (Hub, Meta, Node, Meta, error) {
+	hub := DefaultHub()
+	hub.TLS = HubTLS{CACert: "tls/ca.pem", CAKey: Secret{source: secretFile, ref: "tls/ca.key"}}
+
+	hubMeta, err := load(RoleHub, &hub, opts)
+	if err != nil {
+		return hub, hubMeta, Node{}, Meta{}, err
+	}
+
+	node := DefaultNode()
+	node.Node.ID = "local"
+	node.Node.Listen = "127.0.0.1:8074"
+	node.TLS = NodeTLS{Cert: "tls/node.pem", Key: "tls/node.key"}
+
+	nodeMeta, err := load(RoleNode, &node, opts)
+	if err != nil {
+		return hub, hubMeta, node, nodeMeta, err
+	}
+
+	if !nodeMeta.Origins.Of("hub_trust.ca_cert").Locked() {
+		node.HubTrust.CACert = hub.TLS.CACert
+	}
+
+	return hub, hubMeta, node, nodeMeta, nil
+}
+
 // LoadNode loads and validates the node configuration.
 func LoadNode(opts Options) (Node, Meta, error) {
 	cfg := DefaultNode()
@@ -165,7 +201,7 @@ func load[T any, PT interface {
 		l.applyEnv(cfg)
 	}
 
-	if len(l.problems) == 0 {
+	if len(l.problems) == 0 && !opts.DeferSecrets {
 		l.resolveSecrets()
 	}
 

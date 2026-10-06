@@ -1,9 +1,12 @@
-# Dev node config (`go run ./cmd/meshsdr node` in the dev container).
+# Dev node config: the local node of `meshsdr all` (Air), or a standalone
+# `go run ./cmd/meshsdr node` in the dev container. Under `all`, its
+# certificate and the hub CA are created in tls/ next to this file
+# (ignored by version control).
 schema_version = 1
 
 [node]
 id = "dev"
-listen = "0.0.0.0:8074"
+listen = "127.0.0.1:8074"
 
 [log]
 level = "debug"
