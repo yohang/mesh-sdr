@@ -112,9 +112,9 @@ func New(auth Authenticator, pages Pages, cfg Config, logger *slog.Logger) (*Mod
 }
 
 // Middlewares implements internal/http.Module: client address, session,
-// CSRF protection, JSON-only API bodies.
+// CSRF protection, JSON-only API bodies, then the forced password change.
 func (m *Module) Middlewares() []func(http.Handler) http.Handler {
-	return []func(http.Handler) http.Handler{m.resolver.Middleware, limitAuthBodies, m.session, m.csrf, m.requireJSON}
+	return []func(http.Handler) http.Handler{m.resolver.Middleware, limitAuthBodies, m.session, m.csrf, m.requireJSON, m.passwordGate}
 }
 
 // Routes implements internal/http.Module.

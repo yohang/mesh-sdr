@@ -38,6 +38,9 @@ var (
 	// ErrAdminNetworkDenied means an admin request came from a client address
 	// outside admin.allowed_networks (AUTH-016).
 	ErrAdminNetworkDenied = shared.NewError(shared.KindForbidden, "admin_network_denied", "admin access is not allowed from this network")
+	// ErrPasswordChangeRequired means the user must set a new password
+	// before doing anything else (AUTH-006).
+	ErrPasswordChangeRequired = shared.NewError(shared.KindForbidden, "password_change_required", "set a new password first")
 	// ErrCSRF means a state-changing request failed the CSRF check (AUTH-019).
 	ErrCSRF = shared.NewError(shared.KindForbidden, "csrf_failed", "missing or invalid CSRF token")
 	// ErrRateLimited means too many attempts; see RateLimitError.
