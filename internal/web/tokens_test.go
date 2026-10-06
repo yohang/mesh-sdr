@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"testing"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // colorToken matches a color token definition: --msdr-color-x: light-dark(#light, #dark);
@@ -103,6 +105,17 @@ func TestTokenContrast(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestThemeColors checks that the browser UI colors (theme-color, manifest)
+// are the surface token of each set.
+func TestThemeColors(t *testing.T) {
+	light, dark := tokens(t)
+
+	if light["surface"] != layout.ThemeColorLight || dark["surface"] != layout.ThemeColorDark {
+		t.Errorf("theme colors %s/%s, surface token %s/%s",
+			layout.ThemeColorLight, layout.ThemeColorDark, light["surface"], dark["surface"])
 	}
 }
 

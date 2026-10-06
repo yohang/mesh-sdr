@@ -6,12 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/yohang/mesh-sdr/internal/web"
-	"github.com/yohang/mesh-sdr/internal/web/templates"
 )
 
 // APIPrefix is the base path of the versioned REST API.
@@ -49,8 +47,6 @@ func NewRouter(logger *slog.Logger, api http.Handler, modules ...Module) http.Ha
 	r.Mount(APIPrefix, api)
 
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServerFS(web.Static())))
-
-	r.Get("/", templ.Handler(templates.Home()).ServeHTTP)
 
 	for _, m := range modules {
 		m.Routes(r)

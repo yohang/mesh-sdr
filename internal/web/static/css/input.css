@@ -1,6 +1,8 @@
 @import "tailwindcss" source(none);
 
-@source "../../templates";
+@source "../../layout";
+@source "../../../*/http";
+@source "../js";
 
 /*
  * Design tokens (UI-008, ADR 0003 §2A).
@@ -124,6 +126,24 @@
   :focus-visible {
     outline: 3px solid var(--msdr-color-focus);
     outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Skip link (UI-009): off-screen until focused. */
+  .skip-link {
+    position: absolute;
+    left: 0.5rem;
+    top: -10rem;
+    z-index: 50;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--msdr-radius-md);
+    background: var(--msdr-color-surface);
+    color: var(--msdr-color-fg);
+  }
+
+  .skip-link:focus {
+    top: 0.5rem;
   }
 }
 
