@@ -214,6 +214,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	}
 
 	auditLog := identitysqlite.NewAuditLog(adapter)
+	images := branding(adapter, auditLog)
 
 	// The top bar shows the signed-in user: the identity module, built
 	// after the shell (it renders its pages with the shell), fills it in.
@@ -236,7 +237,9 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	}
 
 	adminGate := &roleGate{role: identitydomain.RoleAdmin}
-	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, AdminGate: adminGate, User: userOf, Logger: logger})
+	shellModule := shell.Wire(shell.Deps{
+		Settings: settingsModule.Store, AdminGate: adminGate, Images: stationImages{b: images}, User: userOf, Logger: logger,
+	})
 
 	ideps := identityDeps(cfg, logger, adapter)
 	ideps.Settings = settingsModule.Store
@@ -267,7 +270,6 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, fmt.Errorf("jobs: %w", err)
 	}
 
-	images := branding(adapter, auditLog)
 	imagesHTTP := fileshttp.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), filesActor,
 		shellModule.Renderer.Error, component(logger, "files.http"))
 

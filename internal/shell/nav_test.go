@@ -256,3 +256,41 @@ func TestHelp(t *testing.T) {
 		t.Error("invalid help link rendered")
 	}
 }
+
+type images map[string]bool
+
+func (i images) HasImage(_ context.Context, slot string) bool { return i[slot] }
+
+// TestReceiverStation covers the Receiver page until the receiver exists:
+// the station's name, location, images and description (raw HTML dropped).
+func TestReceiverStation(t *testing.T) {
+	v := values{
+		"receiver.name": "F4XYZ SDR", "receiver.location": "Lille, France", "receiver.photo_title": "The <antenna>",
+		"receiver.photo_desc": "A **loop** on the roof.<script>alert(1)</script>",
+	}
+
+	m := shell.Wire(shell.Deps{Settings: v, Images: images{"avatar": true, "panorama": true}, Logger: discard})
+	_, body := do(t, httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP), http.MethodGet, "/", nil)
+
+	for _, want := range []string{
+		`<img src="/api/v1/branding/avatar" alt=""`, `<h1 class="text-2xl font-semibold">F4XYZ SDR</h1>`,
+		`<p class="text-fg-muted">Lille, France</p>`, `<img src="/api/v1/branding/panorama" alt="The &lt;antenna&gt;"`,
+		`<p class="font-semibold">The &lt;antenna&gt;</p>`, `<strong>loop</strong>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("receiver page lacks %s", want)
+		}
+	}
+
+	if strings.Contains(body, "<script>alert") {
+		t.Error("raw HTML of the description rendered")
+	}
+
+	// Without images nor description, only the name and the notice.
+	m = shell.Wire(shell.Deps{Settings: values{}, Logger: discard})
+	_, body = do(t, httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP), http.MethodGet, "/", nil)
+
+	if strings.Contains(body, "/api/v1/branding/") || strings.Contains(body, "<figure") {
+		t.Error("empty station shows images or a description")
+	}
+}

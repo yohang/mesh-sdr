@@ -27,6 +27,9 @@ type Deps struct {
 	// User returns the signed-in visitor of a request for the user menu
 	// (nil: anonymous). Optional.
 	User func(r *http.Request) *layout.User
+	// Images tells whether a station image is set (Receiver page).
+	// Optional.
+	Images app.StationImages
 	// Now is the clock (time.Now when nil).
 	Now func() time.Time
 }
@@ -64,8 +67,10 @@ func Wire(d Deps) Module {
 	source := shellhttp.NewShellSource(lookAndFeel, nav, d.User, now)
 	rd := render.New(source, component("web.render"))
 
+	station := app.NewStation(settings, d.Images)
+
 	return Module{
 		Renderer: rd,
-		HTTP:     shellhttp.NewModule(rd, source, policy, web.Static(), component("shell.http")),
+		HTTP:     shellhttp.NewModule(rd, source, policy, station, web.Static(), component("shell.http")),
 	}
 }

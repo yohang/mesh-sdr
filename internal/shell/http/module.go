@@ -80,6 +80,7 @@ type Module struct {
 	render   *render.Renderer
 	shell    render.ShellSource
 	policy   *app.Policy
+	station  *app.Station
 	static   fs.FS
 	markdown *markdown
 	logger   *slog.Logger
@@ -87,8 +88,10 @@ type Module struct {
 
 // NewModule returns the shell router module. static is the embedded static
 // assets filesystem (web.Static).
-func NewModule(rd *render.Renderer, shell render.ShellSource, policy *app.Policy, static fs.FS, logger *slog.Logger) *Module {
-	return &Module{render: rd, shell: shell, policy: policy, static: static, markdown: newMarkdown(), logger: logger}
+func NewModule(rd *render.Renderer, shell render.ShellSource, policy *app.Policy, station *app.Station, static fs.FS,
+	logger *slog.Logger,
+) *Module {
+	return &Module{render: rd, shell: shell, policy: policy, station: station, static: static, markdown: newMarkdown(), logger: logger}
 }
 
 // Middlewares implements internal/http.Module: the shell has none.
@@ -144,10 +147,20 @@ func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 }
 
 // receiver is the Receiver section's entry page. Until the receiver exists
-// (M1), it shows the station and says so.
+// (M1), it presents the station (name, location, images, description) and
+// says that listening is not available yet.
 func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
+	st := m.station.View(r.Context())
+
+	desc, err := m.markdown.HTML(st.PhotoDesc)
+	if err != nil {
+		m.logger.WarnContext(r.Context(), "render station description", slog.Any("error", err))
+
+		desc = ""
+	}
+
 	page := layout.Page{Section: domain.SectionReceiver.ID()}
-	m.render.Page(w, r, http.StatusOK, page, receiverPage(m.shell.Shell(r).SiteName), nil)
+	m.render.Page(w, r, http.StatusOK, page, receiverPage(m.shell.Shell(r).SiteName, st, desc), nil)
 }
 
 // placeholder serves the entry page of a section whose module does not

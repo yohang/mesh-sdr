@@ -17,6 +17,9 @@ const (
 	KeyUsagePolicyURL  = "receiver.usage_policy_url"
 	KeyHelpURL         = "receiver.help_url"
 	KeyShortcutSet     = "ui.shortcut_set"
+	KeyLocation        = "receiver.location"
+	KeyPhotoTitle      = "receiver.photo_title"
+	KeyPhotoDesc       = "receiver.photo_desc"
 )
 
 // Values reads the current effective settings (the settings store).
@@ -99,3 +102,16 @@ func (s *StoreSettings) UsagePolicy(context.Context) (domain.PolicyText, bool, e
 
 	return p, true, nil
 }
+
+// Location returns receiver.location.
+func (s *StoreSettings) Location(context.Context) string {
+	return strings.TrimSpace(s.values.String(KeyLocation))
+}
+
+// PhotoTitle returns receiver.photo_title.
+func (s *StoreSettings) PhotoTitle(context.Context) string {
+	return strings.TrimSpace(s.values.String(KeyPhotoTitle))
+}
+
+// PhotoDesc returns receiver.photo_desc (Markdown).
+func (s *StoreSettings) PhotoDesc(context.Context) string { return s.values.String(KeyPhotoDesc) }

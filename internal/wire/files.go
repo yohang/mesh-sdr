@@ -7,6 +7,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	filesapp "github.com/yohang/mesh-sdr/internal/files/app"
+	filesdomain "github.com/yohang/mesh-sdr/internal/files/domain"
 	"github.com/yohang/mesh-sdr/internal/files/infra/imaging"
 	filessqlite "github.com/yohang/mesh-sdr/internal/files/infra/sqlite"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
@@ -55,4 +56,19 @@ func filesActor(ctx context.Context) filesapp.Actor {
 	a := settingsActor(ctx)
 
 	return filesapp.Actor{User: a.User, IP: a.IP, RequestID: a.RequestID}
+}
+
+// stationImages tells the shell whether a receiver image is set.
+type stationImages struct{ b *filesapp.Branding }
+
+// HasImage implements shell/app.StationImages.
+func (s stationImages) HasImage(ctx context.Context, slot string) bool {
+	sl, err := filesdomain.ParseSlot(slot)
+	if err != nil {
+		return false
+	}
+
+	f, err := s.b.Current(ctx, sl)
+
+	return err == nil && f != nil
 }
