@@ -21,7 +21,7 @@ func (a *app) newNodeCmd() *cobra.Command {
 		RunE:  func(cmd *cobra.Command, _ []string) error { return a.runNode(cmd.Context()) },
 	}
 
-	cmd.AddCommand(a.newConfigCmd(config.RoleNode))
+	cmd.AddCommand(a.newConfigCmd(config.RoleNode), a.newEnrollCmd())
 
 	return cmd
 }

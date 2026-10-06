@@ -15,6 +15,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridinfra "github.com/yohang/mesh-sdr/internal/grid/infra"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 )
@@ -35,11 +36,12 @@ func (c caInfo) Fingerprint() (string, error) {
 
 // hubGrid is the hub side of the grid module.
 type hubGrid struct {
-	ca      *pki.CA
-	hubID   string
-	nodes   *app.Nodes
-	startup []func(ctx context.Context) error
-	workers []func(ctx context.Context)
+	ca         *pki.CA
+	hubID      string
+	nodes      *app.Nodes
+	enrollment *app.Enrollment
+	startup    []func(ctx context.Context) error
+	workers    []func(ctx context.Context)
 }
 
 // HubID returns the hub id: the host of hub.url (ADR 0008 Q6).
@@ -144,6 +146,13 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 	}
 
 	gridLogger := component(logger, "grid.wire")
+
+	if ca != nil {
+		enrollment := app.NewEnrollment(nodeRepo, adapter, enroll.NewHubClient(ca, now), audit, now,
+			5*time.Second, component(logger, "grid.app.enrollment"))
+		g.enrollment = enrollment
+		g.workers = append(g.workers, enrollment.Run)
+	}
 
 	g.startup = append(g.startup, func(ctx context.Context) error {
 		if ca == nil {

@@ -12,8 +12,8 @@ import (
 
 // NewPreEnrollmentRouter returns the node API of a node that is not enrolled
 // yet (TECHNICAL_SPEC §4.2 step 3): only POST /enroll exists and every other
-// path answers 403. Enrollment itself is not implemented yet (GRID-006), so
-// /enroll answers 501.
+// path answers 403. Enrollment is served by the one-off `meshsdr node
+// enroll` (ADR 0008 Q13), so /enroll answers 501 here.
 func NewPreEnrollmentRouter(logger *slog.Logger) http.Handler {
 	r := chi.NewRouter()
 	r.Use(problem.Recoverer(logger))
@@ -28,8 +28,8 @@ func NewPreEnrollmentRouter(logger *slog.Logger) http.Handler {
 	r.MethodNotAllowed(forbidden)
 
 	r.Post("/enroll", func(w http.ResponseWriter, r *http.Request) {
-		logger.WarnContext(r.Context(), "enrollment attempt refused: not implemented", slog.String("remote_addr", r.RemoteAddr))
-		problem.Write(w, problem.New(http.StatusNotImplemented, problem.CodeNotImplemented, "enrollment is not implemented yet"))
+		logger.WarnContext(r.Context(), "enrollment attempt refused: run `meshsdr node enroll` on this node", slog.String("remote_addr", r.RemoteAddr))
+		problem.Write(w, problem.New(http.StatusNotImplemented, problem.CodeNotImplemented, "this node is not waiting for enrollment: run `meshsdr node enroll`"))
 	})
 
 	return r
