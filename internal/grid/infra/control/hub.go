@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -387,7 +388,7 @@ func (m *Manager) connect(ctx context.Context, id domain.NodeID, l *link) error 
 		return errors.New("node is not active")
 	}
 
-	revoked, err := m.revokedSerials(ctx)
+	pinned, err := m.pin(ctx, n)
 	if err != nil {
 		return err
 	}
@@ -398,15 +399,8 @@ func (m *Manager) connect(ctx context.Context, id domain.NodeID, l *link) error 
 	)
 
 	check := func(c *x509.Certificate) error {
-		// The pin accepts the current certificate and a renewed one sent
-		// but not confirmed yet, so a lost acknowledgement never locks the
-		// node out.
-		if !n.AcceptsFingerprint(pki.Fingerprint(c.Raw)) {
-			return fmt.Errorf("%w: node certificate does not match the enrolled one", pki.ErrInvalidCertificate)
-		}
-
-		if revoked[pki.SerialString(c)] {
-			return pki.ErrRevoked
+		if err := pinned(c); err != nil {
+			return err
 		}
 
 		leafMu.Lock()
@@ -445,6 +439,55 @@ func (m *Manager) connect(ctx context.Context, id domain.NodeID, l *link) error 
 	m.o.Control.Disconnected(ctx, id, err)
 
 	return err
+}
+
+// pin returns the check of node n's certificate: the pinned fingerprint
+// (the current certificate, or a renewed one sent but not confirmed yet, so
+// a lost acknowledgement never locks the node out) and the revocation list.
+func (m *Manager) pin(ctx context.Context, n *domain.Node) (pki.LeafCheck, error) {
+	revoked, err := m.revokedSerials(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(c *x509.Certificate) error {
+		if !n.AcceptsFingerprint(pki.Fingerprint(c.Raw)) {
+			return fmt.Errorf("%w: node certificate does not match the enrolled one", pki.ErrInvalidCertificate)
+		}
+
+		if revoked[pki.SerialString(c)] {
+			return pki.ErrRevoked
+		}
+
+		return nil
+	}, nil
+}
+
+// GatewayDialConfig returns the TLS config of a gateway connection to node
+// id: TLS 1.3, the gateway client certificate of client, the node server
+// name and identity, its pinned certificate and the revocation list. The
+// node must be enrolled and enabled.
+func (m *Manager) GatewayDialConfig(ctx context.Context, client *pki.ClientSource, id string) (*tls.Config, error) {
+	nid, err := domain.NewNodeID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	n, err := m.o.Nodes.Get(ctx, nid)
+	if err != nil {
+		return nil, err
+	}
+
+	if !n.Active() {
+		return nil, domain.ErrNodeNotFound
+	}
+
+	check, err := m.pin(ctx, n)
+	if err != nil {
+		return nil, err
+	}
+
+	return pki.HubDialConfig(client, m.o.CA.Pool(), id, check), nil
 }
 
 func (m *Manager) revokedSerials(ctx context.Context) (map[string]bool, error) {

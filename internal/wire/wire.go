@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite"
@@ -21,10 +23,12 @@ import (
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/gateway"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/http/api"
+	"github.com/yohang/mesh-sdr/internal/http/clientip"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
@@ -67,11 +71,20 @@ func OpenDB(ctx context.Context, cfg config.DB, logger *slog.Logger) (db.Adapter
 	}
 }
 
+// Front owns the public listeners of a process (the hub gateway).
+type Front interface {
+	Start(ctx context.Context) error
+	Stop() error
+}
+
 // Process is a role's network process: one HTTP(S) server, startup tasks
-// run before serving and background workers that live as long as it.
+// run before serving and background workers that live as long as it. The
+// hub serves through its gateway (front); Serve serves the handler directly
+// on a listener (nodes, and hub tests without the gateway).
 type Process struct {
 	addr     string
 	server   *http.Server
+	front    Front
 	logger   *slog.Logger
 	startup  []func(ctx context.Context) error
 	workers  []func(ctx context.Context)
@@ -137,14 +150,49 @@ func (p *Process) Serve(ctx context.Context, ln net.Listener) error {
 	return err
 }
 
-// Run listens and serves until ctx is done.
+// Run serves until ctx is done: through the front when the process has
+// one, otherwise on its listen address.
 func (p *Process) Run(ctx context.Context) error {
+	if p.front != nil {
+		return p.runFront(ctx)
+	}
+
 	ln, err := p.Listen(ctx)
 	if err != nil {
 		return err
 	}
 
 	return p.Serve(ctx, ln)
+}
+
+// runFront runs the startup tasks and the workers, starts the front, and
+// stops it when ctx is done.
+func (p *Process) runFront(ctx context.Context) error {
+	for _, task := range p.startup {
+		if err := task(ctx); err != nil {
+			return err
+		}
+	}
+
+	wctx, cancel := context.WithCancel(ctx)
+
+	var wg sync.WaitGroup
+	for _, w := range p.workers {
+		wg.Go(func() { w(wctx) })
+	}
+
+	err := p.front.Start(ctx)
+	if err == nil {
+		<-ctx.Done()
+
+		p.logger.InfoContext(ctx, "stopping the gateway")
+		err = p.front.Stop()
+	}
+
+	cancel()
+	wg.Wait()
+
+	return err
 }
 
 // identityDeps returns the dependencies of the identity module.
@@ -196,8 +244,8 @@ func UserAdmin(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) *identit
 	return identity.UserAdmin(identityDeps(cfg, logger, adapter))
 }
 
-// Hub builds the hub: web UI and REST API on hub.listen, backed by adapter,
-// the session reaper and the grid. The caller checks the schema version before (see
+// Hub builds the hub: web UI and REST API behind the embedded gateway,
+// backed by adapter, the session reaper and the grid. The caller checks the schema version before (see
 // db.Migrator.Check).
 func Hub(ctx context.Context, cfg config.Hub, origins config.Origins, logger *slog.Logger, adapter db.Adapter) (*Process, error) {
 	p, _, err := newHub(ctx, cfg, origins, logger, adapter, time.Now, gridapp.DefaultTimings())
@@ -273,6 +321,13 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	imagesHTTP := fileshttp.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), filesActor,
 		shellModule.Renderer.Error, component(logger, "files.http"))
+	access, err := g.mediaAccess(cfg, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	authz := gridhttp.NewAuthzHandler(access, func(r *http.Request) gridapp.Subject { return subjectOf(idm.HTTP.Principal(r.Context())) },
+		func(r *http.Request) string { return clientip.From(r.Context()).String() }, component(logger, "grid.http.authz"))
 
 	apiServer := api.Server{
 		HealthHandlers:     api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
@@ -292,7 +347,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	router := httpserver.NewRouter(
 		component(logger, "http.router"),
-		api.NewHandler(apiServer, idm.HTTP, component(logger, "http.api")),
+		httpserver.LimitBody(cfg.Gateway.MaxBody.Bytes())(api.NewHandler(apiServer, idm.HTTP, component(logger, "http.api"))),
 		idm.HTTP,
 		settingshttp.New(settingshttp.Deps{
 			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin),
@@ -305,6 +360,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 			Operator: idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
 			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Logger: component(logger, "grid.http.admin"),
 		}),
+		routes(func(r chi.Router) { r.Method(http.MethodGet, gateway.AuthzPath, authz) }),
 		shellModule.HTTP,
 	)
 
@@ -313,9 +369,15 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, fmt.Errorf("identity setup: %w", err)
 	}
 
+	front, err := newGateway(cfg, logger, router, g)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	return &Process{
-		addr:     cfg.Hub.Listen,
-		server:   httpserver.NewServer(cfg.Hub.Listen, router),
+		addr:     gatewayAddr(cfg.Gateway),
+		server:   httpserver.NewServer("", router),
+		front:    front,
 		logger:   component(logger, "http.server"),
 		startup:  g.startup,
 		workers:  append(append(workers, scheduler.Run), g.workers...),

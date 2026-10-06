@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/wire"
 )
 
 type result struct {
@@ -34,9 +36,13 @@ func hubDir(t *testing.T) string {
 	cfg := `schema_version = 1
 
 [hub]
-listen = "127.0.0.1:0"
-url = "http://localhost"
 allow_insecure_url = true
+url = "http://localhost"
+
+[gateway]
+tls_mode = "off"
+http_listen = "127.0.0.1:0"
+storage_dir = "` + filepath.Join(dir, "caddy") + `"
 
 [db]
 dsn = "sqlite://` + filepath.Join(dir, "hub.db") + `"
@@ -56,6 +62,10 @@ token_key_dir = "` + filepath.Join(dir, "keys") + `"
 }
 
 func TestHubLifecycle(t *testing.T) {
+	if !wire.GatewayAvailable() {
+		t.Skip("the hub needs the gateway (nogateway build)")
+	}
+
 	ctx := context.Background()
 	dir := hubDir(t)
 	env := map[string]string{"MESHSDR_CONFIG_DIR": dir}
@@ -119,7 +129,7 @@ func TestHubLifecycle(t *testing.T) {
 	defer cancel()
 
 	r = run(t, runCtx, env, "hub")
-	if r.code != ExitOK || !strings.Contains(r.stderr, "http server listening") || !strings.Contains(r.stderr, "hub stopped") {
+	if r.code != ExitOK || !strings.Contains(r.stderr, "gateway started") || !strings.Contains(r.stderr, "hub stopped") {
 		t.Fatalf("hub = %+v", r)
 	}
 
@@ -212,5 +222,23 @@ func TestUnknownCommand(t *testing.T) {
 	r := run(t, context.Background(), map[string]string{}, "serve")
 	if r.code != ExitFailure || !strings.Contains(r.stderr, "unknown command") {
 		t.Fatalf("serve = %+v", r)
+	}
+}
+
+// In a nogateway build the hub fails fast, before touching the database.
+func TestHubNeedsGateway(t *testing.T) {
+	if wire.GatewayAvailable() {
+		t.Skip("full build")
+	}
+
+	dir := hubDir(t)
+
+	r := run(t, context.Background(), map[string]string{"MESHSDR_CONFIG_DIR": dir}, "hub")
+	if r.code != ExitFailure || !strings.Contains(r.stderr, "nogateway") {
+		t.Fatalf("hub = %+v", r)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "hub.db")); err == nil {
+		t.Fatal("the hub opened its database")
 	}
 }

@@ -3,9 +3,13 @@
 schema_version = 1
 
 [hub]
-listen = "0.0.0.0:8073"
 url = "http://localhost:3000"
 allow_insecure_url = true
+
+[gateway]
+tls_mode = "off"
+http_listen = "0.0.0.0:8073"
+storage_dir = "var/caddy"
 
 [db]
 dsn = "sqlite:var/hub.db"

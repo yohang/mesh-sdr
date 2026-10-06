@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
@@ -34,8 +35,13 @@ type adminHub struct {
 func newAdminHub(t *testing.T, env map[string]string) *adminHub {
 	t.Helper()
 
+	if !wire.GatewayAvailable() {
+		t.Skip("the hub needs the gateway (nogateway build)")
+	}
+
 	dir := t.TempDir()
-	toml := "schema_version = 1\n[hub]\nurl = \"http://127.0.0.1\"\nallow_insecure_url = true\nlisten = \"127.0.0.1:0\"\n" +
+	toml := "schema_version = 1\n[hub]\nurl = \"http://127.0.0.1\"\nallow_insecure_url = true\n" +
+		"[gateway]\ntls_mode = \"off\"\nhttp_listen = \"127.0.0.1:0\"\nstorage_dir = \"" + filepath.Join(dir, "caddy") + "\"\n" +
 		"[auth.argon2]\nmemory_kib = 19456\niterations = 2\nparallelism = 1\n"
 
 	if err := os.WriteFile(filepath.Join(dir, "hub.toml"), []byte(toml), 0o600); err != nil {
@@ -63,7 +69,12 @@ func newAdminHub(t *testing.T, env map[string]string) *adminHub {
 		t.Fatal(err)
 	}
 
-	return &adminHub{t: t, base: "http://" + serve(t, p), db: a}
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return &adminHub{t: t, base: "http://" + serveOn(t, p, ln), db: a}
 }
 
 // browser keeps cookies and the CSRF token of one visitor.

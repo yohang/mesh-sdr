@@ -40,21 +40,24 @@ func (c caInfo) Fingerprint() (string, error) {
 
 // hubGrid is the hub side of the grid module.
 type hubGrid struct {
-	keys       *tokenkey.Ephemeral
-	ca         *pki.CA
-	hubID      string
-	nodes      *app.Nodes
-	history    *app.History
-	enrollment *app.Enrollment
-	tracker    *app.Tracker
-	control    *app.Control
-	status     *app.Status
-	caps       *app.Capabilities
-	devices    *app.Devices
-	presence   *app.Presence
-	manager    *control.Manager
-	startup    []func(ctx context.Context) error
-	workers    []func(ctx context.Context)
+	keys          *tokenkey.Ephemeral
+	nodeRepo      domain.NodeRepository
+	deviceRepo    domain.DeviceRepository
+	gatewayClient *pki.ClientSource
+	ca            *pki.CA
+	hubID         string
+	nodes         *app.Nodes
+	history       *app.History
+	enrollment    *app.Enrollment
+	tracker       *app.Tracker
+	control       *app.Control
+	status        *app.Status
+	caps          *app.Capabilities
+	devices       *app.Devices
+	presence      *app.Presence
+	manager       *control.Manager
+	startup       []func(ctx context.Context) error
+	workers       []func(ctx context.Context)
 }
 
 // HubID returns the hub id: the host of hub.url (ADR 0008 Q6).
@@ -171,6 +174,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 	capRepo := gridsqlite.NewCapabilityRepository(adapter)
 	connRepo := gridsqlite.NewConnectionRepository(adapter)
 	deviceRepo := gridsqlite.NewDeviceRepository(adapter)
+	g.nodeRepo, g.deviceRepo = nodeRepo, deviceRepo
 	g.devices = app.NewDevices(deviceRepo, audit, component(logger, "grid.app.devices"))
 
 	if ca != nil {
