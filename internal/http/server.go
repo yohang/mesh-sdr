@@ -35,12 +35,23 @@ func NewRouter(logger *slog.Logger, api http.Handler) http.Handler {
 	return r
 }
 
-// NewServer builds the HTTP server listening on addr.
+// Server timeouts. WriteTimeout stays unset: it would cut long-lived
+// WebSocket and streaming responses. Hijacked (WebSocket) connections must
+// clear the read deadline set by ReadTimeout.
+const (
+	ReadHeaderTimeout = 10 * time.Second
+	ReadTimeout       = 30 * time.Second
+	IdleTimeout       = 120 * time.Second
+)
+
+// NewServer builds the HTTP server listening on addr (hub and node).
 func NewServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              addr,
 		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: ReadHeaderTimeout,
+		ReadTimeout:       ReadTimeout,
+		IdleTimeout:       IdleTimeout,
 	}
 }
 
