@@ -169,8 +169,15 @@ func (n *Node) resolvePaths(dir string) {
 
 // NodeSection is the [node] table.
 type NodeSection struct {
-	ID     string `toml:"id" env:"ID" jsonschema:"pattern=^[a-z0-9][a-z0-9-]{1\\,62}$,description=Required (file or env). Stable node id (slug). Must not change after enrollment."`
-	Listen string `toml:"listen" env:"LISTEN" jsonschema:"description=Node API and WebSocket listen address (host:port). TLS only."`
+	ID          string      `toml:"id" env:"ID" jsonschema:"pattern=^[a-z0-9][a-z0-9-]{1\\,62}$,description=Required (file or env). Stable node id (slug). Must not change after enrollment."`
+	Listen      string      `toml:"listen" env:"LISTEN" jsonschema:"description=Node API and WebSocket listen address (host:port). TLS only."`
+	EventBuffer EventBuffer `toml:"event_buffer" envPrefix:"EVENT_BUFFER__" jsonschema:"description=RAM buffer of node events while the hub is unreachable (dropped by priority on overflow)."`
+}
+
+// EventBuffer is the [node.event_buffer] table.
+type EventBuffer struct {
+	MaxEvents int  `toml:"max_events" env:"MAX_EVENTS" jsonschema:"minimum=100,maximum=10000000,description=Maximum number of buffered events."`
+	MaxBytes  Size `toml:"max_bytes" env:"MAX_BYTES" jsonschema:"description=Maximum size of buffered events."`
 }
 
 // DefaultHub returns the hub defaults.
@@ -191,7 +198,7 @@ func DefaultHub() Hub {
 // DefaultNode returns the node defaults.
 func DefaultNode() Node {
 	return Node{
-		Node: NodeSection{Listen: "0.0.0.0:8074"},
+		Node: NodeSection{Listen: "0.0.0.0:8074", EventBuffer: EventBuffer{MaxEvents: 10000, MaxBytes: MustSize("16MiB")}},
 		Log:  defaultLog(),
 	}
 }

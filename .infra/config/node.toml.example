@@ -19,6 +19,12 @@ id = "attic"
 # Node API and WebSocket listen address (host:port). TLS only.
 listen = "0.0.0.0:8074"
 
+# RAM buffer of node events while the hub is unreachable; on overflow the
+# node drops diagnostics, then map updates, then decodes (oldest first).
+[node.event_buffer]
+max_events = 10000
+max_bytes = "16MiB"
+
 # Node certificate and key, written by `meshsdr node enroll` (key 0600) and
 # rewritten when the hub renews the certificate.
 # [tls]

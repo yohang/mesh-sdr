@@ -15,6 +15,7 @@ func TestRepositories(t *testing.T) {
 		return repotest.Repos{
 			Nodes:       sqlite.NewNodeRepository(a),
 			Revocations: sqlite.NewRevocationRepository(a),
+			Cursors:     sqlite.NewCursorRepository(a),
 		}
 	})
 }

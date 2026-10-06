@@ -16,6 +16,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite"
+	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
@@ -144,16 +145,24 @@ func UserAdmin(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) *identit
 // the session reaper and the grid. The caller checks the schema version before (see
 // db.Migrator.Check).
 func Hub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Adapter) (*Process, error) {
-	g, err := newHubGrid(cfg, logger, adapter, time.Now)
+	p, _, err := newHub(ctx, cfg, logger, adapter, time.Now, gridapp.DefaultTimings())
+
+	return p, err
+}
+
+func newHub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now func() time.Time,
+	timings gridapp.Timings,
+) (*Process, *hubGrid, error) {
+	g, err := newHubGrid(cfg, logger, adapter, now, timings)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	shellModule := shell.Wire(shell.Deps{Settings: cfg.Settings, Logger: logger})
 
 	idm, err := identity.Wire(ctx, identityDeps(cfg, logger, adapter), pages{shellModule.Renderer})
 	if err != nil {
-		return nil, fmt.Errorf("identity: %w", err)
+		return nil, nil, fmt.Errorf("identity: %w", err)
 	}
 
 	apiServer := api.Server{
@@ -175,16 +184,20 @@ func Hub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Ad
 		logger:  component(logger, "http.server"),
 		startup: g.startup,
 		workers: append([]func(context.Context){func(ctx context.Context) { idm.Reaper.Run(ctx, identityapp.SessionReapEvery) }}, g.workers...),
-	}, nil
+	}, g, nil
 }
 
-// Node builds a node. Until enrollment exists (GRID-006/GRID-007) the node
-// serves only the pre-enrollment API, over TLS 1.3 with an ephemeral
-// self-signed certificate generated at start.
-func Node(cfg config.Node, logger *slog.Logger, now time.Time) (*Process, error) {
+// Node builds a node. An enrolled node (tls.cert present) serves the mTLS
+// node API and /control; otherwise it serves only the pre-enrollment API,
+// over TLS 1.3 with an ephemeral self-signed certificate.
+func Node(cfg config.Node, logger *slog.Logger, now time.Time, opts ...NodeOption) (*Process, error) {
 	id, err := griddomain.NewNodeID(cfg.Node.ID)
 	if err != nil {
 		return nil, fmt.Errorf("node.id: %w", err)
+	}
+
+	if NodeEnrolled(cfg) {
+		return enrolledNode(cfg, id, logger, opts...)
 	}
 
 	key, err := pki.GenerateKey()

@@ -17,6 +17,7 @@ import (
 type Repos struct {
 	Nodes       domain.NodeRepository
 	Revocations domain.RevocationRepository
+	Cursors     domain.EventCursorRepository
 }
 
 // Factory returns the repositories on a fresh, migrated database.
@@ -28,6 +29,57 @@ var t0 = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 func Run(t *testing.T, newRepos Factory) {
 	t.Run("nodes", func(t *testing.T) { testNodes(t, newRepos(t)) })
 	t.Run("revocations", func(t *testing.T) { testRevocations(t, newRepos(t)) })
+	t.Run("cursors", func(t *testing.T) { testCursors(t, newRepos(t)) })
+}
+
+func testCursors(t *testing.T, r Repos) {
+	ctx := context.Background()
+	id := domain.MustNodeID("attic")
+
+	if err := r.Nodes.Create(ctx, domain.NewNode(id, domain.MustNodeName("a"), domain.MustNodeURL("https://x:1"), t0)); err != nil {
+		t.Fatal(err)
+	}
+
+	b1 := must(shared.NewUUIDv7(t0))
+	b2 := must(shared.NewUUIDv7(t0.Add(time.Second)))
+
+	if seq, err := r.Cursors.Last(ctx, id, b1); err != nil || seq != 0 {
+		t.Fatalf("empty cursor = %d, %v", seq, err)
+	}
+
+	for _, c := range []struct {
+		boot shared.UUID
+		seq  int64
+	}{{b1, 5}, {b1, 9}, {b2, 2}} {
+		if err := r.Cursors.Advance(ctx, id, c.boot, c.seq, t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if seq, _ := r.Cursors.Last(ctx, id, b1); seq != 9 {
+		t.Errorf("b1 = %d", seq)
+	}
+
+	if err := r.Cursors.Forget(ctx, id, b2); err != nil {
+		t.Fatal(err)
+	}
+
+	if seq, _ := r.Cursors.Last(ctx, id, b1); seq != 0 {
+		t.Errorf("forgotten b1 = %d", seq)
+	}
+
+	if seq, _ := r.Cursors.Last(ctx, id, b2); seq != 2 {
+		t.Errorf("b2 = %d", seq)
+	}
+
+	// Cursors go away with their node.
+	if err := r.Nodes.Delete(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+
+	if seq, _ := r.Cursors.Last(ctx, id, b2); seq != 0 {
+		t.Errorf("cursor survived its node: %d", seq)
+	}
 }
 
 func must[T any](v T, err error) T {

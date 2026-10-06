@@ -1,18 +1,118 @@
 package wire
 
 import (
+	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
+	"github.com/yohang/mesh-sdr/internal/grid/agent"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
+	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/probe"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/version"
 )
+
+// NodeOption customises the node graph (tests).
+type NodeOption func(*nodeOptions)
+
+type nodeOptions struct {
+	prober  agent.Prober
+	devices func() []ctl.Device
+}
+
+// WithProber replaces the host prober.
+func WithProber(p agent.Prober) NodeOption { return func(o *nodeOptions) { o.prober = p } }
+
+// NodeEnrolled reports whether the node has its certificate (tls.cert).
+func NodeEnrolled(cfg config.Node) bool {
+	if cfg.TLS.Cert == "" {
+		return false
+	}
+
+	_, err := os.Stat(cfg.TLS.Cert)
+
+	return err == nil
+}
+
+// enrolledNode builds an enrolled node: the mTLS node API with /control.
+func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, opts ...NodeOption) (*Process, error) {
+	var o nodeOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
+	cert, err := pki.LoadKeyPair(cfg.TLS.Cert, cfg.TLS.Key)
+	if err != nil {
+		return nil, fmt.Errorf("tls.cert / tls.key: %w", err)
+	}
+
+	caPEM, err := os.ReadFile(cfg.HubTrust.CACert)
+	if err != nil {
+		return nil, fmt.Errorf("hub_trust.ca_cert: %w", err)
+	}
+
+	ca, err := pki.ParseCACert(caPEM)
+	if err != nil {
+		return nil, fmt.Errorf("hub_trust.ca_cert: %w", err)
+	}
+
+	roots := x509.NewCertPool()
+	roots.AddCert(ca)
+
+	key, ok := cert.PrivateKey.(crypto.Signer)
+	if !ok {
+		return nil, errors.New("tls.key: unsupported key type")
+	}
+
+	if o.devices == nil {
+		o.devices = func() []ctl.Device { return []ctl.Device{} }
+	}
+
+	if o.prober == nil {
+		o.prober = probe.New(version.String(), o.devices, time.Now())
+	}
+
+	ag, err := agent.New(agent.Options{
+		NodeID: id.String(), Version: version.String(),
+		Buffer: agent.NewBuffer(cfg.Node.EventBuffer.MaxEvents, int(cfg.Node.EventBuffer.MaxBytes.Bytes())),
+		Prober: o.prober, Now: time.Now, Logger: component(logger, "grid.agent"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	holder := pki.NewCertHolder(cert)
+	revoked := pki.NewRevokedSet()
+
+	ctlServer := control.NewNodeServer(control.NodeOptions{
+		Agent: ag, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
+		Renewer: &control.FileRenewer{NodeID: id.String(), CertFile: cfg.TLS.Cert, Roots: roots, Key: key, Holder: holder, Now: time.Now},
+		Now:     time.Now, Logger: component(logger, "grid.infra.control"),
+	})
+
+	srv := httpserver.NewServer(cfg.Node.Listen, gridhttp.NewNodeRouter(ctlServer, component(logger, "grid.http.node")))
+	srv.TLSConfig = pki.NodeServerConfig(holder, roots, revoked)
+	// Refused handshakes (foreign CA, revoked peer) are expected noise.
+	srv.ErrorLog = slog.NewLogLogger(component(logger, "grid.http.server").Handler(), slog.LevelDebug)
+
+	return &Process{
+		addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server"),
+		workers: []func(context.Context){ag.Run, ctlServer.Run},
+	}, nil
+}
 
 // Enrollment is the one-off process of `meshsdr node enroll`.
 type Enrollment struct {
@@ -47,6 +147,7 @@ func NodeEnrollment(cfg config.Node, logger *slog.Logger, token griddomain.Enrol
 	})
 
 	srv := httpserver.NewServer(cfg.Node.Listen, e.Handler())
+	srv.ErrorLog = slog.NewLogLogger(component(logger, "grid.http.server").Handler(), slog.LevelDebug)
 	srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{self}}
 
 	return &Enrollment{

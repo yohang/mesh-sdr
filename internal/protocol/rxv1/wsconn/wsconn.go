@@ -44,6 +44,12 @@ func Accept(w http.ResponseWriter, r *http.Request, subprotocol string) (*websoc
 		return nil, fmt.Errorf("wsconn: subprotocol %s not offered", subprotocol)
 	}
 
+	// The server's ReadTimeout deadline would survive the hijack and cut
+	// the long-lived connection: clear it (best effort).
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Time{})
+	_ = rc.SetWriteDeadline(time.Time{})
+
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		Subprotocols:    []string{subprotocol},
 		CompressionMode: websocket.CompressionDisabled,
@@ -282,6 +288,18 @@ func (c *Conn) pingLoop() {
 			return
 		}
 	}
+}
+
+// RTT sends a WS ping and returns the time to its pong. A concurrent Read
+// loop must be running (coder/websocket reads pongs in Read).
+func (c *Conn) RTT(ctx context.Context) (time.Duration, error) {
+	start := time.Now()
+
+	if err := c.ws.Ping(ctx); err != nil {
+		return 0, fmt.Errorf("wsconn: ping: %w", err)
+	}
+
+	return time.Since(start), nil
 }
 
 // Read returns the next envelope. A malformed text frame returns an

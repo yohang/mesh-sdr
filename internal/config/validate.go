@@ -209,6 +209,14 @@ func (n *Node) validate(o Origins) []Problem {
 
 	c.listen("node.listen", n.Node.Listen)
 
+	if v := n.Node.EventBuffer.MaxEvents; v < 100 || v > 10_000_000 {
+		c.fail("node.event_buffer.max_events", CodeInvalidValue, fmt.Sprintf("invalid value %d: want 100..10000000", v))
+	}
+
+	if v := n.Node.EventBuffer.MaxBytes.Bytes(); v < 64<<10 || v > 4<<30 {
+		c.fail("node.event_buffer.max_bytes", CodeInvalidValue, "want 64KiB..4GiB")
+	}
+
 	if (n.TLS.Cert == "") != (n.TLS.Key == "") {
 		c.fail("tls.key", CodeRequired, "tls.cert and tls.key go together")
 	}

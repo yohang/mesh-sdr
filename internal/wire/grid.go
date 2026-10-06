@@ -15,9 +15,11 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridinfra "github.com/yohang/mesh-sdr/internal/grid/infra"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/version"
 )
 
 // errGridDisabled is returned by grid features that need the hub CA.
@@ -41,6 +43,9 @@ type hubGrid struct {
 	nodes      *app.Nodes
 	history    *app.History
 	enrollment *app.Enrollment
+	tracker    *app.Tracker
+	control    *app.Control
+	manager    *control.Manager
 	startup    []func(ctx context.Context) error
 	workers    []func(ctx context.Context)
 }
@@ -119,7 +124,7 @@ func DeclaredNodes(cfg map[string]config.ConfigNode) ([]app.DeclaredNode, error)
 	return out, nil
 }
 
-func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now func() time.Time) (*hubGrid, error) {
+func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now func() time.Time, timings app.Timings) (*hubGrid, error) {
 	ca, err := LoadCA(cfg.TLS)
 	if err != nil {
 		return nil, err
@@ -135,7 +140,6 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		return nil, err
 	}
 
-	timings := app.DefaultTimings()
 	audit := gridinfra.NewLogAuditor(component(logger, "grid.infra.audit"))
 	nodeRepo := gridsqlite.NewNodeRepository(adapter)
 	revocations := gridsqlite.NewRevocationRepository(adapter)
@@ -150,10 +154,21 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 	gridLogger := component(logger, "grid.wire")
 
 	if ca != nil {
+		g.tracker = app.NewTracker()
+		g.control = app.NewControl(nodeRepo, gridsqlite.NewCursorRepository(adapter), adapter, audit, g.tracker,
+			version.String(), now, component(logger, "grid.app.control"))
+		g.manager = control.NewManager(control.HubOptions{
+			HubID: hubID, CA: ca, Client: pki.NewClientSource(ca, pki.KindHub, hubID, now),
+			Nodes: nodeRepo, Revocations: revocations, Control: g.control,
+			HeartbeatInterval: timings.HeartbeatInterval, Now: now, Logger: component(logger, "grid.infra.control"),
+		})
+		g.nodes.SetLinks(g.manager)
+
 		enrollment := app.NewEnrollment(nodeRepo, adapter, enroll.NewHubClient(ca, now), audit, now,
 			5*time.Second, component(logger, "grid.app.enrollment"))
+		enrollment.Enrolled = func(context.Context, domain.NodeID) { g.manager.Wake() }
 		g.enrollment = enrollment
-		g.workers = append(g.workers, enrollment.Run)
+		g.workers = append(g.workers, enrollment.Run, g.manager.Run)
 	}
 
 	g.startup = append(g.startup, func(ctx context.Context) error {
