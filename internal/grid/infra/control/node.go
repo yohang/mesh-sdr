@@ -32,8 +32,11 @@ type NodeOptions struct {
 	Revoked      *pki.RevokedSet
 	Renewer      Renewer
 	HelloTimeout time.Duration
-	Now          func() time.Time
-	Logger       *slog.Logger
+	// QueueBytes bounds the outbound queue of a channel (default
+	// MaxQueueBytes). Event replay is paged to half of it.
+	QueueBytes int
+	Now        func() time.Time
+	Logger     *slog.Logger
 }
 
 // NodeServer serves /control on an enrolled node: one hub channel at a
@@ -52,6 +55,10 @@ type NodeServer struct {
 func NewNodeServer(o NodeOptions) *NodeServer {
 	if o.HelloTimeout == 0 {
 		o.HelloTimeout = HelloTimeout
+	}
+
+	if o.QueueBytes == 0 {
+		o.QueueBytes = MaxQueueBytes
 	}
 
 	return &NodeServer{o: o, ready: make(chan struct{})}
@@ -104,7 +111,7 @@ func (s *NodeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := s.baseContext()
-	conn := wsconn.New(ctx, ws, wsconn.Options{ReadLimit: ReadLimit, MaxQueueBytes: MaxQueueBytes})
+	conn := wsconn.New(ctx, ws, wsconn.Options{ReadLimit: ReadLimit, MaxQueueBytes: s.o.QueueBytes})
 
 	s.mu.Lock()
 	old := s.current
@@ -134,7 +141,12 @@ type nodeSession struct {
 	conn     *wsconn.Conn
 	started  bool
 	lastSent int64
+	// more is set when flush stopped with events left to send.
+	more bool
 }
+
+// pageRetry is the delay before sending the next page of a backlog.
+const pageRetry = 20 * time.Millisecond
 
 func (n *nodeSession) run(ctx context.Context) error {
 	o := n.s.o
@@ -144,6 +156,9 @@ func (n *nodeSession) run(ctx context.Context) error {
 
 	reads := reader(ctx, n.conn)
 	buf := o.Agent.Buffer()
+	page := time.NewTicker(pageRetry)
+
+	defer page.Stop()
 
 	for {
 		select {
@@ -151,6 +166,10 @@ func (n *nodeSession) run(ctx context.Context) error {
 			return ctx.Err()
 		case <-buf.Notify():
 			n.flush()
+		case <-page.C:
+			if n.more {
+				n.flush()
+			}
 		case r, ok := <-reads:
 			if !ok {
 				return n.conn.Err()
@@ -172,13 +191,26 @@ func (n *nodeSession) run(ctx context.Context) error {
 	}
 }
 
-// flush sends the buffered events not sent on this channel yet.
+// flush sends the buffered events not sent on this channel yet, one page
+// at a time: it stops while the outbound queue holds half its bound, so a
+// large backlog after an outage never overflows the queue (4413); the rest
+// goes as the hub reads.
 func (n *nodeSession) flush() {
+	n.more = false
+
 	if !n.started {
 		return
 	}
 
+	window := n.s.o.QueueBytes / 2
+
 	for _, e := range n.s.o.Agent.Buffer().After(n.lastSent) {
+		if n.conn.Pending() > 0 && n.conn.Pending()+e.Size > window {
+			n.more = true
+
+			return
+		}
+
 		env, err := rxv1.NewEnvelope(e.Type, rxv1.CorrelationID{}, time.Now().UnixMilli(), e.Payload)
 		if err != nil {
 			n.s.o.Logger.Error("encode node event", slog.Any("error", err))

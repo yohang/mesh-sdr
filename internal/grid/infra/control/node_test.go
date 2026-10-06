@@ -39,6 +39,12 @@ type node struct {
 func startNode(t *testing.T, helloTimeout time.Duration) *node {
 	t.Helper()
 
+	return startNodeWith(t, helloTimeout, 0, nil)
+}
+
+func startNodeWith(t *testing.T, helloTimeout time.Duration, queueBytes int, prefill func(*agent.Agent)) *node {
+	t.Helper()
+
 	certPEM, keyPEM, _ := pki.GenerateCA("hub", time.Now())
 	ca, _ := pki.ParseCA(certPEM, keyPEM)
 
@@ -46,13 +52,18 @@ func startNode(t *testing.T, helloTimeout time.Duration) *node {
 	csr, _ := pki.CreateNodeCSR(key, "attic", "")
 	der, _ := ca.SignNodeCSR(csr, "attic", "", time.Now())
 
-	ag, err := agent.New(agent.Options{NodeID: "attic", Version: "dev", Buffer: agent.NewBuffer(100, 1<<20), Prober: prober{}, Now: time.Now, Logger: discard})
+	ag, err := agent.New(agent.Options{NodeID: "attic", Version: "dev", Buffer: agent.NewBuffer(10000, 16<<20), Prober: prober{}, Now: time.Now, Logger: discard})
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	if prefill != nil {
+		prefill(ag)
+	}
+
 	srv := control.NewNodeServer(control.NodeOptions{
-		Agent: ag, HubIdentity: "hub.example.org", Revoked: pki.NewRevokedSet(), HelloTimeout: helloTimeout, Now: time.Now, Logger: discard,
+		Agent: ag, HubIdentity: "hub.example.org", Revoked: pki.NewRevokedSet(), HelloTimeout: helloTimeout,
+		QueueBytes: queueBytes, Now: time.Now, Logger: discard,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -237,5 +248,42 @@ func TestNewerChannelReplacesOlder(t *testing.T) {
 		}
 
 		return
+	}
+}
+
+// A backlog much larger than the outbound queue is replayed page by page
+// instead of overflowing the queue (4413).
+func TestReplayLargeBacklog(t *testing.T) {
+	const events = 500
+
+	n := startNodeWith(t, time.Second, 8<<10, func(a *agent.Agent) {
+		for range events {
+			a.Emit(rxv1.TypeConnectionOpened, "", agent.ClassState, func(seq int64) any {
+				return ctl.Connection{Seq: seq, CID: strings.Repeat("x", 200)}
+			})
+		}
+	})
+
+	c, err := n.dial(t, pki.KindHub, "hub.example.org")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sendEnv(t, c, rxv1.TypeCtlHello, "", ctl.Hello{HubID: "hub.example.org", ServerTime: time.Now().UnixMilli()})
+
+	seen := 0
+	for seen < events {
+		env := read(t, c)
+		if env.Type() != rxv1.TypeConnectionOpened {
+			continue
+		}
+
+		var s ctl.SeqOnly
+		_ = env.DecodePayload(&s, false)
+		seen++
+
+		if seen%50 == 0 {
+			sendEnv(t, c, rxv1.TypeCtlAck, "", ctl.Ack{UptoSeq: s.Seq})
+		}
 	}
 }
