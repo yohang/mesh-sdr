@@ -90,9 +90,11 @@ func (u NodeURL) Endpoint(scheme, path string) string {
 	return scheme + strings.TrimPrefix(u.value, "https") + path
 }
 
-// EnrollmentToken is the secret shared by the hub and an enrolling node.
-// Hub-issued tokens are 32 random bytes in base64url; config-declared
-// tokens are any 22 to 256 printable ASCII characters.
+// EnrollmentToken is the secret shared by the hub and an enrolling node:
+// 32 random bytes (256 bits) in unpadded base64url, 43 characters. Config
+// tokens must have the same format, so that the HMAC proofs the hub sends
+// before the node is authenticated cannot be brute-forced offline
+// (ADR 0008).
 type EnrollmentToken struct{ value string }
 
 // NewEnrollmentToken returns a fresh random token.
@@ -105,17 +107,13 @@ func NewEnrollmentToken() (EnrollmentToken, error) {
 	return EnrollmentToken{value: base64.RawURLEncoding.EncodeToString(b[:])}, nil
 }
 
-// ParseEnrollmentToken validates s.
+// ParseEnrollmentToken validates s: 32 bytes in unpadded base64url.
 func ParseEnrollmentToken(s string) (EnrollmentToken, error) {
 	s = strings.TrimSpace(s)
-	if len(s) < 22 || len(s) > 256 {
-		return EnrollmentToken{}, ErrInvalidEnrollmentToken
-	}
 
-	for i := range len(s) {
-		if s[i] <= ' ' || s[i] > '~' {
-			return EnrollmentToken{}, ErrInvalidEnrollmentToken
-		}
+	b, err := base64.RawURLEncoding.Strict().DecodeString(s)
+	if err != nil || len(b) != 32 {
+		return EnrollmentToken{}, ErrInvalidEnrollmentToken
 	}
 
 	return EnrollmentToken{value: s}, nil

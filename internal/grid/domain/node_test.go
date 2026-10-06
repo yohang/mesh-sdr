@@ -63,7 +63,13 @@ func TestEnrollmentToken(t *testing.T) {
 		t.Error("two tokens derive the same key")
 	}
 
-	for _, in := range []string{"short", "has space in the middle of it", string(make([]byte, 300))} {
+	for _, in := range []string{
+		"short", "has space in the middle of it", string(make([]byte, 300)),
+		"abcdefghijklmnopqrstuvwxyz",                   // 26 printable characters: too little entropy
+		"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", // padded
+		"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwd",     // 30 bytes
+		"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh+",  // base64 alphabet, not base64url
+	} {
 		if _, err := domain.ParseEnrollmentToken(in); !errors.Is(err, domain.ErrInvalidEnrollmentToken) {
 			t.Errorf("ParseEnrollmentToken(%q) = %v", in, err)
 		}

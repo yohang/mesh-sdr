@@ -126,7 +126,7 @@ func (h *Hub) validate(o Origins) []Problem {
 
 		if n.EnrollmentToken.IsSet() {
 			if _, err := griddomain.ParseEnrollmentToken(n.EnrollmentToken.Reveal()); err != nil {
-				c.fail(key+".enrollment_token", CodeInvalidValue, "enrollment token must be 22 to 256 printable ASCII characters")
+				c.fail(key+".enrollment_token", CodeInvalidValue, "enrollment token must be 32 random bytes in unpadded base64url (43 characters), for example `openssl rand -base64 32 | tr +/ -_ | tr -d =`")
 			}
 		}
 	}

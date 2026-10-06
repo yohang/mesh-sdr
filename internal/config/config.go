@@ -47,7 +47,7 @@ type Hub struct {
 type ConfigNode struct {
 	URL             string `toml:"url" env:"-" jsonschema:"description=Required. Base URL the hub dials: https://host:port (node API and control WebSocket)."`
 	Name            string `toml:"name" env:"-" jsonschema:"description=Display name (defaults to the node id)."`
-	EnrollmentToken Secret `toml:"enrollment_token" env:"-" jsonschema:"description=Enrollment token of the node (22 to 256 printable ASCII characters)\\, used until the node is enrolled."`
+	EnrollmentToken Secret `toml:"enrollment_token" env:"-" jsonschema:"description=Enrollment token of the node: 32 random bytes in unpadded base64url (43 characters)\\, used until the node is enrolled."`
 }
 
 // Settings is the [settings] table: admin settings locked by config

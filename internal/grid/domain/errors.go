@@ -11,7 +11,7 @@ var (
 	ErrVersionConflict         = shared.NewError(shared.KindConflict, "version_conflict", "the node was changed concurrently")
 	ErrInvalidNodeName         = shared.NewError(shared.KindInvalid, "invalid_node_name", "node name must be 1 to 128 printable characters")
 	ErrInvalidNodeURL          = shared.NewError(shared.KindInvalid, "invalid_node_url", "node url must be https://host:port")
-	ErrInvalidEnrollmentToken  = shared.NewError(shared.KindInvalid, "enrollment_token_invalid", "enrollment token must be 22 to 256 printable ASCII characters")
+	ErrInvalidEnrollmentToken  = shared.NewError(shared.KindInvalid, "enrollment_token_invalid", "enrollment token must be 32 random bytes in unpadded base64url (43 characters), for example `openssl rand -base64 32 | tr +/ -_ | tr -d =`")
 	ErrEnrollmentTokenExpired  = shared.NewError(shared.KindConflict, "enrollment_token_expired", "the enrollment token has expired")
 	ErrEnrollmentSuperseded    = shared.NewError(shared.KindConflict, "enrollment_superseded", "the enrollment token or node URL changed during the exchange")
 	ErrNodeNotPending          = shared.NewError(shared.KindConflict, "node_not_pending", "the node is not waiting for enrollment")

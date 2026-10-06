@@ -208,7 +208,7 @@ func testNodes(t *testing.T, r Repos) {
 	ctx := context.Background()
 	repo := r.Nodes
 
-	key := must(domain.ParseEnrollmentToken("abcdefghijklmnopqrstuvwxyz")).Key()
+	key := must(domain.ParseEnrollmentToken("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")).Key()
 	cfgNode := domain.NewConfigNode(domain.MustNodeID("attic"), domain.MustNodeName("Attic"), domain.MustNodeURL("https://10.0.0.1:8074"), &key, t0)
 	dbNode := domain.NewNode(domain.MustNodeID("garden"), domain.MustNodeName("Garden"), domain.MustNodeURL("https://garden.example.org:8074"), t0)
 	dbNode.IssueEnrollmentKey(key, t0.Add(time.Hour), t0)

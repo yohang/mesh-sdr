@@ -40,7 +40,7 @@ enrollment_token = { file = "attic.token" }
 url = "https://garden:8074"
 name = "Garden"
 `,
-		"attic.token": "abcdefghijklmnopqrstuvwxyz\n",
+		"attic.token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\n",
 	})
 
 	hub, meta, err := LoadHub(Options{Dir: hubDir, Env: map[string]string{}})
@@ -48,7 +48,7 @@ name = "Garden"
 		t.Fatal(err)
 	}
 
-	if len(hub.Nodes) != 2 || hub.Nodes["attic"].EnrollmentToken.Reveal() != "abcdefghijklmnopqrstuvwxyz" || hub.Nodes["garden"].Name != "Garden" {
+	if len(hub.Nodes) != 2 || hub.Nodes["attic"].EnrollmentToken.Reveal() != "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8" || hub.Nodes["garden"].Name != "Garden" {
 		t.Errorf("nodes = %+v", hub.Nodes)
 	}
 
@@ -91,7 +91,11 @@ sample_rates = [2_048_000]
 	}{
 		{"ca_cert without ca_key", RoleHub, map[string]string{"hub.toml": minimalHub + "[tls]\nca_cert = \"ca.pem\"\n"}, "tls.ca_key"},
 		{"node url not https", RoleHub, map[string]string{"hub.toml": minimalHub + "[nodes.attic]\nurl = \"http://x:1\"\n"}, "nodes.attic.url"},
-		{"inline node token", RoleHub, map[string]string{"hub.toml": minimalHub + "[nodes.attic]\nurl = \"https://x:1\"\nenrollment_token = \"abcdefghijklmnopqrstuvwxyz\"\n"}, "nodes.attic.enrollment_token"},
+		{"inline node token", RoleHub, map[string]string{"hub.toml": minimalHub + "[nodes.attic]\nurl = \"https://x:1\"\nenrollment_token = \"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\"\n"}, "nodes.attic.enrollment_token"},
+		{"low-entropy node token", RoleHub, map[string]string{
+			"hub.toml": minimalHub + "[nodes.attic]\nurl = \"https://x:1\"\nenrollment_token = { file = \"t\" }\n",
+			"t":        "abcdefghijklmnopqrstuvwxyz\n",
+		}, "nodes.attic.enrollment_token"},
 		{"bad node id", RoleHub, map[string]string{"hub.toml": minimalHub + "[nodes.A]\nurl = \"https://x:1\"\n"}, "nodes.A"},
 		{"device range", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[devices.hf]\nname = \"x\"\ntype = \"rtl_sdr\"\nfreq_range = { min = 10, max = 5 }\nsample_rates = [1]\n"}, "devices.hf.freq_range"},
 		{"cert without key", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[tls]\ncert = \"a\"\n"}, "tls.key"},

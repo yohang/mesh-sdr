@@ -100,7 +100,7 @@ func TestSyncConfig(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 
-	attic := app.DeclaredNode{ID: domain.MustNodeID("attic"), Name: domain.MustNodeName("Attic"), URL: domain.MustNodeURL("https://10.0.0.1:8074"), Token: token(t, "abcdefghijklmnopqrstuvwxyz")}
+	attic := app.DeclaredNode{ID: domain.MustNodeID("attic"), Name: domain.MustNodeName("Attic"), URL: domain.MustNodeURL("https://10.0.0.1:8074"), Token: token(t, "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")}
 	garden := app.DeclaredNode{ID: domain.MustNodeID("garden"), Name: domain.MustNodeName("garden"), URL: domain.MustNodeURL("https://garden:8074")}
 
 	if err := e.svc.SyncConfig(ctx, []app.DeclaredNode{attic, garden}); err != nil {

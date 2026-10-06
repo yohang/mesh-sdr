@@ -49,7 +49,8 @@ max_read_connections = 4
 # url = "https://10.8.0.12:8074"
 # Display name (defaults to the node id).
 # name = "Attic"
-# Enrollment token (secret, 22 to 256 printable ASCII characters), given to
+# Enrollment token (secret): 32 random bytes in unpadded base64url (43
+# characters), e.g. `openssl rand -base64 32 | tr +/ -_ | tr -d =`, given to
 # `meshsdr node enroll` on the node; used once.
 # enrollment_token = { file = "/etc/meshsdr/secrets/node_attic.token" }
 
