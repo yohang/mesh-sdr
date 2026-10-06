@@ -1,0 +1,77 @@
+.DEFAULT_GOAL := help
+MAKEFLAGS += --no-print-directory
+
+export UID := $(shell id -u)
+export GID := $(shell id -g)
+
+COMPOSE ?= docker compose
+RUN     := $(COMPOSE) run --rm --no-deps app
+
+HTMX_VERSION ?= 4.0.0
+IMAGE        ?= mesh-sdr
+
+.PHONY: help
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+
+.PHONY: build
+build: ## Build the dev image
+	$(COMPOSE) build
+
+.PHONY: up
+up: ## Start the dev stack (Air hot reload)
+	$(COMPOSE) up -d --build --remove-orphans --wait
+
+.PHONY: down
+down: ## Stop the dev stack
+	$(COMPOSE) down --remove-orphans
+
+.PHONY: run
+run: ## All-in-one: build image, generate, migrate, start the dev stack
+	$(MAKE) build
+	$(MAKE) migrate
+	$(MAKE) up
+
+.PHONY: clean
+clean: ## Stop the stack, remove volumes (caches), generated files and Air output
+	$(COMPOSE) down -v --remove-orphans
+	find internal -name '*_templ.go' -delete
+	rm -rf internal/db/sqlc internal/web/static/css/app.css tmp
+
+.PHONY: logs
+logs: c=app
+logs: ## Follow logs (c=<service>, default app)
+	$(COMPOSE) logs --tail=100 -f $(c)
+
+.PHONY: sh
+sh: ## Open a shell in a dev container
+	$(RUN) bash
+
+.PHONY: generate
+generate: ## Generate code (templ, sqlc) and CSS (tailwind)
+	$(RUN) go generate ./...
+
+.PHONY: lint
+lint: generate ## Run golangci-lint
+	$(RUN) golangci-lint run
+
+.PHONY: test
+test: generate ## Run tests
+	$(RUN) go test ./...
+
+.PHONY: migrate
+migrate: generate ## Run migrations (cmd=up|down|status, default up)
+	$(RUN) go run ./cmd/meshsdr migrate $(or $(cmd),up)
+
+.PHONY: migrate-create
+migrate-create: ## Create a SQL migration (name=...)
+	@test -n "$(name)" || (echo "usage: make migrate-create name=<name>" && exit 1)
+	$(RUN) go tool goose -dir internal/db/migrations -s create $(name) sql
+
+.PHONY: vendor
+vendor: ## Download vendored JS assets (HTMX_VERSION=...)
+	$(RUN) curl -fsSL -o internal/web/static/vendor/htmx.min.js https://cdn.jsdelivr.net/npm/htmx.org@$(HTMX_VERSION)/dist/htmx.min.js
+
+.PHONY: build-prod
+build-prod: ## Build the production image
+	docker build --target prod -t $(IMAGE) .

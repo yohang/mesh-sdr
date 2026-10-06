@@ -1,0 +1,19 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go generate ./... && go build -o ./tmp/meshsdr ./cmd/meshsdr"
+entrypoint = ["./tmp/meshsdr", "serve"]
+include_ext = ["go", "templ", "sql", "css", "js"]
+exclude_dir = ["tmp", "var", "internal/db/sqlc"]
+exclude_file = ["internal/web/static/css/app.css"]
+exclude_regex = ["_templ\\.go$", "_test\\.go$"]
+send_interrupt = true
+kill_delay = "5s"
+stop_on_error = true
+
+[log]
+time = true
+
+[misc]
+clean_on_exit = true

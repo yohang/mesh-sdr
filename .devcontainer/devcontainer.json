@@ -1,0 +1,66 @@
+{
+  "name": "MeshSDR",
+  "dockerComposeFile": ["../compose.yaml", "../compose.override.yaml"],
+  "service": "app",
+  "workspaceFolder": "/app",
+  "overrideCommand": false,
+  "remoteUser": "app",
+  "updateRemoteUserUID": true,
+  "shutdownAction": "stopCompose",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "a-h.templ",
+        "bradlc.vscode-tailwindcss",
+        "otovo-oss.htmx-tags",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "mikestead.dotenv",
+        "qwtel.sqlite-viewer",
+        "ms-azuretools.vscode-containers",
+        "github.vscode-github-actions"
+      ],
+      "settings": {
+        "go.useLanguageServer": true,
+        "go.toolsManagement.autoUpdate": false,
+        "go.toolsManagement.checkForUpdates": "off",
+        "go.lintTool": "golangci-lint-v2",
+        "go.lintOnSave": "package",
+        "gopls": {
+          "formatting.gofumpt": false,
+          "ui.semanticTokens": true
+        },
+        "[go]": {
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        },
+        "[templ]": {
+          "editor.defaultFormatter": "a-h.templ",
+          "editor.formatOnSave": true
+        },
+        "emmet.includeLanguages": {
+          "templ": "html"
+        },
+        "tailwindCSS.includeLanguages": {
+          "templ": "html"
+        },
+        "tailwindCSS.experimental.configFile": "internal/web/static/css/input.css",
+        "files.associations": {
+          "*.css": "tailwindcss"
+        },
+        "files.exclude": {
+          "tmp": true
+        },
+        "search.exclude": {
+          "**/*_templ.go": true,
+          "internal/db/sqlc": true,
+          "internal/web/static/css/app.css": true,
+          "internal/web/static/vendor": true
+        }
+      }
+    }
+  }
+}

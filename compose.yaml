@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: .
+      target: prod
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${HTTP_PORT:-3000}:3000"
+    volumes:
+      - data:/data
+
+volumes:
+  data:

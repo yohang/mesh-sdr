@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      target: dev
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    environment:
+      DB_PATH: /app/var/meshsdr.db
+      LOG_LEVEL: debug
+      LOG_FORMAT: text
+    volumes:
+      - .:/app
+      - go-cache:/cache
+
+volumes:
+  go-cache:
