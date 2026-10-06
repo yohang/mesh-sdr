@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -185,4 +186,58 @@ func (m *Module) setupRefused(w http.ResponseWriter, r *http.Request, err error)
 	}
 
 	m.pages.Page(w, r, status, pageTitleSetup, setupInvalid(msg), nil)
+}
+
+// setupAllowedCtx checks the setup API's preconditions: a pending setup and
+// a client address in admin.allowed_networks.
+func (m *Module) setupAllowedCtx(ctx context.Context) error {
+	switch {
+	case m.setup == nil:
+		return domain.ErrSetupTokenInvalid
+	case !clientip.In(clientip.From(ctx), m.admin):
+		m.logger.WarnContext(ctx, "setup refused outside admin.allowed_networks")
+
+		return domain.ErrAdminNetworkDenied
+	}
+
+	return nil
+}
+
+// CheckSetup checks a setup token for the API (GET /api/v1/auth/setup/…)
+// and returns the minimum password length.
+func (m *Module) CheckSetup(ctx context.Context, token string) (int, error) {
+	if err := m.setupAllowedCtx(ctx); err != nil {
+		return 0, err
+	}
+
+	if err := m.setup.Check(token, m.meta(ctx)); err != nil {
+		return 0, err
+	}
+
+	return m.setup.MinLength(ctx), nil
+}
+
+// CompleteSetup creates the first admin for the API (POST
+// /api/v1/auth/setup) and signs it in: it returns the principal, the CSRF
+// token of the new session and the cookies to set.
+// email and displayName are optional.
+func (m *Module) CompleteSetup(ctx context.Context, token, username, email, displayName, password string) (domain.Principal, string, []*http.Cookie, error) {
+	if err := m.setupAllowedCtx(ctx); err != nil {
+		return domain.Principal{}, "", nil, err
+	}
+
+	previous := ""
+	if st := FromContext(ctx); st.session != nil {
+		previous = st.token.Cookie()
+	}
+
+	res, err := m.setup.Complete(ctx, app.SetupInput{
+		Token: token, Username: username, Email: email, DisplayName: displayName, Password: password,
+		Previous: previous, Meta: m.meta(ctx),
+	})
+	if err != nil {
+		return domain.Principal{}, "", nil, err
+	}
+
+	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.sessionCookies(res), nil
 }

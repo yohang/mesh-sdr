@@ -342,6 +342,75 @@ paths:
                 $ref: "#/components/schemas/ConnectionList"
         default:
           $ref: "#/components/responses/Problem"
+  /auth/setup/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        description: The single-use token of the setup link (it is redacted from logs).
+        schema:
+          type: string
+          maxLength: 128
+    get:
+      operationId: checkSetup
+      x-meshsdr-access: anonymous
+      summary: Check a first-admin setup link (AUTH-018)
+      description: |
+        Answers 200 while the hub has no admin and the token is the pending
+        one, 404 `setup_token_invalid` otherwise. Only from
+        `admin.allowed_networks` (403 `admin_network_denied`); throttled per
+        client address (429 `rate_limited` with `Retry-After`).
+      tags: [auth]
+      responses:
+        "200":
+          description: The link is valid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupInfo"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/setup:
+    post:
+      operationId: completeSetup
+      x-meshsdr-access: anonymous
+      summary: Create the first admin with a setup link (AUTH-018)
+      description: |
+        Creates the first admin with a local password that follows the
+        password policy, consumes the token and signs the admin in (the
+        session cookie is set). Same network and rate limits as
+        `GET /auth/setup/{token}`; 404 `setup_token_invalid` for an unknown,
+        expired or used token, or once an admin exists.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupRequest"
+      responses:
+        "200":
+          description: The admin is created and signed in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionInfo"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
   /auth/password:
     post:
       operationId: changePassword
@@ -2148,6 +2217,33 @@ components:
         remember_me:
           type: boolean
           description: Keep the session for 30 days instead of 24 hours.
+    SetupInfo:
+      type: object
+      required: [min_password_length]
+      properties:
+        min_password_length:
+          type: integer
+          description: Minimum length of the new password (`auth.password_min_length`).
+    SetupRequest:
+      type: object
+      additionalProperties: false
+      required: [token, username, password]
+      properties:
+        token:
+          type: string
+          maxLength: 128
+        username:
+          type: string
+          maxLength: 254
+        email:
+          type: string
+          maxLength: 254
+        display_name:
+          type: string
+          maxLength: 254
+        password:
+          type: string
+          maxLength: 1024
     ChangePasswordRequest:
       type: object
       additionalProperties: false
