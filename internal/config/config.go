@@ -40,7 +40,13 @@ type Hub struct {
 // settings key. Until the settings store exists (ADM-002) the effective value
 // is the config value or the default.
 type Settings struct {
-	UI SettingsUI `toml:"ui" envPrefix:"UI__" jsonschema:"description=Look and feel."`
+	UI       SettingsUI       `toml:"ui" envPrefix:"UI__" jsonschema:"description=Look and feel."`
+	Receiver SettingsReceiver `toml:"receiver" envPrefix:"RECEIVER__" jsonschema:"description=Receiver identity and policies."`
+}
+
+// SettingsReceiver is the [settings.receiver] table.
+type SettingsReceiver struct {
+	UsagePolicyText string `toml:"usage_policy_text" env:"USAGE_POLICY_TEXT" jsonschema:"maxLength=20000,description=Usage policy shown at /policy (UI-003), in Markdown (raw HTML is not rendered). Empty: the built-in default policy."`
 }
 
 // SettingsUI is the [settings.ui] table.

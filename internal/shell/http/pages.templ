@@ -3,3 +3,12 @@ package http
 templ homePage(siteName string) {
 	<h1 class="text-2xl font-semibold">{ siteName }</h1>
 }
+
+// policyPage renders the usage policy. policyHTML is goldmark output, which
+// carries no raw HTML nor dangerous URLs (see markdown.go).
+templ policyPage(policyHTML string) {
+	<article class="prose-text">
+		<h1>Usage policy</h1>
+		@templ.Raw(policyHTML)
+	</article>
+}

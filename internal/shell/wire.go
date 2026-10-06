@@ -31,11 +31,13 @@ type Module struct {
 func Wire(d Deps) Module {
 	component := func(name string) *slog.Logger { return d.Logger.With(slog.String("component", name)) }
 
-	lookAndFeel := app.NewLookAndFeel(infra.NewConfigSettings(d.Settings), component("shell.app.look_and_feel"))
+	settings := infra.NewConfigSettings(d.Settings)
+	lookAndFeel := app.NewLookAndFeel(settings, component("shell.app.look_and_feel"))
+	policy := app.NewPolicy(settings, component("shell.app.policy"))
 	rd := render.New(shellhttp.NewShellSource(lookAndFeel), component("web.render"))
 
 	return Module{
 		Renderer: rd,
-		HTTP:     shellhttp.NewModule(rd),
+		HTTP:     shellhttp.NewModule(rd, policy, component("shell.http")),
 	}
 }

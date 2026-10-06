@@ -98,6 +98,45 @@ func TestRobots(t *testing.T) {
 	}
 }
 
+// TestPolicy covers UI-003: public page with the default or the configured
+// policy, rendered without raw HTML, linked from the footer.
+func TestPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		want   []string
+		banned []string
+	}{
+		{"default", "", []string{"<h1>Usage policy</h1>", "<h2>Acceptable use</h2>"}, nil},
+		{"configured", "# House rules\n\nBe <em>nice</em> & [polite](javascript:alert(1)).\n<script>alert(1)</script>", []string{
+			"<h1>Usage policy</h1>", "<h2>House rules</h2>", "Be ", "nice", " &amp; ",
+		}, []string{"<em>", "<script>alert", "javascript:", "Acceptable use"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := router(config.Settings{Receiver: config.SettingsReceiver{UsagePolicyText: tt.text}})
+
+			res, body := do(t, h, http.MethodGet, "/policy", nil)
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("GET /policy = %d", res.StatusCode)
+			}
+
+			for _, w := range append(tt.want, "<title>Usage policy · MeshSDR</title>", `<a href="/policy">Usage policy</a>`) {
+				if !strings.Contains(body, w) {
+					t.Errorf("body lacks %q", w)
+				}
+			}
+
+			for _, b := range tt.banned {
+				if strings.Contains(body, b) {
+					t.Errorf("body contains %q", b)
+				}
+			}
+		})
+	}
+}
+
 func TestErrorPages(t *testing.T) {
 	h := router(config.DefaultHub().Settings)
 

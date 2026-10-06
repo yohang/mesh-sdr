@@ -8,11 +8,15 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
+
+// maxUsagePolicyText is the usage policy length limit, in characters.
+const maxUsagePolicyText = 20000
 
 type checker struct {
 	origins  Origins
@@ -90,6 +94,11 @@ func (h *Hub) validate(o Origins) []Problem {
 
 	c.log(h.Log)
 	c.enum("settings.ui.theme_mode", h.Settings.UI.ThemeMode, "light", "dark", "auto")
+
+	if n := utf8.RuneCountInString(h.Settings.Receiver.UsagePolicyText); n > maxUsagePolicyText {
+		c.fail("settings.receiver.usage_policy_text", CodeInvalidValue,
+			fmt.Sprintf("too long (%d characters): want at most %d", n, maxUsagePolicyText))
+	}
 
 	return c.problems
 }

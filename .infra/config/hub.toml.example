@@ -44,3 +44,10 @@ format = "json"
 # Theme mode: light | dark | auto (follows the visitor's prefers-color-scheme).
 # A change applies on the next full page load.
 # theme_mode = "auto"
+
+[settings.receiver]
+# Usage policy shown at /policy, in Markdown (raw HTML is not rendered).
+# Unset: the built-in default policy.
+# usage_policy_text = """
+# This receiver is open to everyone. Be nice.
+# """

@@ -4,6 +4,7 @@ package infra
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/shell/domain"
@@ -32,4 +33,19 @@ func (s *ConfigSettings) ThemeMode(context.Context) (domain.ThemeMode, error) {
 	}
 
 	return m, nil
+}
+
+// UsagePolicy returns settings.receiver.usage_policy_text; set is false when
+// it is empty.
+func (s *ConfigSettings) UsagePolicy(context.Context) (domain.PolicyText, bool, error) {
+	if strings.TrimSpace(s.cfg.Receiver.UsagePolicyText) == "" {
+		return domain.PolicyText{}, false, nil
+	}
+
+	p, err := domain.NewPolicyText(s.cfg.Receiver.UsagePolicyText)
+	if err != nil {
+		return domain.PolicyText{}, false, fmt.Errorf("settings.receiver.usage_policy_text: %w", err)
+	}
+
+	return p, true, nil
 }
