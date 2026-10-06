@@ -137,8 +137,497 @@ paths:
           description: Signed out. The session cookie is cleared.
         default:
           $ref: "#/components/responses/Problem"
+  /nodes:
+    get:
+      operationId: listNodes
+      x-meshsdr-access: admin
+      summary: List nodes and their status (admin)
+      tags: [grid]
+      responses:
+        "200":
+          description: Nodes, ordered by id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createNode
+      x-meshsdr-access: admin
+      summary: Declare a node and get its enrollment token, shown once (admin)
+      tags: [grid]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NodeCreate"
+      responses:
+        "201":
+          description: Node declared, pending enrollment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeEnrollment"
+        default:
+          $ref: "#/components/responses/Problem"
+  /nodes/{id}:
+    parameters:
+      - $ref: "#/components/parameters/NodeID"
+    get:
+      operationId: getNode
+      x-meshsdr-access: admin
+      summary: Node detail with recent load history (admin)
+      tags: [grid]
+      responses:
+        "200":
+          description: Node
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeDetail"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateNode
+      x-meshsdr-access: admin
+      summary: Update the name, URL or disabled flag of a node (admin; 409 setting_locked for config-set fields)
+      tags: [grid]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NodePatch"
+      responses:
+        "200":
+          description: Updated node
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteNode
+      x-meshsdr-access: admin
+      summary: Remove a node and revoke its certificate (admin; 409 entity_locked for config nodes)
+      tags: [grid]
+      responses:
+        "204":
+          description: Node removed
+        default:
+          $ref: "#/components/responses/Problem"
+  /nodes/{id}/enrollment-token:
+    parameters:
+      - $ref: "#/components/parameters/NodeID"
+    post:
+      operationId: issueNodeEnrollmentToken
+      x-meshsdr-access: admin
+      summary: Issue a new enrollment token (re-enrollment), shown once (admin)
+      tags: [grid]
+      responses:
+        "200":
+          description: Node back to pending enrollment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeEnrollment"
+        default:
+          $ref: "#/components/responses/Problem"
+  /nodes/{id}/capabilities:
+    parameters:
+      - $ref: "#/components/parameters/NodeID"
+    get:
+      operationId: getNodeCapabilities
+      x-meshsdr-access: admin
+      summary: Last capability report of a node (admin)
+      tags: [grid]
+      responses:
+        "200":
+          description: Capability report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeCapabilities"
+        default:
+          $ref: "#/components/responses/Problem"
+  /nodes/{id}/capabilities/probe:
+    parameters:
+      - $ref: "#/components/parameters/NodeID"
+    post:
+      operationId: probeNodeCapabilities
+      x-meshsdr-access: admin
+      summary: Ask a connected node to re-probe its capabilities (admin; 503 node_unavailable when not connected)
+      tags: [grid]
+      responses:
+        "202":
+          description: Probe requested; the new report arrives on the control channel
+        default:
+          $ref: "#/components/responses/Problem"
+  /devices:
+    get:
+      operationId: listDevices
+      x-meshsdr-access: admin
+      summary: Device registry, mirrored read-only from node configs (admin for now)
+      tags: [grid]
+      responses:
+        "200":
+          description: Devices ordered by node and config order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceList"
+        default:
+          $ref: "#/components/responses/Problem"
+  /devices/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"
+    get:
+      operationId: getDevice
+      x-meshsdr-access: admin
+      summary: One device of the registry (admin for now)
+      tags: [grid]
+      responses:
+        "200":
+          description: Device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        default:
+          $ref: "#/components/responses/Problem"
+  /connections:
+    get:
+      operationId: listConnections
+      x-meshsdr-access: anonymous
+      summary: Presence registry. Anonymous callers get the count only; admins also get the connections.
+      tags: [grid]
+      responses:
+        "200":
+          description: Open connections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionList"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
+  parameters:
+    NodeID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    ConnectionList:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+        items:
+          type: array
+          description: Present for admins only.
+          items:
+            $ref: "#/components/schemas/Connection"
+    Connection:
+      type: object
+      required: [id, kind, ip, opened_at, last_heartbeat_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [events, media, map]
+        user_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+        device_id:
+          type: string
+        mode:
+          type: string
+        ip:
+          type: string
+        opened_at:
+          type: string
+          format: date-time
+        last_heartbeat_at:
+          type: string
+          format: date-time
+    DeviceList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Device"
+    Device:
+      type: object
+      required: [id, node_id, name, type, freq_min, freq_max, sample_rates, enabled, operator_can_retune, always_on, scheduler_enabled, online, runtime_state, runtime_state_at, sort_order, reported_at]
+      properties:
+        id:
+          type: string
+        node_id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        freq_min:
+          type: integer
+          format: int64
+        freq_max:
+          type: integer
+          format: int64
+        sample_rates:
+          type: array
+          items:
+            type: integer
+            format: int64
+        enabled:
+          type: boolean
+        listen_policy:
+          type: string
+          enum: [anonymous, registered]
+        operator_can_retune:
+          type: boolean
+        always_on:
+          type: boolean
+        scheduler_enabled:
+          type: boolean
+        online:
+          type: boolean
+        runtime_state:
+          type: string
+          enum: [unavailable, disabled, stopped, starting, running, retuning, stopping, retry_wait, failed]
+        runtime_state_at:
+          type: string
+          format: date-time
+        runtime_reason:
+          type: string
+        active_preset_id:
+          type: string
+          format: uuid
+        center_freq:
+          type: integer
+          format: int64
+        sort_order:
+          type: integer
+        reported_at:
+          type: string
+          format: date-time
+    NodeCapabilities:
+      type: object
+      required: [node_id, reported_at, capabilities_hash, product_version, protocols, platform, document, capabilities]
+      properties:
+        node_id:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+        capabilities_hash:
+          type: string
+        product_version:
+          type: string
+        protocols:
+          type: array
+          items:
+            type: string
+        platform:
+          type: object
+          additionalProperties: true
+        document:
+          type: object
+          description: The full node.capabilities report as received.
+          additionalProperties: true
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeCapability"
+    NodeCapability:
+      type: object
+      required: [capability, available, status, detail]
+      properties:
+        capability:
+          type: string
+          example: tool:jt9
+        available:
+          type: boolean
+        status:
+          type: string
+          enum: [ok, missing, too_old, untested, error]
+        version:
+          type: string
+        detail:
+          type: object
+          additionalProperties: true
+        error:
+          type: string
+    NodeCreate:
+      type: object
+      additionalProperties: false
+      required: [id, url]
+      properties:
+        id:
+          type: string
+          description: Stable node id (the node's node.id).
+          example: attic
+        name:
+          type: string
+          description: Display name; defaults to the id.
+        url:
+          type: string
+          description: Base URL the hub dials, https://host:port.
+          example: https://10.8.0.12:8074
+    NodePatch:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version:
+          type: integer
+          description: Expected version (optimistic concurrency, 409 version_conflict on mismatch).
+        name:
+          type: string
+        url:
+          type: string
+        disabled:
+          type: boolean
+    NodeEnrollment:
+      type: object
+      required: [node, enrollment_token, ca_fingerprint]
+      properties:
+        node:
+          $ref: "#/components/schemas/Node"
+        enrollment_token:
+          type: string
+          description: Single-use enrollment token. Shown only in this response.
+        ca_fingerprint:
+          type: string
+          description: SHA-256 fingerprint of the hub CA, to give to the node with the token.
+        expires_at:
+          type: string
+          format: date-time
+    NodeList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Node"
+    Node:
+      type: object
+      required: [id, name, url, origin, locked_fields, disabled, enrollment_state, health, status, created_at, updated_at, version]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        origin:
+          type: string
+          enum: [config, db]
+        locked_fields:
+          type: array
+          items:
+            type: string
+        disabled:
+          type: boolean
+        enrollment_state:
+          type: string
+          enum: [pending, enrolled, revoked]
+        health:
+          type: string
+          description: enrolling, revoked, or the runtime status.
+          enum: [enrolling, online, degraded, offline, unreachable, incompatible, revoked]
+        status:
+          type: string
+          enum: [online, degraded, offline, unreachable, incompatible]
+        status_hint:
+          type: string
+        enrollment_expires_at:
+          type: string
+          format: date-time
+        enrolled_at:
+          type: string
+          format: date-time
+        cert_serial:
+          type: string
+        cert_fingerprint:
+          type: string
+        cert_not_after:
+          type: string
+          format: date-time
+        last_heartbeat_at:
+          type: string
+          format: date-time
+        software_version:
+          type: string
+        protocol_version:
+          type: string
+        hostname:
+          type: string
+        cpu_cores:
+          type: integer
+        clock_offset_ms:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+    NodeDetail:
+      type: object
+      required: [node, load_history]
+      properties:
+        node:
+          $ref: "#/components/schemas/Node"
+        load_history:
+          type: array
+          description: Recent heartbeats (RAM ring, last hour).
+          items:
+            $ref: "#/components/schemas/LoadSample"
+    LoadSample:
+      type: object
+      required: [at, cpu, load1, mem_available_bytes, mem_total_bytes]
+      properties:
+        at:
+          type: string
+          format: date-time
+        cpu:
+          type: number
+          format: double
+        load1:
+          type: number
+          format: double
+        temp_c:
+          type: number
+          format: double
+        mem_available_bytes:
+          type: integer
+          format: int64
+        mem_total_bytes:
+          type: integer
+          format: int64
     SessionInfo:
       type: object
       required: [authenticated, roles, csrf_token, providers]

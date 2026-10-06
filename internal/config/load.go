@@ -118,6 +118,12 @@ type validator interface {
 	validate(o Origins) []Problem
 }
 
+// pathResolver is implemented by configs holding file paths, resolved
+// against the config dir before validation.
+type pathResolver interface {
+	resolvePaths(dir string)
+}
+
 type loader struct {
 	role     Role
 	dir      string
@@ -164,6 +170,10 @@ func load[T any, PT interface {
 	}
 
 	if len(l.problems) == 0 {
+		if r, ok := any(cfg).(pathResolver); ok {
+			r.resolvePaths(l.dir)
+		}
+
 		l.problems = append(l.problems, cfg.validate(l.origins)...)
 	}
 
@@ -292,7 +302,9 @@ func (l *loader) decodeFile(path string, cfg any) {
 			Message: "unknown key" + suggest(key, l.keys())})
 	}
 
-	for _, lf := range l.leaves {
+	dynamic, _ := expandMaps(l.leaves)
+
+	for _, lf := range slices.Concat(l.leaves, dynamic) {
 		if !md.IsDefined(strings.Split(lf.key, ".")...) {
 			continue
 		}
@@ -405,7 +417,10 @@ func (l *loader) resolveSecrets() {
 		return v, ok
 	}
 
-	for _, lf := range l.leaves {
+	dynamic, store := expandMaps(l.leaves)
+	defer store()
+
+	for _, lf := range slices.Concat(l.leaves, dynamic) {
 		s, ok := lf.value.Addr().Interface().(*Secret)
 		if !ok || !s.IsSet() {
 			continue

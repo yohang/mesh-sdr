@@ -292,6 +292,11 @@ func TestCatalogues(t *testing.T) {
 		{rxv1.HubClientToHub(), rxv1.TypeAuthRefresh, false},
 		{rxv1.HubHubToClient(), rxv1.TypeSessionRevoked, true},
 		{rxv1.HubHubToClient(), rxv1.TypeStreamOpen, false},
+		{rxv1.CtlHubToNode(), rxv1.TypeCtlHello, true},
+		{rxv1.CtlHubToNode(), rxv1.TypeCtlWelcome, false},
+		{rxv1.CtlNodeToHub(), rxv1.TypeNodeHeartbeat, true},
+		{rxv1.CtlNodeToHub(), rxv1.TypeDeviceState, true},
+		{rxv1.CtlNodeToHub(), rxv1.TypeCtlHello, false},
 	}
 	for _, tt := range tests {
 		if got := tt.cat.Contains(tt.typ); got != tt.want {

@@ -1,0 +1,290 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+)
+
+// ErrGridDisabled is returned when an action needs the hub CA.
+var ErrGridDisabled = shared.NewError(shared.KindUnavailable, "grid_disabled",
+	"the hub internal CA is not configured (tls.ca_cert): run `meshsdr hub ca init`")
+
+// Links controls the control channels (implemented by the control manager).
+type Links interface {
+	// Drop closes the control channel of id, after pushing revocations.
+	Drop(ctx context.Context, id domain.NodeID)
+	// Probe asks a connected node to re-probe its capabilities.
+	Probe(ctx context.Context, id domain.NodeID) error
+	// Wake reconciles the set of channels now.
+	Wake()
+}
+
+// NoLinks is Links when the grid is disabled.
+type NoLinks struct{}
+
+// Drop implements Links.
+func (NoLinks) Drop(context.Context, domain.NodeID) {}
+
+// Probe implements Links.
+func (NoLinks) Probe(context.Context, domain.NodeID) error { return domain.ErrNodeUnavailable }
+
+// Wake implements Links.
+func (NoLinks) Wake() {}
+
+// Issued is a node with a freshly issued enrollment token.
+type Issued struct {
+	Node          *domain.Node
+	Token         domain.EnrollmentToken
+	CAFingerprint string
+	ExpiresAt     time.Time
+}
+
+// NewNodeInput declares an admin-added node.
+type NewNodeInput struct {
+	ID   string
+	Name string
+	URL  string
+}
+
+// SetLinks wires the control channels; until then NoLinks is used.
+func (s *Nodes) SetLinks(l Links) { s.links = l }
+
+func (s *Nodes) linksOrNone() Links {
+	if s.links == nil {
+		return NoLinks{}
+	}
+
+	return s.links
+}
+
+// Add declares a node (GRID-005) and issues its enrollment token.
+func (s *Nodes) Add(ctx context.Context, actor string, in NewNodeInput) (Issued, error) {
+	fp, err := s.ca.Fingerprint()
+	if err != nil {
+		return Issued{}, ErrGridDisabled
+	}
+
+	id, err := domain.NewNodeID(in.ID)
+	if err != nil {
+		return Issued{}, err
+	}
+
+	nameStr := in.Name
+	if nameStr == "" {
+		nameStr = in.ID
+	}
+
+	name, err := domain.NewNodeName(nameStr)
+	if err != nil {
+		return Issued{}, err
+	}
+
+	u, err := domain.NewNodeURL(in.URL)
+	if err != nil {
+		return Issued{}, err
+	}
+
+	tok, err := domain.NewEnrollmentToken()
+	if err != nil {
+		return Issued{}, err
+	}
+
+	now := s.now()
+	exp := now.Add(s.timings.EnrollmentTTL)
+	n := domain.NewNode(id, name, u, now)
+	n.IssueEnrollmentKey(tok.Key(), exp, now)
+
+	if err := s.repo.Create(ctx, n); err != nil {
+		return Issued{}, err
+	}
+
+	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.add", Target: id.String(), Result: ResultOK})
+	s.logger.InfoContext(ctx, "node added", slog.String("node_id", id.String()), slog.String("url", u.String()))
+
+	return Issued{Node: n, Token: tok, CAFingerprint: fp, ExpiresAt: n.Snapshot().KeyExpiresAt}, nil
+}
+
+// List returns every node.
+func (s *Nodes) List(ctx context.Context) ([]*domain.Node, error) { return s.repo.List(ctx) }
+
+// Get returns one node.
+func (s *Nodes) Get(ctx context.Context, id string) (*domain.Node, error) {
+	nid, err := domain.NewNodeID(id)
+	if err != nil {
+		return nil, domain.ErrNodeNotFound
+	}
+
+	return s.repo.Get(ctx, nid)
+}
+
+// Update applies an admin change at expectedVersion.
+func (s *Nodes) Update(ctx context.Context, actor, id string, name, url *string, disabled *bool, expectedVersion int) (*domain.Node, error) {
+	var p domain.NodePatch
+
+	if name != nil {
+		v, err := domain.NewNodeName(*name)
+		if err != nil {
+			return nil, err
+		}
+
+		p.Name = &v
+	}
+
+	if url != nil {
+		v, err := domain.NewNodeURL(*url)
+		if err != nil {
+			return nil, err
+		}
+
+		p.URL = &v
+	}
+
+	p.Disabled = disabled
+
+	n, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		v := n.Version()
+		if err := n.Update(p, expectedVersion, s.now()); err != nil {
+			return err
+		}
+
+		return s.repo.Save(ctx, n, v)
+	})
+	if err != nil {
+		s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.update", Target: id, Result: ResultDenied, Detail: map[string]string{"reason": err.Error()}})
+
+		return nil, err
+	}
+
+	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.update", Target: id, Result: ResultOK})
+
+	if n.Disabled() {
+		s.linksOrNone().Drop(ctx, n.ID())
+	}
+
+	s.linksOrNone().Wake()
+
+	return n, nil
+}
+
+// Delete removes an admin-managed node and revokes its certificate.
+func (s *Nodes) Delete(ctx context.Context, actor, id string) error {
+	n, err := s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if err := n.CheckDeletable(); err != nil {
+		s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.delete", Target: id, Result: ResultDenied, Detail: map[string]string{"reason": err.Error()}})
+
+		return err
+	}
+
+	now := s.now()
+
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		if err := revoke(ctx, s.revocations, n.PendingCertificate(), n.ID(), "deleted", now); err != nil {
+			return err
+		}
+
+		if c := n.Certificate(); !c.IsZero() {
+			r, err := domain.NewRevokedCertificate(c, n.ID(), "deleted", now)
+			if err != nil {
+				return err
+			}
+
+			if err := s.revocations.Add(ctx, r); err != nil {
+				return err
+			}
+		}
+
+		return s.repo.Delete(ctx, n.ID())
+	})
+	if err != nil {
+		return fmt.Errorf("delete node %s: %w", id, err)
+	}
+
+	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.delete", Target: id, Result: ResultOK})
+	s.logger.InfoContext(ctx, "node deleted", slog.String("node_id", id))
+	s.linksOrNone().Drop(ctx, n.ID())
+
+	return nil
+}
+
+// IssueToken issues a new enrollment token (re-enrollment). The current
+// certificate, if any, is revoked.
+func (s *Nodes) IssueToken(ctx context.Context, actor, id string) (Issued, error) {
+	fp, err := s.ca.Fingerprint()
+	if err != nil {
+		return Issued{}, ErrGridDisabled
+	}
+
+	n, err := s.Get(ctx, id)
+	if err != nil {
+		return Issued{}, err
+	}
+
+	tok, err := domain.NewEnrollmentToken()
+	if err != nil {
+		return Issued{}, err
+	}
+
+	now := s.now()
+	exp := now.Add(s.timings.EnrollmentTTL)
+
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		v := n.Version()
+		old := n.Certificate()
+
+		// A renewed certificate sent but not confirmed is dropped too.
+		if err := revoke(ctx, s.revocations, n.PendingCertificate(), n.ID(), "superseded", now); err != nil {
+			return err
+		}
+
+		n.IssueEnrollmentKey(tok.Key(), exp, now)
+
+		if !old.IsZero() {
+			r, err := domain.NewRevokedCertificate(old, n.ID(), "reenrolled", now)
+			if err != nil {
+				return err
+			}
+
+			if err := s.revocations.Add(ctx, r); err != nil {
+				return err
+			}
+		}
+
+		return s.repo.Save(ctx, n, v)
+	})
+	if err != nil {
+		return Issued{}, fmt.Errorf("issue token for node %s: %w", id, err)
+	}
+
+	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.enrollment_token.issue", Target: id, Result: ResultOK})
+	s.linksOrNone().Drop(ctx, n.ID())
+
+	return Issued{Node: n, Token: tok, CAFingerprint: fp, ExpiresAt: n.Snapshot().KeyExpiresAt}, nil
+}
+
+// revoke adds cert, when set, to the revocation list.
+func revoke(ctx context.Context, repo domain.RevocationRepository, cert domain.CertInfo, id domain.NodeID, reason string, now time.Time) error {
+	if cert.IsZero() {
+		return nil
+	}
+
+	r, err := domain.NewRevokedCertificate(cert, id, reason, now)
+	if err != nil {
+		return err
+	}
+
+	return repo.Add(ctx, r)
+}

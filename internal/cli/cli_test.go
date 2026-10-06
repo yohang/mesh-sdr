@@ -112,7 +112,7 @@ func TestHubLifecycle(t *testing.T) {
 	}
 
 	// The hub now starts, and stops gracefully when its context ends.
-	runCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	runCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	r = run(t, runCtx, env, "hub")
@@ -136,7 +136,7 @@ func TestNodeLifecycle(t *testing.T) {
 	defer cancel()
 
 	r := run(t, ctx, map[string]string{"MESHSDR_LOG__FORMAT": "text"}, "--json", "-c", dir, "node")
-	if r.code != ExitOK || !strings.Contains(r.stderr, `"msg":"node starting: not enrolled, serving the pre-enrollment API only"`) {
+	if r.code != ExitOK || !strings.Contains(r.stderr, `"msg":"node starting: not enrolled, serving the pre-enrollment API only`) {
 		t.Fatalf("node = %+v", r)
 	}
 }

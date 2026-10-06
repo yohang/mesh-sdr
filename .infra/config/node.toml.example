@@ -4,8 +4,9 @@
 # drop-ins merged in lexical order, MESHSDR_<TABLE>__<KEY> env overrides
 # (node.id → MESHSDR_NODE__ID). JSON Schema: `meshsdr node config schema`.
 #
-# Until enrollment ships, the node serves only the pre-enrollment API on
-# node.listen, over TLS with an ephemeral self-signed certificate.
+# Until it is enrolled (`meshsdr node enroll`), the node serves only the
+# pre-enrollment API on node.listen, over TLS with an ephemeral self-signed
+# certificate. Relative paths are resolved against the config dir.
 #
 # Values below are the defaults unless marked "required".
 
@@ -17,6 +18,45 @@ schema_version = 1
 id = "attic"
 # Node API and WebSocket listen address (host:port). TLS only.
 listen = "0.0.0.0:8074"
+
+# RAM buffer of node events while the hub is unreachable; on overflow the
+# node drops diagnostics, then map updates, then decodes (oldest first).
+[node.event_buffer]
+max_events = 10000
+max_bytes = "16MiB"
+
+# Node certificate and key, written by `meshsdr node enroll` (key 0600) and
+# rewritten when the hub renews the certificate.
+# [tls]
+# cert = "tls/node.pem"
+# key = "tls/node.key"
+
+# Trust in the hub.
+# [hub_trust]
+# Hub CA certificate, written by `meshsdr node enroll`.
+# ca_cert = "tls/ca.pem"
+# SHA-256 fingerprint of the hub CA, shown by the hub with the token.
+# ca_fingerprint = "AB:CD:…"
+# Expected hub id (host of the hub's hub.url); empty accepts any hub
+# certificate from the CA.
+# hub_identity = "sdr.example.org"
+# Single-use enrollment token issued by the hub (secret).
+# enrollment_token = { file = "/etc/meshsdr/secrets/enrollment.token" }
+
+# SDR devices of this node (GRID-016), keyed by a hub-wide unique id
+# (^[a-z0-9][a-z0-9_-]{0,62}$). The hub mirrors them read-only into its
+# device registry; they are configured here only. File-only: no env
+# override. Driver settings arrive with the device epic.
+# [devices.hf-sdrplay]
+# name = "SDRplay RSPdx (HF)"        # required
+# type = "soapy:sdrplay"             # required: driver type
+# enabled = true                     # default true
+# freq_range = { min = 1_000, max = "30MHz" }  # required (Hz or units)
+# sample_rates = [500_000, 2_000_000]          # required (S/s)
+# listen_policy = "registered"       # anonymous | registered (overrides the global policy)
+# operator_can_retune = true
+# always_on = true
+# scheduler_enabled = true
 
 [log]
 # debug | info | warn | error. --debug overrides it.

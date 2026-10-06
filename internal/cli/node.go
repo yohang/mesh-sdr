@@ -21,7 +21,7 @@ func (a *app) newNodeCmd() *cobra.Command {
 		RunE:  func(cmd *cobra.Command, _ []string) error { return a.runNode(cmd.Context()) },
 	}
 
-	cmd.AddCommand(a.newConfigCmd(config.RoleNode))
+	cmd.AddCommand(a.newConfigCmd(config.RoleNode), a.newEnrollCmd())
 
 	return cmd
 }
@@ -47,8 +47,13 @@ func (a *app) runNode(ctx context.Context) error {
 		return err
 	}
 
-	logger.InfoContext(ctx, "node starting: not enrolled, serving the pre-enrollment API only",
-		slog.String("node_id", cfg.Node.ID), slog.String("listen", cfg.Node.Listen))
+	if wire.NodeEnrolled(cfg) {
+		logger.InfoContext(ctx, "node starting: enrolled, serving the mTLS node API",
+			slog.String("node_id", cfg.Node.ID), slog.String("listen", cfg.Node.Listen))
+	} else {
+		logger.InfoContext(ctx, "node starting: not enrolled, serving the pre-enrollment API only (run `meshsdr node enroll`)",
+			slog.String("node_id", cfg.Node.ID), slog.String("listen", cfg.Node.Listen))
+	}
 
 	if err := p.Run(ctx); err != nil {
 		return err

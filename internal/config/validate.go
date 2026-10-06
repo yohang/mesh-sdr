@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"net/url"
@@ -103,6 +104,41 @@ func (h *Hub) validate(o Origins) []Problem {
 		c.fail("db.max_read_connections", CodeInvalidValue, fmt.Sprintf("invalid value %d: want 1..64", n))
 	}
 
+	for _, id := range slices.Sorted(maps.Keys(h.Nodes)) {
+		n := h.Nodes[id]
+		key := "nodes." + id
+
+		if _, err := griddomain.NewNodeID(id); err != nil {
+			c.fail(key, CodeInvalidValue, "invalid node id "+strconv.Quote(id)+": must match ^[a-z0-9][a-z0-9-]{1,62}$")
+		}
+
+		if n.URL == "" {
+			c.fail(key+".url", CodeRequired, key+".url is required")
+		} else if _, err := griddomain.NewNodeURL(n.URL); err != nil {
+			c.fail(key+".url", CodeInvalidValue, "want https://host:port")
+		}
+
+		if n.Name != "" {
+			if _, err := griddomain.NewNodeName(n.Name); err != nil {
+				c.fail(key+".name", CodeInvalidValue, "name must be 1 to 128 printable characters")
+			}
+		}
+
+		if n.EnrollmentToken.IsSet() {
+			if _, err := griddomain.ParseEnrollmentToken(n.EnrollmentToken.Reveal()); err != nil {
+				c.fail(key+".enrollment_token", CodeInvalidValue, "enrollment token must be 32 random bytes in unpadded base64url (43 characters), for example `openssl rand -base64 32 | tr +/ -_ | tr -d =`")
+			}
+		}
+	}
+
+	if h.TLS.CACert != "" && !h.TLS.CAKey.IsSet() {
+		c.fail("tls.ca_key", CodeRequired, "tls.ca_key is required with tls.ca_cert")
+	}
+
+	if h.TLS.CACert == "" && h.TLS.CAKey.IsSet() {
+		c.fail("tls.ca_cert", CodeRequired, "tls.ca_cert is required with tls.ca_key")
+	}
+
 	c.log(h.Log)
 	c.enum("settings.ui.theme_mode", h.Settings.UI.ThemeMode, "light", "dark", "auto")
 
@@ -172,7 +208,62 @@ func (n *Node) validate(o Origins) []Problem {
 	}
 
 	c.listen("node.listen", n.Node.Listen)
+
+	if v := n.Node.EventBuffer.MaxEvents; v < 100 || v > 10_000_000 {
+		c.fail("node.event_buffer.max_events", CodeInvalidValue, fmt.Sprintf("invalid value %d: want 100..10000000", v))
+	}
+
+	if v := n.Node.EventBuffer.MaxBytes.Bytes(); v < 64<<10 || v > 4<<30 {
+		c.fail("node.event_buffer.max_bytes", CodeInvalidValue, "want 64KiB..4GiB")
+	}
+
+	for _, id := range slices.Sorted(maps.Keys(n.Devices)) {
+		d := n.Devices[id]
+		key := "devices." + id
+
+		if _, err := griddomain.NewDeviceID(id); err != nil {
+			c.fail(key, CodeInvalidValue, "invalid device id "+strconv.Quote(id)+": must match ^[a-z0-9][a-z0-9_-]{0,62}$")
+		}
+
+		if d.Name == "" || len(d.Name) > 128 {
+			c.fail(key+".name", CodeRequired, "name is required (1 to 128 characters)")
+		}
+
+		if d.Type == "" || len(d.Type) > 48 {
+			c.fail(key+".type", CodeRequired, "type is required (1 to 48 characters)")
+		}
+
+		if lo, hi := d.FreqRange.Min.Hz(), d.FreqRange.Max.Hz(); lo <= 0 || hi <= lo {
+			c.fail(key+".freq_range", CodeInvalidValue, "want 0 < min < max")
+		}
+
+		if len(d.SampleRates) == 0 || slices.ContainsFunc(d.SampleRates, func(r int64) bool { return r <= 0 }) {
+			c.fail(key+".sample_rates", CodeInvalidValue, "want at least one positive sample rate")
+		}
+
+		if d.ListenPolicy != "" {
+			c.enum(key+".listen_policy", d.ListenPolicy, "anonymous", "registered")
+		}
+	}
+
+	if (n.TLS.Cert == "") != (n.TLS.Key == "") {
+		c.fail("tls.key", CodeRequired, "tls.cert and tls.key go together")
+	}
+
+	if fp := n.HubTrust.CAFingerprint; fp != "" && !validFingerprint(fp) {
+		c.fail("hub_trust.ca_fingerprint", CodeInvalidValue, "want a SHA-256 fingerprint: 64 hex digits, colons optional")
+	}
+
 	c.log(n.Log)
 
 	return c.problems
+}
+
+func validFingerprint(s string) bool {
+	s = strings.ReplaceAll(s, ":", "")
+	if len(s) != 64 {
+		return false
+	}
+
+	return strings.Trim(strings.ToLower(s), "0123456789abcdef") == ""
 }
