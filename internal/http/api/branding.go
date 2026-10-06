@@ -19,6 +19,7 @@ import (
 type BrandingService interface {
 	Upload(ctx context.Context, actor app.Actor, slot domain.Slot, data []byte) (*domain.File, error)
 	Remove(ctx context.Context, actor app.Actor, slot domain.Slot) (bool, error)
+	Current(ctx context.Context, slot domain.Slot) (*domain.File, error)
 	Content(ctx context.Context, slot domain.Slot) (*domain.File, []byte, error)
 }
 
@@ -46,7 +47,8 @@ func (h BrandingHandlers) GetReceiverImage(ctx context.Context, req GetReceiverI
 		return nil, err
 	}
 
-	f, data, err := h.branding.Content(ctx, slot)
+	// Compare the ETag on the metadata before loading the content.
+	f, err := h.branding.Current(ctx, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +56,18 @@ func (h BrandingHandlers) GetReceiverImage(ctx context.Context, req GetReceiverI
 	sum := f.SHA256()
 	etag := strconv.Quote(hex.EncodeToString(sum[:]))
 
-	return imageResponse{file: f, data: data, etag: etag, notModified: req.Params.IfNoneMatch != nil && *req.Params.IfNoneMatch == etag}, nil
+	if req.Params.IfNoneMatch != nil && *req.Params.IfNoneMatch == etag {
+		return imageResponse{file: f, etag: etag, notModified: true}, nil
+	}
+
+	f, data, err := h.branding.Content(ctx, slot)
+	if err != nil {
+		return nil, err
+	}
+
+	sum = f.SHA256()
+
+	return imageResponse{file: f, data: data, etag: strconv.Quote(hex.EncodeToString(sum[:]))}, nil
 }
 
 // PutReceiverImage implements StrictServerInterface.
