@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
@@ -79,17 +82,28 @@ func (r *SessionReaper) Run(ctx context.Context) (int64, error) {
 	return int64(n), err
 }
 
+// ActionRetentionPurge records a purge of the audit log by its retention
+// job.
+const ActionRetentionPurge = "retention.purge"
+
+// AuditLogStore is the audit log with its retention side.
+type AuditLogStore interface {
+	domain.AuditLog
+	domain.AuditPurge
+}
+
 // AuditPurger deletes audit entries older than the audit retention
 // (retention.audit_log, never less than 30 days; TECHNICAL_SPEC §7.3
-// `audit.purge`), in batches.
+// `audit.purge`), in batches, and records each purge that deleted entries
+// in the audit log itself (system actor).
 type AuditPurger struct {
-	audit     domain.AuditPurge
+	audit     AuditLogStore
 	retention Retention
 	now       Clock
 }
 
 // NewAuditPurger returns the job.
-func NewAuditPurger(audit domain.AuditPurge, retention Retention, now Clock) *AuditPurger {
+func NewAuditPurger(audit AuditLogStore, retention Retention, now Clock) *AuditPurger {
 	return &AuditPurger{audit: audit, retention: retention, now: now}
 }
 
@@ -98,16 +112,40 @@ func (p *AuditPurger) Name() string { return JobAuditPurge }
 
 // Run implements the jobs scheduler's Job: it returns the entries deleted.
 func (p *AuditPurger) Run(ctx context.Context) (int64, error) {
-	cutoff := p.now().Add(-p.retention.AuditRetention())
+	retention := p.retention.AuditRetention()
+	cutoff := p.now().Add(-retention)
 
-	var total int64
+	var (
+		total int64
+		err   error
+	)
 
 	for {
-		n, err := p.audit.DeleteBefore(ctx, cutoff, auditPurgeBatch)
+		var n int
+
+		n, err = p.audit.DeleteBefore(ctx, cutoff, auditPurgeBatch)
 		total += int64(n)
 
 		if err != nil || n < auditPurgeBatch {
-			return total, err
+			break
 		}
 	}
+
+	if total == 0 {
+		return 0, err
+	}
+
+	e, aerr := domain.NewAuditEntry(p.now(), domain.SystemActor(), ActionRetentionPurge, domain.ResultOK)
+	if aerr == nil {
+		e = e.WithTarget("store", "audit_log").WithAfter(map[string]string{
+			"rows_deleted": strconv.FormatInt(total, 10), "before": cutoff.UTC().Format(time.RFC3339),
+		})
+		aerr = p.audit.Append(context.WithoutCancel(ctx), e)
+	}
+
+	if aerr != nil {
+		return total, errors.Join(err, fmt.Errorf("audit the purge: %w", aerr))
+	}
+
+	return total, err
 }

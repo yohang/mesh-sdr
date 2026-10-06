@@ -737,8 +737,22 @@ func TestAuditPurger(t *testing.T) {
 		t.Fatalf("purged %d, %v", n, err)
 	}
 
+	// The two kept entries, and the record of the purge.
 	left, err := e.audit.Recent(ctx, 10)
-	if err != nil || len(left) != 2 {
-		t.Errorf("left %d entries, %v", len(left), err)
+	if err != nil || len(left) != 3 {
+		t.Fatalf("left %d entries, %v", len(left), err)
+	}
+
+	if r := left[0]; r.Action() != "retention.purge" || r.Actor().Kind() != domain.ActorSystem || r.After()["rows_deleted"] != "2" {
+		t.Errorf("purge record = %s %s %v", r.Action(), r.Actor().Kind(), r.After())
+	}
+
+	// Nothing to delete: nothing recorded.
+	if n, err := p.Run(ctx); err != nil || n != 0 {
+		t.Fatalf("second purge = %d, %v", n, err)
+	}
+
+	if left, _ := e.audit.Recent(ctx, 10); len(left) != 3 {
+		t.Errorf("an empty purge was recorded: %d entries", len(left))
 	}
 }
