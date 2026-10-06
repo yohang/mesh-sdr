@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"runtime"
 	"sync"
 	"time"
@@ -45,6 +46,8 @@ type Deps struct {
 	// Settings reads the identity policies from the settings store. Nil
 	// means the built-in defaults (CLI commands).
 	Settings settingsrc.Values
+	// AcceptsMultipart reports API upload operations (api.AcceptsMultipart).
+	AcceptsMultipart func(r *http.Request) bool
 }
 
 func component(l *slog.Logger, name string) *slog.Logger {
@@ -154,9 +157,10 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	})
 
 	h, err := identityhttp.New(auth, passwords, setup, pages, identityhttp.Config{
-		HubURL:         d.Config.Hub.URL,
-		TrustedProxies: config.Prefixes(d.Config.HTTP.TrustedProxies),
-		AdminNetworks:  config.Prefixes(d.Config.Admin.AllowedNetworks),
+		HubURL:           d.Config.Hub.URL,
+		TrustedProxies:   config.Prefixes(d.Config.HTTP.TrustedProxies),
+		AdminNetworks:    config.Prefixes(d.Config.Admin.AllowedNetworks),
+		AcceptsMultipart: d.AcceptsMultipart,
 	}, component(d.Logger, "identity.http"))
 	if err != nil {
 		return nil, fmt.Errorf("identity http: %w", err)

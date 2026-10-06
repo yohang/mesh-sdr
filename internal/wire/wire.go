@@ -16,6 +16,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite"
+	fileshttp "github.com/yohang/mesh-sdr/internal/files/http"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
@@ -184,6 +185,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	ideps := identityDeps(cfg, logger, adapter)
 	ideps.Settings = settingsModule.Store
+	ideps.AcceptsMultipart = api.AcceptsMultipart
 
 	idm, err := identity.Wire(ctx, ideps, pages{shellModule.Renderer})
 	if err != nil {
@@ -197,12 +199,17 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, fmt.Errorf("jobs: %w", err)
 	}
 
+	images := branding(adapter, auditLog)
+	imagesHTTP := fileshttp.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), filesActor,
+		shellModule.Renderer.Error, component(logger, "files.http"))
+
 	apiServer := api.Server{
 		HealthHandlers:    api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
 		AuthHandlers:      api.NewAuthHandlers(idm.HTTP),
 		GridHandlers:      api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
 		SettingsHandlers:  api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
 		RetentionHandlers: api.NewRetentionHandlers(retention, settingsActor),
+		BrandingHandlers:  api.NewBrandingHandlers(images, settingsActor),
 	}
 
 	router := httpserver.NewRouter(
@@ -212,8 +219,9 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		settingshttp.New(settingshttp.Deps{
 			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin),
 			Store: settingsModule.Store, Config: settingsModule.Effective, Retention: retentionRows{r: retention},
-			Actor: settingsActor, Logger: component(logger, "settings.http"),
+			Actor: settingsActor, Images: imagesHTTP, Logger: component(logger, "settings.http"),
 		}),
+		imagesHTTP,
 		shellModule.HTTP,
 	)
 

@@ -15,7 +15,9 @@ info:
 
     State-changing requests (POST, PUT, PATCH, DELETE) need the
     `X-CSRF-Token` header from `GET /auth/session` and pass the browser
-    cross-origin check; request bodies must be `application/json`.
+    cross-origin check; request bodies must be `application/json`, except
+    for operations whose request body is declared `multipart/form-data`
+    (uploads).
 servers:
   - url: /api/v1
 paths:
@@ -544,6 +546,92 @@ paths:
           $ref: "#/components/responses/Problem"
         "409":
           $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /branding/{slot}:
+    parameters:
+      - name: slot
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [avatar, panorama]
+    get:
+      operationId: getReceiverImage
+      x-meshsdr-access: anonymous
+      summary: The receiver avatar or panorama (ADM-004)
+      tags: [branding]
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The image, as stored after re-encoding
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "304":
+          description: Not modified (If-None-Match)
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: putReceiverImage
+      x-meshsdr-access: admin
+      summary: Upload the receiver avatar or panorama (ADM-004)
+      description: |
+        A `multipart/form-data` body with one `file` part: PNG, JPEG or
+        WebP by magic bytes (SVG and GIF are refused), at most 8192 × 8192
+        pixels, 250 KiB for the avatar and 2 MiB for the panorama (413
+        beyond, checked on the declared size before reading). The image is
+        re-encoded (avatar as PNG, panorama as JPEG), which drops its
+        metadata, and replaces the previous one. Audited.
+      tags: [branding]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiverImage"
+        "413":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteReceiverImage
+      x-meshsdr-access: admin
+      summary: Restore the default (no image). Audited.
+      tags: [branding]
+      responses:
+        "204":
+          description: Removed (or already the default)
         default:
           $ref: "#/components/responses/Problem"
 components:
@@ -1137,6 +1225,27 @@ components:
         rows_deleted:
           type: integer
           format: int64
+    ReceiverImage:
+      type: object
+      required: [slot, name, mime_type, size_bytes, width, height, sha256]
+      properties:
+        slot:
+          type: string
+          enum: [avatar, panorama]
+        name:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        width:
+          type: integer
+        height:
+          type: integer
+        sha256:
+          type: string
+          description: Hex SHA-256 of the stored image.
   responses:
     Problem:
       description: Error

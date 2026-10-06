@@ -83,6 +83,9 @@ type Config struct {
 	TrustedProxies []netip.Prefix
 	// AdminNetworks is admin.allowed_networks.
 	AdminNetworks []netip.Prefix
+	// AcceptsMultipart reports API requests whose operation takes a
+	// multipart/form-data body (uploads); nil means none.
+	AcceptsMultipart func(r *http.Request) bool
 }
 
 // Module is the identity router module (internal/http.Module).
@@ -98,6 +101,7 @@ type Module struct {
 	secure    bool
 	preKey    []byte
 	routes    chi.Routes
+	upload    func(r *http.Request) bool
 }
 
 // New returns the module.
@@ -129,6 +133,7 @@ func New(auth Authenticator, passwords PasswordChanger, setup Bootstrapper, page
 		admin:     cfg.AdminNetworks,
 		secure:    secure,
 		preKey:    []byte(rand.Text()),
+		upload:    cfg.AcceptsMultipart,
 	}, nil
 }
 
@@ -351,7 +356,8 @@ func (m *Module) csrf(next http.Handler) http.Handler {
 }
 
 // requireJSON answers 415 to state-changing /api/v1 requests with a body
-// that is not application/json (ADR 0003 §6).
+// that is not application/json (ADR 0003 §6), except multipart/form-data
+// bodies of the upload operations.
 func (m *Module) requireJSON(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSafe(r.Method) || !isAPI(r) || (r.ContentLength == 0 && len(r.TransferEncoding) == 0) {
@@ -361,7 +367,10 @@ func (m *Module) requireJSON(next http.Handler) http.Handler {
 		}
 
 		ct := r.Header.Get("Content-Type")
-		if mt, _, _ := strings.Cut(ct, ";"); strings.EqualFold(strings.TrimSpace(mt), "application/json") {
+		mt, _, _ := strings.Cut(ct, ";")
+		mt = strings.ToLower(strings.TrimSpace(mt))
+
+		if mt == "application/json" || (mt == "multipart/form-data" && m.upload != nil && m.upload(r)) {
 			next.ServeHTTP(w, r)
 
 			return
