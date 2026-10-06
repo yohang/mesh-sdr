@@ -70,7 +70,12 @@ func (a *app) runHub(ctx context.Context) error {
 
 	logger.InfoContext(ctx, "hub starting", slog.String("listen", cfg.Hub.Listen), slog.String("url", cfg.Hub.URL))
 
-	if err := wire.Hub(cfg, logger, adapter).Run(ctx); err != nil {
+	hub, err := wire.Hub(ctx, cfg, logger, adapter)
+	if err != nil {
+		return err
+	}
+
+	if err := hub.Run(ctx); err != nil {
 		return err
 	}
 

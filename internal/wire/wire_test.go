@@ -51,6 +51,21 @@ func serve(t *testing.T, p *wire.Process) string {
 	return ln.Addr().String()
 }
 
+func hub(t *testing.T, cfg config.Hub, a db.Adapter) *wire.Process {
+	t.Helper()
+
+	cfg.Hub.URL = "http://" + cfg.Hub.Listen
+	cfg.Hub.AllowInsecureURL = true
+	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
+
+	p, err := wire.Hub(context.Background(), cfg, discard, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return p
+}
+
 func get(t *testing.T, c *http.Client, url string) (int, string, []byte) {
 	t.Helper()
 
@@ -78,7 +93,7 @@ func TestHub(t *testing.T) {
 	cfg := config.DefaultHub()
 	cfg.Hub.Listen = "127.0.0.1:0"
 
-	addr := serve(t, wire.Hub(cfg, discard, dbtest.NewSQLite(t)))
+	addr := serve(t, hub(t, cfg, dbtest.NewSQLite(t)))
 	base := "http://" + addr
 
 	tests := []struct {
@@ -92,6 +107,8 @@ func TestHub(t *testing.T) {
 		{"/api/v1/nope", 404, "application/problem+json"},
 		{"/", 200, "text/html; charset=utf-8"},
 		{"/nope", 404, "text/html; charset=utf-8"},
+		{"/login", 200, "text/html; charset=utf-8"},
+		{"/api/v1/auth/session", 200, "application/json"},
 	}
 
 	for _, tt := range tests {
@@ -126,7 +143,7 @@ func TestHubNotReady(t *testing.T) {
 	cfg := config.DefaultHub()
 	cfg.Hub.Listen = "127.0.0.1:0"
 
-	addr := serve(t, wire.Hub(cfg, discard, downDB{dbtest.NewSQLite(t)}))
+	addr := serve(t, hub(t, cfg, downDB{dbtest.NewSQLite(t)}))
 
 	status, _, body := get(t, http.DefaultClient, "http://"+addr+"/api/v1/healthz/ready")
 	if status != http.StatusServiceUnavailable || !json.Valid(body) {

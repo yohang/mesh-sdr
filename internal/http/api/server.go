@@ -27,19 +27,28 @@ func Spec() []byte { return specJSON }
 type Server struct {
 	MetaHandlers
 	HealthHandlers
+	AuthHandlers
 }
 
 var _ StrictServerInterface = Server{}
 
-// NewHandler returns the /api/v1 handler: generated routes, problem+json
-// errors (including 404, 405 and panics).
-func NewHandler(srv StrictServerInterface, logger *slog.Logger) http.Handler {
+// NewHandler returns the /api/v1 handler: generated routes, the access
+// policy of openapi.yaml (x-meshsdr-access) checked by authz, problem+json
+// errors (including 404, 405 and panics). It panics when an operation of
+// the embedded document has no access level (a build defect, caught by
+// tests).
+func NewHandler(srv StrictServerInterface, authz Authorizer, logger *slog.Logger) http.Handler {
+	policy, err := LoadPolicy(specJSON)
+	if err != nil {
+		panic(err)
+	}
+
 	r := chi.NewRouter()
 	r.Use(problem.Recoverer(logger))
 	r.NotFound(problem.NotFound)
 	r.MethodNotAllowed(problem.MethodNotAllowed)
 
-	strict := NewStrictHandlerWithOptions(srv, nil, StrictHTTPServerOptions{
+	strict := NewStrictHandlerWithOptions(srv, []StrictMiddlewareFunc{policy.Middleware(authz)}, StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  problem.BadRequest,
 		ResponseErrorHandlerFunc: problem.ErrorHandler(logger),
 	})

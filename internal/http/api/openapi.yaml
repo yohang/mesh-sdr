@@ -7,12 +7,22 @@ info:
     declared here first, then the Go server interface is generated with
     oapi-codegen. Errors use one format: RFC 9457 problem details with a
     stable `code`.
+
+    Every operation declares its required role in `x-meshsdr-access`
+    (`anonymous`, `listener`, `operator` or `admin`): the server-side policy
+    table (SR-15). A role implies the roles below it; `admin` operations are
+    also restricted to `admin.allowed_networks`.
+
+    State-changing requests (POST, PUT, PATCH, DELETE) need the
+    `X-CSRF-Token` header from `GET /auth/session` and pass the browser
+    cross-origin check; request bodies must be `application/json`.
 servers:
   - url: /api/v1
 paths:
   /openapi.json:
     get:
       operationId: getOpenAPI
+      x-meshsdr-access: anonymous
       summary: This OpenAPI document, as JSON
       tags: [meta]
       responses:
@@ -28,6 +38,7 @@ paths:
   /healthz/live:
     get:
       operationId: getLiveness
+      x-meshsdr-access: anonymous
       summary: Liveness (no details)
       tags: [health]
       responses:
@@ -42,6 +53,7 @@ paths:
   /healthz/ready:
     get:
       operationId: getReadiness
+      x-meshsdr-access: anonymous
       summary: Readiness (ok or degraded, no internals)
       tags: [health]
       responses:
@@ -59,8 +71,125 @@ paths:
                 $ref: "#/components/schemas/Health"
         default:
           $ref: "#/components/responses/Problem"
+  /auth/session:
+    get:
+      operationId: getSession
+      x-meshsdr-access: anonymous
+      summary: Current identity, roles, CSRF token and auth providers
+      description: |
+        Returns the caller's identity and the CSRF token to send in
+        `X-CSRF-Token` on state-changing requests. Without a session, the
+        token is bound to a pre-session cookie set by this response
+        (login and other anonymous forms).
+      tags: [auth]
+      responses:
+        "200":
+          description: Current session (or anonymous)
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionInfo"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/login:
+    post:
+      operationId: login
+      x-meshsdr-access: anonymous
+      summary: Form login with a username or e-mail and a password
+      description: |
+        Opens a new session (any session presented is revoked) and sets the
+        session cookie. Every failure answers the same `invalid_credentials`
+        whether or not the account exists; throttled attempts answer 429
+        `rate_limited` with `Retry-After`.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Signed in. The session cookie is set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionInfo"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/logout:
+    post:
+      operationId: logout
+      x-meshsdr-access: listener
+      summary: End the current session
+      tags: [auth]
+      responses:
+        "204":
+          description: Signed out. The session cookie is cleared.
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   schemas:
+    SessionInfo:
+      type: object
+      required: [authenticated, roles, csrf_token, providers]
+      properties:
+        authenticated:
+          type: boolean
+        user:
+          $ref: "#/components/schemas/SessionUser"
+        roles:
+          type: array
+          description: Roles held globally or on some device, lowest first. Empty when anonymous.
+          items:
+            type: string
+            enum: [listener, operator, admin]
+        csrf_token:
+          type: string
+          description: Value of the X-CSRF-Token header for state-changing requests.
+        providers:
+          type: array
+          description: Available auth providers (`local` only in v1).
+          items:
+            type: string
+    SessionUser:
+      type: object
+      required: [id, username, must_change_password]
+      properties:
+        id:
+          type: string
+          description: User id (UUID).
+          example: 0192c3a4-5b6c-7d8e-9f01-23456789abcd
+        username:
+          type: string
+        display_name:
+          type: string
+        must_change_password:
+          type: boolean
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [login, password]
+      properties:
+        login:
+          type: string
+          description: Username or e-mail address.
+          maxLength: 254
+        password:
+          type: string
+          maxLength: 1024
+        remember_me:
+          type: boolean
+          description: Keep the session for 30 days instead of 24 hours.
     Health:
       type: object
       required: [status]

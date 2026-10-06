@@ -85,7 +85,7 @@ func TestHubLifecycle(t *testing.T) {
 		} `json:"schema"`
 	}
 	if r.code != ExitFailure || json.Unmarshal([]byte(r.stdout), &status) != nil ||
-		status.Schema.OK || status.Schema.Code != "migrations_pending" || len(status.Migrations) != 1 || status.Migrations[0].Applied {
+		status.Schema.OK || status.Schema.Code != "migrations_pending" || len(status.Migrations) < 2 || status.Migrations[0].Applied {
 		t.Fatalf("migrate status --json = %+v (%+v)", r, status)
 	}
 
