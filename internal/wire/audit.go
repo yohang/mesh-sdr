@@ -3,10 +3,10 @@ package wire
 import (
 	"context"
 	"log/slog"
-	"net/netip"
 	"time"
 
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
+	"github.com/yohang/mesh-sdr/internal/http/clientip"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 )
@@ -27,11 +27,15 @@ type gridAuditor struct {
 func (a gridAuditor) actor(ctx context.Context, kind string) identitydomain.Actor {
 	switch kind {
 	case gridapp.ActorUser:
+		// REST calls: the client address resolved by the HTTP front
+		// (trusted proxies applied), invalid outside a request.
+		ip := clientip.From(ctx)
+
 		if p := identityhttp.FromContext(ctx).Principal(); !p.IsAnonymous() {
-			return identitydomain.UserActor(p.UserID(), netip.Addr{})
+			return identitydomain.UserActor(p.UserID(), ip)
 		}
 
-		return identitydomain.AnonymousActor(netip.Addr{})
+		return identitydomain.AnonymousActor(ip)
 	case gridapp.ActorCLI:
 		return identitydomain.CLIActor()
 	default: // system, and node events (the node id is in the target or details)
