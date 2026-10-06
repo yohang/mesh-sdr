@@ -146,3 +146,15 @@ func TestControlNewBootRunsBootHandlers(t *testing.T) {
 		t.Errorf("boot handlers ran %d times, want 2 (first boot, then the restart)", boots)
 	}
 }
+
+func welcome(t *testing.T, c *app.Control, id domain.NodeID, version string) shared.UUID {
+	t.Helper()
+
+	boot, _ := shared.NewUUIDv7(time.Now())
+
+	if _, err := c.Welcome(context.Background(), id, ctl.Welcome{NodeID: id.String(), BootID: boot.String(), Version: version, Protocols: []string{"rx-ctl.v1"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	return boot
+}

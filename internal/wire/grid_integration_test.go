@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,8 +55,8 @@ func eventually(t *testing.T, what string, timeout time.Duration, cond func() bo
 	}
 }
 
-// run serves p until the test ends.
-func run(t *testing.T, p *Process) {
+// run serves p until the test ends or stop is called.
+func run(t *testing.T, p *Process) (stop func()) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -70,13 +71,21 @@ func run(t *testing.T, p *Process) {
 
 	go func() { done <- p.Serve(ctx, ln) }()
 
-	t.Cleanup(func() {
-		cancel()
+	var once sync.Once
 
-		if err := <-done; err != nil {
-			t.Errorf("serve: %v", err)
-		}
-	})
+	stop = func() {
+		once.Do(func() {
+			cancel()
+
+			if err := <-done; err != nil {
+				t.Errorf("serve: %v", err)
+			}
+		})
+	}
+
+	t.Cleanup(stop)
+
+	return stop
 }
 
 func writeFile(t *testing.T, path, content string, mode os.FileMode) {
@@ -188,7 +197,7 @@ ca_fingerprint = "`+pki.FormatFingerprint(ca.Fingerprint())+`"
 
 // enrollNode adds the node on the hub and runs `node enroll` until the hub
 // has enrolled it, then starts the enrolled node.
-func (e *gridEnv) enrollNode(t *testing.T, prober fakeProber) {
+func (e *gridEnv) enrollNode(t *testing.T, prober fakeProber) (stop func()) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -225,12 +234,18 @@ func (e *gridEnv) enrollNode(t *testing.T, prober fakeProber) {
 		t.Fatal(err)
 	}
 
+	return e.startNode(t, prober)
+}
+
+func (e *gridEnv) startNode(t *testing.T, prober fakeProber) (stop func()) {
+	t.Helper()
+
 	np, err := Node(e.nodeCfg, quiet, time.Now(), WithProber(prober))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	run(t, np)
+	return run(t, np)
 }
 
 func (e *gridEnv) node(t *testing.T) *domain.Node {
@@ -336,4 +351,31 @@ func nodeGet(t *testing.T, e *gridEnv, client *pki.ClientSource, path string) in
 	_ = resp.Body.Close()
 
 	return resp.StatusCode
+}
+
+// TestNodeStatusLifecycle follows a node through online, offline when its
+// process stops, and online again with a new boot when it restarts.
+func TestNodeStatusLifecycle(t *testing.T) {
+	e := newGridEnv(t, fastTimings())
+	stop := e.enrollNode(t, fakeProber{})
+
+	id := domain.MustNodeID("attic")
+
+	eventually(t, "online", 15*time.Second, func() bool { return e.node(t).Runtime().Status == domain.StatusOnline })
+
+	firstBoot := e.node(t).Runtime().BootID
+
+	eventually(t, "load history", 5*time.Second, func() bool { return len(e.g.history.Samples(id)) >= 2 })
+
+	stop()
+
+	eventually(t, "offline", 10*time.Second, func() bool { return e.node(t).Runtime().Status == domain.StatusOffline })
+
+	e.startNode(t, fakeProber{})
+
+	eventually(t, "online again", 15*time.Second, func() bool {
+		rt := e.node(t).Runtime()
+
+		return rt.Status == domain.StatusOnline && rt.BootID != firstBoot
+	})
 }

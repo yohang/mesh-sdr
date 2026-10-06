@@ -19,6 +19,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
 
@@ -45,6 +46,7 @@ type hubGrid struct {
 	enrollment *app.Enrollment
 	tracker    *app.Tracker
 	control    *app.Control
+	status     *app.Status
 	manager    *control.Manager
 	startup    []func(ctx context.Context) error
 	workers    []func(ctx context.Context)
@@ -163,6 +165,11 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 			HeartbeatInterval: timings.HeartbeatInterval, Now: now, Logger: component(logger, "grid.infra.control"),
 		})
 		g.nodes.SetLinks(g.manager)
+
+		g.status = app.NewStatus(nodeRepo, g.tracker, g.history, timings, now, component(logger, "grid.app.status"))
+		g.control.Handle(rxv1.TypeNodeHeartbeat, g.status.HeartbeatHandler())
+		g.control.OnLinkChange(g.status.Refresh)
+		g.workers = append(g.workers, g.status.Run)
 
 		enrollment := app.NewEnrollment(nodeRepo, adapter, enroll.NewHubClient(ca, now), audit, now,
 			5*time.Second, component(logger, "grid.app.enrollment"))

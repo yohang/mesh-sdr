@@ -56,6 +56,13 @@ func (c *clock) now() time.Time {
 	return c.t
 }
 
+func (c *clock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.t = c.t.Add(d)
+}
+
 type env struct {
 	db    db.Adapter
 	nodes *sqlite.NodeRepository

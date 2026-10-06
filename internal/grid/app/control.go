@@ -54,6 +54,7 @@ type Control struct {
 
 	handlers map[rxv1.MessageType]EventHandler
 	onBoot   []BootHandler
+	onLink   []func(ctx context.Context, id domain.NodeID)
 	links    *Tracker
 
 	mu     sync.Mutex
@@ -75,6 +76,18 @@ func (c *Control) Handle(t rxv1.MessageType, h EventHandler) { c.handlers[t] = h
 
 // OnBoot registers a node-restart handler (composition time only).
 func (c *Control) OnBoot(h BootHandler) { c.onBoot = append(c.onBoot, h) }
+
+// OnLinkChange registers a callback run after a welcome, a disconnection,
+// a failed dial or an ingested batch (composition time only).
+func (c *Control) OnLinkChange(f func(ctx context.Context, id domain.NodeID)) {
+	c.onLink = append(c.onLink, f)
+}
+
+func (c *Control) linkChanged(ctx context.Context, id domain.NodeID) {
+	for _, f := range c.onLink {
+		f(ctx, id)
+	}
+}
 
 // HubVersion returns the product version announced in ctl.hello.
 func (c *Control) HubVersion() string { return c.hubVersion }
@@ -126,6 +139,7 @@ func (c *Control) Welcome(ctx context.Context, id domain.NodeID, w ctl.Welcome) 
 	d := Decision{Compat: compat, Restricted: compat.Level == domain.CompatIncompatible}
 
 	c.links.Welcomed(id, boot, compat, now)
+	c.linkChanged(ctx, id)
 	c.logger.InfoContext(ctx, "node connected", slog.String("node_id", id.String()), slog.String("version", w.Version),
 		slog.String("boot_id", boot.String()), slog.String("compat", string(compat.Level)), slog.String("hint", compat.Hint))
 
@@ -197,6 +211,8 @@ func (c *Control) Apply(ctx context.Context, id domain.NodeID, boot shared.UUID,
 		return 0, fmt.Errorf("node %s events: %w", id, err)
 	}
 
+	c.linkChanged(ctx, id)
+
 	return upto, nil
 }
 
@@ -214,12 +230,14 @@ func (c *Control) warnOnce(ctx context.Context, t rxv1.MessageType) {
 // Disconnected records the end of a node's control channel.
 func (c *Control) Disconnected(ctx context.Context, id domain.NodeID, cause error) {
 	c.links.Disconnected(id, c.now())
+	c.linkChanged(ctx, id)
 	c.logger.InfoContext(ctx, "node disconnected", slog.String("node_id", id.String()), slog.Any("cause", cause))
 }
 
 // DialFailed records a failed dial to a node.
 func (c *Control) DialFailed(ctx context.Context, id domain.NodeID, cause error) {
 	c.links.DialFailed(id, c.now())
+	c.linkChanged(ctx, id)
 	c.logger.DebugContext(ctx, "node dial failed", slog.String("node_id", id.String()), slog.Any("error", cause))
 }
 
