@@ -114,11 +114,23 @@ The PR closes #12, #14, #16, #18 and #21, and references (without closing) #15 (
 - **Node private key path.** `tls.key` on the node is a plain path, not a `{ file = … }` secret reference: the node writes it during enrollment, so it cannot be resolved at config load. The file is created 0600 and its mode is checked when it is read.
 - **Relative paths.** `tls.*` and `hub_trust.ca_cert` paths are resolved against the config directory, like secret files.
 - **Map keys and env.** `nodes.<id>.*` and `devices.<id>.*` are file-only: an env override would need a dynamic variable name (`MESHSDR_NODES__<ID>__URL`) that the env loader cannot enumerate.
-- **Migrations** of this part start at `00003` (`00002` belongs to the identity epic): `00003` nodes, revocation list and event cursor, `00004` capabilities, `00005` devices, `00006` connections. Timestamps are Unix milliseconds, UUIDs 16-byte blobs, as in §7.2.
+- **Migrations** of this part start at `00003` (`00002` belongs to the identity epic): `00003` nodes, revocation list and event cursor, `00004` capabilities, `00005` devices, `00006` connections, `00007` pending node certificate. Timestamps are Unix milliseconds, UUIDs 16-byte blobs, as in §7.2.
 - **Optimistic concurrency on REST.** `PATCH /nodes/{id}` carries the expected `version` in the body and answers 409 `version_conflict` (§7.1), not `If-Match`/412 (§6.10).
 - **Device order.** TOML tables lose their order once decoded, so `devices.sort_order` follows the device ids in lexical order.
 - **Media presence rows** created from `connection.opened` have an empty `ip` and role 0 until the gateway authz creates them first (GRID-011).
 - **`GET /devices`** is admin-only until the listen policy can be evaluated (identity epic); `GET /connections` returns the count to everyone and the rows to admins.
+- **Security review fixes.**
+  - Status transitions are evaluated and written in one transaction with a status-only `UPDATE`; no runtime column is ever rewritten from a stale copy.
+  - Certificate renewal: the renewed certificate is stored as pending (`cert_pending_*`, migration 00007) before `ctl.cert.renew` is sent; the hub accepts the current or the pending fingerprint, promotes the pending one on the acknowledgement or when the node connects with it, and revokes the replaced one (`renewed`). Open channels re-check renewal every 24 h.
+  - The node replays its event buffer page by page: it stops while half of the outbound queue (4 MiB) is in use, so a large backlog never closes the channel with 4413.
+  - Enrollment completion requires the stored key and URL to match the attempt (`enrollment_superseded` otherwise); the TTL is checked when the attempt starts only.
+  - A config token only seeds a pending node without key; it never replaces an admin-issued key and is never revived after an enrollment or a revocation. Changing the token of a pending config node needs `meshsdr hub node token`.
+  - Every enrollment token, config tokens included, is 32 random bytes in unpadded base64url (43 characters): the hub sends its HMAC proof to the unauthenticated node, so a weaker token could be brute-forced offline.
+  - The three enrollment MACs are domain-separated (phase label, length-prefixed fields, per-certificate hashes, 32-byte nonce).
+  - Hub dials (enrollment, control channel) never follow redirects.
+  - Node leaf SANs are fixed by the hub: the node URI, `<id>.nodes.rx.internal` and the host of the node URL; CSR SANs are ignored.
+  - `node enroll` stages the CA, key and certificate, renames the certificate last (its presence marks the node enrolled) and syncs the directory; `hub ca init` creates its files exclusively (hard link), never replacing an existing CA.
+  - Node-reported presence rows may only name the node's own devices, and a node holds at most 1000 open rows.
 - **WebSocket deadlines.** `wsconn.Accept` clears the server read/write deadlines before the hijack, otherwise `ReadTimeout` would cut long-lived channels.
 
 ## Spec inconsistencies
