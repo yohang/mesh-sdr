@@ -5,16 +5,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 )
 
 type values struct {
+	strs  map[string]string
 	ints  map[string]int
 	durs  map[string]time.Duration
 	count int
 	win   time.Duration
 }
 
+func (v values) String(k string) string           { return v.strs[k] }
 func (v values) Int(k string) int                 { return v.ints[k] }
 func (v values) Duration(k string) time.Duration  { return v.durs[k] }
 func (v values) Rate(string) (int, time.Duration) { return v.count, v.win }
@@ -74,6 +77,14 @@ func TestPolicies(t *testing.T) {
 
 	if d := settingsrc.New(values{}).PasswordResetTTL(context.Background()); d != 30*time.Minute {
 		t.Errorf("default reset ttl = %s", d)
+	}
+
+	if lp := settingsrc.New(values{strs: map[string]string{settingsrc.KeyListenPolicy: "registered"}}).ListenPolicy(context.Background()); lp != domain.ListenRegistered {
+		t.Errorf("listen policy = %s", lp)
+	}
+
+	if lp := settingsrc.New(values{}).ListenPolicy(context.Background()); lp != domain.ListenAnonymous {
+		t.Errorf("default listen policy = %s", lp)
 	}
 
 	if every, burst := settingsrc.New(values{}).LoginRate(); every != 12*time.Second || burst != 5 {

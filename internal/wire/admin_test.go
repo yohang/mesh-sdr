@@ -48,6 +48,7 @@ func newAdminHub(t *testing.T, env map[string]string) *adminHub {
 	}
 
 	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
+	cfg.Auth.TokenKeyDir = filepath.Join(t.TempDir(), "keys")
 	a := dbtest.NewSQLite(t)
 
 	admin := wire.UserAdmin(cfg, discard, a)

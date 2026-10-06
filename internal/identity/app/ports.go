@@ -102,6 +102,8 @@ type Settings interface {
 	InvitationTTL(ctx context.Context) time.Duration
 	// PasswordResetTTL is password_reset.ttl_minutes.
 	PasswordResetTTL(ctx context.Context) time.Duration
+	// ListenPolicy is the global listen_policy (devices may override it).
+	ListenPolicy(ctx context.Context) domain.ListenPolicy
 }
 
 // Policies builds the password policy in force: the minimum length from the

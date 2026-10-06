@@ -199,3 +199,34 @@ func TestGlobalBehaviour(t *testing.T) {
 		t.Errorf("error output = %+v", r)
 	}
 }
+
+func TestKeysCommands(t *testing.T) {
+	ctx := context.Background()
+	env := map[string]string{"MESHSDR_CONFIG_DIR": hubDir(t)}
+
+	r := run(t, ctx, env, "--json", "hub", "keys", "list")
+
+	var keys []struct {
+		Kid   string `json:"kid"`
+		State string `json:"state"`
+	}
+	if r.code != ExitOK || json.Unmarshal([]byte(r.stdout), &keys) != nil || len(keys) != 1 || keys[0].State != "signing" {
+		t.Fatalf("list = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "keys", "rotate"); r.code != ExitOK || !strings.Contains(r.stdout, "published now") {
+		t.Errorf("rotate = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "keys", "revoke", keys[0].Kid); r.code != ExitOK || !strings.Contains(r.stdout, "revoked") {
+		t.Errorf("revoke = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "keys", "revoke", "nope"); r.code != ExitFailure {
+		t.Errorf("revoke unknown = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "keys", "list"); r.code != ExitOK || !strings.Contains(r.stdout, "revoked") || !strings.Contains(r.stdout, "signing") {
+		t.Errorf("list after = %+v", r)
+	}
+}

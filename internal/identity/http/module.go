@@ -129,6 +129,8 @@ type AuditService interface {
 
 // Services are the application services behind the identity pages.
 type Services struct {
+	// Keys publishes the token verification keys (JWKS).
+	Keys        app.KeySource
 	Audit       AuditService
 	Resets      ResetService
 	Invitations InvitationService
@@ -173,6 +175,8 @@ type Module struct {
 	invitations InvitationService
 	resets      ResetService
 	audit       AuditService
+	keys        app.KeySource
+	now         func() time.Time
 	// adminLinks are the admin pages of the user menu.
 	adminLinks []layout.Link
 	pages      Pages
@@ -213,6 +217,8 @@ func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, e
 		invitations: svc.Invitations,
 		resets:      svc.Resets,
 		audit:       svc.Audit,
+		keys:        svc.Keys,
+		now:         time.Now,
 		adminLinks:  []layout.Link{{Label: "Users", Href: UsersPath}, {Label: "Invitations", Href: InvitationsPath}, {Label: "Audit log", Href: AuditPath}},
 		pages:       pages,
 		logger:      logger,
@@ -284,6 +290,9 @@ func (m *Module) Routes(r chi.Router) {
 	admin.Post(InvitationsPath, m.createInvitationAction)
 	admin.Post(InvitationsPath+"/test-mail", m.testMailAction)
 	admin.Post(InvitationsPath+"/{id}/revoke", m.revokeInvitationAction)
+
+	r.Get(JWKSPath, m.jwks)
+	r.Head(JWKSPath, m.jwks)
 
 	r.Get(ForgotPath, m.forgotPage)
 	r.Head(ForgotPath, m.forgotPage)
@@ -653,6 +662,16 @@ func (m *Module) ChangePassword(ctx context.Context, current, newPassword string
 	}
 
 	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge), res.Forced, nil
+}
+
+// SessionRef returns the public handle of the request's session ("" when
+// anonymous): the sid claim of its access tokens.
+func (m *Module) SessionRef(ctx context.Context) string {
+	if st := FromContext(ctx); st.session != nil {
+		return st.session.Ref()
+	}
+
+	return ""
 }
 
 // OpenedSession returns the principal, CSRF token and cookies of a session

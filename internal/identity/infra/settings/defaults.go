@@ -27,3 +27,6 @@ func (Defaults) InvitationTTL(context.Context) time.Duration { return DefaultInv
 
 // PasswordResetTTL implements app.Settings (password_reset.ttl_minutes).
 func (Defaults) PasswordResetTTL(context.Context) time.Duration { return DefaultPasswordResetTTL }
+
+// ListenPolicy implements app.Settings (listen_policy, default anonymous).
+func (Defaults) ListenPolicy(context.Context) domain.ListenPolicy { return domain.ListenAnonymous }

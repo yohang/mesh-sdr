@@ -64,6 +64,16 @@ var (
 	// ErrLastAdmin means the change would leave no enabled admin (ACC-006).
 	ErrLastAdmin = shared.NewError(shared.KindConflict, "last_admin", "the last enabled admin cannot lose the admin role, be disabled or be deleted")
 
+	// ErrNoListenableDevice means no device of the node is open to the
+	// caller: no access token (§5.9).
+	ErrNoListenableDevice = shared.NewError(shared.KindForbidden, "no_listenable_device", "no device of this node is open to you")
+	// ErrAnonymousTokens means anonymous access tokens need a connection
+	// bound by the gateway (GRID-011), not available yet.
+	ErrAnonymousTokens = shared.NewError(shared.KindUnauthenticated, "unauthenticated", "sign in to listen")
+	// ErrInvalidConnection means the connection id is malformed or not the
+	// caller's.
+	ErrInvalidConnection = shared.NewError(shared.KindForbidden, "invalid_connection", "this connection is not yours")
+
 	ErrUserNotFound    = shared.NewError(shared.KindNotFound, "user_not_found", "user not found")
 	ErrSessionNotFound = shared.NewError(shared.KindNotFound, "session_not_found", "session not found")
 	ErrUsernameTaken   = shared.NewError(shared.KindConflict, "username_taken", "the username is already used")

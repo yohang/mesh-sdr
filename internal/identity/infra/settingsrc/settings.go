@@ -1,6 +1,6 @@
 // Package settingsrc reads the identity policies from the settings store
 // (ADR 0010): session lifetimes, login throttling, retention, the password
-// policy and the invitation and reset link lifetimes. Values are
+// policy, the invitation and reset link lifetimes and the listen policy. Values are
 // read on every use, so a saved change applies at once. The store validates
 // them (bounds and checks across keys); invalid combinations fall back to
 // the domain defaults.
@@ -29,6 +29,7 @@ const (
 	KeyPasswordMin      = "auth.password_min_length"
 	KeyInvitationTTL    = "invitations.ttl_hours"
 	KeyPasswordResetTTL = "password_reset.ttl_minutes"
+	KeyListenPolicy     = "listen_policy"
 )
 
 // Default login rate per client address (TECHNICAL_SPEC §5.12): 5 per
@@ -43,6 +44,7 @@ const minAuditRetention = 30 * 24 * time.Hour
 
 // Values reads the current effective settings.
 type Values interface {
+	String(key string) string
 	Int(key string) int
 	Duration(key string) time.Duration
 	Rate(key string) (int, time.Duration)
@@ -131,4 +133,14 @@ func (p Policies) PasswordResetTTL(context.Context) time.Duration {
 	}
 
 	return defaultPasswordResetTTL
+}
+
+// ListenPolicy implements app.Settings (listen_policy; anonymous when the
+// value is unavailable, as its default).
+func (p Policies) ListenPolicy(context.Context) domain.ListenPolicy {
+	if lp, err := domain.ParseListenPolicy(p.values.String(KeyListenPolicy)); err == nil {
+		return lp
+	}
+
+	return domain.ListenAnonymous
 }

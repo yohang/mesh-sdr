@@ -28,6 +28,7 @@ import (
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/keyring"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/mail"
 	"github.com/yohang/mesh-sdr/internal/settings"
@@ -221,6 +222,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	ideps := identityDeps(cfg, logger, adapter)
 	ideps.Settings = settingsModule.Store
 	ideps.AcceptsMultipart = api.AcceptsMultipart
+	ideps.Devices = gridDevices{g.devices}
 
 	var workers []func(context.Context)
 
@@ -233,6 +235,10 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	if err != nil {
 		return nil, nil, fmt.Errorf("identity: %w", err)
 	}
+
+	workers = append(workers, func(ctx context.Context) {
+		idm.RunKeyMaintenance(ctx, now, component(logger, "identity.infra.keyring"))
+	})
 
 	viewer.authz = idm.HTTP
 	identityHTTP = idm.HTTP
@@ -257,6 +263,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		InvitationHandlers: api.NewInvitationHandlers(idm.HTTP, idm.HTTP, idm.Invitations),
 		ResetHandlers:      api.NewResetHandlers(idm.HTTP, idm.Resets),
 		AuditHandlers:      api.NewAuditHandlers(idm.Audit),
+		TokenHandlers:      api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
 	}
 
 	router := httpserver.NewRouter(
@@ -322,4 +329,34 @@ func Node(cfg config.Node, logger *slog.Logger, now time.Time, opts ...NodeOptio
 	}
 
 	return &Process{addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server")}, nil
+}
+
+// gridDevices adapts the grid device registry to the token issuer.
+type gridDevices struct{ devices *gridapp.Devices }
+
+func (g gridDevices) NodeDevices(ctx context.Context, nodeID string) ([]identityapp.NodeDevice, error) {
+	all, err := g.devices.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []identityapp.NodeDevice
+
+	for _, d := range all {
+		if d.Node().String() != nodeID || !d.Flags().Enabled {
+			continue
+		}
+
+		out = append(out, identityapp.NodeDevice{
+			ID: d.ID().String(), ListenPolicy: identitydomain.ListenPolicy(d.Flags().ListenPolicy),
+			OperatorCanRetune: d.Flags().OperatorCanRetune,
+		})
+	}
+
+	return out, nil
+}
+
+// TokenKeyring opens the token signing keyring (meshsdr hub keys …).
+func TokenKeyring(cfg config.Hub, now time.Time) (*keyring.Keyring, error) {
+	return identity.Keyring(cfg, now)
 }

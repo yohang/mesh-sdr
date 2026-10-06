@@ -17,6 +17,7 @@ import (
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/argon2"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/commonpw"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/keyring"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/notify"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settings"
@@ -44,6 +45,9 @@ const (
 	// hour (§5.12).
 	resetIPBurst = 3
 	resetIPEvery = 20 * time.Minute
+	// Access token mints per session or connection: 30 per minute (§5.12).
+	tokenBurst = 30
+	tokenEvery = 2 * time.Second
 )
 
 // Deps are the dependencies of the identity module.
@@ -60,7 +64,28 @@ type Deps struct {
 	AcceptsMultipart func(r *http.Request) bool
 	// Mail queues outgoing e-mail; nil when smtp.host is not set.
 	Mail notify.Outbox
+	// Devices lists the devices of a node, to scope access tokens; nil
+	// means no device (no token).
+	Devices app.DeviceAccess
+	// Binder checks media connection ids (GRID-011); optional.
+	Binder app.ConnectionBinder
 }
+
+// noDevices is the device access without a grid.
+type noDevices struct{}
+
+func (noDevices) NodeDevices(context.Context, string) ([]app.NodeDevice, error) { return nil, nil }
+
+// Keyring opens the token signing keyring of auth.token_key_dir.
+func Keyring(cfg config.Hub, now time.Time) (*keyring.Keyring, error) {
+	return keyring.Open(keyring.Options{
+		Dir: cfg.Auth.TokenKeyDir, Rotation: time.Duration(cfg.Auth.KeyRotationDays) * 24 * time.Hour,
+		TokenTTL: cfg.Auth.TokenTTL.Duration(),
+	}, now)
+}
+
+// KeyMaintenanceEvery is how often the hub reloads and rotates its keys.
+const KeyMaintenanceEvery = time.Minute
 
 func component(l *slog.Logger, name string) *slog.Logger {
 	return l.With(slog.String("component", name))
@@ -126,6 +151,9 @@ func UserAdmin(d Deps) *app.UserAdmin {
 
 // Module is the wired identity module of the hub.
 type Module struct {
+	// Keys is the token signing keyring; KeySource of the grid.
+	Keys        *keyring.Keyring
+	Tokens      *app.Tokens
 	Audit       *app.AuditView
 	Resets      *app.Resets
 	Invitations *app.Invitations
@@ -221,7 +249,25 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 
 	auditView := app.NewAuditView(r.audit, r.users)
 
+	keys, err := Keyring(d.Config, d.Now())
+	if err != nil {
+		return nil, fmt.Errorf("token keys: %w", err)
+	}
+
+	devices := d.Devices
+	if devices == nil {
+		devices = noDevices{}
+	}
+
+	tokens := app.NewTokens(app.TokensDeps{
+		Signer: keys, Devices: devices, Binder: d.Binder, Settings: settings.Defaults{},
+		Limiter: memory.NewKeyLimiter(tokenEvery, tokenBurst, memory.DefaultCapacity),
+		Issuer:  d.Config.Hub.URL, TTL: d.Config.Auth.TokenTTL.Duration(), Now: d.Now,
+		Logger: component(d.Logger, "identity.app.tokens"),
+	})
+
 	h, err := identityhttp.New(identityhttp.Services{
+		Keys:        keys,
 		Audit:       auditView,
 		Resets:      resets,
 		Invitations: invitations,
@@ -237,6 +283,8 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	}
 
 	return &Module{
+		Keys:        keys,
+		Tokens:      tokens,
 		Audit:       auditView,
 		Resets:      resets,
 		Invitations: invitations,
@@ -254,4 +302,23 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 			app.NewPurgeJob(app.JobEmailTokensPurge, app.TokenRetention, r.emailChanges, d.Now),
 		},
 	}, nil
+}
+
+// RunKeyMaintenance reloads, rotates and prunes the keyring every
+// KeyMaintenanceEvery until ctx is done. It is a background worker: it logs
+// its own errors.
+func (m *Module) RunKeyMaintenance(ctx context.Context, now func() time.Time, logger *slog.Logger) {
+	t := time.NewTicker(KeyMaintenanceEvery)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := m.Keys.Maintain(now()); err != nil {
+				logger.ErrorContext(ctx, "token key maintenance failed", slog.Any("error", err))
+			}
+		}
+	}
 }

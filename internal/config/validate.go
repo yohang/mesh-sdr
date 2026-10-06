@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
@@ -153,6 +154,18 @@ func (h *Hub) validate(o Origins) []Problem {
 
 	if h.Auth.Argon2.Parallelism < 1 {
 		c.fail("auth.argon2.parallelism", CodeInvalidValue, "invalid value 0: want 1..255")
+	}
+
+	if h.Auth.TokenKeyDir == "" {
+		c.fail("auth.token_key_dir", CodeRequired, "auth.token_key_dir is required")
+	}
+
+	if d := h.Auth.TokenTTL.Duration(); d < time.Minute || d > 10*time.Minute {
+		c.fail("auth.token_ttl", CodeInvalidValue, fmt.Sprintf("invalid value %s: want 1m to 10m (SR-44)", h.Auth.TokenTTL))
+	}
+
+	if n := h.Auth.KeyRotationDays; n < 1 || n > 365 {
+		c.fail("auth.key_rotation_days", CodeInvalidValue, fmt.Sprintf("invalid value %d: want 1..365", n))
 	}
 
 	c.cidrs("admin.allowed_networks", h.Admin.AllowedNetworks)

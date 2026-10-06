@@ -1316,6 +1316,41 @@ paths:
                 $ref: "#/components/schemas/AuditPage"
         default:
           $ref: "#/components/responses/Problem"
+  /auth/token:
+    post:
+      operationId: mintAccessToken
+      x-meshsdr-access: anonymous
+      summary: Get an access token for a node media connection
+      description: |
+        Issues a short-lived EdDSA token (`auth.token_ttl`, 5 minutes by
+        default) for one node and one media connection, scoped to the node's
+        devices the caller may listen to (TECHNICAL_SPEC §5.8). The client
+        refreshes it in band before it expires. Derived from the live
+        session: a revoked session or a changed role stops refreshes.
+        Anonymous callers need a connection bound by the gateway (GRID-011);
+        until then they get 401. Limited to 30 per minute per session.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenRequest"
+      responses:
+        "200":
+          description: The token. Never store it beyond the page's memory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessToken"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     LinkToken:
@@ -1350,6 +1385,27 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    TokenRequest:
+      type: object
+      additionalProperties: false
+      required: [node_id, cid]
+      properties:
+        node_id:
+          type: string
+          maxLength: 64
+        cid:
+          type: string
+          description: Media connection id issued by the hub.
+          maxLength: 64
+    AccessToken:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
     AuditPage:
       type: object
       required: [entries]

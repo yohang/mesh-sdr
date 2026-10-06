@@ -60,6 +60,15 @@ level = "info"
 # text | json. --json overrides it.
 format = "json"
 
+[auth]
+# Ed25519 keys that sign access tokens: one 0600 file per key in a 0700
+# directory, written by the hub (rotation every key_rotation_days, or
+# `meshsdr hub keys rotate`). Never in the database.
+token_key_dir = "/var/lib/meshsdr/keys"
+# Access token lifetime (1m to 10m).
+token_ttl = "5m"
+key_rotation_days = 30
+
 [auth.argon2]
 # Argon2id password hashing. Floors: memory_kib >= 19456, iterations >= 2.
 # Stored hashes with other parameters are re-hashed at the next login.

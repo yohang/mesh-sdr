@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -85,6 +86,7 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 	cfg.Hub.URL = hubURL
 	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
 	cfg.HTTP.TrustedProxies = []string{"10.0.0.0/8"}
+	cfg.Auth.TokenKeyDir = filepath.Join(t.TempDir(), "keys")
 
 	for _, f := range mutate {
 		f(&cfg)
@@ -93,7 +95,7 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	mails := &outbox{}
-	d := identity.Deps{Mail: mails, Config: cfg, Logger: logger, DB: dbtest.NewSQLite(t), IDs: shared.NewUUIDv7Generator(), Now: time.Now}
+	d := identity.Deps{Mail: mails, Devices: testDevices{}, Config: cfg, Logger: logger, DB: dbtest.NewSQLite(t), IDs: shared.NewUUIDv7Generator(), Now: time.Now}
 
 	m, err := identity.Wire(ctx, d, pages{})
 	if err != nil {
@@ -107,6 +109,7 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 		InvitationHandlers: api.NewInvitationHandlers(m.HTTP, m.HTTP, m.Invitations),
 		ResetHandlers:      api.NewResetHandlers(m.HTTP, m.Resets),
 		AuditHandlers:      api.NewAuditHandlers(m.Audit),
+		TokenHandlers:      api.NewTokenHandlers(m.HTTP, m.HTTP, m.Tokens),
 	}
 
 	return &hub{
@@ -704,4 +707,15 @@ func TestAuthorize(t *testing.T) {
 	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "without Secure") {
 		t.Errorf("no warning for an http hub.url: %q", logs.String())
 	}
+}
+
+// testDevices: node "roof" has one device open to everyone.
+type testDevices struct{}
+
+func (testDevices) NodeDevices(_ context.Context, node string) ([]app.NodeDevice, error) {
+	if node != "roof" {
+		return nil, nil
+	}
+
+	return []app.NodeDevice{{ID: "hf"}}, nil
 }

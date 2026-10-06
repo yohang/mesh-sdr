@@ -43,6 +43,9 @@ dsn = "sqlite://` + filepath.Join(dir, "hub.db") + `"
 
 [log]
 format = "text"
+
+[auth]
+token_key_dir = "` + filepath.Join(dir, "keys") + `"
 `
 
 	if err := os.WriteFile(filepath.Join(dir, "hub.toml"), []byte(cfg), 0o600); err != nil {
