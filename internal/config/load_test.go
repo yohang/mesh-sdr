@@ -224,6 +224,18 @@ func TestLoadErrors(t *testing.T) {
 			code:  CodeDBEngineUnsupported, origin: "env:MESHSDR_DB__DSN",
 		},
 		{
+			name: "usage policy too long", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub},
+			env:   map[string]string{"MESHSDR_SETTINGS__RECEIVER__USAGE_POLICY_TEXT": strings.Repeat("é", 20001)},
+			code:  "invalid_usage_policy", origin: "env:MESHSDR_SETTINGS__RECEIVER__USAGE_POLICY_TEXT",
+		},
+		{
+			name: "usage policy not UTF-8", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub},
+			env:   map[string]string{"MESHSDR_SETTINGS__RECEIVER__USAGE_POLICY_TEXT": "rules \xff"},
+			code:  "invalid_usage_policy",
+		},
+		{
 			name: "invalid theme mode", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub + "[settings.ui]\ntheme_mode = \"sepia\"\n"},
 			code:  CodeInvalidValue, origin: "hub.toml:6",

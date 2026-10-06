@@ -3,6 +3,8 @@ package config
 import (
 	"encoding/json"
 	"testing"
+
+	shelldomain "github.com/yohang/mesh-sdr/internal/shell/domain"
 )
 
 func TestSchema(t *testing.T) {
@@ -92,5 +94,36 @@ func TestSecretSchemaIsMarked(t *testing.T) {
 
 	if s["secret"] != true {
 		t.Errorf("secret = %v", s["secret"])
+	}
+}
+
+// The schema limit of the usage policy is the shell's value object limit.
+func TestUsagePolicySchemaLimit(t *testing.T) {
+	b, err := Schema(RoleHub)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var s struct {
+		Properties struct {
+			Settings struct {
+				Properties struct {
+					Receiver struct {
+						Properties struct {
+							Text struct {
+								MaxLength int `json:"maxLength"`
+							} `json:"usage_policy_text"`
+						} `json:"properties"`
+					} `json:"receiver"`
+				} `json:"properties"`
+			} `json:"settings"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(b, &s); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := s.Properties.Settings.Properties.Receiver.Properties.Text.MaxLength; got != shelldomain.MaxPolicyTextLength {
+		t.Errorf("schema maxLength = %d, want %d", got, shelldomain.MaxPolicyTextLength)
 	}
 }
