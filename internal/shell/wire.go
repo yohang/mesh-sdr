@@ -16,7 +16,9 @@ import (
 type Deps struct {
 	// Settings reads the effective settings (the settings store).
 	Settings infra.Values
-	Logger   *slog.Logger
+	// Viewer tells what the visitor may open (nil: no navigation).
+	Viewer shellhttp.Viewer
+	Logger *slog.Logger
 }
 
 // Module is the wired shell module.
@@ -35,7 +37,7 @@ func Wire(d Deps) Module {
 	settings := infra.NewStoreSettings(d.Settings)
 	lookAndFeel := app.NewLookAndFeel(settings, component("shell.app.look_and_feel"))
 	policy := app.NewPolicy(settings, component("shell.app.policy"))
-	source := shellhttp.NewShellSource(lookAndFeel)
+	source := shellhttp.NewShellSource(lookAndFeel, d.Viewer)
 	rd := render.New(source, component("web.render"))
 
 	return Module{

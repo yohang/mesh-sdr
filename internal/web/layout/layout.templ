@@ -41,6 +41,24 @@ templ Document(s Shell, p Page, content templ.Component) {
 			<header class="sticky top-0 z-10 border-b border-border bg-surface">
 				<div class="mx-auto flex h-14 max-w-screen-2xl items-center gap-4 px-4">
 					<a href="/" class="font-semibold tracking-tight text-fg no-underline">{ s.SiteName }</a>
+					if len(s.Nav) > 0 {
+						<nav aria-label="Main" class="ml-auto">
+							<ul class="flex gap-4">
+								for _, l := range s.Nav {
+									<li>
+										<a
+											href={ templ.URL(l.Href) }
+											data-section={ l.Section }
+											class="font-medium"
+											if l.Section != "" && l.Section == p.Section {
+												aria-current="page"
+											}
+										>{ l.Label }</a>
+									</li>
+								}
+							</ul>
+						</nav>
+					}
 				</div>
 			</header>
 			@Main(p, content)

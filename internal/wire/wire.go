@@ -25,8 +25,10 @@ import (
 	"github.com/yohang/mesh-sdr/internal/http/api"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
+	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/settings"
+	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shell"
 )
@@ -177,7 +179,8 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, fmt.Errorf("settings: %w", err)
 	}
 
-	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, Logger: logger})
+	viewer := &adminViewer{}
+	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, Viewer: viewer, Logger: logger})
 
 	ideps := identityDeps(cfg, logger, adapter)
 	ideps.Settings = settingsModule.Store
@@ -186,6 +189,8 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	if err != nil {
 		return nil, nil, fmt.Errorf("identity: %w", err)
 	}
+
+	viewer.authz = idm.HTTP
 
 	scheduler, retention, err := jobs(adapter, idm, settingsModule.Store, auditLog, logger)
 	if err != nil {
@@ -204,6 +209,11 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		component(logger, "http.router"),
 		api.NewHandler(apiServer, idm.HTTP, component(logger, "http.api")),
 		idm.HTTP,
+		settingshttp.New(settingshttp.Deps{
+			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin),
+			Store: settingsModule.Store, Config: settingsModule.Effective, Retention: retentionRows{r: retention},
+			Actor: settingsActor, Logger: component(logger, "settings.http"),
+		}),
 		shellModule.HTTP,
 	)
 

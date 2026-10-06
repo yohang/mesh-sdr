@@ -8,7 +8,9 @@
 // disconnectedCallback cleans up.
 
 import "./csrf.js";
+import { installAdminForms } from "./admin-form.js";
 import "./token-url.js";
 import { installNavigation } from "./navigation.js";
 
 installNavigation();
+installAdminForms();

@@ -18,14 +18,23 @@ import (
 
 //go:generate go tool templ generate
 
-// ShellSource builds the per-request shell data from the look and feel.
-type ShellSource struct {
-	lookAndFeel *app.LookAndFeel
+// Viewer tells what the visitor of a request may open.
+type Viewer interface {
+	// IsAdmin reports whether the visitor may open the admin area (admin
+	// role, from an allowed network).
+	IsAdmin(r *http.Request) bool
 }
 
-// NewShellSource returns a ShellSource.
-func NewShellSource(lookAndFeel *app.LookAndFeel) *ShellSource {
-	return &ShellSource{lookAndFeel: lookAndFeel}
+// ShellSource builds the per-request shell data from the look and feel and
+// the visitor.
+type ShellSource struct {
+	lookAndFeel *app.LookAndFeel
+	viewer      Viewer
+}
+
+// NewShellSource returns a ShellSource. viewer may be nil (no navigation).
+func NewShellSource(lookAndFeel *app.LookAndFeel, viewer Viewer) *ShellSource {
+	return &ShellSource{lookAndFeel: lookAndFeel, viewer: viewer}
 }
 
 // Shell implements render.ShellSource.
@@ -41,10 +50,16 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 		theme = layout.ThemeDark
 	}
 
+	var nav []layout.Link
+	if s.viewer != nil && s.viewer.IsAdmin(r) {
+		nav = append(nav, layout.Link{Label: "Admin", Href: "/admin", Section: layout.SectionAdmin})
+	}
+
 	return layout.Shell{
 		SiteName:    v.SiteName,
 		Theme:       theme,
 		FooterLinks: []layout.Link{{Label: "Usage policy", Href: v.PolicyURL}},
+		Nav:         nav,
 	}
 }
 

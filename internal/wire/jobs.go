@@ -12,7 +12,10 @@ import (
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	jobsapp "github.com/yohang/mesh-sdr/internal/jobs/app"
+	jobsdomain "github.com/yohang/mesh-sdr/internal/jobs/domain"
 	jobssqlite "github.com/yohang/mesh-sdr/internal/jobs/infra/sqlite"
+	settingsapp "github.com/yohang/mesh-sdr/internal/settings/app"
+	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 )
 
 // jobs builds the hub's jobs scheduler with the retention jobs, and the
@@ -72,4 +75,32 @@ func (a purgeAuditor) RecordPurge(ctx context.Context, r jobsapp.PurgeRecord) er
 		WithAfter(map[string]string{"rows_deleted": strconv.FormatInt(r.Rows, 10)})
 
 	return a.log.Append(ctx, e)
+}
+
+// retentionRows adapts the retention view to the admin pages.
+type retentionRows struct{ r *jobsapp.Retention }
+
+// Stores implements settingshttp.Retention.
+func (a retentionRows) Stores(ctx context.Context) ([]settingshttp.RetentionRow, error) {
+	views, err := a.r.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]settingshttp.RetentionRow, 0, len(views))
+
+	for _, v := range views {
+		out = append(out, settingshttp.RetentionRow{
+			Store: v.Store.Name, Label: v.Store.Label, SettingKey: v.Store.SettingKey, Retention: v.Retention,
+			Rows: v.Rows, Bytes: v.Bytes, Sized: v.Sized, Running: v.LastRun.Running(), LastFinished: v.LastRun.LastFinished(),
+			LastFailed: v.LastRun.Status() == jobsdomain.StatusError, LastError: v.LastRun.LastError(), LastRows: v.LastRun.Rows(),
+		})
+	}
+
+	return out, nil
+}
+
+// Purge implements settingshttp.Retention.
+func (a retentionRows) Purge(ctx context.Context, actor settingsapp.Actor, store string) (int64, error) {
+	return a.r.Purge(ctx, jobsapp.Actor{User: actor.User, IP: actor.IP, RequestID: actor.RequestID}, store)
 }
