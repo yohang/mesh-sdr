@@ -43,7 +43,10 @@ Every HTML response from the helper:
 - sends `Vary: HX-Request, HX-Boosted, HX-Request-Type, HX-History-Restore-Request` and `Cache-Control: no-store`, because pages depend on the session, role and theme;
 - is rendered into a buffer first, so a template error becomes a clean 500.
 
-`Renderer.Error(w, r, status)` renders 403/404/405/5xx inside the shell, because htmx swaps error responses into `#main`. A panic still gets chi's plain 500 from the recoverer. An HTML panic page is left for later.
+`Renderer.Error(w, r, status)` follows the same rule for 403/404/405/5xx, because htmx 4 swaps error responses into the request's target:
+
+- for a full-page request (plain, boosted or history restore), it renders the error page inside the shell, which then lands in `#main`;
+- for a fragment request, it renders only the error content (heading, message, link home) into the request's target. It sends no `HX-Retarget`, so an error replaces the part that failed, not the page. A panic still gets chi's plain 500 from the recoverer. An HTML panic page is left for later.
 
 ### Theme mode: interim source
 

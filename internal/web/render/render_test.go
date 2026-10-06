@@ -3,6 +3,7 @@ package render_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -176,14 +177,41 @@ func TestDocument(t *testing.T) {
 func TestError(t *testing.T) {
 	rd := newRenderer(layout.ThemeAuto)
 
-	for _, status := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusInternalServerError} {
-		rec := httptest.NewRecorder()
-		rd.Error(rec, httptest.NewRequest(http.MethodGet, "/nope", nil), status)
+	tests := []struct {
+		name    string
+		headers map[string]string
+		full    bool
+	}{
+		{"plain request", nil, true},
+		{"boosted navigation", map[string]string{"HX-Request": "true", "HX-Boosted": "true"}, true},
+		{"history restore", map[string]string{"HX-Request": "true", "HX-History-Restore-Request": "true"}, true},
+		{"htmx partial", map[string]string{"HX-Request": "true", "HX-Request-Type": "partial"}, false},
+	}
 
-		body := rec.Body.String()
-		if rec.Code != status || !strings.Contains(body, `<main id="main"`) ||
-			!strings.Contains(body, "<h1 class=\"text-2xl font-semibold\">"+http.StatusText(status)+"</h1>") {
-			t.Errorf("status %d: got %d\n%s", status, rec.Code, body)
+	for _, tt := range tests {
+		for _, status := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusInternalServerError} {
+			t.Run(fmt.Sprintf("%s/%d", tt.name, status), func(t *testing.T) {
+				r := httptest.NewRequest(http.MethodGet, "/nope", nil)
+				for k, v := range tt.headers {
+					r.Header.Set(k, v)
+				}
+
+				rec := httptest.NewRecorder()
+				rd.Error(rec, r, status)
+
+				body := rec.Body.String()
+				if rec.Code != status || !strings.Contains(body, "<h1 class=\"text-2xl font-semibold\">"+http.StatusText(status)+"</h1>") {
+					t.Fatalf("got %d\n%s", rec.Code, body)
+				}
+
+				if isShell := strings.Contains(body, `<main id="main"`) && strings.Contains(body, "<!doctype html>"); isShell != tt.full {
+					t.Errorf("full page = %v, want %v:\n%s", isShell, tt.full, body)
+				}
+
+				if got := rec.Header().Get("Vary"); got != render.Vary {
+					t.Errorf("Vary = %q", got)
+				}
+			})
 		}
 	}
 }

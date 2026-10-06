@@ -59,12 +59,21 @@ func (rd *Renderer) Page(w http.ResponseWriter, r *http.Request, status int, pag
 	rd.write(w, r, status, c)
 }
 
-// Error writes the shell error page for status (4xx, 5xx).
+// Error writes the error page for status (4xx, 5xx): the full shell page, or
+// only the error content when the request asks for a fragment (htmx swaps
+// error responses into the request's target, which must not receive a
+// second shell).
 func (rd *Renderer) Error(w http.ResponseWriter, r *http.Request, status int) {
 	title := http.StatusText(status)
-	page := layout.Page{Title: title}
+	content := layout.Error(status, title, errorMessage(status))
 
-	rd.write(w, r, status, layout.Document(rd.shell.Shell(r), page, layout.Error(status, title, errorMessage(status))))
+	if WantsFragment(r) {
+		rd.write(w, r, status, content)
+
+		return
+	}
+
+	rd.write(w, r, status, layout.Document(rd.shell.Shell(r), layout.Page{Title: title}, content))
 }
 
 // NotFound writes the 404 page.
