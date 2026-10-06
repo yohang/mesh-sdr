@@ -130,8 +130,8 @@ Spec TECHNICAL_SPEC §7.4 is authoritative:
 
 One binary; the bare role starts the process, admin tasks are subcommands of the role:
 
-- `meshsdr hub` — start the hub; `meshsdr hub migrate [up|down|status]` (bare `migrate` = `up`; `down` is dev only); `meshsdr hub config schema|check`; `meshsdr hub user add|remove|reset-password|list|disable|enable|exists`
-- `meshsdr node` — start a node (before enrollment: TLS 1.3 with an ephemeral self-signed certificate, only `POST /enroll`, every other path 403); `meshsdr node config schema|check`; `meshsdr node enroll`
+- `meshsdr hub` — start the hub; `meshsdr hub migrate [up|down|status]` (bare `migrate` = `up`; `down` is dev only); `meshsdr hub config schema|check`; `meshsdr hub ca init` (hub internal CA in `<config-dir>/tls`, never overwrites); `meshsdr hub node add|list|show|token|disable|enable|remove`; `meshsdr hub user add|remove|reset-password|list|disable|enable|exists`
+- `meshsdr node` — start a node (enrolled: mTLS node API with `/control`; before enrollment: TLS 1.3 with an ephemeral self-signed certificate, every path 403, `POST /enroll` 501); `meshsdr node config schema|check`; `meshsdr node enroll` (one-off: serves `POST /enroll` until the hub enrolls the node, writes `tls.key`, `tls.cert`, `hub_trust.ca_cert`, exits). See docs/adr/0008
 - `meshsdr all` — hub + local node (auto-enrolled over loopback)
 - Global flags: `-c/--config-dir`, `--noninteractive`, `--silent`, `--json`, `--debug`
 

@@ -114,7 +114,12 @@ The PR closes #12, #14, #16, #18 and #21, and references (without closing) #15 (
 - **Node private key path.** `tls.key` on the node is a plain path, not a `{ file = … }` secret reference: the node writes it during enrollment, so it cannot be resolved at config load. The file is created 0600 and its mode is checked when it is read.
 - **Relative paths.** `tls.*` and `hub_trust.ca_cert` paths are resolved against the config directory, like secret files.
 - **Map keys and env.** `nodes.<id>.*` and `devices.<id>.*` are file-only: an env override would need a dynamic variable name (`MESHSDR_NODES__<ID>__URL`) that the env loader cannot enumerate.
-- **Migrations** of this part start at `00003` (`00002` belongs to the identity epic).
+- **Migrations** of this part start at `00003` (`00002` belongs to the identity epic): `00003` nodes, revocation list and event cursor, `00004` capabilities, `00005` devices, `00006` connections. Timestamps are Unix milliseconds, UUIDs 16-byte blobs, as in §7.2.
+- **Optimistic concurrency on REST.** `PATCH /nodes/{id}` carries the expected `version` in the body and answers 409 `version_conflict` (§7.1), not `If-Match`/412 (§6.10).
+- **Device order.** TOML tables lose their order once decoded, so `devices.sort_order` follows the device ids in lexical order.
+- **Media presence rows** created from `connection.opened` have an empty `ip` and role 0 until the gateway authz creates them first (GRID-011).
+- **`GET /devices`** is admin-only until the listen policy can be evaluated (identity epic); `GET /connections` returns the count to everyone and the rows to admins.
+- **WebSocket deadlines.** `wsconn.Accept` clears the server read/write deadlines before the hijack, otherwise `ReadTimeout` would cut long-lived channels.
 
 ## Spec inconsistencies
 
