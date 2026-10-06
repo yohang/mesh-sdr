@@ -131,6 +131,9 @@ The PR closes #12, #14, #16, #18 and #21, and references (without closing) #15 (
   - Node leaf SANs are fixed by the hub: the node URI, `<id>.nodes.rx.internal` and the host of the node URL; CSR SANs are ignored.
   - `node enroll` stages the CA, key and certificate, renames the certificate last (its presence marks the node enrolled) and syncs the directory; `hub ca init` creates its files exclusively (hard link), never replacing an existing CA.
   - Node-reported presence rows may only name the node's own devices, and a node holds at most 1000 open rows.
+  - A pending certificate that is dropped (superseded renewal, token re-issue, node deletion) is revoked in the same transaction.
+  - Admin saves of a node never write its status, which belongs to the status service.
+  - Grid audit records of REST calls carry the client address resolved by the HTTP front.
 - **WebSocket deadlines.** `wsconn.Accept` clears the server read/write deadlines before the hijack, otherwise `ReadTimeout` would cut long-lived channels.
 
 ## Spec inconsistencies
