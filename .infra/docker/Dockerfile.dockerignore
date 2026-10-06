@@ -4,10 +4,12 @@
 !internal/
 !go.mod
 !go.sum
-!sqlc.yaml
+!.infra/docker/prod/
 
 **/*_templ.go
-internal/db/sqlc/
+**/*.gen.go
+internal/db/sqlite/sqlc/
+internal/http/api/openapi.json
 internal/web/static/css/app.css
 
 **/*.db

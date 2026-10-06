@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1
+#
+# Build from the repository root: docker build -f .infra/docker/Dockerfile .
+# The build context whitelist is .infra/docker/Dockerfile.dockerignore.
 
 ARG GO_VERSION=1.26
 
@@ -43,21 +46,24 @@ RUN --mount=type=cache,target=/tmp/go-cache,sharing=locked \
     curl -fsSL "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${TARGETARCH}.tar.gz" \
       | tar -xz -C /usr/local/bin --strip-components=1 "golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${TARGETARCH}/golangci-lint"
 
-# -o: tolerate host UID/GID already used in the base image
+# -o: tolerate host UID/GID already used in the base image.
+# /go is chowned recursively: root's installs above leave /go/pkg/sumdb behind,
+# which `go get` must write as the dev user.
 RUN groupadd -o -g "${GID}" app; \
     useradd -o -m -u "${UID}" -g "${GID}" -s /bin/bash app; \
-    chown app:app /app /cache /go /go/bin
+    chown app:app /app /cache; \
+    chown -R app:app /go
 
 USER app
 
 ENV GOLANGCI_LINT_CACHE=/cache/golangci-lint
 
-# go.mod tools (templ, sqlc, goose, air) in PATH (/go/bin), templ LSP needs the binary
+# go.mod tools (templ, sqlc, goose, air, oapi-codegen) in PATH (/go/bin), templ LSP needs the binary
 COPY --chown=app:app go.mod go.sum ./
 RUN go mod download; \
     go install tool
 
-CMD ["air"]
+CMD ["air", "-c", ".infra/docker/dev/air.toml"]
 
 
 FROM base AS build
@@ -70,16 +76,18 @@ COPY . .
 RUN --mount=type=cache,target=/cache/go-build \
     go generate ./...; \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/meshsdr ./cmd/meshsdr; \
-    mkdir -p /out/data
+    mkdir -p /out/var/lib/meshsdr
 
 
 FROM gcr.io/distroless/static-debian13:nonroot AS prod
 
-COPY --from=build --chown=nonroot:nonroot /out/data /data
+COPY --from=build --chown=nonroot:nonroot /out/var/lib/meshsdr /var/lib/meshsdr
+COPY .infra/docker/prod/etc/meshsdr /etc/meshsdr
 COPY --from=build /out/meshsdr /meshsdr
 
-VOLUME /data
-EXPOSE 3000
+VOLUME /var/lib/meshsdr
+# hub.listen, node.listen
+EXPOSE 8073 8074
 
 ENTRYPOINT ["/meshsdr"]
-CMD ["serve"]
+CMD ["hub"]

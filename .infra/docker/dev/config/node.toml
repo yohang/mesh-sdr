@@ -1,0 +1,10 @@
+# Dev node config (`go run ./cmd/meshsdr node` in the dev container).
+schema_version = 1
+
+[node]
+id = "dev"
+listen = "0.0.0.0:8074"
+
+[log]
+level = "debug"
+format = "text"

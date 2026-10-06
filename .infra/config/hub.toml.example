@@ -1,0 +1,38 @@
+# MeshSDR hub configuration: /etc/meshsdr/hub.toml (TECHNICAL_SPEC §7.4).
+#
+# - TOML v1.0, declarative only. Every file (hub.toml and each hub.d/*.toml
+#   drop-in, merged in lexical order) starts with schema_version.
+# - Every key can be overridden by an env var: MESHSDR_<TABLE>__<KEY>, for
+#   example db.dsn → MESHSDR_DB__DSN. Precedence: env > files > defaults.
+#   Keys set in a file or the env are locked and shown with their origin.
+# - The config dir is /etc/meshsdr, or --config-dir / MESHSDR_CONFIG_DIR.
+# - JSON Schema: `meshsdr hub config schema`. Validate: `meshsdr hub config check`.
+# - Secret keys take { file = "/etc/meshsdr/secrets/x" } or { env = "VAR" };
+#   an inline value needs allow_inline_secrets = true in the same file.
+#   Secret files must not be group/world-writable nor world-readable.
+#
+# Values below are the defaults unless marked "required".
+
+schema_version = 1
+
+[hub]
+# Hub HTTP listen address (host:port). The address decides IPv4 or IPv6.
+listen = "0.0.0.0:8073"
+# Public base URL of the hub (required). Must be https unless
+# allow_insecure_url = true.
+url = "https://sdr.example.org"
+# Allow a non-https url (development only).
+allow_insecure_url = false
+
+[db]
+# Database DSN. Only SQLite is supported: sqlite:///abs/path or
+# sqlite:relative/path, on a local filesystem.
+dsn = "sqlite:///var/lib/meshsdr/hub.db"
+# Size of the read-only connection pool (1..64).
+max_read_connections = 4
+
+[log]
+# debug | info | warn | error. --debug overrides it.
+level = "info"
+# text | json. --json overrides it.
+format = "json"

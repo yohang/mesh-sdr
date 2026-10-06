@@ -1,0 +1,94 @@
+package config
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestSchema(t *testing.T) {
+	tests := []struct {
+		role     Role
+		required []string
+		leaf     []string // path to a leaf property
+		def      any
+	}{
+		{RoleHub, []string{"schema_version"}, []string{"hub", "listen"}, "0.0.0.0:8073"},
+		{RoleHub, []string{"schema_version"}, []string{"db", "dsn"}, "sqlite:///var/lib/meshsdr/hub.db"},
+		{RoleNode, []string{"schema_version"}, []string{"node", "listen"}, "0.0.0.0:8074"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.role)+"/"+tt.leaf[1], func(t *testing.T) {
+			b, err := Schema(tt.role)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var s map[string]any
+			if err := json.Unmarshal(b, &s); err != nil {
+				t.Fatal(err)
+			}
+
+			if s["$schema"] != "https://json-schema.org/draft/2020-12/schema" {
+				t.Errorf("$schema = %v", s["$schema"])
+			}
+
+			if s["additionalProperties"] != false {
+				t.Errorf("additionalProperties = %v", s["additionalProperties"])
+			}
+
+			req, _ := s["required"].([]any)
+			for _, r := range tt.required {
+				found := false
+				for _, v := range req {
+					found = found || v == r
+				}
+
+				if !found {
+					t.Errorf("required %v misses %s", req, r)
+				}
+			}
+
+			node := s
+			for _, p := range tt.leaf {
+				props, _ := node["properties"].(map[string]any)
+				node, _ = props[p].(map[string]any)
+				if node == nil {
+					t.Fatalf("no property %v", tt.leaf)
+				}
+			}
+
+			if node["x-scope"] != "global" || node["lockable"] != false {
+				t.Errorf("annotations = x-scope %v, lockable %v", node["x-scope"], node["lockable"])
+			}
+
+			if node["default"] != tt.def {
+				t.Errorf("default = %v, want %v", node["default"], tt.def)
+			}
+
+			if node["description"] == "" || node["description"] == nil {
+				t.Error("missing description")
+			}
+		})
+	}
+
+	if _, err := Schema("gateway"); err == nil {
+		t.Error("unknown role accepted")
+	}
+}
+
+func TestSecretSchemaIsMarked(t *testing.T) {
+	b, err := json.Marshal(Secret{}.JSONSchema())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var s map[string]any
+	if err := json.Unmarshal(b, &s); err != nil {
+		t.Fatal(err)
+	}
+
+	if s["secret"] != true {
+		t.Errorf("secret = %v", s["secret"])
+	}
+}

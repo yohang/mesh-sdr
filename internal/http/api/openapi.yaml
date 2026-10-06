@@ -1,0 +1,117 @@
+openapi: 3.0.3
+info:
+  title: MeshSDR hub API
+  version: "1"
+  description: |
+    REST API of the MeshSDR hub (TECHNICAL_SPEC §6.10). Every endpoint is
+    declared here first, then the Go server interface is generated with
+    oapi-codegen. Errors use one format: RFC 9457 problem details with a
+    stable `code`.
+servers:
+  - url: /api/v1
+paths:
+  /openapi.json:
+    get:
+      operationId: getOpenAPI
+      summary: This OpenAPI document, as JSON
+      tags: [meta]
+      responses:
+        "200":
+          description: OpenAPI document
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          $ref: "#/components/responses/Problem"
+  /healthz/live:
+    get:
+      operationId: getLiveness
+      summary: Liveness (no details)
+      tags: [health]
+      responses:
+        "200":
+          description: The process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        default:
+          $ref: "#/components/responses/Problem"
+  /healthz/ready:
+    get:
+      operationId: getReadiness
+      summary: Readiness (ok or degraded, no internals)
+      tags: [health]
+      responses:
+        "200":
+          description: Ready to serve
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        default:
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+    Problem:
+      description: RFC 9457 problem details, served as application/problem+json.
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          description: Always "about:blank"; the error is identified by `code`.
+          example: about:blank
+        title:
+          type: string
+          description: Short summary of the HTTP status.
+          example: Not Found
+        status:
+          type: integer
+          example: 404
+        code:
+          type: string
+          description: Stable snake_case error code.
+          example: not_found
+        detail:
+          type: string
+          description: Human-readable explanation of this occurrence.
+        errors:
+          type: array
+          description: Field errors of an invalid request.
+          items:
+            $ref: "#/components/schemas/FieldError"
+    FieldError:
+      type: object
+      required: [path, code, message]
+      properties:
+        path:
+          type: string
+          example: username
+        code:
+          type: string
+          example: required
+        message:
+          type: string
+  responses:
+    Problem:
+      description: Error
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

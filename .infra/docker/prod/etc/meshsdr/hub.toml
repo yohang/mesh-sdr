@@ -1,0 +1,5 @@
+# Minimal hub config shipped in the image. Configure the hub by mounting your
+# own /etc/meshsdr (see .infra/config/hub.toml.example), by adding drop-ins
+# in /etc/meshsdr/hub.d/, or with MESHSDR_* env vars, for example
+# MESHSDR_HUB__URL=https://sdr.example.org (required).
+schema_version = 1

@@ -16,7 +16,7 @@ MeshSDR: Go web application for Software Defined Radio (SDR) with Mesh capabilit
 - Templates: `github.com/a-h/templ`
 - Frontend: htmx 4 (vendored in `internal/web/static/vendor/`), Tailwind CSS v4 (standalone CLI, no Node)
 - Database: SQLite via `modernc.org/sqlite` (pure Go, `CGO_ENABLED=0`)
-- Queries: `sqlc`; migrations: `goose` (embedded, applied by `meshsdr migrate`)
+- Queries: `sqlc`; migrations: `goose` (embedded, per dialect, checksummed, applied by `meshsdr hub migrate`)
 - Config: TOML files (`github.com/BurntSushi/toml`) + env overrides (`github.com/caarlos0/env/v11`); JSON Schema generated from the config structs (`github.com/invopop/jsonschema`)
 - Logging: `log/slog`; CLI: `github.com/spf13/cobra`
 - REST API: spec-first OpenAPI (`openapi.yaml` embedded, served at `/api/v1/openapi.json`) + `oapi-codegen` (chi server)
@@ -32,18 +32,24 @@ cmd/meshsdr/            entrypoint (single binary)
 internal/cli/           cobra commands (hub, node, all and their subcommands)
 internal/config/        TOML + env config loading, origin tracking, JSON Schema
 internal/log/           slog logger factory
-internal/db/            SQLite connection, go:generate for sqlc
-internal/db/migrations/ goose SQL migrations (embedded)
-internal/db/queries/    sqlc queries
-internal/db/sqlc/       sqlc output (generated)
+internal/db/            DB engine contract (Adapter, Migrator, DSN), see docs/adr/0006
+internal/db/sqlite/     SQLite dialect adapter (single writer + read pool), sqlc.yaml, go:generate for sqlc
+internal/db/sqlite/migrations/ goose SQL migrations of the dialect (embedded)
+internal/db/sqlite/queries/    sqlc queries of the dialect
+internal/db/sqlite/sqlc/       sqlc output (generated)
+internal/db/dbtest/     contract-test harness (engine contract, migrated test DBs)
 internal/http/          chi router, middlewares, server
+internal/http/api/      openapi.yaml (source of truth), oapi-codegen config, generated server, /api/v1 handlers
+internal/http/problem/  RFC 9457 problem+json errors, domain error → HTTP status
 internal/web/           embedded static assets, go:generate for templ + tailwind
 internal/web/templates/ templ components
 internal/wire/          composition root (hand-written IoC)
 internal/shared/domain/ shared kernel (common VOs, domain error type)
 internal/<module>/      one bounded context / module, see Architecture
 docs/adr/               architecture decision records
-.infra/                 infrastructure files (e.g. .infra/docker/… for files the Docker build/compose needs)
+.infra/                 infrastructure files
+.infra/docker/          Dockerfile (+ Dockerfile.dockerignore), dev/air.toml, dev/config/ (dev hub.toml, node.toml), prod/etc/meshsdr/ (image configs)
+.infra/config/          documented sample configs (hub.toml.example, node.toml.example)
 ```
 
 Modules (bounded contexts):
@@ -61,7 +67,7 @@ Code is organized by module, layered inside each module:
 internal/<module>/
   domain/   aggregates, entities, value objects, domain errors, repository interfaces
   app/      use cases / application services (orchestrate domain + ports)
-  infra/    adapters: repositories (sqlc), external systems, hardware
+  infra/    adapters: repositories (infra/<dialect>/, sqlc), external systems, hardware
   http/     handlers + templ views for this module
   wire.go   module wiring, once the module is big enough (see Dependency injection)
 ```
@@ -78,7 +84,7 @@ The domain must be fully modeled — no primitive obsession, no anemic structs:
 ## Dependency injection
 
 - Hand-written IoC, no DI library/codegen. Constructor injection only: dependencies are explicit constructor params, interfaces declared on the consumer side. No globals, no `init()` side effects, no service locator.
-- `internal/wire` is the composition root: `Wire(...)` functions build the object graph of each role (hub, node) from its config, `*slog.Logger` and, for the hub, `*sql.DB`. CLI commands call them.
+- `internal/wire` is the composition root: `wire.Hub(cfg, logger, adapter)` and `wire.Node(cfg, logger, now)` build the object graph of each role from its config, `*slog.Logger` and, for the hub, the `db.Adapter` opened by `wire.OpenDB` (chosen by the `db.dsn` scheme). CLI commands call them.
 - When volume grows, each module exposes its own `internal/<module>/wire.go` (`Wire(deps) Module`), and the root composes modules.
 
 ## Logging
@@ -103,7 +109,7 @@ Spec TECHNICAL_SPEC §7.4 is authoritative:
 - TOML v1.0 files, declarative only, starting with `schema_version`: `hub.toml`, `node.toml` and `hub.d/*.toml`, `node.d/*.toml` drop-ins (lexical order, recursive table merge). Default dir `/etc/meshsdr`, overridable with `--config-dir` / `MESHSDR_CONFIG_DIR`. Secrets referenced by `{ file = "…" }`.
 - Every key can be overridden by an env var: `MESHSDR_` prefix, `__` between nesting levels (`db.dsn` → `MESHSDR_DB__DSN`, `hub.listen` → `MESHSDR_HUB__LISTEN`). Env-set keys are locked like file-set keys, with origin `env:<VAR>`.
 - Precedence: env > config files > DB settings > defaults. Config/env keys are read-only (locked) in the UI, which shows their origin (`hub.toml:42`).
-- Typed Go structs are the source of truth; JSON Schema (draft 2020-12) is generated from them and published. Validation happens at load; invalid config is a startup error.
+- Typed Go structs are the source of truth; JSON Schema (draft 2020-12) is generated from them (`meshsdr hub|node config schema`, attached to releases by CI). Validation happens at load; invalid config is a startup error (exit code 78). `meshsdr hub|node config check` validates and prints each key's origin. See docs/adr/0005.
 - The binary never writes config files (only exception: first-start TLS bootstrap of `all`).
 
 ## 12-factor
@@ -111,7 +117,7 @@ Spec TECHNICAL_SPEC §7.4 is authoritative:
 - Environment-specific values come from config files or `MESHSDR_*` env vars (see Configuration); never hard-coded.
 - Logs as event streams to stderr; no log files, no rotation.
 - Stateless processes; persistent state only in backing services (hub SQLite file at `db.dsn`, `/var/lib/meshsdr` volume in Docker); nodes hold no persistent state.
-- Port binding via `hub.listen` / `node.listen`; app is self-contained (embedded assets/migrations).
+- Port binding via `hub.listen` (default `0.0.0.0:8073`) / `node.listen` (default `0.0.0.0:8074`); app is self-contained (embedded assets/migrations/OpenAPI document).
 - Disposability: fast start, graceful shutdown on SIGTERM/SIGINT.
 - Admin tasks as one-off subcommands of the same binary (`meshsdr hub migrate`, `meshsdr hub user …`).
 - Build/release/run separated: immutable image, config injected at runtime. Dev/prod parity through the same Dockerfile.
@@ -121,8 +127,8 @@ Spec TECHNICAL_SPEC §7.4 is authoritative:
 
 One binary; the bare role starts the process, admin tasks are subcommands of the role:
 
-- `meshsdr hub` — start the hub; `meshsdr hub migrate [up|down|status]`; `meshsdr hub user add|remove|reset-password|list|disable|enable|exists`
-- `meshsdr node` — start a node; `meshsdr node enroll`
+- `meshsdr hub` — start the hub; `meshsdr hub migrate [up|down|status]` (bare `migrate` = `up`; `down` is dev only); `meshsdr hub config schema|check`; `meshsdr hub user add|remove|reset-password|list|disable|enable|exists`
+- `meshsdr node` — start a node (before enrollment: TLS 1.3 with an ephemeral self-signed certificate, only `POST /enroll`, every other path 403); `meshsdr node config schema|check`; `meshsdr node enroll`
 - `meshsdr all` — hub + local node (auto-enrolled over loopback)
 - Global flags: `-c/--config-dir`, `--noninteractive`, `--silent`, `--json`, `--debug`
 
@@ -132,31 +138,31 @@ Everything runs in Docker; no local Go toolchain required. Run `make help` for t
 
 - `make run` — all-in-one: build, generate, migrate, start the dev stack
 - `make clean` — stop the stack, drop volumes (caches) and remove generated files / Air output
-- `make up` / `make down` / `make logs [c=<service>]` — dev stack with Air hot reload on http://localhost:3000 (`HTTP_PORT` to change host port)
-- `make generate` — `go generate ./...` (templ, sqlc, tailwind)
+- `make up` / `make down` / `make logs [c=<service>]` — dev stack: Air runs `meshsdr hub` (hub.listen 8073 in the container) on http://localhost:3000 (`HTTP_PORT` to change host port), config from `.infra/docker/dev/config/` (`MESHSDR_CONFIG_DIR`)
+- `make generate` — `go generate ./...` (templ, sqlc, oapi-codegen + openapi.json, tailwind)
 - `make lint` / `make test`
-- `make migrate [cmd=up|down|status]`
-- `make migrate-create name=<name>` — new sequential goose SQL migration
+- `make migrate [cmd=up|down|status]` — `meshsdr hub migrate` against the dev database
+- `make migrate-create name=<name>` — new sequential goose SQL migration in `internal/db/sqlite/migrations/`
 - `make vendor [HTMX_VERSION=x.y.z]` — refresh vendored htmx
 - `make sh` — shell in dev container
-- `make build-prod` — production image (distroless, nonroot)
+- `make build-prod` — production image (distroless, nonroot; `-f .infra/docker/Dockerfile`; config dir `/etc/meshsdr`, volume `/var/lib/meshsdr`, ports 8073/8074, `CMD ["hub"]`)
 
-VS Code: "Reopen in Container" (`.devcontainer/`) attaches to the compose `app` service (Air keeps running). The dev image ships gopls, dlv, golangci-lint and the go.mod tools (templ, sqlc, goose, air) on `PATH`; rebuild the image after bumping tool versions.
+VS Code: "Reopen in Container" (`.devcontainer/`) attaches to the compose `app` service (Air keeps running). The dev image ships gopls, dlv, golangci-lint and the go.mod tools (templ, sqlc, goose, air, oapi-codegen) on `PATH`; rebuild the image after bumping tool versions.
 
 Dev containers are rootless: the `dev` stage creates an `app` user with the host UID/GID (`UID`/`GID` build args, exported by the Makefile; the devcontainer remaps it via `updateRemoteUserUID`), so files written to the bind mount belong to the host user. Never run dev commands as root.
 
 ## Conventions
 
-- Generated files are never committed nor edited: `*_templ.go`, `internal/db/sqlc/`, `internal/web/static/css/app.css`. Regenerate with `make generate`.
+- Generated files are never committed nor edited: `*_templ.go`, `*.gen.go`, `internal/db/sqlite/sqlc/`, `internal/http/api/openapi.json`, `internal/web/static/css/app.css`. Regenerate with `make generate`.
 - Go tools are declared with the go.mod `tool` directive (`go get -tool <pkg>`) and run with `go tool <name>`.
-- Schema changes go through goose migrations only; sqlc reads schema from `internal/db/migrations/`.
-- Configuration only through the config structs in `internal/config` (TOML + `MESHSDR_` env). Document new keys in the sample configs under `.infra/`.
+- Schema changes go through goose migrations only, per dialect; sqlc reads the schema from `internal/db/sqlite/migrations/`. Never edit an applied migration (checksums are verified).
+- Configuration only through the config structs in `internal/config` (TOML + `MESHSDR_` env; every leaf has `toml`, `env` and `jsonschema` description tags). Document new keys in `.infra/config/*.toml.example`.
 - Logging only with `log/slog`.
-- Migrations are not applied at startup; run `meshsdr hub migrate`. The hub refuses to start while migrations are pending.
+- Migrations are not applied at startup; run `meshsdr hub migrate`. The hub refuses to start while migrations are pending, when the schema is newer than the binary, or when an applied migration's checksum differs.
 - `make lint` and `make test` must pass before committing.
-- Tests: stdlib `testing`, table-driven; repositories tested against real SQLite in `t.TempDir()` through a shared contract suite (future adapters run the same suite).
+- Tests: stdlib `testing`, table-driven; repositories tested against real SQLite in `t.TempDir()` (`dbtest.NewSQLite`) through a shared contract suite (future adapters run the same suite; `dbtest.RunAdapterContract` covers the engine contract).
 - Dependencies: stdlib and `golang.org/x/*` are fine; any other third-party dependency requires the owner's approval.
-- REST: every `/api/v1` endpoint is declared in `openapi.yaml` first, then generated; one JSON error format.
+- REST: every `/api/v1` endpoint is declared in `internal/http/api/openapi.yaml` first, then generated (oapi-codegen strict chi server); module handler structs are embedded in `api.Server`. One JSON error format: RFC 9457 `application/problem+json` with a stable `code` (`internal/http/problem`).
 - Git: one branch + PR per epic (`epic/<area>-<n>`), split into ordered parts when another epic needs a subset first; PR body lists `Closes #<n>` per ticket; spikes get `spike/<key>-<topic>` branches. No AI attribution in commits or PRs.
-- Dockerfile stages: `base` → `deps` → `dev` (Air) / `build` → `prod` (`gcr.io/distroless/static-debian13:nonroot`).
-- `.dockerignore` whitelists: ignore everything, then `!` what the build needs.
+- Dockerfile (`.infra/docker/Dockerfile`, built from the repository root) stages: `base` → `dev` (Air) / `build` → `prod` (`gcr.io/distroless/static-debian13:nonroot`).
+- `.infra/docker/Dockerfile.dockerignore` whitelists: ignore everything, then `!` what the build needs.

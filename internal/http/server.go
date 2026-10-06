@@ -2,7 +2,6 @@
 package http
 
 import (
-	"database/sql"
 	"log/slog"
 	"net/http"
 	"time"
@@ -15,24 +14,19 @@ import (
 	"github.com/yohang/mesh-sdr/internal/web/templates"
 )
 
-// NewRouter builds the application router.
-func NewRouter(logger *slog.Logger, db *sql.DB) http.Handler {
+// APIPrefix is the base path of the versioned REST API.
+const APIPrefix = "/api/v1"
+
+// NewRouter builds the hub router: the web UI and, under APIPrefix, the REST
+// API handler (which serves its own problem+json errors).
+func NewRouter(logger *slog.Logger, api http.Handler) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
 
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := db.PingContext(r.Context()); err != nil {
-			logger.ErrorContext(r.Context(), "healthcheck failed", slog.Any("error", err))
-			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	r.Mount(APIPrefix, api)
 
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServerFS(web.Static())))
 
@@ -41,12 +35,23 @@ func NewRouter(logger *slog.Logger, db *sql.DB) http.Handler {
 	return r
 }
 
-// NewServer builds the HTTP server listening on addr.
+// Server timeouts. WriteTimeout stays unset: it would cut long-lived
+// WebSocket and streaming responses. Hijacked (WebSocket) connections must
+// clear the read deadline set by ReadTimeout.
+const (
+	ReadHeaderTimeout = 10 * time.Second
+	ReadTimeout       = 30 * time.Second
+	IdleTimeout       = 120 * time.Second
+)
+
+// NewServer builds the HTTP server listening on addr (hub and node).
 func NewServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              addr,
 		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: ReadHeaderTimeout,
+		ReadTimeout:       ReadTimeout,
+		IdleTimeout:       IdleTimeout,
 	}
 }
 

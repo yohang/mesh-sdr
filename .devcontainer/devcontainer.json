@@ -56,7 +56,9 @@
         },
         "search.exclude": {
           "**/*_templ.go": true,
-          "internal/db/sqlc": true,
+          "**/*.gen.go": true,
+          "internal/db/sqlite/sqlc": true,
+          "internal/http/api/openapi.json": true,
           "internal/web/static/css/app.css": true,
           "internal/web/static/vendor": true
         }

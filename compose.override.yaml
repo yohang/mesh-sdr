@@ -6,9 +6,9 @@ services:
         UID: ${UID:-1000}
         GID: ${GID:-1000}
     environment:
-      DB_PATH: /app/var/meshsdr.db
-      LOG_LEVEL: debug
-      LOG_FORMAT: text
+      # Dev config (hub.toml with http://localhost:3000 and
+      # allow_insecure_url, node.toml) committed in the repository.
+      MESHSDR_CONFIG_DIR: /app/.infra/docker/dev/config
     volumes:
       - .:/app
       - go-cache:/cache
