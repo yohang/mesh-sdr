@@ -131,6 +131,51 @@ async function checkTheme(page, where, mode, scheme) {
   if (got.bg !== background[effective]) fail(where, `background ${got.bg}, want ${background[effective]} (${effective})`);
 }
 
+// Help link set on every hub by the compose file.
+const helpPath = "/about";
+
+// checkShellControls checks the top bar as a signed-in admin: key H opens
+// the help link in a new tab, the user menu opens, passes axe and closes
+// with Escape, the section nav is a bottom tab bar on phones and an inline
+// menu on desktops, and boosted navigation through it marks the current
+// section.
+async function checkShellControls(url, mode, scheme, name, viewport) {
+  const where = `shell controls [mode ${mode}, os ${scheme}, ${name}]`;
+  const context = await browser.newContext({ baseURL: url, colorScheme: scheme, viewport });
+  await signIn(context, where);
+
+  const page = await context.newPage();
+  watch(page, where);
+  await page.goto("/", { waitUntil: "networkidle" });
+
+  const [popup] = await Promise.all([context.waitForEvent("page"), page.keyboard.press("h")]);
+  await popup.waitForLoadState("domcontentloaded");
+  if (new URL(popup.url()).pathname !== helpPath) fail(where, `H opened ${popup.url()}`);
+  await popup.close();
+
+  await page.getByRole("button", { name: /^Account menu for/ }).click();
+  const menu = page.locator("#msdr-user-menu");
+  await menu.waitFor({ state: "visible" });
+  await audit(page, `${where} (user menu open)`);
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "hidden" });
+
+  const nav = await page.locator('nav[aria-label="Main"]').boundingBox();
+  const atBottom = nav && Math.abs(nav.y + nav.height - viewport.height) <= 1;
+  if (name === "phone" && !atBottom) fail(where, `nav is not a bottom tab bar: ${JSON.stringify(nav)}`);
+  if (name === "desktop" && (!nav || nav.y > 64)) fail(where, `nav is not in the top bar: ${JSON.stringify(nav)}`);
+
+  await page.getByRole("link", { name: "Map", exact: true }).click();
+  await page.waitForURL("**/map");
+  await page.waitForFunction(
+    () => document.querySelector('nav[aria-label="Main"] a[data-section="map"]')?.getAttribute("aria-current") === "page",
+  );
+  const current = await page.locator('nav[aria-label="Main"] a[aria-current="page"]').count();
+  if (current !== 1) fail(where, `${current} sections marked current after navigation`);
+
+  await context.close();
+}
+
 const browser = await chromium.launch();
 
 for (const { mode, url } of hubs) {
@@ -193,6 +238,8 @@ for (const { mode, url } of hubs) {
       await audit(page, where);
       await page.close();
       await navContext.close();
+
+      await checkShellControls(url, mode, scheme, name, viewport);
     }
   }
 }

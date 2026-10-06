@@ -17,6 +17,11 @@ x-hub: &hub
   environment: &hub-env
     MESHSDR_HUB__URL: http://hub-auto:8073
     MESHSDR_HUB__ALLOW_INSECURE_URL: "true"
+    # A help link on a page every hub serves, so the H shortcut can be
+    # checked without leaving the compose network.
+    MESHSDR_SETTINGS__RECEIVER__HELP_URL: http://hub-auto:8073/about
+    # The checker signs in several times per hub from one address.
+    MESHSDR_SETTINGS__AUTH__LOGIN_RATE_LIMIT: 100/1m
   volumes:
     - data:/var/lib/meshsdr
 
