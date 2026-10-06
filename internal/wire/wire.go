@@ -167,9 +167,11 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, err
 	}
 
+	auditLog := identitysqlite.NewAuditLog(adapter)
+
 	settingsModule, err := settings.Wire(ctx, settings.Deps{
 		Config: cfg, Origins: origins, DB: adapter, Now: now, Logger: logger,
-		Audit: settingsAuditor{log: identitysqlite.NewAuditLog(adapter)},
+		Audit: settingsAuditor{log: auditLog},
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("settings: %w", err)
@@ -185,11 +187,17 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, fmt.Errorf("identity: %w", err)
 	}
 
+	scheduler, retention, err := jobs(adapter, idm, settingsModule.Store, auditLog, logger)
+	if err != nil {
+		return nil, nil, fmt.Errorf("jobs: %w", err)
+	}
+
 	apiServer := api.Server{
-		HealthHandlers:   api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
-		AuthHandlers:     api.NewAuthHandlers(idm.HTTP),
-		GridHandlers:     api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
-		SettingsHandlers: api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
+		HealthHandlers:    api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
+		AuthHandlers:      api.NewAuthHandlers(idm.HTTP),
+		GridHandlers:      api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
+		SettingsHandlers:  api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
+		RetentionHandlers: api.NewRetentionHandlers(retention, settingsActor),
 	}
 
 	router := httpserver.NewRouter(
@@ -209,7 +217,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		server:   httpserver.NewServer(cfg.Hub.Listen, router),
 		logger:   component(logger, "http.server"),
 		startup:  g.startup,
-		workers:  append([]func(context.Context){func(ctx context.Context) { idm.Reaper.Run(ctx, identityapp.SessionReapEvery) }}, g.workers...),
+		workers:  append([]func(context.Context){scheduler.Run}, g.workers...),
 		setupURL: setupURL,
 	}, g, nil
 }

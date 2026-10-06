@@ -497,6 +497,55 @@ paths:
                 $ref: "#/components/schemas/EffectiveConfig"
         default:
           $ref: "#/components/responses/Problem"
+  /retention:
+    get:
+      operationId: getRetention
+      x-meshsdr-access: admin
+      summary: Retention policies of the DB-backed stores (ADM-011)
+      description: |
+        Each store with its retention setting, row count, size and last
+        purge. The retention values are settings (`retention.*`), written
+        with `PATCH /settings`.
+      tags: [retention]
+      responses:
+        "200":
+          description: Stores
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionList"
+        default:
+          $ref: "#/components/responses/Problem"
+  /retention/{store}/purge:
+    post:
+      operationId: purgeStore
+      x-meshsdr-access: admin
+      summary: Apply the retention policy of a store now ("purge now")
+      description: |
+        Runs the store's retention job at once. It deletes only what the
+        policy allows (never audit entries younger than 30 days) and is
+        audited. 409 `job_running` when the job is already running.
+      tags: [retention]
+      parameters:
+        - name: store
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        "200":
+          description: Purged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurgeResult"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     NodeID:
@@ -1023,6 +1072,71 @@ components:
           type: boolean
         secret:
           type: boolean
+    RetentionList:
+      type: object
+      required: [stores]
+      properties:
+        stores:
+          type: array
+          items:
+            $ref: "#/components/schemas/RetentionStore"
+    RetentionStore:
+      type: object
+      required: [store, label, setting_key, retention, rows, job]
+      properties:
+        store:
+          type: string
+          example: sessions
+        label:
+          type: string
+        setting_key:
+          type: string
+          example: retention.sessions
+        retention:
+          type: string
+          description: Effective retention, as a duration string.
+          example: 30d
+        rows:
+          type: integer
+          format: int64
+        bytes:
+          type: integer
+          format: int64
+          description: Size of the table and its indexes. Absent when unknown.
+        job:
+          $ref: "#/components/schemas/JobRun"
+    JobRun:
+      type: object
+      required: [name, running]
+      properties:
+        name:
+          type: string
+          example: sessions.reap
+        running:
+          type: boolean
+        last_started_at:
+          type: string
+          format: date-time
+        last_finished_at:
+          type: string
+          format: date-time
+        last_status:
+          type: string
+          enum: [ok, error]
+        last_error:
+          type: string
+        rows_affected:
+          type: integer
+          format: int64
+    PurgeResult:
+      type: object
+      required: [store, rows_deleted]
+      properties:
+        store:
+          type: string
+        rows_deleted:
+          type: integer
+          format: int64
   responses:
     Problem:
       description: Error

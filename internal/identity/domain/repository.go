@@ -54,3 +54,11 @@ type SessionRepository interface {
 type AuditLog interface {
 	Append(ctx context.Context, e AuditEntry) error
 }
+
+// AuditPurge is the retention side of the audit log: only the retention
+// job uses it (TECHNICAL_SPEC §7.3 audit.purge).
+type AuditPurge interface {
+	// DeleteBefore deletes up to limit entries recorded before cutoff,
+	// oldest first, and returns how many were deleted.
+	DeleteBefore(ctx context.Context, cutoff time.Time, limit int) (int, error)
+}

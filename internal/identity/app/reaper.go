@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
@@ -38,12 +37,11 @@ type SessionReaper struct {
 	sessions  domain.SessionRepository
 	retention Retention
 	now       Clock
-	logger    *slog.Logger
 }
 
 // NewSessionReaper returns the reaper.
-func NewSessionReaper(sessions domain.SessionRepository, retention Retention, now Clock, logger *slog.Logger) *SessionReaper {
-	return &SessionReaper{sessions: sessions, retention: retention, now: now, logger: logger}
+func NewSessionReaper(sessions domain.SessionRepository, retention Retention, now Clock) *SessionReaper {
+	return &SessionReaper{sessions: sessions, retention: retention, now: now}
 }
 
 // Reap deletes every session that ended more than the session retention
@@ -62,26 +60,54 @@ func (r *SessionReaper) Reap(ctx context.Context) (int, error) {
 	}
 }
 
-// Run reaps at start, then every interval, until ctx is done. It is a
-// background worker: it logs its own errors.
-func (r *SessionReaper) Run(ctx context.Context, interval time.Duration) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
+// Job names and periods (TECHNICAL_SPEC §7.3 "Retention jobs").
+const (
+	JobSessionsReap = "sessions.reap"
+	JobAuditPurge   = "audit.purge"
+	AuditPurgeEvery = 24 * time.Hour
+	auditPurgeBatch = 10_000
+)
+
+// Name implements the jobs scheduler's Job: the hub runs the reaper every
+// SessionReapEvery and logs its outcome.
+func (r *SessionReaper) Name() string { return JobSessionsReap }
+
+// Run implements the jobs scheduler's Job.
+func (r *SessionReaper) Run(ctx context.Context) (int64, error) {
+	n, err := r.Reap(ctx)
+
+	return int64(n), err
+}
+
+// AuditPurger deletes audit entries older than the audit retention
+// (retention.audit_log, never less than 30 days; TECHNICAL_SPEC §7.3
+// `audit.purge`), in batches.
+type AuditPurger struct {
+	audit     domain.AuditPurge
+	retention Retention
+	now       Clock
+}
+
+// NewAuditPurger returns the job.
+func NewAuditPurger(audit domain.AuditPurge, retention Retention, now Clock) *AuditPurger {
+	return &AuditPurger{audit: audit, retention: retention, now: now}
+}
+
+// Name implements the jobs scheduler's Job.
+func (p *AuditPurger) Name() string { return JobAuditPurge }
+
+// Run implements the jobs scheduler's Job: it returns the entries deleted.
+func (p *AuditPurger) Run(ctx context.Context) (int64, error) {
+	cutoff := p.now().Add(-p.retention.AuditRetention())
+
+	var total int64
 
 	for {
-		n, err := r.Reap(ctx)
+		n, err := p.audit.DeleteBefore(ctx, cutoff, auditPurgeBatch)
+		total += int64(n)
 
-		switch {
-		case err != nil && ctx.Err() == nil:
-			r.logger.ErrorContext(ctx, "session reaper failed", slog.Any("error", err))
-		case n > 0:
-			r.logger.InfoContext(ctx, "expired sessions deleted", slog.Int("rows", n))
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
+		if err != nil || n < auditPurgeBatch {
+			return total, err
 		}
 	}
 }

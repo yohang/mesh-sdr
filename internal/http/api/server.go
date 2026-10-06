@@ -30,6 +30,7 @@ type Server struct {
 	AuthHandlers
 	GridHandlers
 	SettingsHandlers
+	RetentionHandlers
 }
 
 var _ StrictServerInterface = Server{}

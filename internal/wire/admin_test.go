@@ -360,3 +360,41 @@ func TestSettingsApplyLive(t *testing.T) {
 		t.Errorf("session lifetimes = %d ms idle, %d ms absolute", idle, abs)
 	}
 }
+
+func TestRetentionAPI(t *testing.T) {
+	h := newAdminHub(t, nil)
+
+	if status, _, _ := h.browser("op").json(http.MethodGet, "/api/v1/retention", ""); status != 403 {
+		t.Errorf("operator GET = %d", status)
+	}
+
+	b := h.browser("root")
+
+	status, v, _ := b.json(http.MethodGet, "/api/v1/retention", "")
+	stores, _ := v["stores"].([]any)
+
+	if status != 200 || len(stores) != 2 {
+		t.Fatalf("GET = %d %v", status, v)
+	}
+
+	audit, _ := stores[1].(map[string]any)
+	if audit["store"] != "audit_log" || audit["retention"] != "365d" || audit["setting_key"] != "retention.audit_log" {
+		t.Errorf("audit store = %v", audit)
+	}
+
+	if status, v, _ = b.json(http.MethodPost, "/api/v1/retention/audit_log/purge", ""); status != 200 || v["rows_deleted"] != 0.0 {
+		t.Errorf("purge = %d %v", status, v)
+	}
+
+	if n := h.count("SELECT count(*) FROM audit_log WHERE action = 'retention.purge' AND target_id = 'audit_log'"); n != 1 {
+		t.Errorf("purge audit rows = %d", n)
+	}
+
+	if n := h.count("SELECT count(*) FROM job_runs WHERE job = 'audit.purge' AND last_status = 'ok'"); n != 1 {
+		t.Errorf("job runs = %d", n)
+	}
+
+	if status, v, _ = b.json(http.MethodPost, "/api/v1/retention/files/purge", ""); status != 404 || v["code"] != "unknown_store" {
+		t.Errorf("unknown store = %d %v", status, v)
+	}
+}

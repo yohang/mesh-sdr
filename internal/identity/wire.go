@@ -99,10 +99,13 @@ func UserAdmin(d Deps) *app.UserAdmin {
 
 // Module is the wired identity module of the hub.
 type Module struct {
-	Auth   *app.Auth
-	Setup  *app.Setup
-	Reaper *app.SessionReaper
-	HTTP   *identityhttp.Module
+	Auth  *app.Auth
+	Setup *app.Setup
+	// Reaper (sessions.reap) and AuditPurger (audit.purge) are jobs run by
+	// the hub's jobs scheduler.
+	Reaper      *app.SessionReaper
+	AuditPurger *app.AuditPurger
+	HTTP        *identityhttp.Module
 }
 
 // Wire builds the identity module. pages renders the login page in the
@@ -160,9 +163,10 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	}
 
 	return &Module{
-		Auth:   auth,
-		Setup:  setup,
-		Reaper: app.NewSessionReaper(r.sessions, retention, d.Now, component(d.Logger, "identity.app.reaper")),
-		HTTP:   h,
+		Auth:        auth,
+		Setup:       setup,
+		Reaper:      app.NewSessionReaper(r.sessions, retention, d.Now),
+		AuditPurger: app.NewAuditPurger(r.audit, retention, d.Now),
+		HTTP:        h,
 	}, nil
 }

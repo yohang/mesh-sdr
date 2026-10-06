@@ -110,3 +110,8 @@ VALUES (
 
 -- name: ListRecentAuditEntries :many
 SELECT * FROM audit_log ORDER BY id DESC LIMIT sqlc.arg(max_rows);
+
+-- name: DeleteAuditEntriesBefore :execrows
+DELETE FROM audit_log WHERE id IN (
+    SELECT a.id FROM audit_log a WHERE a.at < sqlc.arg(cutoff) ORDER BY a.id LIMIT sqlc.arg(batch)
+);

@@ -696,7 +696,7 @@ func TestSessionReaper(t *testing.T) {
 
 	fresh, _ := e.login("alice", password)
 
-	n, err := app.NewSessionReaper(e.sessions, app.FixedRetention{Sessions: app.DefaultSessionRetention}, e.clock.Now, slog.New(slog.DiscardHandler)).Reap(ctx)
+	n, err := app.NewSessionReaper(e.sessions, app.FixedRetention{Sessions: app.DefaultSessionRetention}, e.clock.Now).Reap(ctx)
 	if err != nil || n != 1 {
 		t.Fatalf("reaped %d, %v", n, err)
 	}
@@ -707,5 +707,38 @@ func TestSessionReaper(t *testing.T) {
 
 	if _, err := e.sessions.ByTokenHash(ctx, fresh.Token.Hash()); err != nil {
 		t.Error("fresh session deleted")
+	}
+}
+
+func TestAuditPurger(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, nil)
+	now := e.clock.Now()
+
+	for _, age := range []time.Duration{40 * 24 * time.Hour, 31 * 24 * time.Hour, 29 * 24 * time.Hour, time.Hour} {
+		entry, err := domain.NewAuditEntry(now.Add(-age), domain.SystemActor(), "test.event", domain.ResultOK)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := e.audit.Append(ctx, entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Entries older than the retention are deleted, the others kept.
+	p := app.NewAuditPurger(e.audit, app.FixedRetention{Audit: 30 * 24 * time.Hour}, e.clock.Now)
+	if p.Name() != "audit.purge" {
+		t.Errorf("name = %s", p.Name())
+	}
+
+	n, err := p.Run(ctx)
+	if err != nil || n != 2 {
+		t.Fatalf("purged %d, %v", n, err)
+	}
+
+	left, err := e.audit.Recent(ctx, 10)
+	if err != nil || len(left) != 2 {
+		t.Errorf("left %d entries, %v", len(left), err)
 	}
 }
