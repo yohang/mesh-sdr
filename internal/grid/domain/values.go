@@ -96,6 +96,9 @@ func (u NodeURL) Host() string {
 	return parsed.Hostname()
 }
 
+// HostPort returns host:port of the URL (the dial address).
+func (u NodeURL) HostPort() string { return strings.TrimPrefix(u.value, "https://") }
+
 // Endpoint returns the URL of path on the node with scheme (https or wss).
 func (u NodeURL) Endpoint(scheme, path string) string {
 	return scheme + strings.TrimPrefix(u.value, "https") + path
