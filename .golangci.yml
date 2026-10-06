@@ -19,6 +19,8 @@ linters:
           deny:
             - pkg: github.com/getkin/kin-openapi
               desc: build- and test-time only (specgen, apitest and tests)
+            - pkg: github.com/yohang/mesh-sdr/internal/http/api/apitest
+              desc: test helper (it links kin-openapi); import it from tests only
 
 formatters:
   enable:
