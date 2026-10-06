@@ -7,6 +7,7 @@ package app
 import (
 	"context"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
@@ -37,6 +38,11 @@ type IDGenerator interface {
 
 // Clock returns the current time.
 type Clock func() time.Time
+
+// KeyLimiter rate-limits per key (an account).
+type KeyLimiter interface {
+	Allow(key string, now time.Time) (bool, time.Duration)
+}
 
 // IPLimiter rate-limits login attempts per client address.
 type IPLimiter interface {
@@ -91,6 +97,13 @@ type RequestMeta struct {
 type Settings interface {
 	// PasswordMinLength is auth.password_min_length.
 	PasswordMinLength(ctx context.Context) int
+	// InvitationTTL is invitations.ttl_hours: the default validity of a new
+	// invitation.
+	InvitationTTL(ctx context.Context) time.Duration
+	// PasswordResetTTL is password_reset.ttl_minutes.
+	PasswordResetTTL(ctx context.Context) time.Duration
+	// ListenPolicy is the global listen_policy (devices may override it).
+	ListenPolicy(ctx context.Context) domain.ListenPolicy
 }
 
 // Policies builds the password policy in force: the minimum length from the
@@ -140,3 +153,73 @@ func (p FixedSessionPolicies) SessionPolicy() domain.SessionPolicy { return p.Se
 
 // ThrottlePolicy implements SessionPolicies.
 func (p FixedSessionPolicies) ThrottlePolicy() domain.ThrottlePolicy { return p.Throttle }
+
+// Notifier sends the identity e-mails (SR-09): each method queues one
+// plain-text message. When mail is not configured, Enabled is false and the
+// methods return ErrMailDisabled.
+type Notifier interface {
+	Enabled() bool
+	// Invitation sends an invitation link.
+	Invitation(ctx context.Context, to domain.Email, link string, role domain.Role, expires time.Time) error
+	// PasswordReset sends a password reset link.
+	PasswordReset(ctx context.Context, to domain.Email, link string, expires time.Time) error
+	// EmailConfirmation sends the link that confirms a new address.
+	EmailConfirmation(ctx context.Context, to domain.Email, link string, expires time.Time) error
+	// PasswordChanged tells the account owner that the password changed.
+	PasswordChanged(ctx context.Context, to domain.Email, at time.Time) error
+	// EmailChanged tells the previous address that the account's address
+	// changed.
+	EmailChanged(ctx context.Context, to, next domain.Email, at time.Time) error
+	// Test sends a test message to an admin.
+	Test(ctx context.Context, to domain.Email) error
+}
+
+// ErrMailDisabled means no SMTP relay is configured.
+var ErrMailDisabled = shared.NewError(shared.KindUnavailable, "mail_disabled", "e-mail is not configured on this hub")
+
+// Links builds the single-use links sent to users, from hub.url only (never
+// from a request, SR-09).
+type Links struct{ base string }
+
+// NewLinks returns the link builder of hub.url.
+func NewLinks(hubURL string) Links { return Links{base: strings.TrimRight(hubURL, "/")} }
+
+// Invitation returns the link of an invitation.
+func (l Links) Invitation(t domain.LinkToken) string { return l.base + "/invite/" + t.Text() }
+
+// PasswordReset returns the link of a password reset.
+func (l Links) PasswordReset(t domain.LinkToken) string {
+	return l.base + "/password/reset/" + t.Text()
+}
+
+// EmailConfirmation returns the link that confirms a new address.
+func (l Links) EmailConfirmation(t domain.LinkToken) string {
+	return l.base + "/account/email/verify/" + t.Text()
+}
+
+// PendingLinks invalidates the pending single-use links of a user (password
+// reset, e-mail change) whenever its access changes: password change or
+// reset, generated password, disable, sign-out everywhere, e-mail change.
+// Otherwise a link started by someone who knew the old password could be
+// used after the owner recovered the account.
+type PendingLinks struct {
+	Resets domain.PasswordResetRepository
+	Emails domain.EmailChangeRepository
+}
+
+// invalidate runs in the caller's transaction.
+func (l PendingLinks) invalidate(ctx context.Context, id domain.UserID, now time.Time) error {
+	if l.Resets != nil {
+		if err := l.Resets.InvalidateForUser(ctx, id, now); err != nil {
+			return err
+		}
+	}
+
+	if l.Emails != nil {
+		if err := l.Emails.InvalidateForUser(ctx, id, now); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

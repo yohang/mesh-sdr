@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/yohang/mesh-sdr/internal/http/problem"
+	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 )
 
@@ -22,6 +23,8 @@ type Sessions interface {
 	// ChangePassword changes the caller's password and replaces its
 	// session: it returns the new CSRF token and the cookie to set.
 	ChangePassword(ctx context.Context, current, newPassword string) (domain.Principal, string, *http.Cookie, bool, error)
+	// Actor returns who makes the request, for account operations.
+	Actor(ctx context.Context) app.Actor
 }
 
 // AuthHandlers serve /auth/session, /auth/login and /auth/logout.
@@ -147,6 +150,8 @@ func (r rateLimited) VisitLoginResponse(w http.ResponseWriter) error { return r.
 
 func (r rateLimited) VisitChangePasswordResponse(w http.ResponseWriter) error { return r.write(w) }
 
+func (r rateLimited) VisitChangeMyEmailResponse(w http.ResponseWriter) error { return r.write(w) }
+
 func (r rateLimited) write(w http.ResponseWriter) error {
 	w.Header().Set("Retry-After", strconv.Itoa(int(r.err.RetryAfter().Seconds())))
 	problem.Write(w, problem.FromError(r.err))
@@ -156,6 +161,14 @@ func (r rateLimited) write(w http.ResponseWriter) error {
 
 // logoutResponse clears the session cookie.
 type logoutResponse struct{ cookie *http.Cookie }
+
+func (l logoutResponse) VisitDeleteMeResponse(w http.ResponseWriter) error {
+	return l.VisitLogoutResponse(w)
+}
+
+func (l logoutResponse) VisitLogoutAllResponse(w http.ResponseWriter) error {
+	return l.VisitLogoutResponse(w)
+}
 
 func (l logoutResponse) VisitLogoutResponse(w http.ResponseWriter) error {
 	http.SetCookie(w, l.cookie)

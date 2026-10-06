@@ -41,6 +41,7 @@ type Hub struct {
 	Auth  Auth  `toml:"auth" envPrefix:"AUTH__" jsonschema:"description=Authentication (password hashing)."`
 	Admin Admin `toml:"admin" envPrefix:"ADMIN__" jsonschema:"description=Admin access restrictions."`
 	HTTP  HTTP  `toml:"http" envPrefix:"HTTP__" jsonschema:"description=HTTP front: reverse proxies."`
+	SMTP  SMTP  `toml:"smtp" envPrefix:"SMTP__" jsonschema:"description=Outgoing mail (invitations, password reset, security notices). Without smtp.host, links are shown to copy and no mail is sent."`
 }
 
 // ConfigNode is one [nodes.<id>] table.
@@ -50,9 +51,26 @@ type ConfigNode struct {
 	EnrollmentToken Secret `toml:"enrollment_token" env:"-" jsonschema:"description=Enrollment token of the node: 32 random bytes in unpadded base64url (43 characters)\\, used until the node is enrolled."`
 }
 
+// SMTP is the [smtp] table (TECHNICAL_SPEC §7.4, SR-09).
+type SMTP struct {
+	Host          string `toml:"host" env:"HOST" jsonschema:"description=Mail relay host name. Empty: mail is off."`
+	Port          int    `toml:"port" env:"PORT" jsonschema:"minimum=1,maximum=65535,description=Mail relay port (587 for STARTTLS, 465 for implicit TLS)."`
+	TLS           string `toml:"tls" env:"TLS" jsonschema:"enum=starttls,enum=implicit,enum=none,description=Transport security: starttls or implicit TLS, with a verified certificate. none (plain text) needs smtp.allow_insecure."`
+	Username      string `toml:"username" env:"USERNAME" jsonschema:"description=SMTP user name (empty: no authentication)."`
+	Password      Secret `toml:"password" env:"PASSWORD" jsonschema:"description=SMTP password."`
+	From          string `toml:"from" env:"FROM" jsonschema:"description=Sender address, for example \"WebSDR <sdr@example.org>\". Required with smtp.host."`
+	AllowInsecure bool   `toml:"allow_insecure" env:"ALLOW_INSECURE" jsonschema:"description=Allow smtp.tls = none (development relays only): mail and credentials travel in clear."`
+}
+
+// Enabled reports whether outgoing mail is configured.
+func (s SMTP) Enabled() bool { return s.Host != "" }
+
 // Auth is the [auth] table.
 type Auth struct {
-	Argon2 Argon2 `toml:"argon2" envPrefix:"ARGON2__" jsonschema:"description=Argon2id password hashing parameters. A stored hash with other parameters is re-hashed at the next successful login."`
+	TokenKeyDir     string   `toml:"token_key_dir" env:"TOKEN_KEY_DIR" jsonschema:"description=Directory of the Ed25519 keys that sign access tokens (0700\\, one 0600 file per key\\, written by the hub). On the state volume\\, never in the database. Relative paths are resolved against the working directory."`
+	TokenTTL        Duration `toml:"token_ttl" env:"TOKEN_TTL" jsonschema:"description=Access token lifetime (60s to 10m)."`
+	KeyRotationDays int      `toml:"key_rotation_days" env:"KEY_ROTATION_DAYS" jsonschema:"minimum=1,maximum=365,description=Age in days at which a new token signing key is introduced."`
+	Argon2          Argon2   `toml:"argon2" envPrefix:"ARGON2__" jsonschema:"description=Argon2id password hashing parameters. A stored hash with other parameters is re-hashed at the next successful login."`
 }
 
 // Argon2 is the [auth.argon2] table.
@@ -189,9 +207,13 @@ func DefaultHub() Hub {
 		DB:       DB{DSN: "sqlite:///var/lib/meshsdr/hub.db", MaxReadConnections: 4},
 		Log:      defaultLog(),
 		Settings: DefaultSettings(),
-		Auth:     Auth{Argon2: Argon2{MemoryKiB: 65536, Iterations: 3, Parallelism: 1}},
-		Admin:    Admin{AllowedNetworks: []string{"0.0.0.0/0", "::/0"}},
-		HTTP:     HTTP{TrustedProxies: []string{}},
+		Auth: Auth{
+			TokenKeyDir: "/var/lib/meshsdr/keys", TokenTTL: MustDuration("5m"), KeyRotationDays: 30,
+			Argon2: Argon2{MemoryKiB: 65536, Iterations: 3, Parallelism: 1},
+		},
+		Admin: Admin{AllowedNetworks: []string{"0.0.0.0/0", "::/0"}},
+		HTTP:  HTTP{TrustedProxies: []string{}},
+		SMTP:  SMTP{Port: 587, TLS: "starttls"},
 	}
 }
 

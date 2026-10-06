@@ -96,37 +96,189 @@ func uniqueViolation(err error, u *domain.User) error {
 	}
 }
 
-// Save updates the user's mutable fields when its version matches.
+// Save updates the user's mutable fields when its version matches, and its
+// role grants when they changed, in one transaction.
 func (r *Users) Save(ctx context.Context, u *domain.User) error {
-	n, err := sqlc.New(r.db.Writer(ctx)).UpdateUser(ctx, sqlc.UpdateUserParams{
-		Email:              nullString(u.Email().String()),
-		EmailVerifiedAt:    nullMS(u.EmailVerifiedAt()),
-		DisplayName:        nullString(u.DisplayName().String()),
-		PasswordHash:       nullString(u.PasswordHash().String()),
-		MustChangePassword: boolInt(u.MustChangePassword()),
-		Enabled:            boolInt(u.Enabled()),
-		FailedLoginCount:   int64(u.FailedLogins()),
-		LockedUntil:        nullMS(u.LockedUntil()),
-		LastLoginAt:        nullMS(u.LastLoginAt()),
-		UpdatedAt:          ms(u.UpdatedAt()),
-		ID:                 u.ID().Bytes(),
-		Version:            int64(u.Version()),
-	})
-	if err != nil {
-		if strings.Contains(err.Error(), "ux_users_email_lower") {
-			return domain.ErrEmailTaken
+	return r.db.WithinTx(ctx, func(ctx context.Context) error {
+		q := sqlc.New(r.db.Writer(ctx))
+
+		n, err := q.UpdateUser(ctx, sqlc.UpdateUserParams{
+			Email:              nullString(u.Email().String()),
+			EmailVerifiedAt:    nullMS(u.EmailVerifiedAt()),
+			DisplayName:        nullString(u.DisplayName().String()),
+			PasswordHash:       nullString(u.PasswordHash().String()),
+			MustChangePassword: boolInt(u.MustChangePassword()),
+			Enabled:            boolInt(u.Enabled()),
+			FailedLoginCount:   int64(u.FailedLogins()),
+			LockedUntil:        nullMS(u.LockedUntil()),
+			LastLoginAt:        nullMS(u.LastLoginAt()),
+			UpdatedAt:          ms(u.UpdatedAt()),
+			ID:                 u.ID().Bytes(),
+			Version:            int64(u.Version()),
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "ux_users_email_lower") {
+				return domain.ErrEmailTaken
+			}
+
+			return fmt.Errorf("update user %s: %w", u.ID(), err)
 		}
 
-		return fmt.Errorf("update user %s: %w", u.ID(), err)
+		if n == 0 {
+			return domain.ErrVersionConflict
+		}
+
+		if by, at := u.GrantedBy(); !at.IsZero() {
+			if err := r.syncGrants(ctx, q, u, by, at); err != nil {
+				return err
+			}
+		}
+
+		u.Saved()
+
+		return nil
+	})
+}
+
+// syncGrants deletes the stored grants the user no longer has and inserts
+// the new ones; unchanged rows keep their granted_by and granted_at.
+func (r *Users) syncGrants(ctx context.Context, q *sqlc.Queries, u *domain.User, by domain.UserID, at time.Time) error {
+	rows, err := q.ListUserRoles(ctx, u.ID().Bytes())
+	if err != nil {
+		return fmt.Errorf("load role grants: %w", err)
+	}
+
+	stored := map[string]bool{}
+
+	for _, row := range rows {
+		key := fmt.Sprint(row.RoleID, "/", row.DeviceID.String)
+		stored[key] = true
+		keep := false
+
+		for _, g := range u.Grants() {
+			if int64(g.Role().ID()) == row.RoleID && g.Device().String() == row.DeviceID.String {
+				keep = true
+			}
+		}
+
+		if !keep {
+			if err := q.DeleteUserRole(ctx, sqlc.DeleteUserRoleParams{UserID: u.ID().Bytes(), RoleID: row.RoleID, DeviceID: row.DeviceID.String}); err != nil {
+				return fmt.Errorf("delete role grant: %w", err)
+			}
+		}
+	}
+
+	var grantedBy []byte
+	if !by.IsZero() {
+		grantedBy = by.Bytes()
+	}
+
+	for _, g := range u.Grants() {
+		if stored[fmt.Sprint(int64(g.Role().ID()), "/", g.Device().String())] {
+			continue
+		}
+
+		id, err := r.ids.New(at)
+		if err != nil {
+			return fmt.Errorf("role grant id: %w", err)
+		}
+
+		if err := q.InsertUserRole(ctx, sqlc.InsertUserRoleParams{
+			ID: id.Bytes(), UserID: u.ID().Bytes(), RoleID: int64(g.Role().ID()),
+			DeviceID: nullString(g.Device().String()), GrantedBy: grantedBy, GrantedAt: ms(at),
+		}); err != nil {
+			return fmt.Errorf("insert role grant: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// Search returns a page of users matching q.
+func (r *Users) Search(ctx context.Context, uq domain.UserQuery) ([]*domain.User, error) {
+	q := sqlc.New(r.db.Reader(ctx))
+
+	enabled := int64(-1)
+	if uq.Enabled != nil {
+		enabled = boolInt(*uq.Enabled)
+	}
+
+	role := int64(0)
+	if uq.Role != domain.RoleAnonymous {
+		role = int64(uq.Role.ID())
+	}
+
+	limit := uq.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+
+	rows, err := q.SearchUsers(ctx, sqlc.SearchUsersParams{
+		Text: uq.Text, Enabled: enabled, NeverLoggedIn: boolInt(uq.NeverLoggedIn), RoleID: role,
+		After: strings.ToLower(uq.After), MaxRows: int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search users: %w", err)
+	}
+
+	out := make([]*domain.User, 0, len(rows))
+
+	for _, row := range rows {
+		u, err := r.load(ctx, q, func() (sqlc.User, error) { return row, nil })
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, u)
+	}
+
+	return out, nil
+}
+
+// Delete deletes a user; its identities, grants, sessions and tokens go
+// with it (ON DELETE CASCADE).
+func (r *Users) Delete(ctx context.Context, id domain.UserID) error {
+	n, err := sqlc.New(r.db.Writer(ctx)).DeleteUser(ctx, id.Bytes())
+	if err != nil {
+		return fmt.Errorf("delete user %s: %w", id, err)
 	}
 
 	if n == 0 {
-		return domain.ErrVersionConflict
+		return domain.ErrUserNotFound
 	}
 
-	u.Saved()
-
 	return nil
+}
+
+// Usernames returns the usernames of the given users that exist.
+func (r *Users) Usernames(ctx context.Context, ids []domain.UserID) (map[domain.UserID]domain.Username, error) {
+	out := map[domain.UserID]domain.Username{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	raw := make([][]byte, len(ids))
+	for i, id := range ids {
+		raw[i] = id.Bytes()
+	}
+
+	rows, err := sqlc.New(r.db.Reader(ctx)).ListUsernames(ctx, raw)
+	if err != nil {
+		return nil, fmt.Errorf("list usernames: %w", err)
+	}
+
+	for _, row := range rows {
+		id, err := domain.UserIDFromBytes(row.ID)
+		if err != nil {
+			continue
+		}
+
+		if name, err := domain.NewUsername(row.Username); err == nil {
+			out[id] = name
+		}
+	}
+
+	return out, nil
 }
 
 // ByID returns a user.

@@ -13,3 +13,7 @@ dsn = "sqlite:var/hub.db"
 [log]
 level = "debug"
 format = "text"
+
+[auth]
+# Token signing keys of the dev stack (gitignored var/).
+token_key_dir = "var/keys"

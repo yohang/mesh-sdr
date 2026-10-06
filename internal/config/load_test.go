@@ -505,3 +505,44 @@ func TestAuthDefaultsAndEnvLists(t *testing.T) {
 		t.Errorf("trusted proxies = %v", got)
 	}
 }
+
+func TestSMTP(t *testing.T) {
+	load := func(extra string, env map[string]string) (Hub, error) {
+		dir := writeFiles(t, map[string]string{"hub.toml": minimalHub + extra})
+		if env == nil {
+			env = map[string]string{}
+		}
+
+		cfg, _, err := LoadHub(Options{Dir: dir, Env: env})
+
+		return cfg, err
+	}
+
+	cfg, err := load("", nil)
+	if err != nil || cfg.SMTP.Enabled() || cfg.SMTP.Port != 587 || cfg.SMTP.TLS != "starttls" {
+		t.Fatalf("defaults = %+v, %v", cfg.SMTP, err)
+	}
+
+	cfg, err = load("[smtp]\nhost = \"smtp.example.org\"\nfrom = \"WebSDR <sdr@example.org>\"\n",
+		map[string]string{"MESHSDR_SMTP__PASSWORD": "pw", "MESHSDR_SMTP__USERNAME": "sdr"})
+	if err != nil || !cfg.SMTP.Enabled() || cfg.SMTP.Password.Reveal() != "pw" {
+		t.Fatalf("configured = %+v, %v", cfg.SMTP, err)
+	}
+
+	for name, extra := range map[string]string{
+		"no from":     "[smtp]\nhost = \"smtp.example.org\"\n",
+		"bad from":    "[smtp]\nhost = \"smtp.example.org\"\nfrom = \"not an address\"\n",
+		"plain text":  "[smtp]\nhost = \"smtp.example.org\"\nfrom = \"a@b.example\"\ntls = \"none\"\n",
+		"unknown tls": "[smtp]\nhost = \"smtp.example.org\"\nfrom = \"a@b.example\"\ntls = \"ssl\"\n",
+		"bad port":    "[smtp]\nhost = \"smtp.example.org\"\nfrom = \"a@b.example\"\nport = 0\n",
+		"bad host":    "[smtp]\nhost = \"smtp example\"\nfrom = \"a@b.example\"\n",
+	} {
+		if _, err := load(extra, nil); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+
+	if _, err := load("[smtp]\nhost = \"mailpit\"\nport = 1025\nfrom = \"a@b.example\"\ntls = \"none\"\nallow_insecure = true\n", nil); err != nil {
+		t.Errorf("explicitly insecure relay refused: %v", err)
+	}
+}

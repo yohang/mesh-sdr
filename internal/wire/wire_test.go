@@ -16,6 +16,10 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
+	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/wire"
 )
 
@@ -58,6 +62,7 @@ func hub(t *testing.T, cfg config.Hub, a db.Adapter) *wire.Process {
 	cfg.Hub.URL = "http://" + cfg.Hub.Listen
 	cfg.Hub.AllowInsecureURL = true
 	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
+	cfg.Auth.TokenKeyDir = filepath.Join(t.TempDir(), "keys")
 
 	p, err := wire.Hub(context.Background(), cfg, config.Origins{}, discard, a)
 	if err != nil {
@@ -280,5 +285,72 @@ func TestLoginPageInShell(t *testing.T) {
 
 	if resp, _ := do(http.MethodGet, "/logout"); resp.StatusCode != http.StatusMethodNotAllowed || resp.Header.Get("Allow") != "POST" {
 		t.Errorf("GET /logout = %d, Allow %q", resp.StatusCode, resp.Header.Get("Allow"))
+	}
+}
+
+// ACC-001: the hub works without any account. Visitors browse the public
+// pages, see a discreet "Sign in" entry, and protected pages ask them to
+// sign in.
+func TestHubWithoutAccounts(t *testing.T) {
+	cfg := config.DefaultHub()
+	cfg.Hub.Listen = "127.0.0.1:0"
+
+	addr := serve(t, hub(t, cfg, dbtest.NewSQLite(t)))
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	for _, path := range []string{"/", "/policy", "/login", "/password/forgot"} {
+		status, _, b := get(t, c, "http://"+addr+path)
+		if status != http.StatusOK || !strings.Contains(string(b), `href="/login"`) && path != "/login" {
+			t.Errorf("GET %s = %d", path, status)
+		}
+	}
+
+	_, _, b := get(t, c, "http://"+addr+"/api/v1/auth/session")
+
+	var s map[string]any
+	if err := json.Unmarshal(b, &s); err != nil || s["authenticated"] != false {
+		t.Errorf("session = %s", b)
+	}
+
+	for _, path := range []string{"/account", "/admin/users"} {
+		if status, _, _ := get(t, c, "http://"+addr+path); status != http.StatusSeeOther {
+			t.Errorf("GET %s = %d, want a redirect to sign in", path, status)
+		}
+	}
+}
+
+// SR-64: removing a user from the CLI also erases its presence rows.
+func TestRemoveErasesConnections(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.DefaultHub()
+	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
+	a := dbtest.NewSQLite(t)
+	admin := wire.UserAdmin(cfg, discard, a)
+
+	res, err := admin.Add(ctx, identityapp.AddUserInput{Username: "alice", Password: "a long passphrase here"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	uid, _ := shared.UUIDFromBytes(res.User.ID().Bytes())
+	cid, _ := shared.NewUUIDv7Generator().New(time.Now())
+
+	c, err := griddomain.NewConnection(griddomain.ConnectionInfo{ID: cid, Kind: griddomain.ConnectionEvents, UserID: uid, RoleID: 10, IP: "192.0.2.1"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conns := gridsqlite.NewConnectionRepository(a)
+	if _, err := conns.Open(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := admin.Remove(ctx, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := conns.Get(ctx, cid)
+	if err != nil || !got.Info().UserID.IsZero() || got.Info().IP != "" {
+		t.Errorf("connection after removal = %+v, %v", got, err)
 	}
 }

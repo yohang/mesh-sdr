@@ -182,6 +182,8 @@ sample_rates = [2_048_000]
 
 	ctx := context.Background()
 
+	hubCfg.Auth.TokenKeyDir = filepath.Join(t.TempDir(), "keys")
+
 	adapter, err := OpenDB(ctx, hubCfg.DB, quiet)
 	if err != nil {
 		t.Fatal(err)

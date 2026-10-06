@@ -1,0 +1,9 @@
+Hello,
+
+Confirm that this address belongs to your account on {{.Site}} by opening
+this link:
+
+{{.Link}}
+
+The link works once and expires on {{date .Expires}}.
+If you did not change your address, ignore this message.

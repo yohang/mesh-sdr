@@ -26,6 +26,10 @@ const (
 
 // loginForm is the view of the login form.
 type loginForm struct {
+	// Forgot shows the "Forgot password?" link (mail configured).
+	Forgot bool
+	// Reset shows that a password reset just succeeded.
+	Reset    bool
 	Login    string
 	Remember bool
 	Next     string
@@ -67,7 +71,10 @@ func noIndex(w http.ResponseWriter) {
 func (m *Module) loginPage(w http.ResponseWriter, r *http.Request) {
 	noIndex(w)
 
-	f := loginForm{Next: SafeNext(r.URL.Query().Get("next"), m.routes)}
+	f := loginForm{
+		Next: SafeNext(r.URL.Query().Get("next"), m.routes), Reset: r.URL.Query().Get("reset") == "1",
+		Forgot: m.resets != nil && m.resets.MailEnabled(),
+	}
 	m.pages.Page(w, r, http.StatusOK, "Sign in", loginPage(f), nil)
 }
 
@@ -88,6 +95,7 @@ func (m *Module) loginAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	f := loginForm{
+		Forgot:   m.resets != nil && m.resets.MailEnabled(),
 		Login:    r.PostForm.Get("login"),
 		Remember: r.PostForm.Get("remember_me") != "",
 		Next:     SafeNext(r.PostForm.Get("next"), m.routes),

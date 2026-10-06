@@ -158,6 +158,41 @@ func (l *IPLimiter) Allow(ip netip.Addr, now time.Time) (bool, time.Duration) {
 	return true, 0
 }
 
+// KeyLimiter is a token bucket per string key (an account, a token).
+type KeyLimiter struct {
+	mu    sync.Mutex
+	limit rate.Limit
+	burst int
+	cache *lru[string, *rate.Limiter]
+}
+
+// NewKeyLimiter allows burst attempts, then one per every, per key.
+func NewKeyLimiter(every time.Duration, burst, capacity int) *KeyLimiter {
+	return &KeyLimiter{limit: rate.Every(every), burst: max(burst, 1), cache: newLRU[string, *rate.Limiter](capacity)}
+}
+
+// Allow takes one token for key. When none is left it returns false and
+// the wait until the next one.
+func (l *KeyLimiter) Allow(key string, now time.Time) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	lim, ok := l.cache.get(key)
+	if !ok {
+		lim = rate.NewLimiter(l.limit, l.burst)
+		l.cache.put(key, lim)
+	}
+
+	r := lim.ReserveN(now, 1)
+	if d := r.DelayFrom(now); d > 0 {
+		r.CancelAt(now)
+
+		return false, d
+	}
+
+	return true, 0
+}
+
 // Throttle applies the account throttle policy to login identifiers that
 // match no account, so that responses for unknown and existing accounts are
 // identical (SR-05).

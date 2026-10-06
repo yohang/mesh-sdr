@@ -60,7 +60,7 @@ func TestUserCommands(t *testing.T) {
 	withPw := maps.Clone(env)
 	withPw["MESHSDR_PASSWORD"] = "from the environment"
 
-	if r := run(t, ctx, withPw, "--noninteractive", "hub", "user", "add", "dave"); r.code != ExitOK || strings.Contains(r.stdout, "password:") {
+	if r := run(t, ctx, withPw, "--noninteractive", "hub", "user", "add", "dave", "--role", "admin"); r.code != ExitOK || strings.Contains(r.stdout, "password:") {
 		t.Errorf("add --noninteractive with MESHSDR_PASSWORD = %+v", r)
 	}
 
@@ -151,8 +151,29 @@ func TestUserCommands(t *testing.T) {
 		t.Errorf("list --all --json = %+v (%+v)", r, listed)
 	}
 
-	for _, cmd := range []string{"disable", "enable", "reset-password"} {
-		r := run(t, ctx, env, "--json", "--noninteractive", "hub", "user", cmd, "nobody")
+	if r := run(t, ctx, env, "--noninteractive", "hub", "user", "remove", "gina"); r.code != ExitFailure || !strings.Contains(r.stderr, "--yes") {
+		t.Errorf("remove without --yes = %+v", r)
+	}
+
+	if r := runIn(t, ctx, env, "nope\n", "hub", "user", "remove", "gina"); r.code != ExitFailure || !strings.Contains(r.stderr, "not confirmed") {
+		t.Errorf("remove not confirmed = %+v", r)
+	}
+
+	if r := runIn(t, ctx, env, "gina\n", "hub", "user", "remove", "gina"); r.code != ExitOK || !strings.Contains(r.stdout, "user gina removed") {
+		t.Errorf("remove = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "user", "exists", "gina"); r.code != ExitFailure {
+		t.Errorf("gina still exists = %+v", r)
+	}
+
+	for _, cmd := range []string{"disable", "enable", "reset-password", "remove"} {
+		args := []string{"--json", "--noninteractive", "hub", "user", cmd, "nobody"}
+		if cmd == "remove" {
+			args = append(args, "--yes")
+		}
+
+		r := run(t, ctx, env, args...)
 		if r.code != ExitFailure || !strings.Contains(r.stderr, `"code":"user_not_found"`) {
 			t.Errorf("%s nobody = %+v", cmd, r)
 		}
@@ -176,5 +197,36 @@ func TestGlobalBehaviour(t *testing.T) {
 	r = run(t, ctx, map[string]string{"MESHSDR_CONFIG_DIR": t.TempDir()}, "hub", "user", "exists", "x")
 	if r.code == ExitOK || strings.Count(strings.TrimSpace(r.stderr), "\n") != 0 || !strings.HasPrefix(r.stderr, "meshsdr: ") {
 		t.Errorf("error output = %+v", r)
+	}
+}
+
+func TestKeysCommands(t *testing.T) {
+	ctx := context.Background()
+	env := map[string]string{"MESHSDR_CONFIG_DIR": hubDir(t)}
+
+	r := run(t, ctx, env, "--json", "hub", "keys", "list")
+
+	var keys []struct {
+		Kid   string `json:"kid"`
+		State string `json:"state"`
+	}
+	if r.code != ExitOK || json.Unmarshal([]byte(r.stdout), &keys) != nil || len(keys) != 1 || keys[0].State != "signing" {
+		t.Fatalf("list = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "keys", "rotate"); r.code != ExitOK || !strings.Contains(r.stdout, "published now") {
+		t.Errorf("rotate = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "keys", "revoke", "--", keys[0].Kid); r.code != ExitOK || !strings.Contains(r.stdout, "revoked") {
+		t.Errorf("revoke = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "keys", "revoke", "--", "-nope"); r.code != ExitFailure {
+		t.Errorf("revoke unknown = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "keys", "list"); r.code != ExitOK || !strings.Contains(r.stdout, "revoked") || !strings.Contains(r.stdout, "signing") {
+		t.Errorf("list after = %+v", r)
 	}
 }

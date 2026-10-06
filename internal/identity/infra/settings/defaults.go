@@ -5,6 +5,7 @@ package settings
 
 import (
 	"context"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 )
@@ -14,3 +15,18 @@ type Defaults struct{}
 
 // PasswordMinLength implements app.Settings (auth.password_min_length).
 func (Defaults) PasswordMinLength(context.Context) int { return domain.DefaultPasswordMinLength }
+
+// Default identity settings (ADR 0011).
+const (
+	DefaultInvitationTTL    = 7 * 24 * time.Hour
+	DefaultPasswordResetTTL = 30 * time.Minute
+)
+
+// InvitationTTL implements app.Settings (invitations.ttl_hours).
+func (Defaults) InvitationTTL(context.Context) time.Duration { return DefaultInvitationTTL }
+
+// PasswordResetTTL implements app.Settings (password_reset.ttl_minutes).
+func (Defaults) PasswordResetTTL(context.Context) time.Duration { return DefaultPasswordResetTTL }
+
+// ListenPolicy implements app.Settings (listen_policy, default anonymous).
+func (Defaults) ListenPolicy(context.Context) domain.ListenPolicy { return domain.ListenAnonymous }

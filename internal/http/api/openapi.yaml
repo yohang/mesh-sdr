@@ -656,8 +656,727 @@ paths:
           description: Removed (or already the default)
         default:
           $ref: "#/components/responses/Problem"
+  /roles:
+    get:
+      operationId: listRoles
+      x-meshsdr-access: admin
+      summary: List the roles
+      tags: [users]
+      responses:
+        "200":
+          description: Roles, lowest rank first. listener is implicit for every account; anonymous is never granted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleList"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/roles:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      operationId: getUserRoles
+      x-meshsdr-access: admin
+      summary: Role grants of a user
+      tags: [users]
+      responses:
+        "200":
+          description: Grants (empty for a listener)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleGrants"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setUserRoles
+      x-meshsdr-access: admin
+      summary: Replace the role grants of a user
+      description: |
+        Any change revokes every session of the user (strict SR-01). The
+        last enabled admin cannot lose the admin role (409 `last_admin`).
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleGrants"
+      responses:
+        "200":
+          description: The stored grants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleGrants"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/logout-all:
+    post:
+      operationId: logoutAll
+      x-meshsdr-access: listener
+      summary: Sign out every session of the caller, this one included
+      tags: [auth]
+      responses:
+        "204":
+          description: Signed out everywhere. The session cookie is cleared.
+        default:
+          $ref: "#/components/responses/Problem"
+  /me/sessions:
+    get:
+      operationId: listOwnSessions
+      x-meshsdr-access: listener
+      summary: The caller's active sessions
+      tags: [account]
+      responses:
+        "200":
+          description: Active sessions, most recently seen first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        default:
+          $ref: "#/components/responses/Problem"
+  /me/sessions/{ref}:
+    parameters:
+      - $ref: "#/components/parameters/SessionRef"
+    delete:
+      operationId: revokeOwnSession
+      x-meshsdr-access: listener
+      summary: Sign out one of the caller's sessions
+      tags: [account]
+      responses:
+        "204":
+          description: Signed out
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      operationId: listUserSessions
+      x-meshsdr-access: admin
+      summary: Active sessions of a user
+      tags: [users]
+      responses:
+        "200":
+          description: Active sessions, most recently seen first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/sessions/{ref}:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+      - $ref: "#/components/parameters/SessionRef"
+    delete:
+      operationId: revokeUserSession
+      x-meshsdr-access: admin
+      summary: Sign out one session of a user
+      tags: [users]
+      responses:
+        "204":
+          description: Signed out
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/sessions/revoke:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      operationId: revokeUserSessions
+      x-meshsdr-access: admin
+      summary: Sign a user out everywhere
+      tags: [users]
+      responses:
+        "200":
+          description: Number of sessions signed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revoked"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /me:
+    get:
+      operationId: getMe
+      x-meshsdr-access: listener
+      summary: The caller's account
+      tags: [account]
+      responses:
+        "200":
+          description: Account (no per-user preferences in v1)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteMe
+      x-meshsdr-access: listener
+      summary: Delete the caller's account
+      description: |
+        Needs the current password. Removes the account and its personal
+        data; audit entries keep the user id as a pseudonymous id. The last
+        enabled admin cannot be deleted (409 `last_admin`).
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountDeletion"
+      responses:
+        "204":
+          description: Deleted. The session cookie is cleared.
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateMe
+      x-meshsdr-access: listener
+      summary: Change the caller's display name
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeUpdate"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /me/email:
+    post:
+      operationId: changeMyEmail
+      x-meshsdr-access: listener
+      summary: Change the caller's e-mail address
+      description: |
+        Needs the current password (SR-04; a wrong one counts as a failed
+        login). With mail configured, a single-use link confirms the new
+        address and the change is pending until it is opened; otherwise
+        the address applies at once, unconfirmed. An empty address removes
+        it. The previous address is told.
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailChange"
+      responses:
+        "200":
+          description: Applied, or pending confirmation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailChangeResult"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /invitations:
+    get:
+      operationId: listInvitations
+      x-meshsdr-access: admin
+      summary: List invitations (pending, used, expired, revoked)
+      tags: [invitations]
+      responses:
+        "200":
+          description: Invitations, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createInvitation
+      x-meshsdr-access: admin
+      summary: Create an invitation
+      description: |
+        Returns the single-use link once (SR-08). With an e-mail address
+        and mail configured, the link is also e-mailed.
+      tags: [invitations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationCreated"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /invitations/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 36
+    delete:
+      operationId: revokeInvitation
+      x-meshsdr-access: admin
+      summary: Revoke a pending invitation
+      tags: [invitations]
+      responses:
+        "204":
+          description: Revoked
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/invitations/{token}:
+    parameters:
+      - $ref: "#/components/parameters/LinkToken"
+    get:
+      operationId: checkInvitation
+      x-meshsdr-access: anonymous
+      summary: Validate an invitation token
+      description: Unknown, expired, revoked and used invitations answer the same 404 `invitation_invalid`.
+      tags: [auth]
+      responses:
+        "200":
+          description: The pre-set role and e-mail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationCheck"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/invitations/{token}/accept:
+    parameters:
+      - $ref: "#/components/parameters/LinkToken"
+    post:
+      operationId: acceptInvitation
+      x-meshsdr-access: anonymous
+      summary: Accept an invitation
+      description: |
+        Creates the account (role from the invitation, never from the
+        request), marks the invitation used and signs in.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationAccept"
+      responses:
+        "201":
+          description: Account created and signed in. The session cookie is set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionInfo"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/password-reset:
+    post:
+      operationId: requestPasswordReset
+      x-meshsdr-access: anonymous
+      summary: Ask for a password reset link
+      description: |
+        Always 202, whether or not the account exists (SR-06): the link is
+        e-mailed afterwards, to the account's address, when mail is
+        configured. Too many requests from a client address answer 429.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "202":
+          description: Accepted
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/password-reset/confirm:
+    post:
+      operationId: confirmPasswordReset
+      x-meshsdr-access: anonymous
+      summary: Set a new password with a reset token
+      description: Single use; every session of the user is revoked.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetConfirm"
+      responses:
+        "204":
+          description: Password set
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/password-reset:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      operationId: issuePasswordReset
+      x-meshsdr-access: admin
+      summary: Issue a password reset link for a user
+      description: E-mailed when mail is configured and the user has an address; otherwise returned once to copy.
+      tags: [users]
+      responses:
+        "200":
+          description: Issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReset"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users:
+    get:
+      operationId: listUsers
+      x-meshsdr-access: admin
+      summary: List users, with search and filters
+      tags: [users]
+      parameters:
+        - name: q
+          in: query
+          description: Substring of the username, e-mail or display name.
+          schema:
+            type: string
+            maxLength: 254
+        - name: role
+          in: query
+          description: Highest global role.
+          schema:
+            type: string
+            enum: [listener, operator, admin]
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+        - name: never_signed_in
+          in: query
+          schema:
+            type: boolean
+        - name: after
+          in: query
+          description: Username of the last user of the previous page.
+          schema:
+            type: string
+            maxLength: 64
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Users by username
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserList"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      operationId: getUser
+      x-meshsdr-access: admin
+      summary: User detail
+      tags: [users]
+      responses:
+        "200":
+          description: The user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteUser
+      x-meshsdr-access: admin
+      summary: Delete a user (sessions revoked, personal data removed)
+      tags: [users]
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateUser
+      x-meshsdr-access: admin
+      summary: Enable or disable a user, or change its display name
+      description: Disabling revokes every session; the last enabled admin cannot be disabled (409 `last_admin`).
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200":
+          description: The user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/password:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      operationId: setGeneratedPassword
+      x-meshsdr-access: admin
+      summary: Give a user a generated password to change at the next sign-in
+      description: Revokes every session of the user. The password is returned only here.
+      tags: [users]
+      responses:
+        "200":
+          description: The generated password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratedPassword"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/export:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      operationId: exportUser
+      x-meshsdr-access: admin
+      summary: Export a user's data (GDPR request)
+      tags: [users]
+      responses:
+        "200":
+          description: The data, as a JSON document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountExport"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /me/export:
+    post:
+      operationId: exportMe
+      x-meshsdr-access: listener
+      summary: Export the caller's data (account and sessions)
+      tags: [account]
+      responses:
+        "200":
+          description: The data, as a JSON document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountExport"
+        default:
+          $ref: "#/components/responses/Problem"
+  /audit:
+    get:
+      operationId: searchAudit
+      x-meshsdr-access: admin
+      summary: Search the audit log
+      description: Newest first, paged by `before` (the id of the last entry of the previous page). Read-only.
+      tags: [audit]
+      parameters:
+        - name: actor
+          in: query
+          description: Username of the actor.
+          schema:
+            type: string
+            maxLength: 64
+        - name: action
+          in: query
+          description: Action prefix, for example `auth.login.`.
+          schema:
+            type: string
+            maxLength: 64
+        - name: target_type
+          in: query
+          schema:
+            type: string
+            maxLength: 32
+        - name: target_id
+          in: query
+          schema:
+            type: string
+            maxLength: 128
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: before
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditPage"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/token:
+    post:
+      operationId: mintAccessToken
+      x-meshsdr-access: anonymous
+      summary: Get an access token for a node media connection
+      description: |
+        Issues a short-lived EdDSA token (`auth.token_ttl`, 5 minutes by
+        default) for one node and one media connection, scoped to the node's
+        devices the caller may listen to (TECHNICAL_SPEC §5.8). The client
+        refreshes it in band before it expires. Derived from the live
+        session: a revoked session or a changed role stops refreshes.
+        Anonymous callers need a connection bound by the gateway (GRID-011);
+        until then they get 401. Limited to 30 per minute per session.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenRequest"
+      responses:
+        "200":
+          description: The token. Never store it beyond the page's memory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessToken"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
+    LinkToken:
+      name: token
+      in: path
+      required: true
+      description: Single-use token of a link.
+      schema:
+        type: string
+        maxLength: 64
+    SessionRef:
+      name: ref
+      in: path
+      required: true
+      description: Public handle of a session (never its id).
+      schema:
+        type: string
+        maxLength: 32
+    UserID:
+      name: id
+      in: path
+      required: true
+      description: User id (UUID).
+      schema:
+        type: string
+        maxLength: 36
     NodeID:
       name: id
       in: path
@@ -666,6 +1385,414 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    TokenRequest:
+      type: object
+      additionalProperties: false
+      required: [node_id, cid]
+      properties:
+        node_id:
+          type: string
+          maxLength: 64
+        cid:
+          type: string
+          description: Media connection id issued by the hub.
+          maxLength: 64
+    AccessToken:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    AuditPage:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEntry"
+        next_before:
+          type: integer
+          format: int64
+          description: Value of `before` for the next page, when there is one.
+    AuditEntry:
+      type: object
+      required: [id, at, actor_kind, actor, action, result]
+      properties:
+        id:
+          type: integer
+          format: int64
+        at:
+          type: string
+          format: date-time
+        actor_kind:
+          type: string
+          enum: [user, anonymous, system, node, cli]
+        actor_id:
+          type: string
+        actor:
+          type: string
+          description: Username, "deleted user <id>", or the actor kind.
+        actor_ip:
+          type: string
+        action:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+        target:
+          type: string
+        result:
+          type: string
+          enum: [ok, denied, error]
+        before:
+          type: object
+          additionalProperties:
+            type: string
+        after:
+          type: object
+          additionalProperties:
+            type: string
+        request_id:
+          type: string
+    AccountDeletion:
+      type: object
+      additionalProperties: false
+      required: [current_password]
+      properties:
+        current_password:
+          type: string
+          maxLength: 1024
+    AccountExport:
+      type: object
+      description: Account data export (ACC-009); see `app.Export` for the fields.
+      additionalProperties: true
+    UserList:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        next_after:
+          type: string
+          description: Value of `after` for the next page, when there may be one.
+    User:
+      type: object
+      required: [id, username, email_verified, roles, enabled, must_change_password, created_at]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: string
+        email_verified:
+          type: boolean
+        roles:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+        must_change_password:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+    UserUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled:
+          type: boolean
+        display_name:
+          type: string
+          description: Empty removes it.
+          maxLength: 256
+    GeneratedPassword:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [login]
+      properties:
+        login:
+          type: string
+          description: Username or e-mail address.
+          maxLength: 254
+    PasswordResetConfirm:
+      type: object
+      additionalProperties: false
+      required: [token, new_password]
+      properties:
+        token:
+          type: string
+          maxLength: 64
+        new_password:
+          type: string
+          maxLength: 1024
+    AdminReset:
+      type: object
+      required: [mailed]
+      properties:
+        mailed:
+          type: boolean
+        link:
+          type: string
+          description: The link to copy, present only when it was not e-mailed.
+    InvitationList:
+      type: object
+      required: [invitations]
+      properties:
+        invitations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Invitation"
+    Invitation:
+      type: object
+      required: [id, role, delivery, state, created_at, expires_at]
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [listener, operator, admin]
+        device_id:
+          type: string
+        email:
+          type: string
+        delivery:
+          type: string
+          enum: [email, link]
+        state:
+          type: string
+          enum: [pending, redeemed, revoked, expired]
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        redeemed_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+    InvitationCreate:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [listener, operator, admin]
+        device_id:
+          type: string
+          maxLength: 64
+        email:
+          type: string
+          maxLength: 254
+        expires_in_hours:
+          type: integer
+          minimum: 1
+          maximum: 720
+          description: Validity; default `invitations.ttl_hours` (7 days).
+    InvitationCreated:
+      type: object
+      required: [invitation, link, mailed]
+      properties:
+        invitation:
+          $ref: "#/components/schemas/Invitation"
+        link:
+          type: string
+          description: The single-use link, returned only here.
+        mailed:
+          type: boolean
+    InvitationCheck:
+      type: object
+      required: [role, expires_at]
+      properties:
+        role:
+          type: string
+          enum: [listener, operator, admin]
+        device_id:
+          type: string
+        email:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    InvitationAccept:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          maxLength: 64
+        display_name:
+          type: string
+          maxLength: 256
+        password:
+          type: string
+          maxLength: 1024
+        email:
+          type: string
+          description: Used only when the invitation has no address.
+          maxLength: 254
+    Me:
+      type: object
+      required: [id, username, email_verified, roles, identities, must_change_password]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: string
+        email_verified:
+          type: boolean
+        roles:
+          type: array
+          description: Grants, device scope after '@' ("operator@rtl-1"); "listener" when none.
+          items:
+            type: string
+        identities:
+          type: array
+          description: Login methods (provider ids, `local` in v1).
+          items:
+            type: string
+        must_change_password:
+          type: boolean
+    MeUpdate:
+      type: object
+      additionalProperties: false
+      required: [display_name]
+      properties:
+        display_name:
+          type: string
+          description: Empty removes it.
+          maxLength: 256
+    EmailChange:
+      type: object
+      additionalProperties: false
+      required: [email, current_password]
+      properties:
+        email:
+          type: string
+          description: New address; empty removes it.
+          maxLength: 254
+        current_password:
+          type: string
+          maxLength: 1024
+    EmailChangeResult:
+      type: object
+      required: [pending]
+      properties:
+        pending:
+          type: boolean
+          description: True when a confirmation link was sent to the new address.
+    SessionList:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionView"
+    SessionView:
+      type: object
+      required: [id, current, created_at, last_seen_at, expires_at, browser, system]
+      properties:
+        id:
+          type: string
+          description: Public handle of the session.
+        current:
+          type: boolean
+          description: True for the session of this request.
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        ip:
+          type: string
+        user_agent:
+          type: string
+        browser:
+          type: string
+        system:
+          type: string
+    Revoked:
+      type: object
+      required: [revoked]
+      properties:
+        revoked:
+          type: integer
+    RoleList:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoleInfo"
+    RoleInfo:
+      type: object
+      required: [name, rank, grantable]
+      properties:
+        name:
+          type: string
+          enum: [listener, operator, admin]
+        rank:
+          type: integer
+        grantable:
+          type: boolean
+          description: False for listener, which every account holds implicitly.
+    RoleGrants:
+      type: object
+      additionalProperties: false
+      required: [grants]
+      properties:
+        grants:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/RoleGrant"
+    RoleGrant:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [operator, admin]
+        device_id:
+          type: string
+          description: Device scope of an operator grant; absent means every device. Admin is always global.
+          maxLength: 64
     ConnectionList:
       type: object
       required: [count]

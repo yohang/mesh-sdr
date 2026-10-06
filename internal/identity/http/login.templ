@@ -1,13 +1,19 @@
 package http
 
 // loginPage is the sign-in page (AUTH-001, FEATURE_SPEC §10.3): a centred
-// single-column form. There is no sign-up link (invitation only) and no
-// "Forgot password?" link until SMTP exists. The CSRF header of the form is
+// single-column form. There is no sign-up link (invitation only); "Forgot
+// password?" shows when mail is configured. The CSRF header of the form is
 // added by static/js/csrf.js, imported by the shell entry module.
 templ loginPage(f loginForm) {
 	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="login-title">
 		<h1 id="login-title" class="text-2xl font-bold">Sign in</h1>
+		if f.Reset {
+			<p class="font-semibold" role="status">Your password was reset. Sign in with the new one.</p>
+		}
 		@loginFormView(f)
+		if f.Forgot {
+			<p><a href="/password/forgot">Forgot password?</a></p>
+		}
 	</section>
 }
 

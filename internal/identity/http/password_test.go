@@ -234,3 +234,26 @@ func TestVoluntaryPasswordChangeAPI(t *testing.T) {
 		t.Errorf("anonymous = %d", res.StatusCode)
 	}
 }
+
+func TestUnknownBodyFieldsAreRefused(t *testing.T) {
+	h := newHub(t)
+	h.addUser("bob", domain.RoleListener)
+
+	c := h.client()
+	c.session()
+
+	res := c.do(http.MethodPost, "/api/v1/auth/login", "application/json",
+		`{"login":"bob","password":"`+password+`","role":"admin"}`, map[string]string{identityhttp.CSRFHeader: c.token})
+	if v := decode(t, res); res.StatusCode != http.StatusBadRequest || v["code"] != "unknown_field" {
+		t.Errorf("login with an unknown field = %d %v", res.StatusCode, v)
+	}
+
+	c.login("bob", password, false)
+	c.session()
+
+	res = c.do(http.MethodPost, "/api/v1/auth/password", "application/json",
+		`{"current_password":"`+password+`","new_password":"`+newPassword+`","x":1}`, map[string]string{identityhttp.CSRFHeader: c.token})
+	if v := decode(t, res); res.StatusCode != http.StatusBadRequest || v["code"] != "unknown_field" {
+		t.Errorf("password change with an unknown field = %d %v", res.StatusCode, v)
+	}
+}

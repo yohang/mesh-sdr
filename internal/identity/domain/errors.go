@@ -26,6 +26,7 @@ var (
 	ErrInvalidToken       = shared.NewError(shared.KindInvalid, "invalid_token", "invalid token")
 	ErrInvalidSession     = shared.NewError(shared.KindInvalid, "invalid_session", "invalid session")
 	ErrInvalidUser        = shared.NewError(shared.KindInvalid, "invalid_user", "invalid user")
+	ErrInvalidInvitation  = shared.NewError(shared.KindInvalid, "invalid_invitation", "invalid invitation")
 	ErrInvalidAudit       = shared.NewError(shared.KindInvalid, "invalid_audit_entry", "invalid audit entry")
 
 	// ErrInvalidCredentials is the one generic login error (SR-06): unknown
@@ -53,10 +54,35 @@ var (
 	// expired, used, or useless because an admin exists (AUTH-018).
 	ErrSetupTokenInvalid = shared.NewError(shared.KindNotFound, "setup_token_invalid", "the setup link is not valid")
 
+	// ErrInvitationInvalid means an invitation link is unknown, expired,
+	// revoked or used (one answer for all, ACC-002).
+	ErrInvitationInvalid = shared.NewError(shared.KindNotFound, "invitation_invalid", "this invitation is no longer valid")
+	// ErrInvitationNotFound means no invitation has this id.
+	ErrInvitationNotFound = shared.NewError(shared.KindNotFound, "invitation_not_found", "invitation not found")
+	// ErrInvitationNotPending means the invitation can no longer be revoked.
+	ErrInvitationNotPending = shared.NewError(shared.KindConflict, "invitation_not_pending", "the invitation was already used, revoked or has expired")
+	// ErrLastAdmin means the change would leave no enabled admin (ACC-006).
+	ErrLastAdmin = shared.NewError(shared.KindConflict, "last_admin", "the last enabled admin cannot lose the admin role, be disabled or be deleted")
+
+	// ErrNoListenableDevice means no device of the node is open to the
+	// caller: no access token (§5.9).
+	ErrNoListenableDevice = shared.NewError(shared.KindForbidden, "no_listenable_device", "no device of this node is open to you")
+	// ErrAnonymousTokens means anonymous access tokens need a connection
+	// bound by the gateway (GRID-011), not available yet.
+	ErrAnonymousTokens = shared.NewError(shared.KindUnauthenticated, "unauthenticated", "sign in to listen")
+	// ErrInvalidConnection means the connection id is malformed or not the
+	// caller's.
+	ErrInvalidConnection = shared.NewError(shared.KindForbidden, "invalid_connection", "this connection is not yours")
+
 	ErrUserNotFound    = shared.NewError(shared.KindNotFound, "user_not_found", "user not found")
 	ErrSessionNotFound = shared.NewError(shared.KindNotFound, "session_not_found", "session not found")
 	ErrUsernameTaken   = shared.NewError(shared.KindConflict, "username_taken", "the username is already used")
 	ErrEmailTaken      = shared.NewError(shared.KindConflict, "email_taken", "the e-mail address is already used")
+	// ErrEmailUnusable is the one answer for an address that cannot be
+	// used, whether it is malformed or another account's: account flows
+	// never tell that an address has an account (SR-06).
+	ErrEmailUnusable = ErrInvalidEmail.WithDetail("this e-mail address cannot be used")
+
 	ErrVersionConflict = shared.NewError(shared.KindConflict, "version_conflict", "the record was changed concurrently")
 )
 

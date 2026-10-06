@@ -14,19 +14,28 @@ import (
 // UserAdmin runs the account administration done from the command line on
 // the hub host (AUTH-008, AUTH-012, AUTH-013, AUTH-014).
 type UserAdmin struct {
-	users    domain.UserRepository
-	sessions domain.SessionRepository
-	audit    domain.AuditLog
-	tx       Transactor
-	hasher   PasswordHasher
-	ids      IDGenerator
-	now      Clock
-	policy   Policies
-	logger   *slog.Logger
+	invitations domain.InvitationRepository
+	pending     PendingLinks
+	erasers     []UserEraser
+	users       domain.UserRepository
+	sessions    domain.SessionRepository
+	audit       domain.AuditLog
+	tx          Transactor
+	hasher      PasswordHasher
+	ids         IDGenerator
+	now         Clock
+	policy      Policies
+	logger      *slog.Logger
 }
 
 // UserAdminDeps are the dependencies of UserAdmin.
 type UserAdminDeps struct {
+	// Invitations lets Remove clear the address of redeemed invitations.
+	Invitations domain.InvitationRepository
+	// Pending invalidates pending links on reset and disable.
+	Pending PendingLinks
+	// Erasers remove the personal data other modules keep (Remove).
+	Erasers  []UserEraser
 	Users    domain.UserRepository
 	Sessions domain.SessionRepository
 	Audit    domain.AuditLog
@@ -41,6 +50,7 @@ type UserAdminDeps struct {
 // NewUserAdmin returns the service.
 func NewUserAdmin(d UserAdminDeps) *UserAdmin {
 	return &UserAdmin{
+		invitations: d.Invitations, pending: d.Pending, erasers: d.Erasers,
 		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs,
 		now: d.Now, policy: d.Policy, logger: d.Logger,
 	}
@@ -143,7 +153,7 @@ func (s *UserAdmin) Add(ctx context.Context, in AddUserInput) (AddUserResult, er
 		}
 
 		return s.appendAudit(ctx, domain.ActionUserCreate, u, nil, map[string]string{
-			"username": u.Username().String(), "role": u.Role().String(),
+			"role":                 u.Role().String(),
 			"must_change_password": strconv.FormatBool(u.MustChangePassword()),
 		})
 	})
@@ -199,6 +209,10 @@ func (s *UserAdmin) ResetPassword(ctx context.Context, username, password string
 
 		n, err := s.sessions.RevokeAllForUser(ctx, u.ID(), domain.RevokePasswordReset, now)
 		if err != nil {
+			return err
+		}
+
+		if err := s.pending.invalidate(ctx, u.ID(), now); err != nil {
 			return err
 		}
 
@@ -264,9 +278,22 @@ func (s *UserAdmin) Disable(ctx context.Context, username string) (DisableResult
 
 	err := s.withUser(ctx, username, func(ctx context.Context, u *domain.User) error {
 		now := s.now()
-		if !u.Disable(now) {
+		if !u.Enabled() {
 			return nil
 		}
+
+		if u.IsAdmin() {
+			n, err := s.users.CountEnabledAdmins(ctx)
+			if err != nil {
+				return err
+			}
+
+			if n <= 1 {
+				return domain.ErrLastAdmin
+			}
+		}
+
+		u.Disable(now)
 
 		if err := s.users.Save(ctx, u); err != nil {
 			return err
@@ -274,6 +301,10 @@ func (s *UserAdmin) Disable(ctx context.Context, username string) (DisableResult
 
 		n, err := s.sessions.RevokeAllForUser(ctx, u.ID(), domain.RevokeUserDisabled, now)
 		if err != nil {
+			return err
+		}
+
+		if err := s.pending.invalidate(ctx, u.ID(), now); err != nil {
 			return err
 		}
 

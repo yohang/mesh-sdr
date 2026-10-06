@@ -70,3 +70,60 @@ func (s SessionID) Bytes() []byte { return s.v.Bytes() }
 
 // IsZero reports whether s is the zero value.
 func (s SessionID) IsZero() bool { return s.v.IsZero() }
+
+// InvitationID identifies an invitation (UUIDv7). Admins see it.
+type InvitationID struct{ v shared.UUID }
+
+// NewInvitationID wraps a UUID (not the nil UUID).
+func NewInvitationID(u shared.UUID) (InvitationID, error) {
+	v, err := nonNil(u, nil)
+
+	return InvitationID{v: v}, err
+}
+
+// InvitationIDFromBytes returns the invitation id held in 16 bytes.
+func InvitationIDFromBytes(b []byte) (InvitationID, error) {
+	v, err := nonNil(shared.UUIDFromBytes(b))
+
+	return InvitationID{v: v}, err
+}
+
+// ParseInvitationID parses the canonical textual UUID form.
+func ParseInvitationID(s string) (InvitationID, error) {
+	v, err := nonNil(shared.ParseUUID(s))
+
+	return InvitationID{v: v}, err
+}
+
+// String returns the canonical textual form.
+func (i InvitationID) String() string { return i.v.String() }
+
+// Bytes returns the 16 bytes.
+func (i InvitationID) Bytes() []byte { return i.v.Bytes() }
+
+// IsZero reports whether i is the zero value.
+func (i InvitationID) IsZero() bool { return i.v.IsZero() }
+
+// TokenID identifies a one-time token row (password reset, e-mail change).
+// It is never sent to clients.
+type TokenID struct{ v shared.UUID }
+
+// NewTokenID wraps a UUID (not the nil UUID).
+func NewTokenID(u shared.UUID) (TokenID, error) {
+	v, err := nonNil(u, nil)
+
+	return TokenID{v: v}, err
+}
+
+// TokenIDFromBytes returns the token id held in 16 bytes.
+func TokenIDFromBytes(b []byte) (TokenID, error) {
+	v, err := nonNil(shared.UUIDFromBytes(b))
+
+	return TokenID{v: v}, err
+}
+
+// Bytes returns the 16 bytes.
+func (i TokenID) Bytes() []byte { return i.v.Bytes() }
+
+// IsZero reports whether i is the zero value.
+func (i TokenID) IsZero() bool { return i.v.IsZero() }

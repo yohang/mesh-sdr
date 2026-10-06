@@ -18,7 +18,12 @@ const fresh = "a fresh and long passphrase"
 func (e *env) passwords() *app.Passwords { return e.passwordsWith(e.hasher) }
 
 func (e *env) passwordsWith(h app.PasswordHasher) *app.Passwords {
+	return e.passwordsWithNotifier(h, nil)
+}
+
+func (e *env) passwordsWithNotifier(h app.PasswordHasher, n app.Notifier) *app.Passwords {
 	return app.NewPasswords(app.PasswordsDeps{
+		Notifier: n, Pending: e.pending(),
 		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Hasher: h, IDs: shared.NewUUIDv7Generator(),
 		Now: e.clock.Now, Policies: app.NewPolicies(nil, nil),
 		SessionPolicies: app.DefaultSessionPolicies(), Logger: slog.New(slog.DiscardHandler),
@@ -285,5 +290,34 @@ func TestPasswordsAreNormalisedToNFC(t *testing.T) {
 
 	if _, err := e.login("zoe", decomposed); err != nil {
 		t.Errorf("decomposed form refused: %v", err)
+	}
+}
+
+func TestPasswordChangeNotifiesTheAccount(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, nil)
+	e.addUser(t, "alice", "alice@example.org", domain.RoleListener)
+	in, _ := e.login("alice", password)
+	n := &recNotifier{}
+
+	if _, err := e.passwordsWithNotifier(e.hasher, n).Change(ctx, app.ChangePasswordInput{Session: in.Session, Current: password, New: fresh}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := n.all(); len(got) != 1 || got[0].kind != "password_changed" || got[0].to != "alice@example.org" {
+		t.Errorf("notifications = %v", got)
+	}
+
+	// A forced change (first chosen password) is not notified.
+	added, _ := e.admin.Add(ctx, app.AddUserInput{Username: "bob", Email: "bob@example.org"})
+	bob, _ := e.login("bob", added.GeneratedPassword)
+	n2 := &recNotifier{}
+
+	if _, err := e.passwordsWithNotifier(e.hasher, n2).Change(ctx, app.ChangePasswordInput{Session: bob.Session, Current: added.GeneratedPassword, New: fresh}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := n2.all(); len(got) != 0 {
+		t.Errorf("forced change notified: %v", got)
 	}
 }

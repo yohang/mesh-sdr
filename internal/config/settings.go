@@ -24,6 +24,9 @@ type Settings struct {
 	Session   SettingsSession   `toml:"session" envPrefix:"SESSION__" jsonschema:"description=Session lifetimes."`
 	Auth      SettingsAuth      `toml:"auth" envPrefix:"AUTH__" jsonschema:"description=Sign-in throttling."`
 	Retention SettingsRetention `toml:"retention" envPrefix:"RETENTION__" jsonschema:"description=Retention of DB-backed stores."`
+
+	Invitations   SettingsInvitations   `toml:"invitations" envPrefix:"INVITATIONS__" jsonschema:"description=Invitations (ACC-002)."`
+	PasswordReset SettingsPasswordReset `toml:"password_reset" envPrefix:"PASSWORD_RESET__" jsonschema:"description=Password reset links (ACC-003)."`
 }
 
 // SettingsReceiver is the [settings.receiver] table (ADM-003).
@@ -102,6 +105,18 @@ type SettingsRetention struct {
 	AuditLog Duration `toml:"audit_log" env:"AUDIT_LOG" jsonschema_extras:"x-min-duration=30d,x-max-duration=3650d,x-label=Audit log" jsonschema_description:"Audit log entries are deleted after this long (at least 30 days)."`
 }
 
+// SettingsInvitations is the [settings.invitations] table (ACC-002, ADR
+// 0011).
+type SettingsInvitations struct {
+	TTLHours int `toml:"ttl_hours" env:"TTL_HOURS" jsonschema:"minimum=1,maximum=720" jsonschema_extras:"x-label=Invitation validity (hours)" jsonschema_description:"An invitation link expires this many hours after it is created (1 to 720). Existing invitations keep their expiry."`
+}
+
+// SettingsPasswordReset is the [settings.password_reset] table (ACC-003,
+// ADR 0011).
+type SettingsPasswordReset struct {
+	TTLMinutes int `toml:"ttl_minutes" env:"TTL_MINUTES" jsonschema:"minimum=5,maximum=1440" jsonschema_extras:"x-label=Reset link validity (minutes)" jsonschema_description:"A password reset link expires this many minutes after it is sent (5 to 1440). Links already sent keep their expiry."`
+}
+
 // DefaultSettings returns the built-in defaults of the settings.
 func DefaultSettings() Settings {
 	return Settings{
@@ -121,6 +136,8 @@ func DefaultSettings() Settings {
 				DelayAfter: 5, LockAfter: 10, LockFor: MustDuration("15m"), MaxLock: MustDuration("24h"),
 			},
 		},
-		Retention: SettingsRetention{Sessions: MustDuration("30d"), AuditLog: MustDuration("365d")},
+		Retention:     SettingsRetention{Sessions: MustDuration("30d"), AuditLog: MustDuration("365d")},
+		Invitations:   SettingsInvitations{TTLHours: 168},
+		PasswordReset: SettingsPasswordReset{TTLMinutes: 30},
 	}
 }

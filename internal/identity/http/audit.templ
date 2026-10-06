@@ -1,0 +1,78 @@
+package http
+
+// auditPage is Admin › Audit log (ACC-010): filters, the entries newest
+// first, paging and CSV/JSON export. Read-only.
+templ auditPage(v auditView) {
+	<section class="flex w-full max-w-6xl flex-col gap-6" aria-labelledby="audit-title">
+		<h1 id="audit-title" class="text-2xl font-bold">Audit log</h1>
+		<form id="audit-filters" class="flex flex-wrap items-end gap-3" method="get" action="/admin/audit" role="search">
+			<label class="flex flex-col gap-1">
+				<span>Actor (username)</span>
+				<input class="rounded border px-2 py-1" type="text" name="actor" value={ v.Form.Actor }/>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span>Action (prefix)</span>
+				<input class="rounded border px-2 py-1" type="text" name="action" value={ v.Form.Action } placeholder="auth.login"/>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span>Target type</span>
+				<input class="rounded border px-2 py-1" type="text" name="target_type" value={ v.Form.TargetType } placeholder="user"/>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span>Target id</span>
+				<input class="rounded border px-2 py-1" type="text" name="target_id" value={ v.Form.TargetID }/>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span>From (UTC)</span>
+				<input class="rounded border px-2 py-1" type="date" name="from" value={ v.Form.From }/>
+			</label>
+			<label class="flex flex-col gap-1">
+				<span>To (UTC)</span>
+				<input class="rounded border px-2 py-1" type="date" name="to" value={ v.Form.To }/>
+			</label>
+			<button class="rounded border px-3 py-1 font-semibold" type="submit">Filter</button>
+		</form>
+		<p class="flex flex-wrap items-center gap-4">
+			<button class="rounded border px-3 py-1" type="button" data-download="/admin/audit/export" data-download-form="audit-filters" data-download-fields="format=csv" data-download-name="audit-log.csv" data-download-status="audit-export-status">Export as CSV</button>
+			<button class="rounded border px-3 py-1" type="button" data-download="/admin/audit/export" data-download-form="audit-filters" data-download-fields="format=json" data-download-name="audit-log.json" data-download-status="audit-export-status">Export as JSON</button>
+			<span id="audit-export-status" role="status"></span>
+		</p>
+		if len(v.Rows) == 0 {
+			<p>No entry matches.</p>
+		} else {
+			<div class="overflow-x-auto">
+				<table class="w-full text-left text-sm">
+					<thead>
+						<tr><th scope="col">When (UTC)</th><th scope="col">Actor</th><th scope="col">From</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Result</th><th scope="col">Details</th></tr>
+					</thead>
+					<tbody>
+						for _, row := range v.Rows {
+							<tr>
+								<td>{ when(row.Entry.At()) }</td>
+								<td>{ row.ActorName }</td>
+								<td>
+									if row.Entry.Actor().IP().IsValid() {
+										{ row.Entry.Actor().IP().String() }
+									}
+								</td>
+								<td>{ row.Entry.Action() }</td>
+								<td>
+									if row.TargetName != "" {
+										{ row.Entry.TargetType() + " " + row.TargetName }
+									} else {
+										{ row.Entry.TargetType() + " " + row.Entry.TargetID() }
+									}
+								</td>
+								<td>{ string(row.Entry.Result()) }</td>
+								<td class="break-all">{ details(row.Entry.After()) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+		if v.NextQS != "" {
+			<p><a href={ templ.SafeURL("/admin/audit?" + v.NextQS) }>Older entries</a></p>
+		}
+	</section>
+}

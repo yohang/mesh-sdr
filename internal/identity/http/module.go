@@ -18,6 +18,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
@@ -64,11 +65,89 @@ type Bootstrapper interface {
 	MinLength(ctx context.Context) int
 }
 
+// ProfileService runs the account page (ACC-004).
+type ProfileService interface {
+	Me(ctx context.Context, by app.Actor) (*domain.User, error)
+	MailEnabled() bool
+	SetDisplayName(ctx context.Context, by app.Actor, name string) (*domain.User, error)
+	ChangeEmail(ctx context.Context, by app.Actor, email, currentPassword string) (app.EmailChangeResult, error)
+	CheckEmailToken(ctx context.Context, token string) error
+	ConfirmEmail(ctx context.Context, token string, meta app.RequestMeta) error
+}
+
+// AccountService runs session lists and the account administration.
+type AccountService interface {
+	OwnSessions(ctx context.Context, by app.Actor) ([]app.SessionView, error)
+	RevokeOwnSession(ctx context.Context, by app.Actor, ref string) error
+	RevokeOtherSessions(ctx context.Context, by app.Actor) (int, error)
+
+	Search(ctx context.Context, q domain.UserQuery) ([]*domain.User, error)
+	User(ctx context.Context, id domain.UserID) (*domain.User, error)
+	SetRoles(ctx context.Context, by app.Actor, id domain.UserID, grants []domain.RoleGrant) (app.RolesResult, error)
+	SetEnabled(ctx context.Context, by app.Actor, id domain.UserID, enabled bool) (bool, error)
+	SetGeneratedPassword(ctx context.Context, by app.Actor, id domain.UserID) (string, error)
+	UserSessions(ctx context.Context, id domain.UserID) ([]app.SessionView, error)
+	RevokeUserSession(ctx context.Context, by app.Actor, id domain.UserID, ref string) error
+	RevokeUserSessions(ctx context.Context, by app.Actor, id domain.UserID) (int, error)
+	Delete(ctx context.Context, by app.Actor, id domain.UserID) error
+	DeleteOwn(ctx context.Context, by app.Actor, currentPassword string) error
+	ExportUser(ctx context.Context, by app.Actor, id domain.UserID) (app.Export, error)
+	ExportOwn(ctx context.Context, by app.Actor) (app.Export, error)
+}
+
+// InvitationService runs invitations (ACC-002).
+type InvitationService interface {
+	MailEnabled() bool
+	DefaultTTL(ctx context.Context) time.Duration
+	MinLength(ctx context.Context) int
+	Now() time.Time
+	Create(ctx context.Context, by app.Actor, in app.CreateInvitationInput) (app.CreatedInvitation, error)
+	List(ctx context.Context) ([]*domain.Invitation, error)
+	Revoke(ctx context.Context, by app.Actor, id domain.InvitationID) error
+	Check(ctx context.Context, token string, meta app.RequestMeta) (*domain.Invitation, error)
+	Accept(ctx context.Context, in app.AcceptInput) (app.LoginResult, error)
+	TestMail(ctx context.Context, by app.Actor) (domain.Email, error)
+}
+
+// ResetService runs password reset by link (ACC-003).
+type ResetService interface {
+	MailEnabled() bool
+	TTL(ctx context.Context) time.Duration
+	MinLength(ctx context.Context) int
+	Request(ctx context.Context, login string, meta app.RequestMeta) error
+	Check(ctx context.Context, token string, meta app.RequestMeta) error
+	Confirm(ctx context.Context, token, password string, meta app.RequestMeta) error
+	IssueByAdmin(ctx context.Context, by app.Actor, id domain.UserID) (app.AdminResult, error)
+}
+
+// AuditService reads the audit log (ACC-010).
+type AuditService interface {
+	Search(ctx context.Context, f app.AuditFilter) ([]app.AuditRow, int64, error)
+	Each(ctx context.Context, f app.AuditFilter, fn func(app.AuditRow) error) error
+}
+
+// Services are the application services behind the identity pages.
+type Services struct {
+	// Keys publishes the token verification keys (JWKS).
+	Keys        app.KeySource
+	Audit       AuditService
+	Resets      ResetService
+	Invitations InvitationService
+	Auth        Authenticator
+	Passwords   PasswordChanger
+	Setup       Bootstrapper
+	Profile     ProfileService
+	Accounts    AccountService
+}
+
 // Pages renders HTML pages in the app shell.
 type Pages interface {
 	// Page writes a page; fragment, when not nil, is written alone for htmx
 	// fragment requests.
 	Page(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component)
+	// AdminPage writes a page of the admin area: content is shown in the
+	// admin layout, with section (layout.AdminSections) as the current one.
+	AdminPage(w http.ResponseWriter, r *http.Request, status int, title, section string, content, fragment templ.Component)
 	// Error writes the shell error page for status.
 	Error(w http.ResponseWriter, r *http.Request, status int)
 }
@@ -90,22 +169,29 @@ type Config struct {
 
 // Module is the identity router module (internal/http.Module).
 type Module struct {
-	auth      Authenticator
-	passwords PasswordChanger
-	setup     Bootstrapper
-	pages     Pages
-	logger    *slog.Logger
-	resolver  *clientip.Resolver
-	cop       *http.CrossOriginProtection
-	admin     []netip.Prefix
-	secure    bool
-	preKey    []byte
-	routes    chi.Routes
-	upload    func(r *http.Request) bool
+	auth        Authenticator
+	passwords   PasswordChanger
+	setup       Bootstrapper
+	profile     ProfileService
+	accounts    AccountService
+	invitations InvitationService
+	resets      ResetService
+	audit       AuditService
+	keys        app.KeySource
+	now         func() time.Time
+	pages       Pages
+	logger      *slog.Logger
+	resolver    *clientip.Resolver
+	cop         *http.CrossOriginProtection
+	admin       []netip.Prefix
+	secure      bool
+	preKey      []byte
+	routes      chi.Routes
+	upload      func(r *http.Request) bool
 }
 
 // New returns the module.
-func New(auth Authenticator, passwords PasswordChanger, setup Bootstrapper, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
+func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
 	u, err := url.Parse(cfg.HubURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("hub.url %q: not an absolute URL", cfg.HubURL)
@@ -123,17 +209,24 @@ func New(auth Authenticator, passwords PasswordChanger, setup Bootstrapper, page
 	}
 
 	return &Module{
-		auth:      auth,
-		passwords: passwords,
-		setup:     setup,
-		pages:     pages,
-		logger:    logger,
-		resolver:  clientip.NewResolver(cfg.TrustedProxies),
-		cop:       cop,
-		admin:     cfg.AdminNetworks,
-		secure:    secure,
-		preKey:    []byte(rand.Text()),
-		upload:    cfg.AcceptsMultipart,
+		auth:        svc.Auth,
+		passwords:   svc.Passwords,
+		setup:       svc.Setup,
+		profile:     svc.Profile,
+		accounts:    svc.Accounts,
+		invitations: svc.Invitations,
+		resets:      svc.Resets,
+		audit:       svc.Audit,
+		keys:        svc.Keys,
+		now:         time.Now,
+		pages:       pages,
+		logger:      logger,
+		resolver:    clientip.NewResolver(cfg.TrustedProxies),
+		cop:         cop,
+		admin:       cfg.AdminNetworks,
+		secure:      secure,
+		preKey:      []byte(rand.Text()),
+		upload:      cfg.AcceptsMultipart,
 	}, nil
 }
 
@@ -158,6 +251,60 @@ func (m *Module) Routes(r chi.Router) {
 	r.Get(app.SetupPath, m.setupLanding)
 	r.Head(app.SetupPath, m.setupLanding)
 	r.Post(app.SetupPath, m.setupAction)
+
+	listener := r.With(m.Require(domain.RoleListener))
+	listener.Get(AccountPath, m.accountPage)
+	listener.Head(AccountPath, m.accountPage)
+	listener.Post(AccountPath+"/profile", m.profileAction)
+	listener.Post(AccountPath+"/email", m.emailAction)
+	listener.Post(AccountPath+"/sessions/revoke-others", m.revokeOthersAction)
+	listener.Post(AccountPath+"/sessions/{ref}/revoke", m.revokeSessionAction)
+	listener.Post(AccountPath+"/export", m.exportOwnAction)
+	listener.Post(AccountPath+"/delete", m.deleteOwnAction)
+
+	r.Get(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
+	r.Head(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
+	r.Get(AccountPath+"/email/verify", m.emailVerifyLanding)
+	r.Post(AccountPath+"/email/verify", m.emailVerifyAction)
+
+	admin := r.With(m.Require(domain.RoleAdmin))
+	admin.Get(AuditPath, m.auditPage)
+	admin.Head(AuditPath, m.auditPage)
+	admin.Post(AuditPath+"/export", m.auditExport)
+	admin.Get(UsersPath, m.usersPage)
+	admin.Head(UsersPath, m.usersPage)
+	admin.Get(UsersPath+"/{id}", m.userPage)
+	admin.Head(UsersPath+"/{id}", m.userPage)
+	admin.Post(UsersPath+"/{id}/roles", m.userRolesAction)
+	admin.Post(UsersPath+"/{id}/enable", m.userEnableAction(true))
+	admin.Post(UsersPath+"/{id}/disable", m.userEnableAction(false))
+	admin.Post(UsersPath+"/{id}/password-reset", m.userResetAction)
+	admin.Post(UsersPath+"/{id}/password", m.userPasswordAction)
+	admin.Post(UsersPath+"/{id}/sessions/revoke", m.userRevokeAllAction)
+	admin.Post(UsersPath+"/{id}/sessions/{ref}/revoke", m.userRevokeAction)
+	admin.Post(UsersPath+"/{id}/export", m.userExportAction)
+	admin.Post(UsersPath+"/{id}/delete", m.userDeleteAction)
+	admin.Get(InvitationsPath, m.invitationsPage)
+	admin.Head(InvitationsPath, m.invitationsPage)
+	admin.Post(InvitationsPath, m.createInvitationAction)
+	admin.Post(InvitationsPath+"/test-mail", m.testMailAction)
+	admin.Post(InvitationsPath+"/{id}/revoke", m.revokeInvitationAction)
+
+	r.Get(JWKSPath, m.jwks)
+	r.Head(JWKSPath, m.jwks)
+
+	r.Get(ForgotPath, m.forgotPage)
+	r.Head(ForgotPath, m.forgotPage)
+	r.Post(ForgotPath, m.forgotAction)
+	r.Get(ResetPath+"/{token}", m.resetPage)
+	r.Head(ResetPath+"/{token}", m.resetPage)
+	r.Get(ResetPath, m.resetLanding)
+	r.Post(ResetPath, m.resetAction)
+
+	r.Get("/invite/{token}", m.invitePage)
+	r.Head("/invite/{token}", m.invitePage)
+	r.Get("/invite", m.inviteLanding)
+	r.Post("/invite", m.acceptAction)
 
 	r.With(m.Require(domain.RoleListener)).Get(PasswordChangePath, m.passwordPage)
 	r.With(m.Require(domain.RoleListener)).Head(PasswordChangePath, m.passwordPage)
@@ -312,7 +459,7 @@ func isAPI(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/api/")
 func limitAuthBodies(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/login" || p == "/logout" || p == PasswordChangePath || p == app.SetupPath || strings.HasPrefix(p, "/api/v1/auth/") {
+		if p == "/login" || p == "/logout" || p == PasswordChangePath || p == app.SetupPath || p == "/invite" || p == ForgotPath || p == ResetPath || strings.HasPrefix(p, "/api/v1/auth/") {
 			r.Body = http.MaxBytesReader(w, r.Body, AuthBodyLimit)
 		}
 
@@ -453,6 +600,11 @@ func (m *Module) meta(ctx context.Context) app.RequestMeta {
 	}
 }
 
+// Actor returns who makes the request, with its request metadata.
+func (m *Module) Actor(ctx context.Context) app.Actor {
+	return app.Actor{Principal: FromContext(ctx).Principal(), Meta: m.meta(ctx)}
+}
+
 // Principal returns who makes the request.
 func (m *Module) Principal(ctx context.Context) domain.Principal { return FromContext(ctx).Principal() }
 
@@ -509,6 +661,22 @@ func (m *Module) ChangePassword(ctx context.Context, current, newPassword string
 	}
 
 	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge), res.Forced, nil
+}
+
+// SessionRef returns the public handle of the request's session ("" when
+// anonymous): the sid claim of its access tokens.
+func (m *Module) SessionRef(ctx context.Context) string {
+	if st := FromContext(ctx); st.session != nil {
+		return st.session.Ref()
+	}
+
+	return ""
+}
+
+// OpenedSession returns the principal, CSRF token and cookies of a session
+// opened by an invitation (API).
+func (m *Module) OpenedSession(res app.LoginResult) (domain.Principal, string, []*http.Cookie) {
+	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.sessionCookies(res)
 }
 
 // Logout ends the request's session and returns the cookie to clear it.

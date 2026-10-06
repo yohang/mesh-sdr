@@ -43,6 +43,9 @@ dsn = "sqlite://` + filepath.Join(dir, "hub.db") + `"
 
 [log]
 format = "text"
+
+[auth]
+token_key_dir = "` + filepath.Join(dir, "keys") + `"
 `
 
 	if err := os.WriteFile(filepath.Join(dir, "hub.toml"), []byte(cfg), 0o600); err != nil {
@@ -133,7 +136,7 @@ func TestHubLifecycle(t *testing.T) {
 		t.Fatalf("add admin = %+v", r)
 	}
 
-	runCtx, cancel = context.WithTimeout(ctx, 500*time.Millisecond)
+	runCtx, cancel = context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	if r := run(t, runCtx, env, "hub"); r.code != ExitOK || strings.Contains(r.stderr, "/setup/") {

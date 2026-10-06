@@ -23,6 +23,9 @@ type Passwords struct {
 	now       Clock
 	policies  Policies
 	lifetimes SessionPolicies
+	notifier  Notifier
+	revoked   RevocationPublisher
+	pending   PendingLinks
 	logger    *slog.Logger
 }
 
@@ -39,14 +42,21 @@ type PasswordsDeps struct {
 	// SessionPolicies gives the session and throttling policies, read on
 	// every use (DB settings, ADR 0010).
 	SessionPolicies SessionPolicies
-	Logger          *slog.Logger
+	// Notifier tells the account's address about the change (SR-04);
+	// optional.
+	Notifier Notifier
+	// Revocations tells nodes that the user's sessions ended; optional.
+	Revocations RevocationPublisher
+	// Pending invalidates the user's pending reset and e-mail links.
+	Pending PendingLinks
+	Logger  *slog.Logger
 }
 
 // NewPasswords returns the service.
 func NewPasswords(d PasswordsDeps) *Passwords {
 	return &Passwords{
 		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs, now: d.Now,
-		policies: d.Policies, lifetimes: d.SessionPolicies, logger: d.Logger,
+		policies: d.Policies, lifetimes: d.SessionPolicies, notifier: d.Notifier, revoked: d.Revocations, pending: d.Pending, logger: d.Logger,
 	}
 }
 
@@ -75,6 +85,21 @@ type ChangePasswordResult struct {
 	// RevokedSessions counts the sessions signed out, the replaced one
 	// included.
 	RevokedSessions int
+
+	email domain.Email
+}
+
+// notify tells the account's address that the password changed. A forced
+// change is the first password the user chooses: it is not notified. Mail
+// failures are logged: the change is done.
+func (s *Passwords) notify(ctx context.Context, to domain.Email) {
+	if s.notifier == nil || !s.notifier.Enabled() || to.IsZero() {
+		return
+	}
+
+	if err := s.notifier.PasswordChanged(ctx, to, s.now()); err != nil {
+		s.logger.WarnContext(ctx, "password change notice not sent", slog.Any("error", err))
+	}
 }
 
 // Change checks the current password, then sets the new one (which follows
@@ -100,44 +125,10 @@ func (s *Passwords) Change(ctx context.Context, in ChangePasswordInput) (ChangeP
 	}
 
 	uid := in.Session.UserID()
-	now := s.now()
 
-	// Reserve the attempt before verifying the current password, as login
-	// does: parallel guesses cannot exceed the throttle thresholds.
-	var current domain.PasswordHash
-
-	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		u, err := s.users.ByID(ctx, uid)
-		if err != nil {
-			return err
-		}
-
-		if blocked, until := u.BlockedAt(now); blocked {
-			return domain.NewRateLimitError(until.Sub(now))
-		}
-
-		if !u.CanPasswordLogin() {
-			return domain.ErrInvalidCurrentPassword
-		}
-
-		current = u.PasswordHash()
-		u.RecordLoginFailure(now, s.lifetimes.ThrottlePolicy())
-
-		return s.users.Save(ctx, u)
-	})
+	current, err := s.verifyCurrent(ctx, uid, in.Current, in.Meta, domain.ActionPasswordChange)
 	if err != nil {
-		return ChangePasswordResult{}, s.wrap(err)
-	}
-
-	ok, err := s.hasher.Verify(ctx, normalizePassword(in.Current), current)
-	if err != nil {
-		return ChangePasswordResult{}, fmt.Errorf("verify current password: %w", err)
-	}
-
-	if !ok {
-		s.record(ctx, in.Meta, uid, domain.ResultDenied, map[string]string{"reason": "invalid_current_password"})
-
-		return ChangePasswordResult{}, domain.ErrInvalidCurrentPassword
+		return ChangePasswordResult{}, err
 	}
 
 	same, err := s.hasher.Verify(ctx, pw.Reveal(), current)
@@ -163,6 +154,12 @@ func (s *Passwords) Change(ctx context.Context, in ChangePasswordInput) (ChangeP
 
 	s.logger.InfoContext(ctx, "password changed", slog.String("user_id", uid.String()), slog.Bool("forced", res.Forced),
 		slog.Int("revoked_sessions", res.RevokedSessions))
+
+	if s.revoked != nil {
+		s.revoked.PublishRevocation(ctx, Revocation{Users: []domain.UserID{uid}})
+	}
+
+	s.notify(ctx, res.email)
 
 	return res, nil
 }
@@ -217,6 +214,10 @@ func (s *Passwords) apply(ctx context.Context, in ChangePasswordInput, verified,
 			return err
 		}
 
+		if err := s.pending.invalidate(ctx, u.ID(), now); err != nil {
+			return err
+		}
+
 		sid, err := s.ids.New(now)
 		if err != nil {
 			return fmt.Errorf("session id: %w", err)
@@ -256,11 +257,78 @@ func (s *Passwords) apply(ctx context.Context, in ChangePasswordInput, verified,
 		}
 
 		res.Token, res.Session, res.Principal = token, sess, domain.UserPrincipal(u, sess)
+		if !res.Forced {
+			res.email = u.Email()
+		}
 
 		return nil
 	})
 
 	return res, err
+}
+
+// verifyCurrent checks the current password of a user and returns the
+// verified hash. The attempt is reserved first, as login does: it counts as
+// a failed login until the caller clears it, so parallel guesses cannot
+// exceed the throttle thresholds (SR-05). A wrong password is audited under
+// action.
+func (s *Passwords) verifyCurrent(ctx context.Context, uid domain.UserID, password string, meta RequestMeta, action string) (domain.PasswordHash, error) {
+	if len(password) > MaxPasswordBytes {
+		return domain.PasswordHash{}, domain.ErrInvalidCurrentPassword
+	}
+
+	now := s.now()
+
+	var current domain.PasswordHash
+
+	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		u, err := s.users.ByID(ctx, uid)
+		if err != nil {
+			return err
+		}
+
+		if blocked, until := u.BlockedAt(now); blocked {
+			return domain.NewRateLimitError(until.Sub(now))
+		}
+
+		if !u.CanPasswordLogin() {
+			return domain.ErrInvalidCurrentPassword
+		}
+
+		current = u.PasswordHash()
+		u.RecordLoginFailure(now, s.lifetimes.ThrottlePolicy())
+
+		return s.users.Save(ctx, u)
+	})
+	if err != nil {
+		return domain.PasswordHash{}, s.wrap(err)
+	}
+
+	ok, err := s.hasher.Verify(ctx, normalizePassword(password), current)
+	if err != nil {
+		return domain.PasswordHash{}, fmt.Errorf("verify current password: %w", err)
+	}
+
+	if !ok {
+		s.record(ctx, meta, uid, action, domain.ResultDenied, map[string]string{"reason": "invalid_current_password"})
+
+		return domain.PasswordHash{}, domain.ErrInvalidCurrentPassword
+	}
+
+	return current, nil
+}
+
+// CheckCurrent checks the current password of a user before a sensitive
+// change (e-mail change, account deletion: SR-04), with the throttling of
+// login. action is audited when the password is wrong.
+func (s *Passwords) CheckCurrent(ctx context.Context, uid domain.UserID, password string, meta RequestMeta, action string) error {
+	if _, err := s.verifyCurrent(ctx, uid, password, meta, action); err != nil {
+		return err
+	}
+
+	s.clearFailures(ctx, uid)
+
+	return nil
 }
 
 // clearFailures resets the throttling counted by the reservation once the
@@ -282,14 +350,14 @@ func (s *Passwords) clearFailures(ctx context.Context, id domain.UserID) {
 	}
 }
 
-func (s *Passwords) record(ctx context.Context, meta RequestMeta, id domain.UserID, result domain.AuditResult, after map[string]string) {
-	e, err := domain.NewAuditEntry(s.now(), domain.UserActor(id, meta.IP), domain.ActionPasswordChange, result)
+func (s *Passwords) record(ctx context.Context, meta RequestMeta, id domain.UserID, action string, result domain.AuditResult, after map[string]string) {
+	e, err := domain.NewAuditEntry(s.now(), domain.UserActor(id, meta.IP), action, result)
 	if err == nil {
 		err = s.audit.Append(ctx, e.WithTarget("user", id.String()).WithRequestID(meta.RequestID).WithAfter(after))
 	}
 
 	if err != nil {
-		s.logger.WarnContext(ctx, "audit entry not written", slog.String("action", domain.ActionPasswordChange), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "audit entry not written", slog.String("action", action), slog.Any("error", err))
 	}
 }
 

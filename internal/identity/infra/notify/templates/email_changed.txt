@@ -1,0 +1,6 @@
+Hello,
+
+The e-mail address of your account on {{.Site}} was changed on {{date .At}}
+to {{.Email}}. This address will no longer receive messages for the account.
+
+If you did not change it, contact the administrator of {{.HubURL}} at once.

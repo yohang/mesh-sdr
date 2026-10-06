@@ -32,6 +32,11 @@ type Server struct {
 	SettingsHandlers
 	RetentionHandlers
 	BrandingHandlers
+	AccountHandlers
+	InvitationHandlers
+	ResetHandlers
+	AuditHandlers
+	TokenHandlers
 }
 
 var _ StrictServerInterface = Server{}
@@ -47,6 +52,11 @@ func NewHandler(srv StrictServerInterface, authz Authorizer, logger *slog.Logger
 		panic(err)
 	}
 
+	fields, err := loadBodyFields(specJSON)
+	if err != nil {
+		panic(err)
+	}
+
 	r := chi.NewRouter()
 	r.Use(problem.Recoverer(logger), guard(authz), uploadLimits)
 	r.NotFound(problem.NotFound)
@@ -57,7 +67,10 @@ func NewHandler(srv StrictServerInterface, authz Authorizer, logger *slog.Logger
 		ResponseErrorHandlerFunc: problem.ErrorHandler(logger),
 	})
 
-	return HandlerWithOptions(strict, ChiServerOptions{BaseRouter: r, ErrorHandlerFunc: problem.BadRequest})
+	return HandlerWithOptions(strict, ChiServerOptions{
+		BaseRouter: r, ErrorHandlerFunc: problem.BadRequest,
+		Middlewares: []MiddlewareFunc{fields.rejectUnknownFields(policy, authz)},
+	})
 }
 
 // MetaHandlers serve the API description.

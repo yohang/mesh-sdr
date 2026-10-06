@@ -27,6 +27,10 @@ func jobs(adapter db.Adapter, idm *identity.Module, values jobsapp.RetentionValu
 	sched.Register(idm.Reaper, identityapp.SessionReapEvery)
 	sched.Register(idm.AuditPurger, identityapp.AuditPurgeEvery)
 
+	for _, j := range idm.Purges {
+		sched.Register(j, identityapp.LinkPurgeEvery)
+	}
+
 	sessions, err := jobssqlite.NewTableStats(adapter, "sessions")
 	if err != nil {
 		return nil, nil, err

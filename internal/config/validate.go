@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/mail"
 	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
@@ -154,10 +156,52 @@ func (h *Hub) validate(o Origins) []Problem {
 		c.fail("auth.argon2.parallelism", CodeInvalidValue, "invalid value 0: want 1..255")
 	}
 
+	if h.Auth.TokenKeyDir == "" {
+		c.fail("auth.token_key_dir", CodeRequired, "auth.token_key_dir is required")
+	}
+
+	if d := h.Auth.TokenTTL.Duration(); d < time.Minute || d > 10*time.Minute {
+		c.fail("auth.token_ttl", CodeInvalidValue, fmt.Sprintf("invalid value %s: want 1m to 10m (SR-44)", h.Auth.TokenTTL))
+	}
+
+	if n := h.Auth.KeyRotationDays; n < 1 || n > 365 {
+		c.fail("auth.key_rotation_days", CodeInvalidValue, fmt.Sprintf("invalid value %d: want 1..365", n))
+	}
+
 	c.cidrs("admin.allowed_networks", h.Admin.AllowedNetworks)
 	c.cidrs("http.trusted_proxies", h.HTTP.TrustedProxies)
+	c.smtp(h.SMTP)
 
 	return c.problems
+}
+
+// smtp checks the mail relay settings when mail is configured (SR-09: TLS
+// with a verified certificate unless explicitly allowed off).
+func (c *checker) smtp(s SMTP) {
+	c.enum("smtp.tls", s.TLS, "starttls", "implicit", "none")
+
+	if !s.Enabled() {
+		return
+	}
+
+	if net.ParseIP(s.Host) == nil && !isHostname(s.Host) {
+		c.fail("smtp.host", CodeInvalidValue, fmt.Sprintf("invalid host %q", s.Host))
+	}
+
+	if s.Port < 1 || s.Port > 65535 {
+		c.fail("smtp.port", CodeInvalidValue, fmt.Sprintf("invalid value %d: want 1..65535", s.Port))
+	}
+
+	if s.TLS == "none" && !s.AllowInsecure {
+		c.fail("smtp.tls", CodeInvalidValue, "smtp.tls = none sends mail in clear: set smtp.allow_insecure = true to allow it")
+	}
+
+	switch a, err := mail.ParseAddress(s.From); {
+	case s.From == "":
+		c.fail("smtp.from", CodeRequired, "smtp.from is required with smtp.host")
+	case err != nil || a.Address == "":
+		c.fail("smtp.from", CodeInvalidValue, fmt.Sprintf("invalid address %q", s.From))
+	}
 }
 
 // cidrs checks a list of CIDR prefixes (for example "10.0.0.0/8").

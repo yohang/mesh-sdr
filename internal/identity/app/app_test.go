@@ -113,7 +113,8 @@ func newEnv(t *testing.T, ipLimiter app.IPLimiter) *env {
 		IPLimiter: ipLimiter, Unknown: e.unknown, Refusals: memory.NewRefusalGate(100), SessionPolicies: app.DefaultSessionPolicies(), Logger: logger,
 	})
 	e.admin = app.NewUserAdmin(app.UserAdminDeps{
-		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: a, Hasher: e.hasher, IDs: ids, Now: c.Now,
+		Pending: e.pending(),
+		Users:   e.users, Sessions: e.sessions, Audit: e.audit, Tx: a, Hasher: e.hasher, IDs: ids, Now: c.Now,
 		Policy: app.NewPolicies(nil, nil), Logger: logger,
 	})
 
@@ -755,4 +756,9 @@ func TestAuditPurger(t *testing.T) {
 	if left, _ := e.audit.Recent(ctx, 10); len(left) != 3 {
 		t.Errorf("an empty purge was recorded: %d entries", len(left))
 	}
+}
+
+// pending invalidates a user's reset and e-mail links.
+func (e *env) pending() app.PendingLinks {
+	return app.PendingLinks{Resets: sqlite.NewPasswordResets(e.db), Emails: sqlite.NewEmailChanges(e.db)}
 }

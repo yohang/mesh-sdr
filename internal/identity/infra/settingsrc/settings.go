@@ -1,5 +1,6 @@
 // Package settingsrc reads the identity policies from the settings store
-// (ADR 0010): session lifetimes, login throttling and retention. Values are
+// (ADR 0010): session lifetimes, login throttling, retention, the password
+// policy, the invitation and reset link lifetimes and the listen policy. Values are
 // read on every use, so a saved change applies at once. The store validates
 // them (bounds and checks across keys); invalid combinations fall back to
 // the domain defaults.
@@ -7,6 +8,7 @@ package settingsrc
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/app"
@@ -26,6 +28,9 @@ const (
 	KeyRetentionSession = "retention.sessions"
 	KeyRetentionAudit   = "retention.audit_log"
 	KeyPasswordMin      = "auth.password_min_length"
+	KeyInvitationTTL    = "invitations.ttl_hours"
+	KeyPasswordResetTTL = "password_reset.ttl_minutes"
+	KeyListenPolicy     = "listen_policy"
 )
 
 // Default login rate per client address (TECHNICAL_SPEC §5.12): 5 per
@@ -40,13 +45,17 @@ const minAuditRetention = 30 * 24 * time.Hour
 
 // Values reads the current effective settings.
 type Values interface {
+	String(key string) string
 	Int(key string) int
 	Duration(key string) time.Duration
 	Rate(key string) (int, time.Duration)
 }
 
 // Policies adapts the settings store to the identity ports.
-type Policies struct{ values Values }
+type Policies struct {
+	values Values
+	logger *slog.Logger
+}
 
 var (
 	_ app.SessionPolicies = Policies{}
@@ -55,7 +64,9 @@ var (
 )
 
 // New returns the adapter.
-func New(values Values) Policies { return Policies{values: values} }
+func New(values Values, logger *slog.Logger) Policies {
+	return Policies{values: values, logger: logger}
+}
 
 // SessionPolicy implements app.SessionPolicies.
 func (p Policies) SessionPolicy() domain.SessionPolicy {
@@ -104,4 +115,45 @@ func (p Policies) PasswordMinLength(context.Context) int {
 	}
 
 	return domain.DefaultPasswordMinLength
+}
+
+// Default link lifetimes, used when the setting is unavailable (ADR 0011).
+const (
+	defaultInvitationTTL    = 7 * 24 * time.Hour
+	defaultPasswordResetTTL = 30 * time.Minute
+)
+
+// InvitationTTL implements app.Settings (invitations.ttl_hours).
+func (p Policies) InvitationTTL(context.Context) time.Duration {
+	if h := p.values.Int(KeyInvitationTTL); h > 0 {
+		return time.Duration(h) * time.Hour
+	}
+
+	return defaultInvitationTTL
+}
+
+// PasswordResetTTL implements app.Settings (password_reset.ttl_minutes).
+func (p Policies) PasswordResetTTL(context.Context) time.Duration {
+	if m := p.values.Int(KeyPasswordResetTTL); m > 0 {
+		return time.Duration(m) * time.Minute
+	}
+
+	return defaultPasswordResetTTL
+}
+
+// ListenPolicy implements app.Settings (listen_policy). An unavailable or
+// invalid value fails closed: registered, so that a settings read error
+// never grants listen scopes to anonymous callers.
+func (p Policies) ListenPolicy(ctx context.Context) domain.ListenPolicy {
+	raw := p.values.String(KeyListenPolicy)
+
+	lp, err := domain.ParseListenPolicy(raw)
+	if err != nil {
+		p.logger.WarnContext(ctx, "listen policy unavailable or invalid, falling back to registered",
+			slog.String("key", KeyListenPolicy), slog.String("value", raw), slog.Any("error", err))
+
+		return domain.ListenRegistered
+	}
+
+	return lp
 }

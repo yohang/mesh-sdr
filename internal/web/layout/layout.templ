@@ -41,8 +41,9 @@ templ Document(s Shell, p Page, content templ.Component) {
 			<header class="sticky top-0 z-10 border-b border-border bg-surface">
 				<div class="mx-auto flex h-14 max-w-screen-2xl items-center gap-4 px-4">
 					<a href="/" class="font-semibold tracking-tight text-fg no-underline">{ s.SiteName }</a>
+					<div class="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1">
 					if len(s.Nav) > 0 {
-						<nav aria-label="Main" class="ml-auto">
+						<nav aria-label="Main">
 							<ul class="flex gap-4">
 								for _, l := range s.Nav {
 									<li>
@@ -59,6 +60,8 @@ templ Document(s Shell, p Page, content templ.Component) {
 							</ul>
 						</nav>
 					}
+						@userMenu(s.User)
+					</div>
 				</div>
 			</header>
 			@Main(p, content)
@@ -74,6 +77,26 @@ templ Document(s Shell, p Page, content templ.Component) {
 			<div id="msdr-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 		</body>
 	</html>
+}
+
+// userMenu is the account area of the top bar (UI-010 slot): a discreet
+// sign-in link for anonymous visitors (ACC-001), otherwise the user's name,
+// the account and admin links and sign out. Sign out is a POST (CSRF
+// header from the shell), answered with a full page load.
+templ userMenu(u *User) {
+	<nav class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm" aria-label="Account">
+		if u == nil {
+			<a href="/login" class="text-fg-muted">Sign in</a>
+		} else {
+			<span class="font-medium">{ u.Name }</span>
+			for _, l := range u.Links {
+				<a href={ templ.URL(l.Href) }>{ l.Label }</a>
+			}
+			<form method="post" action="/logout" class="inline">
+				<button type="submit" class="underline">Sign out</button>
+			</form>
+		}
+	</nav>
 }
 
 // Main is the region swapped by boosted navigation. It carries the page

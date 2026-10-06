@@ -171,3 +171,26 @@ func TestDynamicIPLimiter(t *testing.T) {
 		t.Error("attempt refused after the rate was raised")
 	}
 }
+
+func TestKeyLimiter(t *testing.T) {
+	l := NewKeyLimiter(time.Hour, 2, 10)
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+
+	for i := range 2 {
+		if ok, _ := l.Allow("alice", now); !ok {
+			t.Fatalf("attempt %d refused", i)
+		}
+	}
+
+	if ok, wait := l.Allow("alice", now); ok || wait <= 0 {
+		t.Error("third attempt allowed")
+	}
+
+	if ok, _ := l.Allow("bob", now); !ok {
+		t.Error("another key refused")
+	}
+
+	if ok, _ := l.Allow("alice", now.Add(time.Hour)); !ok {
+		t.Error("refill missing")
+	}
+}

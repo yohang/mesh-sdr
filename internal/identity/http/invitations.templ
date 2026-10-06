@@ -1,0 +1,211 @@
+package http
+
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/identity/domain"
+)
+
+func invitationTarget(i *domain.Invitation) string {
+	s := i.Role().String()
+	if !i.Device().IsZero() {
+		s += " on " + i.Device().String()
+	}
+
+	return s
+}
+
+// invitationsPage is Admin › Invitations (ACC-002, FEATURE_SPEC §10.4):
+// the creation form, the link of a new invitation (shown once), the list
+// and the mail state.
+templ invitationsPage(v invitationsView) {
+	<section class="flex w-full max-w-4xl flex-col gap-6" aria-labelledby="invitations-title">
+		<h1 id="invitations-title" class="text-2xl font-bold">Invitations</h1>
+		@noticeView("invitations-notice", v.Notice)
+		if v.MailEnabled {
+			<div class="flex flex-wrap items-center gap-3">
+				<p>Mail configured: invitations with an address are sent by e-mail.</p>
+				<form method="post" action="/admin/invitations/test-mail">
+					<button class="rounded border px-2 py-0.5 text-sm" type="submit">Send a test e-mail to myself</button>
+				</form>
+			</div>
+		} else {
+			<p>Mail not configured: invitations are copy-link only.</p>
+		}
+		if v.Created != nil {
+			<section class="flex flex-col gap-2 rounded border p-3" aria-labelledby="invitation-created-title">
+				<h2 id="invitation-created-title" class="text-lg font-semibold">Invitation created</h2>
+				if v.Created.Mailed {
+					<p role="status">The link was e-mailed to { v.Created.Invitation.Email().String() }. You can also copy it below.</p>
+				} else {
+					<p role="status">Copy this link now and send it to the invitee: it is shown only once.</p>
+				}
+				<label class="flex flex-col gap-1">
+					<span>Invitation link</span>
+					<input class="rounded border px-2 py-1 font-mono text-sm" type="text" readonly value={ v.Created.Link }/>
+				</label>
+				<p class="text-sm">It works once, until { when(v.Created.Invitation.ExpiresAt()) }.</p>
+			</section>
+		}
+		<section class="flex flex-col gap-3" aria-labelledby="invitation-new-title">
+			<h2 id="invitation-new-title" class="text-xl font-semibold">New invitation</h2>
+			<form class="flex flex-col gap-3" method="post" action="/admin/invitations">
+				<label class="flex flex-col gap-1">
+					<span>Role</span>
+					<select class="rounded border px-2 py-1" name="role">
+						<option value="listener" selected?={ v.Form.Role == "listener" }>Listener</option>
+						<option value="operator" selected?={ v.Form.Role == "operator" }>Operator</option>
+						<option value="admin" selected?={ v.Form.Role == "admin" }>Admin</option>
+					</select>
+				</label>
+				<label class="flex flex-col gap-1">
+					<span>Device scope of an operator (optional, device id)</span>
+					<input class="rounded border px-2 py-1" type="text" name="device_id" value={ v.Form.Device } maxlength="64"/>
+				</label>
+				<label class="flex flex-col gap-1">
+					<span>E-mail address (optional)</span>
+					<input class="rounded border px-2 py-1" type="email" name="email" value={ v.Form.Email } autocomplete="off"/>
+				</label>
+				<label class="flex flex-col gap-1">
+					<span>Valid for (days, 1 to 30; empty: { strconv.Itoa(v.DefaultDays) })</span>
+					<input class="rounded border px-2 py-1" type="number" name="days" min="1" max="30" value={ v.Form.Days }/>
+				</label>
+				<button class="self-start rounded border px-3 py-1 font-semibold" type="submit">Create invitation</button>
+			</form>
+		</section>
+		<section class="flex flex-col gap-3" aria-labelledby="invitation-list-title">
+			<h2 id="invitation-list-title" class="text-xl font-semibold">All invitations</h2>
+			if len(v.List) == 0 {
+				<p>No invitations yet.</p>
+			} else {
+				<div class="overflow-x-auto">
+					<table class="w-full text-left text-sm">
+						<thead>
+							<tr><th scope="col">Role</th><th scope="col">E-mail</th><th scope="col">State</th><th scope="col">Created</th><th scope="col">Expires</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
+						</thead>
+						<tbody>
+							for _, i := range v.List {
+								<tr>
+									<td>{ invitationTarget(i) }</td>
+									<td>{ i.Email().String() }</td>
+									<td>{ string(i.StateAt(v.Now)) }</td>
+									<td>{ when(i.CreatedAt()) }</td>
+									<td>{ when(i.ExpiresAt()) }</td>
+									<td>
+										if i.StateAt(v.Now) == domain.InvitationPending {
+											<form method="post" action={ templ.SafeURL("/admin/invitations/" + i.ID().String() + "/revoke") }>
+												<button class="rounded border px-2 py-0.5" type="submit" aria-label={ "Revoke the " + invitationTarget(i) + " invitation created " + when(i.CreatedAt()) }>Revoke</button>
+											</form>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			}
+		</section>
+	</section>
+}
+
+// invitePage is the acceptance page (/invite/{token}): the token moves
+// from the address bar into a hidden field (token-url.js, SR-07).
+templ invitePage(f acceptForm) {
+	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="invite-title" data-replace-url="/invite">
+		<h1 id="invite-title" class="text-2xl font-bold">Create your account</h1>
+		<p>You are invited with the <strong>{ f.Role }</strong> role. See the <a href="/policy">usage policy</a>.</p>
+		@acceptFormView(f)
+	</section>
+}
+
+templ acceptFormView(f acceptForm) {
+	<form id="invite-form" class="flex flex-col gap-3" method="post" action="/invite" hx-post="/invite" hx-target="this" hx-swap="outerHTML">
+		if f.Error != "" {
+			<p id="invite-error" class="font-semibold" role="alert">{ f.Error }</p>
+		}
+		<input type="hidden" name="token" value={ f.Token }/>
+		<input type="hidden" name="role" value={ f.Role }/>
+		<input type="hidden" name="invited_email" value={ f.Email }/>
+		if f.Email != "" {
+			<p>E-mail: <strong>{ f.Email }</strong></p>
+		} else {
+			<label class="flex flex-col gap-1">
+				<span>E-mail (optional, to reset a forgotten password)</span>
+				<input
+					class="rounded border px-2 py-1"
+					type="email"
+					name="email"
+					value={ f.OwnEmail }
+					autocomplete="email"
+					if f.Field == "email" {
+						aria-describedby="invite-error"
+						aria-invalid="true"
+					}
+				/>
+			</label>
+		}
+		<label class="flex flex-col gap-1">
+			<span>Username</span>
+			<input
+				class="rounded border px-2 py-1"
+				type="text"
+				name="username"
+				value={ f.Username }
+				autocomplete="username"
+				autocapitalize="none"
+				spellcheck="false"
+				required
+				if f.Field == "username" {
+					aria-describedby="invite-error"
+					aria-invalid="true"
+				}
+			/>
+		</label>
+		<label class="flex flex-col gap-1">
+			<span>Display name (optional)</span>
+			<input
+				class="rounded border px-2 py-1"
+				type="text"
+				name="display_name"
+				value={ f.DisplayName }
+				autocomplete="nickname"
+				maxlength="64"
+				if f.Field == "display_name" {
+					aria-describedby="invite-error"
+					aria-invalid="true"
+				}
+			/>
+		</label>
+		<label class="flex flex-col gap-1">
+			<span>Password</span>
+			<input
+				class="rounded border px-2 py-1"
+				type="password"
+				name="password"
+				autocomplete="new-password"
+				minlength={ strconv.Itoa(f.MinLength) }
+				maxlength="256"
+				required
+				if f.Field == "password" {
+					aria-describedby="invite-rules invite-error"
+					aria-invalid="true"
+				} else {
+					aria-describedby="invite-rules"
+				}
+			/>
+		</label>
+		<p id="invite-rules" class="text-sm">At least { strconv.Itoa(f.MinLength) } characters. Common passwords are refused.</p>
+		<label class="flex flex-col gap-1">
+			<span>Repeat the password</span>
+			<input class="rounded border px-2 py-1" type="password" name="confirm_password" autocomplete="new-password" required/>
+		</label>
+		<button class="rounded border px-3 py-1 font-semibold" type="submit">Create account</button>
+	</form>
+}
+
+templ inviteMessage(msg string) {
+	<section class="mx-auto flex w-full max-w-prose flex-col gap-4 p-4" aria-labelledby="invite-title">
+		<h1 id="invite-title" class="text-2xl font-bold">Invitation</h1>
+		<p role="alert">{ msg }</p>
+	</section>
+}

@@ -37,6 +37,9 @@ func AnonymousActor(ip netip.Addr) Actor { return Actor{kind: ActorAnonymous, ip
 // CLIActor returns the operator using the command line on the hub host.
 func CLIActor() Actor { return Actor{kind: ActorCLI} }
 
+// NodeActor is a node, identified by its address in audit entries.
+func NodeActor(ip netip.Addr) Actor { return Actor{kind: ActorNode, ip: canonicalIP(ip)} }
+
 // SystemActor returns the hub itself (jobs).
 func SystemActor() Actor { return Actor{kind: ActorSystem} }
 
@@ -71,6 +74,16 @@ const (
 	ActionUserPasswordReset = "user.password.reset"
 	ActionUserDisable       = "user.disable"
 	ActionUserEnable        = "user.enable"
+	ActionUserRoleUpdate    = "user.role.update"
+	ActionUserUpdate        = "user.update"
+	ActionEmailChange       = "user.email.change"
+	ActionInvitationCreate  = "invitation.create"
+	ActionInvitationRevoke  = "invitation.revoke"
+	ActionInvitationRedeem  = "invitation.redeem"
+	ActionResetRequest      = "auth.password_reset.request"
+	ActionResetComplete     = "auth.password_reset.complete"
+	ActionUserDelete        = "user.delete"
+	ActionUserExport        = "user.export"
 )
 
 var actionPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)

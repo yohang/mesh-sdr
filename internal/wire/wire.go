@@ -22,16 +22,21 @@ import (
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/http/api"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/keyring"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/mail"
 	"github.com/yohang/mesh-sdr/internal/settings"
 	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shell"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 func component(logger *slog.Logger, name string) *slog.Logger {
@@ -144,7 +149,45 @@ func (p *Process) Run(ctx context.Context) error {
 
 // identityDeps returns the dependencies of the identity module.
 func identityDeps(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) identity.Deps {
-	return identity.Deps{Config: cfg, Logger: logger, DB: adapter, IDs: shared.NewUUIDv7Generator(), Now: time.Now}
+	return identity.Deps{
+		Config: cfg, Logger: logger, DB: adapter, IDs: shared.NewUUIDv7Generator(), Now: time.Now,
+		Erasers: []identityapp.UserEraser{connectionEraser{gridsqlite.NewConnectionRepository(adapter)}},
+	}
+}
+
+// connectionEraser removes a deleted user from the grid presence registry
+// (SR-64).
+type connectionEraser struct {
+	repo *gridsqlite.ConnectionRepository
+}
+
+func (c connectionEraser) EraseUser(ctx context.Context, id identitydomain.UserID) error {
+	u, err := shared.UUIDFromBytes(id.Bytes())
+	if err != nil {
+		return err
+	}
+
+	return c.repo.EraseUser(ctx, u)
+}
+
+// mailQueue returns the outgoing mail queue, or nil when smtp.host is not
+// set.
+func mailQueue(cfg config.SMTP, logger *slog.Logger) *mail.Queue {
+	if !cfg.Enabled() {
+		logger.Info("mail is not configured (smtp.host): links are shown to copy, password reset by e-mail is off")
+
+		return nil
+	}
+
+	if cfg.TLS == string(mail.TLSNone) {
+		logger.Warn("smtp.tls = none: mail and SMTP credentials travel in clear; use this only with a local development relay",
+			slog.String("smtp_host", cfg.Host))
+	}
+
+	return mail.NewQueue(mail.NewSMTP(mail.SMTPConfig{
+		Host: cfg.Host, Port: cfg.Port, TLS: mail.TLSMode(cfg.TLS), Username: cfg.Username,
+		Password: cfg.Password.Reveal(), From: cfg.From,
+	}), component(logger, "mail.queue"))
 }
 
 // UserAdmin builds the user administration service of the hub CLI
@@ -172,6 +215,18 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	auditLog := identitysqlite.NewAuditLog(adapter)
 
+	// The top bar shows the signed-in user: the identity module, built
+	// after the shell (it renders its pages with the shell), fills it in.
+	var identityHTTP *identityhttp.Module
+
+	userOf := func(r *http.Request) *layout.User {
+		if identityHTTP == nil {
+			return nil
+		}
+
+		return identityHTTP.ShellUser(r)
+	}
+
 	settingsModule, err := settings.Wire(ctx, settings.Deps{
 		Config: cfg, Origins: origins, DB: adapter, Now: now, Logger: logger,
 		Audit: settingsAuditor{log: auditLog},
@@ -181,18 +236,31 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	}
 
 	viewer := &adminViewer{}
-	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, Viewer: viewer, Logger: logger})
+	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, Viewer: viewer, User: userOf, Logger: logger})
 
 	ideps := identityDeps(cfg, logger, adapter)
 	ideps.Settings = settingsModule.Store
 	ideps.AcceptsMultipart = api.AcceptsMultipart
+	ideps.Devices = gridDevices{g.devices}
+
+	var workers []func(context.Context)
+
+	if q := mailQueue(cfg.SMTP, logger); q != nil {
+		ideps.Mail = q
+		workers = append(workers, q.Run)
+	}
 
 	idm, err := identity.Wire(ctx, ideps, pages{shellModule.Renderer})
 	if err != nil {
 		return nil, nil, fmt.Errorf("identity: %w", err)
 	}
 
+	workers = append(workers, func(ctx context.Context) {
+		idm.RunKeyMaintenance(ctx, now, component(logger, "identity.infra.keyring"))
+	})
+
 	viewer.authz = idm.HTTP
+	identityHTTP = idm.HTTP
 
 	scheduler, retention, err := jobs(adapter, idm, settingsModule.Store, auditLog, logger)
 	if err != nil {
@@ -204,12 +272,17 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		shellModule.Renderer.Error, component(logger, "files.http"))
 
 	apiServer := api.Server{
-		HealthHandlers:    api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
-		AuthHandlers:      api.NewAuthHandlers(idm.HTTP),
-		GridHandlers:      api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
-		SettingsHandlers:  api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
-		RetentionHandlers: api.NewRetentionHandlers(retention, settingsActor),
-		BrandingHandlers:  api.NewBrandingHandlers(images, settingsActor),
+		HealthHandlers:     api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
+		AuthHandlers:       api.NewAuthHandlers(idm.HTTP),
+		GridHandlers:       api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
+		SettingsHandlers:   api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
+		RetentionHandlers:  api.NewRetentionHandlers(retention, settingsActor),
+		BrandingHandlers:   api.NewBrandingHandlers(images, settingsActor),
+		AccountHandlers:    api.NewAccountHandlers(idm.HTTP, idm.Accounts, idm.Profile),
+		InvitationHandlers: api.NewInvitationHandlers(idm.HTTP, idm.HTTP, idm.Invitations),
+		ResetHandlers:      api.NewResetHandlers(idm.HTTP, idm.Resets),
+		AuditHandlers:      api.NewAuditHandlers(idm.Audit),
+		TokenHandlers:      api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
 	}
 
 	router := httpserver.NewRouter(
@@ -240,7 +313,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		server:   httpserver.NewServer(cfg.Hub.Listen, router),
 		logger:   component(logger, "http.server"),
 		startup:  g.startup,
-		workers:  append([]func(context.Context){scheduler.Run}, g.workers...),
+		workers:  append(append(workers, scheduler.Run), g.workers...),
 		setupURL: setupURL,
 	}, g, nil
 }
@@ -275,4 +348,34 @@ func Node(cfg config.Node, logger *slog.Logger, now time.Time, opts ...NodeOptio
 	}
 
 	return &Process{addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server")}, nil
+}
+
+// gridDevices adapts the grid device registry to the token issuer.
+type gridDevices struct{ devices *gridapp.Devices }
+
+func (g gridDevices) NodeDevices(ctx context.Context, nodeID string) ([]identityapp.NodeDevice, error) {
+	all, err := g.devices.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []identityapp.NodeDevice
+
+	for _, d := range all {
+		if d.Node().String() != nodeID || !d.Flags().Enabled {
+			continue
+		}
+
+		out = append(out, identityapp.NodeDevice{
+			ID: d.ID().String(), ListenPolicy: identitydomain.ListenPolicy(d.Flags().ListenPolicy),
+			OperatorCanRetune: d.Flags().OperatorCanRetune,
+		})
+	}
+
+	return out, nil
+}
+
+// TokenKeyring opens the token signing keyring (meshsdr hub keys …).
+func TokenKeyring(cfg config.Hub, now time.Time) (*keyring.Keyring, error) {
+	return identity.Keyring(cfg, now)
 }

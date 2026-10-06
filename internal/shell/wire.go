@@ -4,11 +4,13 @@ package shell
 
 import (
 	"log/slog"
+	"net/http"
 
 	"github.com/yohang/mesh-sdr/internal/shell/app"
 	shellhttp "github.com/yohang/mesh-sdr/internal/shell/http"
 	"github.com/yohang/mesh-sdr/internal/shell/infra"
 	"github.com/yohang/mesh-sdr/internal/web"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
@@ -19,6 +21,9 @@ type Deps struct {
 	// Viewer tells what the visitor may open (nil: no navigation).
 	Viewer shellhttp.Viewer
 	Logger *slog.Logger
+	// User returns the signed-in user of a request for the top bar (nil:
+	// anonymous). Optional.
+	User func(r *http.Request) *layout.User
 }
 
 // Module is the wired shell module.
@@ -37,7 +42,7 @@ func Wire(d Deps) Module {
 	settings := infra.NewStoreSettings(d.Settings)
 	lookAndFeel := app.NewLookAndFeel(settings, component("shell.app.look_and_feel"))
 	policy := app.NewPolicy(settings, component("shell.app.policy"))
-	source := shellhttp.NewShellSource(lookAndFeel, d.Viewer)
+	source := shellhttp.NewShellSource(lookAndFeel, d.Viewer, d.User)
 	rd := render.New(source, component("web.render"))
 
 	return Module{

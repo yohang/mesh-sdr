@@ -46,6 +46,10 @@ type User struct {
 	version            int
 	identities         []Identity
 	grants             []RoleGrant
+	// grantedBy and grantedAt describe the last grant change, for the
+	// repository (`user_roles.granted_by`, `granted_at`).
+	grantedBy UserID
+	grantedAt time.Time
 }
 
 // NewLocalUser is the input of NewLocalUser.
@@ -311,6 +315,105 @@ func (u *User) ClearLoginFailures(now time.Time) {
 	u.lockedUntil = time.Time{}
 	u.touch(now)
 }
+
+// CompleteReset sets the password chosen through a reset link (ACC-003):
+// it clears must_change_password and the login throttling, and confirms
+// the address the link was e-mailed to (sentTo) when it is still the
+// account's address; a link shown to an admin (zero sentTo) confirms
+// nothing.
+func (u *User) CompleteReset(h PasswordHash, sentTo Email, now time.Time) error {
+	if err := u.ResetPassword(h, false, now); err != nil {
+		return err
+	}
+
+	if !sentTo.IsZero() && sentTo.Key() == u.email.Key() && u.emailVerifiedAt.IsZero() {
+		u.emailVerifiedAt = now.UTC().Truncate(time.Millisecond)
+	}
+
+	return nil
+}
+
+// SetDisplayName changes the display name (zero removes it). It returns
+// whether it changed.
+func (u *User) SetDisplayName(d DisplayName, now time.Time) bool {
+	if d == u.displayName {
+		return false
+	}
+
+	u.displayName = d
+	u.touch(now)
+
+	return true
+}
+
+// SetEmail changes the e-mail address (zero removes it); verified tells
+// that its owner proved it (invitation, confirmation link). It returns
+// whether it changed.
+func (u *User) SetEmail(e Email, verified bool, now time.Time) bool {
+	same := e.Key() == u.email.Key() && e.String() == u.email.String()
+	if same && (!verified || !u.emailVerifiedAt.IsZero()) {
+		return false
+	}
+
+	if !same {
+		u.emailVerifiedAt = time.Time{}
+	}
+
+	u.email = e
+	if verified && !e.IsZero() && u.emailVerifiedAt.IsZero() {
+		u.emailVerifiedAt = now.UTC().Truncate(time.Millisecond)
+	}
+
+	u.touch(now)
+
+	return true
+}
+
+// IsAdmin reports whether the user holds the global admin role.
+func (u *User) IsAdmin() bool { return u.Role() == RoleAdmin }
+
+// ReplaceGrants sets the role grants (listener stays implicit), granted by
+// an admin (zero: the CLI). It returns whether they changed: every change
+// is a privilege change, and the caller revokes the user's sessions
+// (ACC-006, SR-01).
+func (u *User) ReplaceGrants(grants []RoleGrant, by UserID, now time.Time) bool {
+	next := make([]RoleGrant, 0, len(grants))
+
+	for _, g := range dedupGrants(grants) {
+		if g.role > RoleListener {
+			next = append(next, g)
+		}
+	}
+
+	if sameGrants(u.grants, next) {
+		return false
+	}
+
+	u.grants = next
+	u.grantedBy = by
+	u.grantedAt = now.UTC().Truncate(time.Millisecond)
+	u.touch(now)
+
+	return true
+}
+
+func sameGrants(a, b []RoleGrant) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for _, g := range a {
+		if !slices.Contains(b, g) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// GrantedBy returns who changed the grants last in this aggregate's life
+// and when (zero values when they did not change).
+func (u *User) GrantedBy() (UserID, time.Time) { return u.grantedBy, u.grantedAt }
 
 // Disable disables the account. The caller revokes its sessions. It
 // returns false when the account was already disabled.
