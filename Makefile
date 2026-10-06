@@ -6,6 +6,7 @@ export GID := $(shell id -g)
 
 COMPOSE ?= docker compose
 RUN     := $(COMPOSE) run --rm --no-deps app
+A11Y    := $(COMPOSE) -f .infra/a11y/compose.yaml
 
 HTMX_VERSION ?= 4.0.0
 IMAGE        ?= mesh-sdr
@@ -58,6 +59,11 @@ lint: generate ## Run golangci-lint
 .PHONY: test
 test: generate ## Run tests
 	$(RUN) go test ./...
+
+.PHONY: a11y
+a11y: ## Run the accessibility checks (axe-core, CI-only container) against the production image
+	$(A11Y) up -d --build --wait hub
+	$(A11Y) run --rm --build --no-deps a11y; status=$$?; $(A11Y) down -v; exit $$status
 
 .PHONY: migrate
 migrate: generate ## Run hub migrations (cmd=up|down|status, default up)

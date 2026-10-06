@@ -1,0 +1,39 @@
+# Accessibility job: the production image of the hub, migrated, checked by
+# the axe-core container. Run from the repository root (make a11y):
+#   docker compose -f .infra/a11y/compose.yaml -p meshsdr-a11y up --build \
+#     --abort-on-container-exit --exit-code-from a11y
+name: meshsdr-a11y
+
+x-hub: &hub
+  build:
+    context: ../..
+    dockerfile: .infra/docker/Dockerfile
+    target: prod
+  image: meshsdr-a11y-hub
+  environment:
+    MESHSDR_HUB__URL: http://hub:8073
+    MESHSDR_HUB__ALLOW_INSECURE_URL: "true"
+  volumes:
+    - data:/var/lib/meshsdr
+
+services:
+  migrate:
+    <<: *hub
+    command: ["hub", "migrate", "up"]
+
+  hub:
+    <<: *hub
+    command: ["hub"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  a11y:
+    build: .
+    environment:
+      BASE_URL: http://hub:8073
+    depends_on:
+      - hub
+
+volumes:
+  data:

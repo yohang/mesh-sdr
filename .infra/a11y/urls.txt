@@ -1,0 +1,5 @@
+# Pages checked by the accessibility job: <path> <expected status>.
+# Every feature adds its pages here (UI-009 definition of done).
+/ 200
+/policy 200
+/no-such-page 404

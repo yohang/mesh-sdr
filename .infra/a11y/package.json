@@ -1,0 +1,10 @@
+{
+  "name": "meshsdr-a11y",
+  "private": true,
+  "description": "WCAG 2.1 AA checks (axe-core) of the running hub. CI only: never part of the app or dev image.",
+  "type": "module",
+  "dependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "playwright": "1.63.0"
+  }
+}
