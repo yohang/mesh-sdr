@@ -146,13 +146,8 @@ func (s *Server) Revoke(r ctl.Revocations) {
 	}
 
 	s.mu.Lock()
-	for _, v := range r.Sessions {
-		s.revSess[v] = now
-	}
-
-	for _, v := range r.Users {
-		s.revUsers[v] = now
-	}
+	keep(s.revSess, r.Sessions)
+	keep(s.revUsers, r.Users)
 
 	s.forgetRevocations(now)
 
@@ -229,6 +224,17 @@ func (s *Server) revokedLocked(c token.Claims) bool {
 	}
 
 	return false
+}
+
+// keep records revocations with the hub time of each, never moving an
+// entry to a later time.
+func keep(known map[string]time.Time, revoked []ctl.Revoked) {
+	for _, r := range revoked {
+		at := time.UnixMilli(r.At)
+		if first, ok := known[r.ID]; !ok || at.Before(first) {
+			known[r.ID] = at
+		}
+	}
 }
 
 func originOf(issuer string) (string, error) {

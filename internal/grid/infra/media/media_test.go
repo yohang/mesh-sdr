@@ -344,7 +344,7 @@ func TestSession(t *testing.T) {
 	expectType(t, ws, rxv1.TypeAck)
 
 	// A revoked session is closed with 4403.
-	e.srv.Revoke(ctl.Revocations{Sessions: []string{token.SessionRef("s1")}})
+	e.srv.Revoke(ctl.Revocations{Sessions: []ctl.Revoked{{ID: token.SessionRef("s1"), At: time.Now().UnixMilli()}}})
 	expectClose(t, ws, websocket.StatusCode(rxv1.CloseForbidden))
 
 	// Its tokens are refused afterwards.

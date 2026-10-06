@@ -92,7 +92,7 @@ func TestMediaKeysOverControl(t *testing.T) {
 		return st == http.StatusSwitchingProtocols
 	})
 
-	e.g.manager.BroadcastRevocations(context.Background(), nil, []string{"u1"})
+	e.g.manager.BroadcastRevocations(context.Background(), time.Time{}, nil, []string{"u1"})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

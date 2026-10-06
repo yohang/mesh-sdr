@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
 	"sync"
 	"time"
 
@@ -60,20 +59,15 @@ type Manager struct {
 	links map[domain.NodeID]*link
 	wake  chan struct{}
 
-	revMu  sync.Mutex
-	recent []recentRevocation
+	revMu       sync.Mutex
+	revSessions map[string]time.Time
+	revUsers    map[string]time.Time
 }
 
 // RevocationMemory is how long revoked sessions and users are re-pushed to
 // nodes that (re)connect: longer than any access token lives (TTL ≤ 600 s
 // plus the 30 s leeway).
 const RevocationMemory = 15 * time.Minute
-
-type recentRevocation struct {
-	at       time.Time
-	sessions []string
-	users    []string
-}
 
 var _ app.RevocationBroadcaster = (*Manager)(nil)
 
@@ -129,7 +123,10 @@ func NewManager(o HubOptions) *Manager {
 		o.RenewalDue = pki.RenewalDue
 	}
 
-	return &Manager{o: o, links: map[domain.NodeID]*link{}, wake: make(chan struct{}, 1)}
+	return &Manager{
+		o: o, links: map[domain.NodeID]*link{}, wake: make(chan struct{}, 1),
+		revSessions: map[string]time.Time{}, revUsers: map[string]time.Time{},
+	}
 }
 
 var _ app.Links = (*Manager)(nil)
@@ -179,21 +176,22 @@ func (m *Manager) sessions() []*hubSession {
 	return out
 }
 
-// BroadcastRevocations implements app.RevocationBroadcaster: the revoked
-// sessions and users go to every open channel now, and to every channel
-// that opens within RevocationMemory.
-func (m *Manager) BroadcastRevocations(ctx context.Context, sessions, users []string) {
+// BroadcastRevocations implements app.RevocationBroadcaster: the sessions
+// and users revoked at (hub clock; zero means now) go to every open channel
+// now, and to every channel that opens within RevocationMemory. An entry
+// keeps its first revocation time: a later push never moves it.
+func (m *Manager) BroadcastRevocations(ctx context.Context, at time.Time, sessions, users []string) {
 	if len(sessions) == 0 && len(users) == 0 {
 		return
 	}
 
-	now := m.o.Now()
+	if at.IsZero() {
+		at = m.o.Now()
+	}
 
 	m.revMu.Lock()
-	m.recent = append(m.recent, recentRevocation{at: now, sessions: slices.Clone(sessions), users: slices.Clone(users)})
+	rev := ctl.Revocations{Sessions: remember(m.revSessions, sessions, at), Users: remember(m.revUsers, users, at), CertSerials: []string{}}
 	m.revMu.Unlock()
-
-	rev := ctl.Revocations{Sessions: nonNil(sessions), Users: nonNil(users), CertSerials: []string{}}
 
 	for _, s := range m.sessions() {
 		_ = send(s.conn, rxv1.TypeCtlRevocations, rxv1.CorrelationID{}, rev)
@@ -202,23 +200,47 @@ func (m *Manager) BroadcastRevocations(ctx context.Context, sessions, users []st
 	m.o.Logger.DebugContext(ctx, "revocations pushed to the nodes", slog.Int("sessions", len(sessions)), slog.Int("users", len(users)))
 }
 
+// remember records ids revoked at, keeping earlier times, and returns the
+// entries to push.
+func remember(known map[string]time.Time, ids []string, at time.Time) []ctl.Revoked {
+	out := make([]ctl.Revoked, 0, len(ids))
+
+	for _, id := range ids {
+		if first, ok := known[id]; !ok || at.Before(first) {
+			known[id] = at
+		}
+
+		out = append(out, ctl.Revoked{ID: id, At: known[id].UnixMilli()})
+	}
+
+	return out
+}
+
 // recentRevocations returns the sessions and users revoked within
-// RevocationMemory, forgetting older ones.
-func (m *Manager) recentRevocations() (sessions, users []string) {
+// RevocationMemory, with their revocation times, forgetting older ones.
+func (m *Manager) recentRevocations() (sessions, users []ctl.Revoked) {
 	cutoff := m.o.Now().Add(-RevocationMemory)
 
 	m.revMu.Lock()
 	defer m.revMu.Unlock()
 
-	m.recent = slices.DeleteFunc(m.recent, func(r recentRevocation) bool { return r.at.Before(cutoff) })
+	list := func(known map[string]time.Time) []ctl.Revoked {
+		out := []ctl.Revoked{}
 
-	sessions, users = []string{}, []string{}
-	for _, r := range m.recent {
-		sessions = append(sessions, r.sessions...)
-		users = append(users, r.users...)
+		for id, at := range known {
+			if at.Before(cutoff) {
+				delete(known, id)
+
+				continue
+			}
+
+			out = append(out, ctl.Revoked{ID: id, At: at.UnixMilli()})
+		}
+
+		return out
 	}
 
-	return sessions, users
+	return list(m.revSessions), list(m.revUsers)
 }
 
 func nonNil(s []string) []string {

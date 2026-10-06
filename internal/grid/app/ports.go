@@ -68,9 +68,10 @@ type TokenIssuer interface {
 }
 
 // RevocationBroadcaster pushes revoked sessions (token.SessionRef) and users
-// to every node, which close the matching media connections (§5.8).
+// to every node, which close the matching media connections and refuse the
+// tokens issued up to at (hub clock; zero means now) (§5.8).
 type RevocationBroadcaster interface {
-	BroadcastRevocations(ctx context.Context, sessions, users []string)
+	BroadcastRevocations(ctx context.Context, at time.Time, sessions, users []string)
 }
 
 // Timings are the grid durations that become DB settings later (ADR 0008

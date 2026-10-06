@@ -45,13 +45,21 @@ type KeysUpdate struct {
 	RevokedKids []string    `json:"revoked_kids"`
 }
 
+// Revoked is one revoked session or user, with the hub time of its
+// revocation in Unix milliseconds. Tokens issued (iat, hub clock) at or
+// before that time are refused; later ones (a new sign-in) are not.
+type Revoked struct {
+	ID string `json:"id"`
+	At int64  `json:"at"`
+}
+
 // Revocations lists revoked sessions (token.SessionRef of the session id),
 // users (user ids) and certificate serials (hub → node). The node closes the
 // media connections whose token matches within 1 s (§5.8).
 type Revocations struct {
-	Sessions    []string `json:"sessions"`
-	Users       []string `json:"users"`
-	CertSerials []string `json:"cert_serials"`
+	Sessions    []Revoked `json:"sessions"`
+	Users       []Revoked `json:"users"`
+	CertSerials []string  `json:"cert_serials"`
 }
 
 // CertRenew carries a renewed node certificate (hub → node): base64 standard
