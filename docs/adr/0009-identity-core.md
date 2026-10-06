@@ -102,7 +102,7 @@ There is no read API yet (ACC-010).
   - on error it returns the form fragment with the generic message (401, or 429);
   - on success it sends `HX-Redirect` to a safe `next` (same-origin path, no `//` or `\`, matching a route; otherwise `/`).
 - `POST /logout` ends the session.
-- Pages render through an injected `Pages` interface. The composition root passes a temporary adapter over the current layout, which the shell renderer (`internal/web/render`) replaces when the shell epic lands.
+- Pages render through an injected `Pages` interface, adapted in the composition root to the shell renderer (`internal/web/render`, ADR 0007): full page, or the form fragment for non-boosted htmx requests. `/login` answers GET and HEAD and is checked by the accessibility job.
 
 ### CLI (AUTH-008, AUTH-012, AUTH-013, AUTH-014, AUTH-015)
 
@@ -143,4 +143,4 @@ The spec is not edited. These inconsistencies were found and resolved as follows
 
 - AUTH-004 is only partly done: REST and HTML routes are covered, while `/api/ws` topics and node media messages come with their epics through the same `Authorize` and `CanListen` hooks.
 - AUTH-005's "close the WebSockets bound to the session" and AUTH-012's "stop token refresh" become effective with the WebSocket and access-token epics, because they read the revoked session.
-- The shell epic imports `static/js/csrf.js` and replaces the composition root's temporary `Pages` adapter with its renderer. The login page then renders inside the app shell.
+- The shell entry module (`static/js/shell.js`) imports `static/js/csrf.js`, so every page sends the CSRF header.
