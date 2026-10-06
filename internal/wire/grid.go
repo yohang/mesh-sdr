@@ -49,6 +49,7 @@ type hubGrid struct {
 	status     *app.Status
 	caps       *app.Capabilities
 	devices    *app.Devices
+	presence   *app.Presence
 	manager    *control.Manager
 	startup    []func(ctx context.Context) error
 	workers    []func(ctx context.Context)
@@ -157,6 +158,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 
 	gridLogger := component(logger, "grid.wire")
 	capRepo := gridsqlite.NewCapabilityRepository(adapter)
+	connRepo := gridsqlite.NewConnectionRepository(adapter)
 	g.devices = app.NewDevices(gridsqlite.NewDeviceRepository(adapter), audit, component(logger, "grid.app.devices"))
 
 	if ca != nil {
@@ -181,6 +183,13 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		g.control.Handle(rxv1.TypeDeviceState, g.devices.StateHandler())
 		g.status.Listen(g.devices.NodeStatusChanged)
 
+		g.presence = app.NewPresence(connRepo, g.tracker, timings, now, component(logger, "grid.app.presence"))
+		for _, t := range []rxv1.MessageType{rxv1.TypeConnectionOpened, rxv1.TypeConnectionHeart, rxv1.TypeConnectionClosed} {
+			g.control.Handle(t, g.presence.Handler())
+		}
+
+		g.control.OnBoot(g.presence.NodeRestarted)
+
 		enrollment := app.NewEnrollment(nodeRepo, adapter, enroll.NewHubClient(ca, now), audit, now,
 			5*time.Second, component(logger, "grid.app.enrollment"))
 		enrollment.Enrolled = func(context.Context, domain.NodeID) { g.manager.Wake() }
@@ -188,7 +197,10 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		g.workers = append(g.workers, enrollment.Run, g.manager.Run)
 	} else {
 		g.caps = app.NewCapabilities(capRepo, nodeRepo, nil, component(logger, "grid.app.capabilities"))
+		g.presence = app.NewPresence(connRepo, nil, timings, now, component(logger, "grid.app.presence"))
 	}
+
+	g.workers = append(g.workers, g.presence.Run)
 
 	g.startup = append(g.startup, func(ctx context.Context) error {
 		if ca == nil {
@@ -196,6 +208,10 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		} else {
 			gridLogger.InfoContext(ctx, "hub internal CA loaded",
 				slog.String("hub_id", hubID), slog.String("ca_fingerprint", pki.FormatFingerprint(ca.Fingerprint())))
+		}
+
+		if err := g.presence.CloseAtStart(ctx); err != nil {
+			return err
 		}
 
 		return g.nodes.SyncConfig(ctx, declared)

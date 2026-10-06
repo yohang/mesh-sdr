@@ -9,6 +9,8 @@ import (
 
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	idomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // NodeAdmin is the node registry seen by the REST API.
@@ -33,23 +35,34 @@ type DeviceRegistry interface {
 	Get(ctx context.Context, id string) (*domain.Device, error)
 }
 
+// ConnectionRegistry reads the presence registry.
+type ConnectionRegistry interface {
+	Count(ctx context.Context) (int, error)
+	List(ctx context.Context) ([]*domain.Connection, error)
+}
+
 // LoadHistory returns the recent heartbeats of a node.
 type LoadHistory interface {
 	Samples(id domain.NodeID) []gridapp.LoadSample
 }
 
 // GridHandlers serve the grid endpoints (nodes, devices, connections).
-// Access is enforced by the x-meshsdr-access policy of openapi.yaml.
+// Access is enforced by the x-meshsdr-access policy of openapi.yaml; authz
+// only decides what an anonymous-level operation shows to admins.
 type GridHandlers struct {
+	authz   Authorizer
 	nodes   NodeAdmin
 	history LoadHistory
 	caps    CapabilityReports
 	devices DeviceRegistry
+	conns   ConnectionRegistry
 }
 
 // NewGridHandlers returns the handlers.
-func NewGridHandlers(nodes NodeAdmin, history LoadHistory, caps CapabilityReports, devices DeviceRegistry) GridHandlers {
-	return GridHandlers{nodes: nodes, history: history, caps: caps, devices: devices}
+func NewGridHandlers(authz Authorizer, nodes NodeAdmin, history LoadHistory, caps CapabilityReports, devices DeviceRegistry,
+	conns ConnectionRegistry,
+) GridHandlers {
+	return GridHandlers{authz: authz, nodes: nodes, history: history, caps: caps, devices: devices, conns: conns}
 }
 
 func optString(s string) *string {
@@ -284,4 +297,50 @@ func (h GridHandlers) GetDevice(ctx context.Context, req GetDeviceRequestObject)
 	}
 
 	return GetDevice200JSONResponse(deviceDTO(d)), nil
+}
+
+func uuidPtr(u shared.UUID) *openapi_types.UUID {
+	if u.IsZero() {
+		return nil
+	}
+
+	var out openapi_types.UUID
+	copy(out[:], u.Bytes())
+
+	return &out
+}
+
+// ListConnections implements StrictServerInterface: the count for
+// everyone, the connections for admins (§6.10).
+func (h GridHandlers) ListConnections(ctx context.Context, _ ListConnectionsRequestObject) (ListConnectionsResponseObject, error) {
+	count, err := h.conns.Count(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	out := ListConnections200JSONResponse{Count: count}
+
+	if h.authz.Authorize(ctx, idomain.RoleAdmin) != nil {
+		return out, nil
+	}
+
+	conns, err := h.conns.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]Connection, 0, len(conns))
+
+	for _, c := range conns {
+		i := c.Info()
+		id := uuidPtr(i.ID)
+		items = append(items, Connection{
+			Id: *id, Kind: ConnectionKind(i.Kind), UserId: uuidPtr(i.UserID), NodeId: optString(i.NodeID),
+			DeviceId: optString(i.DeviceID), Mode: optString(i.Mode), Ip: i.IP, OpenedAt: c.OpenedAt(), LastHeartbeatAt: c.LastHeartbeat(),
+		})
+	}
+
+	out.Items = &items
+
+	return out, nil
 }

@@ -17,6 +17,8 @@ func TestRepositories(t *testing.T) {
 			Revocations: sqlite.NewRevocationRepository(a),
 			Cursors:     sqlite.NewCursorRepository(a),
 			Caps:        sqlite.NewCapabilityRepository(a),
+			Devices:     sqlite.NewDeviceRepository(a),
+			Conns:       sqlite.NewConnectionRepository(a),
 		}
 	})
 }

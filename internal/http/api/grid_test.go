@@ -55,8 +55,9 @@ func newServer(t *testing.T, auth api.Authorizer) *httptest.Server {
 	caps := gridapp.NewCapabilities(sqlite.NewCapabilityRepository(a), sqlite.NewNodeRepository(a), nil, discard)
 
 	srv := httptest.NewServer(api.NewHandler(api.Server{
-		GridHandlers: api.NewGridHandlers(nodes, gridapp.NewHistory(), caps,
-			gridapp.NewDevices(sqlite.NewDeviceRepository(a), gridinfra.NewLogAuditor(discard), discard)),
+		GridHandlers: api.NewGridHandlers(auth, nodes, gridapp.NewHistory(), caps,
+			gridapp.NewDevices(sqlite.NewDeviceRepository(a), gridinfra.NewLogAuditor(discard), discard),
+			gridapp.NewPresence(sqlite.NewConnectionRepository(a), nil, gridapp.DefaultTimings(), time.Now, discard)),
 	}, auth, discard))
 	t.Cleanup(srv.Close)
 
@@ -189,5 +190,21 @@ func TestNodesCRUD(t *testing.T) {
 
 	if status, out := call(t, srv, http.MethodGet, "/nodes/attic", nil); status != http.StatusNotFound || out["code"] != "node_not_found" {
 		t.Errorf("get deleted = %d %v", status, out)
+	}
+}
+
+func TestConnectionsCountIsPublic(t *testing.T) {
+	for _, tc := range []struct {
+		auth      roleAuthz
+		wantItems bool
+	}{{anonymous, false}, {listener, false}, {admin, true}} {
+		srv := newServer(t, tc.auth)
+
+		status, out := call(t, srv, http.MethodGet, "/connections", nil)
+		_, hasItems := out["items"]
+
+		if status != http.StatusOK || out["count"] != float64(0) || hasItems != tc.wantItems {
+			t.Errorf("%T: %d %v", tc.auth, status, out)
+		}
 	}
 }

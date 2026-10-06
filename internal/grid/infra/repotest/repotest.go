@@ -20,6 +20,8 @@ type Repos struct {
 	Revocations domain.RevocationRepository
 	Cursors     domain.EventCursorRepository
 	Caps        domain.CapabilityRepository
+	Devices     domain.DeviceRepository
+	Conns       domain.ConnectionRepository
 }
 
 // Factory returns the repositories on a fresh, migrated database.
@@ -33,6 +35,59 @@ func Run(t *testing.T, newRepos Factory) {
 	t.Run("revocations", func(t *testing.T) { testRevocations(t, newRepos(t)) })
 	t.Run("cursors", func(t *testing.T) { testCursors(t, newRepos(t)) })
 	t.Run("capabilities", func(t *testing.T) { testCapabilities(t, newRepos(t)) })
+	t.Run("devices", func(t *testing.T) { testDevices(t, newRepos(t)) })
+	t.Run("connections", func(t *testing.T) { testConnections(t, newRepos(t)) })
+}
+
+func testDevices(t *testing.T, r Repos) {
+	ctx := context.Background()
+	attic, garden := domain.MustNodeID("attic"), domain.MustNodeID("garden")
+
+	for _, id := range []domain.NodeID{attic, garden} {
+		if err := r.Nodes.Create(ctx, domain.NewNode(id, domain.MustNodeName("n"), domain.MustNodeURL("https://x:1"), t0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spec := domain.DeviceSpec{ID: domain.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 1, FreqMax: 2, SampleRates: []int64{48_000}}
+	hf := must(domain.NewReportedDevice(attic, spec, 0, t0))
+
+	if err := r.Devices.Save(ctx, hf); err != nil {
+		t.Fatal(err)
+	}
+
+	// The row of another node is never overwritten.
+	stolen := must(domain.NewReportedDevice(garden, spec, 3, t0))
+	if err := r.Devices.Save(ctx, stolen); err != nil {
+		t.Fatal(err)
+	}
+
+	got := must(r.Devices.Get(ctx, spec.ID))
+	if got.Node() != attic || got.Type() != "rtl_sdr" || got.SampleRates()[0] != 48_000 || !got.Flags().Enabled {
+		t.Errorf("device = %+v", got.Snapshot())
+	}
+
+	got.ApplyState(domain.StateRunning, "", nil, shared.UUID{}, t0)
+
+	if err := r.Devices.Save(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.Devices.SetNodeOffline(ctx, attic); err != nil {
+		t.Fatal(err)
+	}
+
+	if d := must(r.Devices.Get(ctx, spec.ID)); d.Online() {
+		t.Error("device still online")
+	}
+
+	if list := must(r.Devices.ListByNode(ctx, garden)); len(list) != 0 {
+		t.Errorf("garden devices = %d", len(list))
+	}
+
+	if list := must(r.Devices.List(ctx)); len(list) != 1 {
+		t.Errorf("devices = %d", len(list))
+	}
 }
 
 func testCapabilities(t *testing.T, r Repos) {

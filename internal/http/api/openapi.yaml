@@ -303,6 +303,21 @@ paths:
                 $ref: "#/components/schemas/Device"
         default:
           $ref: "#/components/responses/Problem"
+  /connections:
+    get:
+      operationId: listConnections
+      x-meshsdr-access: anonymous
+      summary: Presence registry. Anonymous callers get the count only; admins also get the connections.
+      tags: [grid]
+      responses:
+        "200":
+          description: Open connections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionList"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     NodeID:
@@ -313,6 +328,44 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    ConnectionList:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+        items:
+          type: array
+          description: Present for admins only.
+          items:
+            $ref: "#/components/schemas/Connection"
+    Connection:
+      type: object
+      required: [id, kind, ip, opened_at, last_heartbeat_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [events, media, map]
+        user_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+        device_id:
+          type: string
+        mode:
+          type: string
+        ip:
+          type: string
+        opened_at:
+          type: string
+          format: date-time
+        last_heartbeat_at:
+          type: string
+          format: date-time
     DeviceList:
       type: object
       required: [items]
