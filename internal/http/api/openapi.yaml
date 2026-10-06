@@ -266,6 +266,43 @@ paths:
           description: Probe requested; the new report arrives on the control channel
         default:
           $ref: "#/components/responses/Problem"
+  /devices:
+    get:
+      operationId: listDevices
+      x-meshsdr-access: admin
+      summary: Device registry, mirrored read-only from node configs (admin for now)
+      tags: [grid]
+      responses:
+        "200":
+          description: Devices ordered by node and config order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceList"
+        default:
+          $ref: "#/components/responses/Problem"
+  /devices/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"
+    get:
+      operationId: getDevice
+      x-meshsdr-access: admin
+      summary: One device of the registry (admin for now)
+      tags: [grid]
+      responses:
+        "200":
+          description: Device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     NodeID:
@@ -276,6 +313,69 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    DeviceList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Device"
+    Device:
+      type: object
+      required: [id, node_id, name, type, freq_min, freq_max, sample_rates, enabled, operator_can_retune, always_on, scheduler_enabled, online, runtime_state, runtime_state_at, sort_order, reported_at]
+      properties:
+        id:
+          type: string
+        node_id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        freq_min:
+          type: integer
+          format: int64
+        freq_max:
+          type: integer
+          format: int64
+        sample_rates:
+          type: array
+          items:
+            type: integer
+            format: int64
+        enabled:
+          type: boolean
+        listen_policy:
+          type: string
+          enum: [anonymous, registered]
+        operator_can_retune:
+          type: boolean
+        always_on:
+          type: boolean
+        scheduler_enabled:
+          type: boolean
+        online:
+          type: boolean
+        runtime_state:
+          type: string
+          enum: [unavailable, disabled, stopped, starting, running, retuning, stopping, retry_wait, failed]
+        runtime_state_at:
+          type: string
+          format: date-time
+        runtime_reason:
+          type: string
+        active_preset_id:
+          type: string
+          format: uuid
+        center_freq:
+          type: integer
+          format: int64
+        sort_order:
+          type: integer
+        reported_at:
+          type: string
+          format: date-time
     NodeCapabilities:
       type: object
       required: [node_id, reported_at, capabilities_hash, product_version, protocols, platform, document, capabilities]

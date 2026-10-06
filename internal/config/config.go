@@ -128,10 +128,31 @@ type Node struct {
 	SchemaVersion      int  `toml:"schema_version" env:"-" jsonschema:"required,enum=1,description=Config schema version. Required in every file."`
 	AllowInlineSecrets bool `toml:"allow_inline_secrets" env:"-" jsonschema:"description=Accept inline secret values in this file (startup warning). Applies only to the file that sets it."`
 
-	Node     NodeSection `toml:"node" envPrefix:"NODE__" jsonschema:"description=Node bootstrap."`
-	TLS      NodeTLS     `toml:"tls" envPrefix:"TLS__" jsonschema:"description=Node certificate for hub <-> node mTLS\\, written by meshsdr node enroll."`
-	HubTrust HubTrust    `toml:"hub_trust" envPrefix:"HUB_TRUST__" jsonschema:"description=Trust in the hub: CA\\, expected hub identity\\, enrollment token."`
-	Log      Log         `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
+	Node     NodeSection             `toml:"node" envPrefix:"NODE__" jsonschema:"description=Node bootstrap."`
+	TLS      NodeTLS                 `toml:"tls" envPrefix:"TLS__" jsonschema:"description=Node certificate for hub <-> node mTLS\\, written by meshsdr node enroll."`
+	HubTrust HubTrust                `toml:"hub_trust" envPrefix:"HUB_TRUST__" jsonschema:"description=Trust in the hub: CA\\, expected hub identity\\, enrollment token."`
+	Devices  map[string]DeviceConfig `toml:"devices" env:"-" jsonschema:"description=SDR devices of this node\\, keyed by device id (^[a-z0-9][a-z0-9_-]{0\\,62}$\\, unique across the hub). Mirrored read-only into the hub device registry. File-only (no env override)."`
+	Log      Log                     `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
+}
+
+// DeviceConfig is one [devices.<id>] table (TECHNICAL_SPEC §7.4). Driver
+// settings arrive with the device epic.
+type DeviceConfig struct {
+	Name              string    `toml:"name" env:"-" jsonschema:"description=Required. Display name."`
+	Type              string    `toml:"type" env:"-" jsonschema:"description=Required. Driver type\\, for example rtl_sdr or soapy:sdrplay."`
+	Enabled           *bool     `toml:"enabled" env:"-" jsonschema:"description=Whether the device is used (default true)."`
+	FreqRange         FreqRange `toml:"freq_range" env:"-" jsonschema:"description=Required. Tunable frequency range."`
+	SampleRates       []int64   `toml:"sample_rates" env:"-" jsonschema:"description=Required. Supported sample rates (S/s)."`
+	ListenPolicy      string    `toml:"listen_policy" env:"-" jsonschema:"enum=,enum=anonymous,enum=registered,description=Overrides the global listen policy for this device."`
+	OperatorCanRetune bool      `toml:"operator_can_retune" env:"-" jsonschema:"description=Operators may retune the device."`
+	AlwaysOn          bool      `toml:"always_on" env:"-" jsonschema:"description=Keep the device running without listeners."`
+	SchedulerEnabled  bool      `toml:"scheduler_enabled" env:"-" jsonschema:"description=The hub scheduler may switch presets on this device."`
+}
+
+// FreqRange is a frequency range.
+type FreqRange struct {
+	Min Frequency `toml:"min" env:"-" jsonschema:"description=Lowest tunable frequency."`
+	Max Frequency `toml:"max" env:"-" jsonschema:"description=Highest tunable frequency."`
 }
 
 // NodeTLS is the [tls] table of the node.

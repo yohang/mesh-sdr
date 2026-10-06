@@ -55,7 +55,8 @@ func newServer(t *testing.T, auth api.Authorizer) *httptest.Server {
 	caps := gridapp.NewCapabilities(sqlite.NewCapabilityRepository(a), sqlite.NewNodeRepository(a), nil, discard)
 
 	srv := httptest.NewServer(api.NewHandler(api.Server{
-		GridHandlers: api.NewGridHandlers(nodes, gridapp.NewHistory(), caps),
+		GridHandlers: api.NewGridHandlers(nodes, gridapp.NewHistory(), caps,
+			gridapp.NewDevices(sqlite.NewDeviceRepository(a), gridinfra.NewLogAuditor(discard), discard)),
 	}, auth, discard))
 	t.Cleanup(srv.Close)
 
@@ -109,6 +110,8 @@ func testNodesDenied(t *testing.T, srv *httptest.Server, wantStatus int, wantCod
 		{http.MethodPost, "/nodes/attic/enrollment-token"},
 		{http.MethodGet, "/nodes/attic/capabilities"},
 		{http.MethodPost, "/nodes/attic/capabilities/probe"},
+		{http.MethodGet, "/devices"},
+		{http.MethodGet, "/devices/hf"},
 	} {
 		body := map[string]any{"id": "attic", "url": "https://x:1", "version": 1}
 
@@ -170,6 +173,14 @@ func TestNodesCRUD(t *testing.T) {
 	status, out = call(t, srv, http.MethodGet, "/nodes", nil)
 	if items, _ := out["items"].([]any); status != http.StatusOK || len(items) != 1 {
 		t.Errorf("list = %d %v", status, out)
+	}
+
+	if status, out := call(t, srv, http.MethodGet, "/devices", nil); status != http.StatusOK || out["items"] == nil {
+		t.Errorf("devices = %d %v", status, out)
+	}
+
+	if status, out := call(t, srv, http.MethodGet, "/devices/hf", nil); status != http.StatusNotFound || out["code"] != "device_not_found" {
+		t.Errorf("unknown device = %d %v", status, out)
 	}
 
 	if status, _ := call(t, srv, http.MethodDelete, "/nodes/attic", nil); status != http.StatusNoContent {

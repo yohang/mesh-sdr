@@ -56,6 +56,33 @@ name = "Garden"
 		t.Errorf("origin of nodes.garden.name = %q", got)
 	}
 
+	devDir := writeFiles(t, map[string]string{"node.toml": `schema_version = 1
+[node]
+id = "attic"
+[devices.hf-sdrplay]
+name = "SDRplay RSPdx (HF)"
+type = "soapy:sdrplay"
+enabled = true
+listen_policy = "registered"
+operator_can_retune = true
+freq_range = { min = 1_000, max = "30MHz" }
+sample_rates = [500_000, 2_000_000]
+[devices.vhf]
+name = "VHF"
+type = "rtl_sdr"
+freq_range = { min = "24MHz", max = "1.766GHz" }
+sample_rates = [2_048_000]
+`})
+
+	node, _, err := LoadNode(Options{Dir: devDir, Env: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if d := node.Devices["hf-sdrplay"]; d.FreqRange.Max.Hz() != 30_000_000 || len(d.SampleRates) != 2 || !d.OperatorCanRetune || node.Devices["vhf"].Enabled != nil {
+		t.Errorf("devices = %+v", node.Devices)
+	}
+
 	tests := []struct {
 		name  string
 		role  Role
@@ -66,6 +93,7 @@ name = "Garden"
 		{"node url not https", RoleHub, map[string]string{"hub.toml": minimalHub + "[nodes.attic]\nurl = \"http://x:1\"\n"}, "nodes.attic.url"},
 		{"inline node token", RoleHub, map[string]string{"hub.toml": minimalHub + "[nodes.attic]\nurl = \"https://x:1\"\nenrollment_token = \"abcdefghijklmnopqrstuvwxyz\"\n"}, "nodes.attic.enrollment_token"},
 		{"bad node id", RoleHub, map[string]string{"hub.toml": minimalHub + "[nodes.A]\nurl = \"https://x:1\"\n"}, "nodes.A"},
+		{"device range", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[devices.hf]\nname = \"x\"\ntype = \"rtl_sdr\"\nfreq_range = { min = 10, max = 5 }\nsample_rates = [1]\n"}, "devices.hf.freq_range"},
 		{"cert without key", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[tls]\ncert = \"a\"\n"}, "tls.key"},
 		{"bad fingerprint", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[hub_trust]\nca_fingerprint = \"zz\"\n"}, "hub_trust.ca_fingerprint"},
 	}

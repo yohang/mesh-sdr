@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
+	openapi_types "github.com/oapi-codegen/runtime/types"
+
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 )
@@ -25,6 +27,12 @@ type CapabilityReports interface {
 	Probe(ctx context.Context, id string) error
 }
 
+// DeviceRegistry reads the device registry.
+type DeviceRegistry interface {
+	List(ctx context.Context) ([]*domain.Device, error)
+	Get(ctx context.Context, id string) (*domain.Device, error)
+}
+
 // LoadHistory returns the recent heartbeats of a node.
 type LoadHistory interface {
 	Samples(id domain.NodeID) []gridapp.LoadSample
@@ -36,11 +44,12 @@ type GridHandlers struct {
 	nodes   NodeAdmin
 	history LoadHistory
 	caps    CapabilityReports
+	devices DeviceRegistry
 }
 
 // NewGridHandlers returns the handlers.
-func NewGridHandlers(nodes NodeAdmin, history LoadHistory, caps CapabilityReports) GridHandlers {
-	return GridHandlers{nodes: nodes, history: history, caps: caps}
+func NewGridHandlers(nodes NodeAdmin, history LoadHistory, caps CapabilityReports, devices DeviceRegistry) GridHandlers {
+	return GridHandlers{nodes: nodes, history: history, caps: caps, devices: devices}
 }
 
 func optString(s string) *string {
@@ -222,4 +231,57 @@ func (h GridHandlers) ProbeNodeCapabilities(ctx context.Context, req ProbeNodeCa
 	}
 
 	return ProbeNodeCapabilities202Response{}, nil
+}
+
+func deviceDTO(d *domain.Device) Device {
+	s := d.Snapshot()
+	out := Device{
+		Id: s.ID, NodeId: s.Node, Name: s.Name, Type: s.Type, FreqMin: s.FreqMin, FreqMax: s.FreqMax,
+		SampleRates: s.SampleRates, Enabled: s.Flags.Enabled, OperatorCanRetune: s.Flags.OperatorCanRetune,
+		AlwaysOn: s.Flags.AlwaysOn, SchedulerEnabled: s.Flags.SchedulerEnabled, Online: s.Online,
+		RuntimeState: DeviceRuntimeState(s.State), RuntimeStateAt: s.StateAt, RuntimeReason: optString(s.Reason),
+		CenterFreq: s.CenterFreq, SortOrder: s.SortOrder, ReportedAt: s.ReportedAt,
+	}
+
+	if s.Flags.ListenPolicy != "" {
+		lp := DeviceListenPolicy(s.Flags.ListenPolicy)
+		out.ListenPolicy = &lp
+	}
+
+	if !s.ActivePreset.IsZero() {
+		var u openapi_types.UUID
+		copy(u[:], s.ActivePreset.Bytes())
+		out.ActivePresetId = &u
+	}
+
+	if out.SampleRates == nil {
+		out.SampleRates = []int64{}
+	}
+
+	return out
+}
+
+// ListDevices implements StrictServerInterface.
+func (h GridHandlers) ListDevices(ctx context.Context, _ ListDevicesRequestObject) (ListDevicesResponseObject, error) {
+	devices, err := h.devices.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	out := ListDevices200JSONResponse{Items: make([]Device, 0, len(devices))}
+	for _, d := range devices {
+		out.Items = append(out.Items, deviceDTO(d))
+	}
+
+	return out, nil
+}
+
+// GetDevice implements StrictServerInterface.
+func (h GridHandlers) GetDevice(ctx context.Context, req GetDeviceRequestObject) (GetDeviceResponseObject, error) {
+	d, err := h.devices.Get(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	return GetDevice200JSONResponse(deviceDTO(d)), nil
 }

@@ -165,6 +165,11 @@ key = "tls/node.key"
 ca_cert = "tls/ca.pem"
 hub_identity = "hub.example.org"
 ca_fingerprint = "`+pki.FormatFingerprint(ca.Fingerprint())+`"
+[devices.hf]
+name = "HF"
+type = "rtl_sdr"
+freq_range = { min = "100kHz", max = 30_000_000 }
+sample_rates = [2_048_000]
 `, 0o600)
 
 	nodeCfg, _, err := config.LoadNode(config.Options{Dir: nodeDir, Env: map[string]string{}})
@@ -240,6 +245,10 @@ func (e *gridEnv) enrollNode(t *testing.T, prober fakeProber) (stop func()) {
 func (e *gridEnv) startNode(t *testing.T, prober fakeProber) (stop func()) {
 	t.Helper()
 
+	if prober.devices == nil {
+		prober.devices = DevicesOf(e.nodeCfg)
+	}
+
 	np, err := Node(e.nodeCfg, quiet, time.Now(), WithProber(prober))
 	if err != nil {
 		t.Fatal(err)
@@ -309,6 +318,18 @@ func TestGridEndToEnd(t *testing.T) {
 	if rt := e.node(t).Runtime(); rt.CPUCores != 4 {
 		t.Errorf("cpu cores = %d", rt.CPUCores)
 	}
+
+	// The node config devices are mirrored into the registry.
+	eventually(t, "device registry", 5*time.Second, func() bool {
+		d, err := e.g.devices.Get(ctx, "hf")
+		if err != nil {
+			return false
+		}
+
+		lo, hi := d.FreqRange()
+
+		return d.Node() == id && d.Type() == "rtl_sdr" && lo == 100_000 && hi == 30_000_000
+	})
 
 	if err := e.g.caps.Probe(ctx, "attic"); err != nil {
 		t.Errorf("probe: %v", err)

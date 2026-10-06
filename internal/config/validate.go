@@ -217,6 +217,35 @@ func (n *Node) validate(o Origins) []Problem {
 		c.fail("node.event_buffer.max_bytes", CodeInvalidValue, "want 64KiB..4GiB")
 	}
 
+	for _, id := range slices.Sorted(maps.Keys(n.Devices)) {
+		d := n.Devices[id]
+		key := "devices." + id
+
+		if _, err := griddomain.NewDeviceID(id); err != nil {
+			c.fail(key, CodeInvalidValue, "invalid device id "+strconv.Quote(id)+": must match ^[a-z0-9][a-z0-9_-]{0,62}$")
+		}
+
+		if d.Name == "" || len(d.Name) > 128 {
+			c.fail(key+".name", CodeRequired, "name is required (1 to 128 characters)")
+		}
+
+		if d.Type == "" || len(d.Type) > 48 {
+			c.fail(key+".type", CodeRequired, "type is required (1 to 48 characters)")
+		}
+
+		if lo, hi := d.FreqRange.Min.Hz(), d.FreqRange.Max.Hz(); lo <= 0 || hi <= lo {
+			c.fail(key+".freq_range", CodeInvalidValue, "want 0 < min < max")
+		}
+
+		if len(d.SampleRates) == 0 || slices.ContainsFunc(d.SampleRates, func(r int64) bool { return r <= 0 }) {
+			c.fail(key+".sample_rates", CodeInvalidValue, "want at least one positive sample rate")
+		}
+
+		if d.ListenPolicy != "" {
+			c.enum(key+".listen_policy", d.ListenPolicy, "anonymous", "registered")
+		}
+	}
+
 	if (n.TLS.Cert == "") != (n.TLS.Key == "") {
 		c.fail("tls.key", CodeRequired, "tls.cert and tls.key go together")
 	}

@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
@@ -78,7 +80,8 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	}
 
 	if o.devices == nil {
-		o.devices = func() []ctl.Device { return []ctl.Device{} }
+		devices := DevicesOf(cfg)
+		o.devices = func() []ctl.Device { return devices }
 	}
 
 	if o.prober == nil {
@@ -156,4 +159,21 @@ func NodeEnrollment(cfg config.Node, logger *slog.Logger, token griddomain.Enrol
 		Key:      key,
 		Paths:    enroll.Paths{Key: cfg.TLS.Key, Cert: cfg.TLS.Cert, CA: cfg.HubTrust.CACert},
 	}, nil
+}
+
+// DevicesOf lists the [devices.<id>] of the node config, ordered by id
+// (TOML tables carry no order once decoded).
+func DevicesOf(cfg config.Node) []ctl.Device {
+	out := make([]ctl.Device, 0, len(cfg.Devices))
+
+	for _, id := range slices.Sorted(maps.Keys(cfg.Devices)) {
+		d := cfg.Devices[id]
+		out = append(out, ctl.Device{
+			ID: id, Name: d.Name, Type: d.Type, Enabled: d.Enabled == nil || *d.Enabled,
+			FreqMin: d.FreqRange.Min.Hz(), FreqMax: d.FreqRange.Max.Hz(), SampleRates: slices.Clone(d.SampleRates),
+			ListenPolicy: d.ListenPolicy, OperatorCanRetune: d.OperatorCanRetune, AlwaysOn: d.AlwaysOn, SchedulerEnabled: d.SchedulerEnabled,
+		})
+	}
+
+	return out
 }

@@ -43,6 +43,21 @@ max_bytes = "16MiB"
 # Single-use enrollment token issued by the hub (secret).
 # enrollment_token = { file = "/etc/meshsdr/secrets/enrollment.token" }
 
+# SDR devices of this node (GRID-016), keyed by a hub-wide unique id
+# (^[a-z0-9][a-z0-9_-]{0,62}$). The hub mirrors them read-only into its
+# device registry; they are configured here only. File-only: no env
+# override. Driver settings arrive with the device epic.
+# [devices.hf-sdrplay]
+# name = "SDRplay RSPdx (HF)"        # required
+# type = "soapy:sdrplay"             # required: driver type
+# enabled = true                     # default true
+# freq_range = { min = 1_000, max = "30MHz" }  # required (Hz or units)
+# sample_rates = [500_000, 2_000_000]          # required (S/s)
+# listen_policy = "registered"       # anonymous | registered (overrides the global policy)
+# operator_can_retune = true
+# always_on = true
+# scheduler_enabled = true
+
 [log]
 # debug | info | warn | error. --debug overrides it.
 level = "info"

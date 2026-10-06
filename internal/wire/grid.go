@@ -48,6 +48,7 @@ type hubGrid struct {
 	control    *app.Control
 	status     *app.Status
 	caps       *app.Capabilities
+	devices    *app.Devices
 	manager    *control.Manager
 	startup    []func(ctx context.Context) error
 	workers    []func(ctx context.Context)
@@ -156,6 +157,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 
 	gridLogger := component(logger, "grid.wire")
 	capRepo := gridsqlite.NewCapabilityRepository(adapter)
+	g.devices = app.NewDevices(gridsqlite.NewDeviceRepository(adapter), audit, component(logger, "grid.app.devices"))
 
 	if ca != nil {
 		g.tracker = app.NewTracker()
@@ -175,6 +177,9 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 
 		g.caps = app.NewCapabilities(capRepo, nodeRepo, g.manager, component(logger, "grid.app.capabilities"))
 		g.control.Handle(rxv1.TypeNodeCapabilities, g.caps.Handler())
+		g.caps.OnReport(g.devices.Sync)
+		g.control.Handle(rxv1.TypeDeviceState, g.devices.StateHandler())
+		g.status.Listen(g.devices.NodeStatusChanged)
 
 		enrollment := app.NewEnrollment(nodeRepo, adapter, enroll.NewHubClient(ca, now), audit, now,
 			5*time.Second, component(logger, "grid.app.enrollment"))
