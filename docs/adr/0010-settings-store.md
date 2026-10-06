@@ -59,7 +59,7 @@ Each consumer declares its port in its own `app` package. An adapter in its `inf
 |---|---|---|---|
 | shell | `shell/app.Settings` (`ThemeMode`, `SiteName`, `PolicyURL`), `shell/app.PolicySettings` (`UsagePolicy`) | `shell/infra.StoreSettings` | `ui.theme_mode`, `receiver.name`, `receiver.usage_policy_url`, `receiver.usage_policy_text` |
 | identity | `identity/app.SessionPolicies` (`SessionPolicy()`, `ThrottlePolicy()`), read by login, session resolution and password change | `identity/infra/settingsrc.Policies` | `session.*`, `auth.lockout.*` |
-| identity | `identity/app.Settings` (`PasswordMinLength`, ADR 0011), behind the password policy | same | `auth.password_min_length` |
+| identity | `identity/app.Settings` (`PasswordMinLength`, `InvitationTTL`, `PasswordResetTTL`, ADR 0011), behind the password policy and the invitation and reset services | same | `auth.password_min_length`, `invitations.ttl_hours`, `password_reset.ttl_minutes` |
 | identity | per-address limiter rate (`settingsrc.Policies.LoginRate`, read by `memory.NewDynamicIPLimiter` on each attempt) | same | `auth.login_rate_limit` |
 | identity jobs | `identity/app.Retention` (`SessionRetention()`, `AuditRetention()`, never under 30 days) | same | `retention.sessions`, `retention.audit_log` |
 
@@ -93,6 +93,8 @@ The identity part 2 (`epic/acc-1`) reads these through the same ports, and adds 
 | `auth.lockout.delay_after`, `.lock_after`, `.lock_for`, `.max_lock` (Q5) | count, duration | `5`, `10`, `15m`, `24h` | Access |
 | `retention.sessions` | duration ≥ 1d | `30d` | Retention |
 | `retention.audit_log` | duration ≥ 30d | `365d` | Retention |
+| `invitations.ttl_hours` (ADR 0011) | `1`–`720` hours | `168` | Access |
+| `password_reset.ttl_minutes` (ADR 0011) | `5`–`1440` minutes | `30` | Access |
 
 Keys without a consumer yet (Q14) are defined, editable and exposed by `GET /settings/public` (`x-public`). The GPS map picker waits for the MAP epic; the page has latitude and longitude fields (Q15). `receiver.usage_policy_url` is added next to ADR 0007's text key (Q17). These keys live in `[settings]`, apart from the config-only `[auth]` bootstrap table.
 

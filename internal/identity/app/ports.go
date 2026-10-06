@@ -91,6 +91,11 @@ type RequestMeta struct {
 type Settings interface {
 	// PasswordMinLength is auth.password_min_length.
 	PasswordMinLength(ctx context.Context) int
+	// InvitationTTL is invitations.ttl_hours: the default validity of a new
+	// invitation.
+	InvitationTTL(ctx context.Context) time.Duration
+	// PasswordResetTTL is password_reset.ttl_minutes.
+	PasswordResetTTL(ctx context.Context) time.Duration
 }
 
 // Policies builds the password policy in force: the minimum length from the

@@ -42,6 +42,8 @@ var formPages = []formPage{
 			{ID: "sessions", Title: "Sessions", Description: "New lifetimes apply to sessions opened from now on; activity extends open sessions with the new idle timeout.",
 				Keys: []string{"session.idle_timeout", "session.absolute_timeout", "session.remember_me_timeout"}},
 			{ID: "passwords", Title: "Passwords", Keys: []string{"auth.password_min_length"}},
+			{ID: "links", Title: "Invitation and reset links", Description: "New lifetimes apply to links created from now on.",
+				Keys: []string{"invitations.ttl_hours", "password_reset.ttl_minutes"}},
 			{ID: "sign-in", Title: "Sign-in throttling", Keys: []string{
 				"auth.login_rate_limit", "auth.lockout.delay_after", "auth.lockout.lock_after", "auth.lockout.lock_for", "auth.lockout.max_lock",
 			}},

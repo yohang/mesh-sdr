@@ -1,5 +1,6 @@
 // Package settingsrc reads the identity policies from the settings store
-// (ADR 0010): session lifetimes, login throttling and retention. Values are
+// (ADR 0010): session lifetimes, login throttling, retention, the password
+// policy and the invitation and reset link lifetimes. Values are
 // read on every use, so a saved change applies at once. The store validates
 // them (bounds and checks across keys); invalid combinations fall back to
 // the domain defaults.
@@ -26,6 +27,8 @@ const (
 	KeyRetentionSession = "retention.sessions"
 	KeyRetentionAudit   = "retention.audit_log"
 	KeyPasswordMin      = "auth.password_min_length"
+	KeyInvitationTTL    = "invitations.ttl_hours"
+	KeyPasswordResetTTL = "password_reset.ttl_minutes"
 )
 
 // Default login rate per client address (TECHNICAL_SPEC §5.12): 5 per
@@ -104,4 +107,28 @@ func (p Policies) PasswordMinLength(context.Context) int {
 	}
 
 	return domain.DefaultPasswordMinLength
+}
+
+// Default link lifetimes, used when the setting is unavailable (ADR 0011).
+const (
+	defaultInvitationTTL    = 7 * 24 * time.Hour
+	defaultPasswordResetTTL = 30 * time.Minute
+)
+
+// InvitationTTL implements app.Settings (invitations.ttl_hours).
+func (p Policies) InvitationTTL(context.Context) time.Duration {
+	if h := p.values.Int(KeyInvitationTTL); h > 0 {
+		return time.Duration(h) * time.Hour
+	}
+
+	return defaultInvitationTTL
+}
+
+// PasswordResetTTL implements app.Settings (password_reset.ttl_minutes).
+func (p Policies) PasswordResetTTL(context.Context) time.Duration {
+	if m := p.values.Int(KeyPasswordResetTTL); m > 0 {
+		return time.Duration(m) * time.Minute
+	}
+
+	return defaultPasswordResetTTL
 }

@@ -59,6 +59,23 @@ func TestPolicies(t *testing.T) {
 		t.Errorf("default password min length = %d", n)
 	}
 
+	links := settingsrc.New(values{ints: map[string]int{settingsrc.KeyInvitationTTL: 48, settingsrc.KeyPasswordResetTTL: 15}})
+	if d := links.InvitationTTL(context.Background()); d != 48*time.Hour {
+		t.Errorf("invitation ttl = %s", d)
+	}
+
+	if d := links.PasswordResetTTL(context.Background()); d != 15*time.Minute {
+		t.Errorf("reset ttl = %s", d)
+	}
+
+	if d := settingsrc.New(values{}).InvitationTTL(context.Background()); d != 7*24*time.Hour {
+		t.Errorf("default invitation ttl = %s", d)
+	}
+
+	if d := settingsrc.New(values{}).PasswordResetTTL(context.Background()); d != 30*time.Minute {
+		t.Errorf("default reset ttl = %s", d)
+	}
+
 	if every, burst := settingsrc.New(values{}).LoginRate(); every != 12*time.Second || burst != 5 {
 		t.Errorf("default login rate = %s, %d", every, burst)
 	}
