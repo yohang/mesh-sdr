@@ -144,7 +144,8 @@ func (h SettingsHandlers) GetPublicSettings(context.Context, GetPublicSettingsRe
 
 	for _, e := range h.store.Snapshot().All() {
 		if d := e.Definition(); d.Public() && !d.Secret() {
-			out[e.Key().String()] = e.Value().JSON()
+			v := any(e.Value().JSON())
+			out[e.Key().String()] = &v
 		}
 	}
 

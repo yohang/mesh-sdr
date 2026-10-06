@@ -582,12 +582,14 @@ paths:
       tags: [settings]
       responses:
         "200":
-          description: Effective values of the public keys, by key
+          description: Effective values of the public keys, by key (null when unset)
           content:
             application/json:
               schema:
                 type: object
-                additionalProperties: {}
+                additionalProperties:
+                  nullable: true
+          x-go-type-skip-optional-pointer: true
         default:
           $ref: "#/components/responses/Problem"
   /config/effective:
@@ -2372,11 +2374,15 @@ components:
           example: ui.theme_mode
         value:
           description: Effective value. Absent for secrets.
+          nullable: true
+          x-go-type-skip-optional-pointer: true
         set:
           type: boolean
           description: Secrets only. Whether a value is set.
         default:
           description: Built-in default. Absent for secrets.
+          nullable: true
+          x-go-type-skip-optional-pointer: true
         source:
           type: string
           enum: [cfg, db, default]
@@ -2391,6 +2397,8 @@ components:
           description: Version of the DB value (0 when there is none), to send back on writes.
         shadowed_value:
           description: DB value hidden by a config value ("overridden by config"). Absent for secrets.
+          nullable: true
+          x-go-type-skip-optional-pointer: true
         secret:
           type: boolean
         public:
@@ -2410,7 +2418,10 @@ components:
         values:
           type: object
           description: New values by key; null resets a key to its default.
-          additionalProperties: {}
+          additionalProperties:
+            nullable: true
+            x-go-type-skip-optional-pointer: true
+          x-go-type-skip-optional-pointer: true
         versions:
           type: object
           description: Version last read, by key (0 when the key had no DB value).
@@ -2445,6 +2456,8 @@ components:
           description: cfg for config-only keys, db for settings (lockable).
         value:
           description: Effective value. Absent for secrets.
+          nullable: true
+          x-go-type-skip-optional-pointer: true
         set:
           type: boolean
           description: Secrets only.
