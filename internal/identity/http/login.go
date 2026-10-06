@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/yohang/mesh-sdr/internal/http/redact"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 )
 
@@ -32,8 +33,9 @@ type loginForm struct {
 }
 
 // SafeNext returns next when it is a same-origin relative path to a known
-// route (SR-12: `^/(?![/\\])`), otherwise "/". routes may be nil (no route
-// check).
+// route (SR-12: `^/(?![/\\])`), otherwise "/". A path that carries a
+// single-use token is refused too, so that a redirect never copies it into
+// the address bar. routes may be nil (no route check).
 func SafeNext(next string, routes chi.Routes) string {
 	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") ||
 		strings.ContainsAny(next, "\\\x00\r\n\t") {
@@ -43,6 +45,10 @@ func SafeNext(next string, routes chi.Routes) string {
 	u, err := url.Parse(next)
 	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil || !strings.HasPrefix(u.Path, "/") ||
 		strings.HasPrefix(u.Path, "//") {
+		return "/"
+	}
+
+	if redact.HasToken(next) || redact.HasToken(u.Path) {
 		return "/"
 	}
 

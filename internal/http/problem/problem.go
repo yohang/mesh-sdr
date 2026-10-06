@@ -10,6 +10,8 @@ import (
 	"net/http"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+
+	"github.com/yohang/mesh-sdr/internal/http/redact"
 )
 
 // ContentType is the media type of problem responses.
@@ -106,7 +108,7 @@ func ErrorHandler(logger *slog.Logger) func(w http.ResponseWriter, r *http.Reque
 		}
 
 		logger.LogAttrs(r.Context(), level, "api request failed",
-			slog.String("method", r.Method), slog.String("path", r.URL.Path),
+			slog.String("method", r.Method), slog.String("path", redact.Path(r.URL.Path)),
 			slog.Int("status", p.Status), slog.String("code", p.Code), slog.Any("error", err))
 
 		Write(w, p)
@@ -143,7 +145,7 @@ func Recoverer(logger *slog.Logger) func(http.Handler) http.Handler {
 				}
 
 				logger.ErrorContext(r.Context(), "panic serving api request",
-					slog.String("method", r.Method), slog.String("path", r.URL.Path), slog.Any("panic", rec))
+					slog.String("method", r.Method), slog.String("path", redact.Path(r.URL.Path)), slog.Any("panic", rec))
 				Write(w, New(http.StatusInternalServerError, CodeInternal, ""))
 			}()
 

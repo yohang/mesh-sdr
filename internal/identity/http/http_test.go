@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,6 +69,7 @@ func (a adminPage) Routes(r chi.Router) {
 
 type hub struct {
 	t       *testing.T
+	logs    *syncBuffer
 	handler http.Handler
 	admin   *app.UserAdmin
 	setup   *app.Setup
@@ -86,7 +88,8 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 		f(&cfg)
 	}
 
-	logger := slog.New(slog.DiscardHandler)
+	logs := &syncBuffer{}
+	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	d := identity.Deps{Config: cfg, Logger: logger, DB: dbtest.NewSQLite(t), IDs: shared.NewUUIDv7Generator(), Now: time.Now}
 
 	m, err := identity.Wire(ctx, d, pages{})
@@ -101,10 +104,31 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 
 	return &hub{
 		t:       t,
+		logs:    logs,
 		handler: httpserver.NewRouter(logger, api.NewHandler(srv, m.HTTP, logger), m.HTTP, adminPage{m.HTTP}),
 		admin:   identity.UserAdmin(d),
 		setup:   m.Setup,
 	}
+}
+
+// syncBuffer is a log sink safe for concurrent writes.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.b.String()
 }
 
 func (h *hub) addUser(name string, role domain.Role) {
@@ -525,6 +549,7 @@ func TestSafeNext(t *testing.T) {
 	r.Get("/", func(http.ResponseWriter, *http.Request) {})
 	r.Get("/receiver", func(http.ResponseWriter, *http.Request) {})
 	r.Get("/files/{id}", func(http.ResponseWriter, *http.Request) {})
+	r.Get("/setup/{token}", func(http.ResponseWriter, *http.Request) {})
 
 	tests := map[string]string{
 		"":                       "/",
@@ -541,6 +566,10 @@ func TestSafeNext(t *testing.T) {
 		"/receiver\r\nLocation:": "/",
 		"/%5Cevil":               "/",
 		"/ok?next=//evil":        "/",
+		// A single-use token never goes into a redirect.
+		"/setup/s3cr3t":     "/",
+		"/setup/s3cr3t?x=1": "/",
+		"/%73etup/s3cr3t":   "/",
 	}
 
 	for in, want := range tests {

@@ -25,6 +25,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/http/clientip"
 	"github.com/yohang/mesh-sdr/internal/http/problem"
+	"github.com/yohang/mesh-sdr/internal/http/redact"
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -341,7 +342,7 @@ func (m *Module) csrf(next http.Handler) http.Handler {
 		}
 
 		m.logger.LogAttrs(r.Context(), slog.LevelWarn, "csrf check failed",
-			slog.String("reason", reason), slog.String("method", r.Method), slog.String("path", r.URL.Path),
+			slog.String("reason", reason), slog.String("method", r.Method), slog.String("path", redact.Path(r.URL.Path)),
 			slog.String("origin", r.Header.Get("Origin")), slog.String("sec_fetch_site", r.Header.Get("Sec-Fetch-Site")),
 			slog.String("request_id", middleware.GetReqID(r.Context())))
 
@@ -405,7 +406,7 @@ func (m *Module) Require(role domain.Role) func(http.Handler) http.Handler {
 			case errors.Is(err, domain.ErrUnauthenticated):
 				m.redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()))
 			default:
-				m.logger.WarnContext(r.Context(), "access denied", slog.String("path", r.URL.Path), slog.Any("error", err))
+				m.logger.WarnContext(r.Context(), "access denied", slog.String("path", redact.Path(r.URL.Path)), slog.Any("error", err))
 				m.pages.Error(w, r, http.StatusForbidden)
 			}
 		})

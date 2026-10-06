@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/yohang/mesh-sdr/internal/http/redact"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 )
 
@@ -57,7 +58,7 @@ func (m *Module) passwordGate(next http.Handler) http.Handler {
 			return
 		}
 
-		m.logger.DebugContext(r.Context(), "password change required", slog.String("path", r.URL.Path))
+		m.logger.DebugContext(r.Context(), "password change required", slog.String("path", redact.Path(r.URL.Path)))
 
 		if isAPI(r) {
 			m.deny(w, r, http.StatusForbidden, domain.ErrPasswordChangeRequired)

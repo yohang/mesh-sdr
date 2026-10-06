@@ -4,12 +4,12 @@ package http
 import (
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/yohang/mesh-sdr/internal/http/redact"
 	"github.com/yohang/mesh-sdr/internal/web"
 )
 
@@ -76,19 +76,9 @@ func NewServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
-// loggedPath is the request path as logged. A path that carries a
-// single-use token (setup, invitation and password reset links: routes with
-// a {token} parameter) is logged as its route pattern, so that the token
-// never reaches the logs (SR-07).
-func loggedPath(r *http.Request) string {
-	if rc := chi.RouteContext(r.Context()); rc != nil {
-		if p := rc.RoutePattern(); strings.Contains(p, "{token}") {
-			return p
-		}
-	}
-
-	return r.URL.Path
-}
+// loggedPath is the request path as logged: a single-use token in it is
+// redacted (SR-07), whether or not a route matched.
+func loggedPath(r *http.Request) string { return redact.Path(r.URL.Path) }
 
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
