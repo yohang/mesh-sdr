@@ -1,6 +1,10 @@
 package config
 
-import "strings"
+import (
+	"regexp"
+	"strconv"
+	"strings"
+)
 
 // keyLines returns the 1-based line of every key defined in a TOML document,
 // keyed by its dotted path (components joined with "."). Table headers are
@@ -197,9 +201,33 @@ func (s *posScanner) value(path []string) {
 	case c == '{':
 		s.inlineTable(path)
 	default:
-		for !s.eof() && !strings.ContainsRune(",]}#\n \t\r", rune(s.peek())) {
-			s.advance(1)
+		s.scalar()
+	}
+}
+
+// localDate matches a TOML local date, which may be followed by a space and
+// a time ("1979-05-27 07:32:00Z").
+var localDate = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+
+// scalar consumes a bare value: number, boolean or date-time.
+func (s *posScanner) scalar() {
+	start := s.pos
+
+	for !s.eof() {
+		c := s.peek()
+
+		if c == ' ' && localDate.MatchString(s.src[start:s.pos]) &&
+			s.pos+1 < len(s.src) && s.src[s.pos+1] >= '0' && s.src[s.pos+1] <= '9' {
+			s.advance(1) // date-time separator
+
+			continue
 		}
+
+		if strings.ContainsRune(",]}#\n \t\r", rune(c)) {
+			return
+		}
+
+		s.advance(1)
 	}
 }
 
@@ -251,8 +279,7 @@ func (s *posScanner) inlineTable(path []string) {
 	}
 }
 
-// basicString consumes a "…" string and returns its raw content (escapes are
-// kept as-is, which is enough for key matching of ordinary keys).
+// basicString consumes a "…" string and returns its decoded content.
 func (s *posScanner) basicString() string {
 	s.advance(1)
 
@@ -266,10 +293,68 @@ func (s *posScanner) basicString() string {
 		s.advance(1)
 	}
 
-	v := s.src[start:s.pos]
+	raw := s.src[start:s.pos]
 	s.advance(1)
 
-	return v
+	return unescape(raw)
+}
+
+// unescape decodes the escapes of a TOML basic string (\b \t \n \f \r \" \\
+// \e \uXXXX \UXXXXXXXX). Invalid input is returned as is.
+func unescape(raw string) string {
+	if !strings.Contains(raw, `\`) {
+		return raw
+	}
+
+	var b strings.Builder
+
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '\\' || i+1 >= len(raw) {
+			b.WriteByte(raw[i])
+
+			continue
+		}
+
+		i++
+
+		switch c := raw[i]; c {
+		case 'b':
+			b.WriteByte('\b')
+		case 't':
+			b.WriteByte('\t')
+		case 'n':
+			b.WriteByte('\n')
+		case 'f':
+			b.WriteByte('\f')
+		case 'r':
+			b.WriteByte('\r')
+		case 'e':
+			b.WriteByte(0x1b)
+		case '"', '\\':
+			b.WriteByte(c)
+		case 'u', 'U':
+			n := 4
+			if c == 'U' {
+				n = 8
+			}
+
+			if i+n >= len(raw) {
+				return raw
+			}
+
+			r, err := strconv.ParseUint(raw[i+1:i+1+n], 16, 32)
+			if err != nil {
+				return raw
+			}
+
+			b.WriteRune(rune(r))
+			i += n
+		default:
+			return raw
+		}
+	}
+
+	return b.String()
 }
 
 func (s *posScanner) literalString() string {

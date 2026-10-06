@@ -78,6 +78,56 @@ esc = "a\"b = c"
 	}
 }
 
+func TestKeyLinesDatesAndEscapedKeys(t *testing.T) {
+	doc := `odt = 1979-05-27 07:32:00Z
+after = 1
+ldt = 1979-05-27T07:32:00
+date = 1979-05-27
+inline = { at = 1979-05-27 07:32:00-07:00, n = 2 }
+"a\"b" = 1
+"café" = 2
+"tab\there" = 3
+[tbl]
+"x\\y" = 4
+`
+
+	var decoded map[string]any
+
+	md, err := toml.Decode(doc, &decoded)
+	if err != nil {
+		t.Fatalf("test document is not valid TOML: %v", err)
+	}
+
+	want := map[string]int{
+		"odt":       1,
+		"after":     2,
+		"ldt":       3,
+		"date":      4,
+		"inline":    5,
+		"inline.at": 5,
+		"inline.n":  5,
+		`a"b`:       6,
+		"café":      7,
+		"tab\there": 8,
+		"tbl":       9,
+		`tbl.x\y`:   10,
+	}
+
+	got := keyLines(doc)
+	for k, line := range want {
+		if got[k] != line {
+			t.Errorf("%q: line %d, want %d", k, got[k], line)
+		}
+	}
+
+	// Every key the decoder reports is found.
+	for _, k := range md.Keys() {
+		if key := strings.Join(k, "."); got[key] == 0 {
+			t.Errorf("decoder key %q not found by the scanner", key)
+		}
+	}
+}
+
 func TestKeyLinesMalformed(t *testing.T) {
 	// Must not hang or panic.
 	for _, doc := range []string{"[", "a = ", "a = \"unterminated", "= 1", "a = [1, ", "a = {", `a = """x`} {
