@@ -24,8 +24,8 @@ type Deps struct {
 	// role, from an allowed network). Nil: the Admin section is never shown.
 	AdminGate app.Gate
 	Logger    *slog.Logger
-	// User returns the signed-in user of a request for the top bar (nil:
-	// anonymous). Optional.
+	// User returns the signed-in visitor of a request for the user menu
+	// (nil: anonymous). Optional.
 	User func(r *http.Request) *layout.User
 	// Now is the clock (time.Now when nil).
 	Now func() time.Time

@@ -12,6 +12,7 @@ import (
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/shell"
 	"github.com/yohang/mesh-sdr/internal/shell/app"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // navRouter serves the shell with an admin gate that is open or closed.
@@ -130,5 +131,50 @@ func TestUTCClock(t *testing.T) {
 	want := `<msdr-utc-clock class="whitespace-nowrap font-mono tabular-nums text-fg-muted"><time datetime="2026-10-06T19:07Z">19:07</time> UTC</msdr-utc-clock>`
 	if !strings.Contains(body, want) {
 		t.Errorf("body lacks %s", want)
+	}
+}
+
+// TestUserMenu covers UI-010: anonymous visitors get a Sign in link; signed
+// in users a menu with their name, role, account links, the usage policy
+// and Sign out (a POST to /logout). The notifications area is always there.
+func TestUserMenu(t *testing.T) {
+	user := func(r *http.Request) *layout.User {
+		if r.Header.Get("X-Test-User") == "" {
+			return nil
+		}
+
+		return &layout.User{Name: "Ada <Lovelace>", Role: "Operator", Links: []layout.Link{{Label: "Change password", Href: "/account/password"}}}
+	}
+
+	m := shell.Wire(shell.Deps{Settings: values{}, User: user, Logger: discard})
+	h := httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP)
+
+	_, anon := do(t, h, http.MethodGet, "/", nil)
+	for _, want := range []string{`<a href="/login" class="font-medium">Sign in</a>`, `popovertarget="msdr-notifications"`, `id="msdr-notifications" popover`} {
+		if !strings.Contains(anon, want) {
+			t.Errorf("anonymous page lacks %s", want)
+		}
+	}
+
+	if strings.Contains(anon, "msdr-user-menu") || strings.Contains(anon, "/logout") {
+		t.Error("anonymous page has a user menu")
+	}
+
+	_, signed := do(t, h, http.MethodGet, "/", map[string]string{"X-Test-User": "1"})
+	for _, want := range []string{
+		`popovertarget="msdr-user-menu"`,
+		`<span class="font-semibold">Ada &lt;Lovelace&gt;</span>`,
+		`<span class="badge">Operator</span>`,
+		`<a href="/account/password" class="menu-item">Change password</a>`,
+		`<a href="/policy" class="menu-item">Usage policy</a>`,
+		`<form method="post" action="/logout"><button type="submit" class="menu-item">Sign out</button>`,
+	} {
+		if !strings.Contains(signed, want) {
+			t.Errorf("signed-in page lacks %s", want)
+		}
+	}
+
+	if strings.Contains(signed, `href="/login"`) {
+		t.Error("signed-in page links to the login page")
 	}
 }

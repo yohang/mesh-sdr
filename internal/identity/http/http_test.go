@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -71,6 +72,19 @@ func (a adminPage) Routes(r chi.Router) {
 		_, _ = io.WriteString(w, "admin")
 	})
 	r.Get("/receiver", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "receiver") })
+	r.Get("/shell-user", func(w http.ResponseWriter, r *http.Request) {
+		u := a.m.ShellUser(r)
+		if u == nil {
+			_, _ = io.WriteString(w, "anonymous")
+
+			return
+		}
+
+		_, _ = fmt.Fprintf(w, "%s|%s", u.Name, u.Role)
+		for _, l := range u.Links {
+			_, _ = fmt.Fprintf(w, "|%s=%s", l.Label, l.Href)
+		}
+	})
 }
 
 type hub struct {

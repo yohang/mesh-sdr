@@ -50,7 +50,8 @@ templ Document(s Shell, p Page, content templ.Component) {
 						<msdr-utc-clock class="whitespace-nowrap font-mono tabular-nums text-fg-muted">
 							<time datetime={ s.ClockDateTime() }>{ s.ClockText() }</time> UTC
 						</msdr-utc-clock>
-						@userMenu(s.User)
+						@notifications()
+						@userMenu(s)
 					</div>
 				</div>
 			</header>
@@ -100,24 +101,57 @@ templ mainNav(nav []Link, current string) {
 	}
 }
 
-// userMenu is the account area of the top bar (UI-010 slot): a discreet
-// sign-in link for anonymous visitors (ACC-001), otherwise the user's name,
-// the account links and sign out. Sign out is a POST (CSRF header from the
-// shell), answered with a full page load.
-templ userMenu(u *User) {
-	<nav class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm" aria-label="Account">
-		if u == nil {
-			<a href="/login" class="text-fg-muted">Sign in</a>
-		} else {
-			<span class="font-medium">{ u.Name }</span>
-			for _, l := range u.Links {
-				<a href={ templ.URL(l.Href) }>{ l.Label }</a>
-			}
-			<form method="post" action="/logout" class="inline">
-				<button type="submit" class="underline">Sign out</button>
-			</form>
+// notifications is the notifications area (UI-006): a bell that opens the
+// list of recent notifications. UI-011 fills it; until then it is empty.
+templ notifications() {
+	<button type="button" popovertarget="msdr-notifications" class="icon-button" aria-label="Notifications">
+		@icon() {
+			<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21a2 2 0 0 0 4 0"></path>
 		}
-	</nav>
+	</button>
+	<div id="msdr-notifications" popover class="menu-popover">
+		<p class="font-semibold">Notifications</p>
+		<p class="mt-1 text-fg-muted">No notifications.</p>
+	</div>
+}
+
+// userMenu is the user menu (UI-010): a "Sign in" link for anonymous
+// visitors (no sign-up: accounts are by invitation), otherwise a button
+// opening the menu with the name and role, the account links, the usage
+// policy and "Sign out". Menus are native popovers (Esc and outside clicks
+// close them); sign out is a POST answered with a full page load.
+templ userMenu(s Shell) {
+	if s.User == nil {
+		<a href="/login" class="font-medium">Sign in</a>
+	} else {
+		<button type="button" popovertarget="msdr-user-menu" class="icon-button gap-1.5">
+			@icon() {
+				<circle cx="12" cy="8" r="4"></circle>
+				<path d="M4 21a8 8 0 0 1 16 0"></path>
+			}
+			<span class="sr-only">Account menu for </span>
+			<span class="sr-only md:not-sr-only md:max-w-40 md:truncate">{ s.User.Name }</span>
+		</button>
+		<div id="msdr-user-menu" popover class="menu-popover">
+			<p class="flex flex-wrap items-center gap-2">
+				<span class="font-semibold">{ s.User.Name }</span>
+				<span class="badge">{ s.User.Role }</span>
+			</p>
+			<ul class="mt-2 flex flex-col">
+				for _, l := range s.User.Links {
+					<li><a href={ templ.URL(l.Href) } class="menu-item">{ l.Label }</a></li>
+				}
+				for _, l := range s.FooterLinks {
+					<li><a href={ templ.URL(l.Href) } class="menu-item">{ l.Label }</a></li>
+				}
+				<li>
+					<form method="post" action="/logout">
+						<button type="submit" class="menu-item">Sign out</button>
+					</form>
+				</li>
+			</ul>
+		</div>
+	}
 }
 
 // Main is the region swapped by boosted navigation. It carries the page

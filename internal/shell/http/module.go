@@ -29,9 +29,9 @@ type ShellSource struct {
 	now         func() time.Time
 }
 
-// NewShellSource returns a ShellSource. user returns the signed-in user of
-// a request for the top bar (nil: anonymous) and may be nil. now is the
-// clock of the top bar.
+// NewShellSource returns a ShellSource. user returns the signed-in visitor
+// of a request for the user menu (nil: anonymous); it may be nil. now is
+// the clock of the top bar.
 func NewShellSource(lookAndFeel *app.LookAndFeel, nav *app.Navigation, user func(r *http.Request) *layout.User,
 	now func() time.Time,
 ) *ShellSource {

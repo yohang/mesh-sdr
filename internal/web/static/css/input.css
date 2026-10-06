@@ -189,6 +189,64 @@
     }
   }
 
+  /* Icon buttons of the top bar (notifications, user menu): 44 px targets. */
+  .icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0 0.5rem;
+    border-radius: var(--msdr-radius-md);
+    color: var(--msdr-color-fg);
+    font-weight: 500;
+
+    &:hover { background: var(--msdr-color-surface-raised); }
+  }
+
+  /*
+   * Top bar menus (UI-006, UI-010): native popovers, anchored under the top
+   * bar on the right (CSS anchor positioning is not in every supported
+   * browser yet). They never float over content elsewhere.
+   */
+  .menu-popover {
+    position: fixed;
+    inset: 3.75rem 0.5rem auto auto;
+    margin: 0;
+    width: min(18rem, calc(100vw - 1rem));
+    padding: 0.75rem;
+    border: 1px solid var(--msdr-color-border);
+    border-radius: var(--msdr-radius-md);
+    background: var(--msdr-color-surface);
+    color: var(--msdr-color-fg);
+    font-size: var(--msdr-text-sm);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.2);
+  }
+
+  .menu-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 2.75rem;
+    padding: 0 0.5rem;
+    border-radius: var(--msdr-radius-sm);
+    color: var(--msdr-color-fg);
+    text-align: left;
+    text-decoration: none;
+
+    &:hover { background: var(--msdr-color-surface-raised); }
+  }
+
+  /* Role badge: text on a raised surface with a border (not color alone). */
+  .badge {
+    padding: 0 0.375rem;
+    border: 1px solid var(--msdr-color-border);
+    border-radius: var(--msdr-radius-sm);
+    background: var(--msdr-color-surface-raised);
+    font-size: var(--msdr-text-xs);
+    font-weight: 600;
+  }
+
   /* Long-form text (usage policy): readable measure and spacing. */
   .prose-text {
     max-width: 70ch;
