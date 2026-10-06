@@ -22,6 +22,7 @@ require (
 	github.com/yuin/goldmark v1.8.2
 	golang.org/x/crypto v0.57.0
 	golang.org/x/image v0.43.0
+	golang.org/x/term v0.46.0
 	golang.org/x/time v0.16.0
 	modernc.org/sqlite v1.60.1
 )

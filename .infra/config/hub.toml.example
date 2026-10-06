@@ -7,6 +7,8 @@
 #   Keys set in a file or the env are locked and shown with their origin.
 # - The config dir is /etc/meshsdr, or --config-dir / MESHSDR_CONFIG_DIR.
 # - JSON Schema: `meshsdr hub config schema`. Validate: `meshsdr hub config check`.
+# - MESHSDR_PASSWORD is not a config key: it gives the password of
+#   `meshsdr --noninteractive hub user add <name>`.
 # - Secret keys take { file = "/etc/meshsdr/secrets/x" } or { env = "VAR" };
 #   an inline value needs allow_inline_secrets = true in the same file.
 #   Secret files must not be group/world-writable nor world-readable.

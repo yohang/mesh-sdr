@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/log"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Exit codes.
@@ -29,6 +31,8 @@ const (
 )
 
 type app struct {
+	stdin          io.Reader
+	reader         *bufio.Reader
 	stdout, stderr io.Writer
 	// env is the environment; nil means the process environment.
 	env map[string]string
@@ -42,7 +46,7 @@ type app struct {
 
 // Execute runs the command line and returns the process exit code.
 func Execute(ctx context.Context, args []string) int {
-	a := &app{stdout: os.Stdout, stderr: os.Stderr}
+	a := &app{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr}
 
 	return a.execute(ctx, args)
 }
@@ -76,7 +80,7 @@ func (a *app) newRootCmd() *cobra.Command {
 	f.BoolVar(&a.debug, "debug", false, "log at debug level (overrides log.level)")
 	f.BoolVar(&a.json, "json", false, "machine-readable output and JSON logs (overrides log.format)")
 	f.BoolVar(&a.silent, "silent", false, "print errors only")
-	f.BoolVar(&a.noninteractive, "noninteractive", false, "never prompt (no command prompts yet)")
+	f.BoolVar(&a.noninteractive, "noninteractive", false, "never prompt (read secrets from the environment instead)")
 
 	cmd.AddCommand(a.newHubCmd(), a.newNodeCmd())
 
@@ -148,6 +152,11 @@ func (a *app) printJSON(v any) error {
 }
 
 func (a *app) printError(err error) {
+	var status exitStatus
+	if errors.As(err, &status) {
+		return
+	}
+
 	if a.json {
 		_ = json.NewEncoder(a.stderr).Encode(map[string]string{"error": err.Error(), "code": errorCode(err)})
 
@@ -158,6 +167,11 @@ func (a *app) printError(err error) {
 }
 
 func exitCode(err error) int {
+	var status exitStatus
+	if errors.As(err, &status) {
+		return int(status)
+	}
+
 	var cerr *config.Error
 	if errors.As(err, &cerr) {
 		return ExitConfig
@@ -177,6 +191,11 @@ func errorCode(err error) string {
 
 	if errors.As(err, &cerr) {
 		return "config_invalid"
+	}
+
+	var de *shared.Error
+	if errors.As(err, &de) {
+		return string(de.Code())
 	}
 
 	return "error"

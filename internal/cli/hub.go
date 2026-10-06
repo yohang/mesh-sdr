@@ -26,7 +26,7 @@ func (a *app) newHubCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error { return a.runHub(cmd.Context()) },
 	}
 
-	cmd.AddCommand(a.newMigrateCmd(), a.newConfigCmd(config.RoleHub))
+	cmd.AddCommand(a.newMigrateCmd(), a.newConfigCmd(config.RoleHub), a.newUserCmd())
 
 	return cmd
 }
