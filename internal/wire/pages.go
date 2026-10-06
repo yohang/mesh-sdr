@@ -21,6 +21,11 @@ func (p pages) Page(w http.ResponseWriter, r *http.Request, status int, title st
 	p.rd.Page(w, r, status, layout.Page{Title: title}, content, fragment)
 }
 
+// AdminPage implements identityhttp.Pages.
+func (p pages) AdminPage(w http.ResponseWriter, r *http.Request, status int, title, section string, content, fragment templ.Component) {
+	p.rd.Page(w, r, status, layout.Page{Title: title, Section: layout.SectionAdmin}, layout.AdminPage(section, content), fragment)
+}
+
 // Error implements identityhttp.Pages.
 func (p pages) Error(w http.ResponseWriter, r *http.Request, status int) {
 	p.rd.Error(w, r, status)

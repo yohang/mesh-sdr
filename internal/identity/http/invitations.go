@@ -67,7 +67,7 @@ func (m *Module) invitationsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.pages.Page(w, r, http.StatusOK, pageTitleInvitations, invitationsPage(v), nil)
+	m.pages.AdminPage(w, r, http.StatusOK, pageTitleInvitations, "invitations", invitationsPage(v), nil)
 }
 
 func (m *Module) createInvitationAction(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +118,7 @@ func (m *Module) createInvitationAction(w http.ResponseWriter, r *http.Request) 
 		v.Created = &created
 	}
 
-	m.pages.Page(w, r, status, pageTitleInvitations, invitationsPage(v), nil)
+	m.pages.AdminPage(w, r, status, pageTitleInvitations, "invitations", invitationsPage(v), nil)
 }
 
 func (m *Module) revokeInvitationAction(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +147,7 @@ func (m *Module) revokeInvitationAction(w http.ResponseWriter, r *http.Request) 
 		v.Notice = notice{Text: "The invitation was revoked."}
 	}
 
-	m.pages.Page(w, r, status, pageTitleInvitations, invitationsPage(v), nil)
+	m.pages.AdminPage(w, r, status, pageTitleInvitations, "invitations", invitationsPage(v), nil)
 }
 
 func (m *Module) testMailAction(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +173,7 @@ func (m *Module) testMailAction(w http.ResponseWriter, r *http.Request) {
 		v.Notice = notice{Text: "A test message was queued for " + to.String() + "."}
 	}
 
-	m.pages.Page(w, r, status, pageTitleInvitations, invitationsPage(v), nil)
+	m.pages.AdminPage(w, r, status, pageTitleInvitations, "invitations", invitationsPage(v), nil)
 }
 
 // Invitation acceptance (anyone holding the link).

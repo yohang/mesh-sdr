@@ -36,12 +36,7 @@ func (m *Module) ShellUser(r *http.Request) *layout.User {
 		name = d.String()
 	}
 
-	links := []layout.Link{{Label: "Account", Href: AccountPath}}
-	if p.Has(domain.RoleAdmin) {
-		links = append(links, m.adminLinks...)
-	}
-
-	return &layout.User{Name: name, Links: links}
+	return &layout.User{Name: name, Links: []layout.Link{{Label: "Account", Href: AccountPath}}}
 }
 
 // notice is the outcome message of a section form.

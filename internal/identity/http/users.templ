@@ -17,7 +17,7 @@ func userURL(u *domain.User) string { return "/admin/users/" + u.ID().String() }
 
 // usersPage is Admin › Users (ACC-008): search and filters, then the list.
 templ usersPage(v usersView) {
-	<section class="flex w-full max-w-5xl flex-col gap-6 p-4" aria-labelledby="users-title">
+	<section class="flex w-full max-w-5xl flex-col gap-6" aria-labelledby="users-title">
 		<div class="flex flex-wrap items-center gap-4">
 			<h1 id="users-title" class="text-2xl font-bold">Users</h1>
 			<a href="/admin/invitations">Invite a user</a>
@@ -88,7 +88,7 @@ templ usersPage(v usersView) {
 // userPage is Admin › Users › {user}: details, roles, state, password and
 // sessions.
 templ userPage(v userView) {
-	<section class="flex w-full max-w-3xl flex-col gap-6 p-4" aria-labelledby="user-title">
+	<section class="flex w-full max-w-3xl flex-col gap-6" aria-labelledby="user-title">
 		<p><a href="/admin/users">All users</a></p>
 		<h1 id="user-title" class="text-2xl font-bold">{ v.User.Username().String() }</h1>
 		@noticeView("user-notice", v.Notice)

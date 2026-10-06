@@ -40,6 +40,10 @@ const (
 // pages renders the content alone, or the fragment for htmx requests.
 type pages struct{}
 
+func (p pages) AdminPage(w http.ResponseWriter, r *http.Request, status int, title, _ string, content, fragment templ.Component) {
+	p.Page(w, r, status, title, content, fragment)
+}
+
 func (pages) Page(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component) {
 	c := content
 	if fragment != nil && r.Header.Get("HX-Request") == "true" {

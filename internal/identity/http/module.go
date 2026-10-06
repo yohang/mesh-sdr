@@ -30,7 +30,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
-	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 //go:generate go tool templ generate
@@ -146,6 +145,9 @@ type Pages interface {
 	// Page writes a page; fragment, when not nil, is written alone for htmx
 	// fragment requests.
 	Page(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component)
+	// AdminPage writes a page of the admin area: content is shown in the
+	// admin layout, with section (layout.AdminSections) as the current one.
+	AdminPage(w http.ResponseWriter, r *http.Request, status int, title, section string, content, fragment templ.Component)
 	// Error writes the shell error page for status.
 	Error(w http.ResponseWriter, r *http.Request, status int)
 }
@@ -177,17 +179,15 @@ type Module struct {
 	audit       AuditService
 	keys        app.KeySource
 	now         func() time.Time
-	// adminLinks are the admin pages of the user menu.
-	adminLinks []layout.Link
-	pages      Pages
-	logger     *slog.Logger
-	resolver   *clientip.Resolver
-	cop        *http.CrossOriginProtection
-	admin      []netip.Prefix
-	secure     bool
-	preKey     []byte
-	routes     chi.Routes
-	upload     func(r *http.Request) bool
+	pages       Pages
+	logger      *slog.Logger
+	resolver    *clientip.Resolver
+	cop         *http.CrossOriginProtection
+	admin       []netip.Prefix
+	secure      bool
+	preKey      []byte
+	routes      chi.Routes
+	upload      func(r *http.Request) bool
 }
 
 // New returns the module.
@@ -219,7 +219,6 @@ func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, e
 		audit:       svc.Audit,
 		keys:        svc.Keys,
 		now:         time.Now,
-		adminLinks:  []layout.Link{{Label: "Users", Href: UsersPath}, {Label: "Invitations", Href: InvitationsPath}, {Label: "Audit log", Href: AuditPath}},
 		pages:       pages,
 		logger:      logger,
 		resolver:    clientip.NewResolver(cfg.TrustedProxies),

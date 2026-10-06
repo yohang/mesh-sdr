@@ -92,7 +92,7 @@ func (m *Module) auditPage(w http.ResponseWriter, r *http.Request) {
 		v.NextQS = nv.Encode()
 	}
 
-	m.pages.Page(w, r, http.StatusOK, pageTitleAudit, auditPage(v), nil)
+	m.pages.AdminPage(w, r, http.StatusOK, pageTitleAudit, "audit", auditPage(v), nil)
 }
 
 // details renders before/after maps as "key=value" pairs, sorted.

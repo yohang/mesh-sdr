@@ -13,9 +13,12 @@ var AdminSections = []AdminSection{
 	{ID: "overview", Label: "Overview", Href: "/admin"},
 	{ID: "site", Label: "Site", Href: "/admin/site"},
 	{ID: "access", Label: "Access", Href: "/admin/access"},
+	{ID: "users", Label: "Users", Href: "/admin/users"},
+	{ID: "invitations", Label: "Invitations", Href: "/admin/invitations"},
 	{ID: "look-and-feel", Label: "Look & feel", Href: "/admin/look-and-feel"},
 	{ID: "devices", Label: "Devices", Href: "/admin/devices"},
 	{ID: "retention", Label: "Data & retention", Href: "/admin/retention"},
+	{ID: "audit", Label: "Audit log", Href: "/admin/audit"},
 	{ID: "system", Label: "System", Href: "/admin/system"},
 }
 

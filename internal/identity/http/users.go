@@ -79,7 +79,7 @@ func (m *Module) usersPage(w http.ResponseWriter, r *http.Request) {
 		view.NextQS = next.Encode()
 	}
 
-	m.pages.Page(w, r, http.StatusOK, pageTitleUsers, usersPage(view), nil)
+	m.pages.AdminPage(w, r, http.StatusOK, pageTitleUsers, "users", usersPage(view), nil)
 }
 
 // userView is the detail page of a user.
@@ -154,7 +154,7 @@ func (m *Module) userPage(w http.ResponseWriter, r *http.Request) {
 	noIndex(w)
 
 	if v, ok := m.userView(w, r); ok {
-		m.pages.Page(w, r, http.StatusOK, v.User.Username().String(), userPage(v), nil)
+		m.pages.AdminPage(w, r, http.StatusOK, v.User.Username().String(), "users", userPage(v), nil)
 	}
 }
 
@@ -189,7 +189,7 @@ func (m *Module) userAction(w http.ResponseWriter, r *http.Request, run func(id 
 		v.Notice = notice{Text: msg}
 	}
 
-	m.pages.Page(w, r, status, v.User.Username().String(), userPage(v), nil)
+	m.pages.AdminPage(w, r, status, v.User.Username().String(), "users", userPage(v), nil)
 }
 
 // parseGrants reads the role form: a global role, plus device-scoped

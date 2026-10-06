@@ -19,7 +19,7 @@ func invitationTarget(i *domain.Invitation) string {
 // the creation form, the link of a new invitation (shown once), the list
 // and the mail state.
 templ invitationsPage(v invitationsView) {
-	<section class="flex w-full max-w-4xl flex-col gap-6 p-4" aria-labelledby="invitations-title">
+	<section class="flex w-full max-w-4xl flex-col gap-6" aria-labelledby="invitations-title">
 		<h1 id="invitations-title" class="text-2xl font-bold">Invitations</h1>
 		@noticeView("invitations-notice", v.Notice)
 		if v.MailEnabled {
