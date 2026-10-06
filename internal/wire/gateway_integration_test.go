@@ -10,6 +10,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 )
 
@@ -156,6 +157,50 @@ func TestGatewayNodeOffline(t *testing.T) {
 
 		return st == http.StatusServiceUnavailable
 	})
+}
+
+// TestRevokedByAnotherProcess: a node revoked through the CLI while the hub
+// runs (another process, no link to the control manager) is dropped by the
+// next reconcile with the revocation list and 4403, so its media
+// connections close (GRID-015).
+func TestRevokedByAnotherProcess(t *testing.T) {
+	e := newGridEnvWith(t, true, fastTimings(), func(o *control.HubOptions) { o.ReconcileEvery = 200 * time.Millisecond })
+	e.enrollNode(t, fakeProber{})
+
+	id := domain.MustNodeID("attic")
+
+	eventually(t, "control channel", 15*time.Second, func() bool { return e.g.manager.Connected(id) })
+
+	origin := http.Header{}
+	origin.Set("Origin", e.hubCfg.Hub.URL)
+
+	var ws *websocket.Conn
+
+	eventually(t, "media connection", 5*time.Second, func() bool {
+		var st int
+		ws, st = e.browserDial(t, "attic", origin)
+
+		return st == http.StatusSwitchingProtocols
+	})
+
+	cli, err := HubNodes(e.hubCfg, quiet, e.adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := cli.Revoke(context.Background(), "cli", "attic"); err != nil {
+		t.Fatal(err)
+	}
+
+	for {
+		if _, err := readEnvelope(t, ws); err != nil {
+			if got := websocket.CloseStatus(err); got != websocket.StatusCode(rxv1.CloseForbidden) {
+				t.Fatalf("close status = %d (%v), want 4403", got, err)
+			}
+
+			break
+		}
+	}
 }
 
 // TestGatewayRevokedNode: revoking a node closes its media connections and

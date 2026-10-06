@@ -280,10 +280,13 @@ func (m *Manager) reconcile(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// A node removed, revoked or disabled by another process (the CLI while
+	// the hub runs) is dropped like through Drop: revocations, then 4403.
 	for id, l := range m.links {
 		if !want[id] {
-			l.cancel()
 			delete(m.links, id)
+
+			go m.drop(context.WithoutCancel(ctx), l)
 		}
 	}
 
@@ -330,6 +333,12 @@ func (m *Manager) Drop(ctx context.Context, id domain.NodeID) {
 		return
 	}
 
+	m.drop(ctx, l)
+}
+
+// drop pushes the revocation list on the open channel of l, closes it with
+// 4403 and waits for the close handshake before cancelling it.
+func (m *Manager) drop(ctx context.Context, l *link) {
 	if s := l.current(); s != nil {
 		s.pushRevocations(ctx)
 		s.conn.Close(rxv1.CloseForbidden, "node removed, disabled or re-enrolled")
