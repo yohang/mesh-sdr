@@ -60,3 +60,14 @@ func settingsActor(ctx context.Context) settingsapp.Actor {
 
 	return a
 }
+
+// storeListenPolicy reads the global listen policy (listen_policy) from the
+// settings store for the grid feature summary.
+type storeListenPolicy struct {
+	store interface{ String(key string) string }
+}
+
+// ListenPolicy implements grid/app.GlobalListenPolicy.
+func (p storeListenPolicy) ListenPolicy(context.Context) (string, error) {
+	return p.store.String("listen_policy"), nil
+}

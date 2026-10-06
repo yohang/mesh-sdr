@@ -342,6 +342,27 @@ paths:
                 $ref: "#/components/schemas/ConnectionList"
         default:
           $ref: "#/components/responses/Problem"
+  /features:
+    get:
+      operationId: getFeatures
+      x-meshsdr-access: anonymous
+      summary: Public feature summary (API-001)
+      description: |
+        The enabled devices the caller may listen to (effective listen
+        policy: the device's node config override, else the global
+        `listen_policy`), each with the modes its node reports available.
+        It never carries node addresses, versions or missing requirements:
+        the detailed report is `GET /nodes/{id}/capabilities` (admin).
+      tags: [grid]
+      responses:
+        "200":
+          description: Feature summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Features"
+        default:
+          $ref: "#/components/responses/Problem"
   /auth/setup/{token}:
     parameters:
       - name: token
@@ -1900,6 +1921,33 @@ components:
         last_heartbeat_at:
           type: string
           format: date-time
+    Features:
+      type: object
+      additionalProperties: false
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceFeatures"
+    DeviceFeatures:
+      type: object
+      additionalProperties: false
+      required: [id, node_id, name, online, modes]
+      properties:
+        id:
+          type: string
+        node_id:
+          type: string
+        name:
+          type: string
+        online:
+          type: boolean
+        modes:
+          type: array
+          description: Modes the device's node reports available, sorted.
+          items:
+            type: string
     DeviceList:
       type: object
       required: [items]

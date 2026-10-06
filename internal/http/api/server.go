@@ -37,6 +37,7 @@ type Server struct {
 	ResetHandlers
 	AuditHandlers
 	TokenHandlers
+	FeatureHandlers
 }
 
 var _ StrictServerInterface = Server{}
