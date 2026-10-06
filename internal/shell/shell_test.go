@@ -239,6 +239,23 @@ func checkIcon(t *testing.T, h http.Handler, src, ctype, sizes string) {
 	}
 }
 
+func TestMethods(t *testing.T) {
+	h := router(config.DefaultHub().Settings)
+
+	for _, p := range []string{"/", "/policy", "/robots.txt", "/manifest.webmanifest", "/favicon.ico"} {
+		// The recorder keeps the body; net/http drops it on the wire.
+		res, _ := do(t, h, http.MethodHead, p, nil)
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("HEAD %s = %d", p, res.StatusCode)
+		}
+	}
+
+	res, _ := do(t, h, http.MethodPost, "/policy", nil)
+	if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != "GET, HEAD" {
+		t.Errorf("POST /policy = %d, Allow %q", res.StatusCode, res.Header.Get("Allow"))
+	}
+}
+
 func TestErrorPages(t *testing.T) {
 	h := router(config.DefaultHub().Settings)
 

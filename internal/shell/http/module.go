@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -71,13 +72,45 @@ func (m *Module) Middlewares() []func(http.Handler) http.Handler { return nil }
 // 405 pages of the whole router; the API keeps its problem+json errors.
 func (m *Module) Routes(r chi.Router) {
 	r.NotFound(m.render.NotFound)
-	r.MethodNotAllowed(m.render.MethodNotAllowed)
+	r.MethodNotAllowed(m.methodNotAllowed)
 
-	r.Get("/", m.home)
-	r.Get("/robots.txt", robots)
-	r.Get("/policy", m.policyPage)
-	r.Get("/manifest.webmanifest", m.manifest)
-	r.Get("/favicon.ico", favicon(m.static))
+	// Read-only pages answer GET and HEAD (net/http drops HEAD bodies).
+	get := func(pattern string, h http.HandlerFunc) {
+		r.Get(pattern, h)
+		r.Head(pattern, h)
+	}
+
+	get("/", m.home)
+	get("/robots.txt", robots)
+	get("/policy", m.policyPage)
+	get("/manifest.webmanifest", m.manifest)
+	get("/favicon.ico", favicon(m.static))
+}
+
+// allowCandidates are the methods probed for the Allow header of a 405.
+var allowCandidates = []string{
+	http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+	http.MethodPatch, http.MethodDelete, http.MethodOptions,
+}
+
+// methodNotAllowed is the router's 405 page. chi gives a custom 405 handler
+// no Allow header, so the methods the path accepts are probed on the router.
+func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	if rctx := chi.RouteContext(r.Context()); rctx != nil && rctx.Routes != nil {
+		var allowed []string
+
+		for _, method := range allowCandidates {
+			if rctx.Routes.Match(chi.NewRouteContext(), method, r.URL.Path) {
+				allowed = append(allowed, method)
+			}
+		}
+
+		if len(allowed) > 0 {
+			w.Header().Set("Allow", strings.Join(allowed, ", "))
+		}
+	}
+
+	m.render.MethodNotAllowed(w, r)
 }
 
 // home is a placeholder home page until the Receiver section (UI-006) takes
