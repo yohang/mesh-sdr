@@ -93,6 +93,12 @@ func New(auth Authenticator, pages Pages, cfg Config, logger *slog.Logger) (*Mod
 		return nil, fmt.Errorf("trust hub.url origin: %w", err)
 	}
 
+	secure := u.Scheme == "https"
+	if !secure {
+		logger.Warn("hub.url is not https: session cookies are sent without Secure nor the __Host- prefix; use this only on loopback or a trusted LAN",
+			slog.String("hub_url", cfg.HubURL))
+	}
+
 	return &Module{
 		auth:     auth,
 		pages:    pages,
@@ -100,7 +106,7 @@ func New(auth Authenticator, pages Pages, cfg Config, logger *slog.Logger) (*Mod
 		resolver: clientip.NewResolver(cfg.TrustedProxies),
 		cop:      cop,
 		admin:    cfg.AdminNetworks,
-		secure:   u.Scheme == "https",
+		secure:   secure,
 		preKey:   []byte(rand.Text()),
 	}, nil
 }

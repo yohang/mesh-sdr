@@ -1,6 +1,7 @@
 package http_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -618,5 +619,15 @@ func TestAuthorize(t *testing.T) {
 
 	if _, err := identityhttp.New(nil, pages{}, identityhttp.Config{HubURL: "not a url"}, slog.New(slog.DiscardHandler)); err == nil {
 		t.Error("invalid hub.url accepted")
+	}
+
+	var logs bytes.Buffer
+
+	if _, err := identityhttp.New(nil, pages{}, identityhttp.Config{HubURL: "http://lan.example"}, slog.New(slog.NewTextHandler(&logs, nil))); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "without Secure") {
+		t.Errorf("no warning for an http hub.url: %q", logs.String())
 	}
 }
