@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	settingsdomain "github.com/yohang/mesh-sdr/internal/settings/domain"
@@ -25,6 +26,9 @@ import (
 const (
 	CodeInvalidType = "invalid_type"
 )
+
+// maxLoginBurst bounds auth.login_rate_limit.
+const maxLoginBurst = 100
 
 // settingsPrefix is the hub.toml table of the settings.
 const settingsPrefix = "settings."
@@ -46,6 +50,16 @@ type settingsIndex struct {
 // domain value object of a key's consumer. They receive the decoded Go
 // value.
 var settingHooks = map[string]func(v any) error{
+	// Login attempts per client address: at most 100 per window, and a
+	// window of at least one minute (at most 100 attempts per minute).
+	"auth.login_rate_limit": func(v any) error {
+		r, _ := v.(Rate)
+		if r.Count() > maxLoginBurst || r.Window() < time.Minute {
+			return fmt.Errorf("at most %d attempts per window of at least 1m", maxLoginBurst)
+		}
+
+		return nil
+	},
 	"receiver.usage_policy_text": func(v any) error {
 		s, _ := v.(string)
 		if strings.TrimSpace(s) == "" {

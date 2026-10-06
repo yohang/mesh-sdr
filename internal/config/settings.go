@@ -82,7 +82,7 @@ type SettingsSession struct {
 // SettingsAuth is the [settings.auth] table: login throttling (AUTH-002,
 // ADR 0009). It is not the config-only [auth] bootstrap table.
 type SettingsAuth struct {
-	LoginRateLimit Rate                `toml:"login_rate_limit" env:"LOGIN_RATE_LIMIT" jsonschema_extras:"x-label=Sign-in attempts per client address" jsonschema_description:"Sign-in attempts allowed per client address: <count>/<window> (for example 5/1m)."`
+	LoginRateLimit Rate                `toml:"login_rate_limit" env:"LOGIN_RATE_LIMIT" jsonschema_extras:"x-label=Sign-in attempts per client address" jsonschema_description:"Sign-in attempts allowed per client address: <count>/<window> (for example 5/1m), at most 100 per window of at least 1m."`
 	Lockout        SettingsAuthLockout `toml:"lockout" envPrefix:"LOCKOUT__" jsonschema:"description=Per-account throttling after failed sign-ins."`
 }
 
