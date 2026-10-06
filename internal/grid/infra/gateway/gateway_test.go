@@ -65,6 +65,7 @@ func freeAddr(t *testing.T) string {
 type fixture struct {
 	ca       *pki.CA
 	node     *httptest.Server
+	evil     *httptest.Server
 	gwClient *pki.ClientSource
 	logs     *syncBuffer
 }
@@ -102,6 +103,8 @@ func newFixture(t *testing.T) *fixture {
 			"path": r.URL.Path, "peer": kind + ":" + id, "token": r.Header.Get(gateway.HeaderAccessToken),
 			"cid": r.Header.Get(gateway.HeaderCID), "node": r.Header.Get(gateway.HeaderNodeID),
 			"forged": r.Header.Get("X-Rx-Forged"), "upstream": r.Header.Get(gateway.HeaderUpstream),
+			"cookie": r.Header.Get("Cookie"), "authorization": r.Header.Get("Authorization"),
+			"referer": r.Header.Get("Referer"),
 		})
 
 		ctx := r.Context()
@@ -120,7 +123,26 @@ func newFixture(t *testing.T) *fixture {
 	node.StartTLS()
 	t.Cleanup(node.Close)
 
-	return &fixture{ca: ca, node: node, gwClient: pki.NewClientSource(ca, pki.KindGateway, "hub.example.org", time.Now), logs: &syncBuffer{}}
+	// A node "evil" that answers with content of its own.
+	evilKey, _ := pki.GenerateKey()
+	evilCSR, _ := pki.CreateNodeCSR(evilKey, "evil", "127.0.0.1:0")
+
+	evilDER, err := ca.SignNodeCSR(evilCSR, "evil", "127.0.0.1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	evil := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "__Host-rx_session", Value: "stolen", Path: "/", Secure: true})
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, "<script>steal()</script>")
+	}))
+	evil.TLS = pki.NodeServerConfig(pki.NewCertHolder(tls.Certificate{Certificate: [][]byte{evilDER}, PrivateKey: evilKey}), ca.Pool(), nil)
+	evil.StartTLS()
+	t.Cleanup(evil.Close)
+
+	return &fixture{ca: ca, node: node, evil: evil, gwClient: pki.NewClientSource(ca, pki.KindGateway, "hub.example.org", time.Now), logs: &syncBuffer{}}
 }
 
 // hub is a fake hub router: "/" answers "hub", the authz admits node "roof"
@@ -134,6 +156,11 @@ func (f *fixture) hub() http.Handler {
 			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = io.WriteString(w, `{"code":"node_offline"}`)
+		case r.URL.Query().Get("node") == "evil":
+			w.Header().Set(gateway.HeaderAccessToken, "minted")
+			w.Header().Set(gateway.HeaderCID, "c1")
+			w.Header().Set(gateway.HeaderUpstream, strings.TrimPrefix(f.evil.URL, "https://"))
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Query().Get("node") != "roof":
 			w.WriteHeader(http.StatusNotFound)
 		case r.Header.Get(gateway.HeaderAccessToken) != "":
@@ -265,6 +292,8 @@ func TestGatewayPlainHTTP(t *testing.T) {
 	// cid, the node id, the /ws path, and none of the forged headers.
 	h := http.Header{}
 	h.Set("Cookie", "session=ok")
+	h.Set("Authorization", "Basic c2VjcmV0")
+	h.Set("Referer", "http://example.org/private")
 	h.Set(gateway.HeaderAccessToken, "forged")
 	h.Set("X-Rx-Forged", "1")
 	h.Set(gateway.HeaderUpstream, "evil:1")
@@ -286,6 +315,7 @@ func TestGatewayPlainHTTP(t *testing.T) {
 
 	want := map[string]string{
 		"path": "/ws", "peer": "gateway:hub.example.org", "token": "minted", "cid": "c1", "node": "roof", "forged": "", "upstream": "",
+		"cookie": "", "authorization": "", "referer": "",
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -301,9 +331,45 @@ func TestGatewayPlainHTTP(t *testing.T) {
 		t.Fatalf("echo = %q, %v", b, err)
 	}
 
-	// Caddy logs reach the injected logger, with a gateway.caddy component.
-	if !strings.Contains(f.logs.String(), `"component":"gateway.caddy`) {
-		t.Fatalf("no Caddy log through slog: %s", f.logs.String())
+	// Caddy logs reach the injected logger, with a gateway.caddy component,
+	// and never carry the access token nor the browser credentials, even
+	// at debug level.
+	logs := f.logs.String()
+	if !strings.Contains(logs, `"component":"gateway.caddy`) || !strings.Contains(logs, "upstream roundtrip") || !strings.Contains(logs, "REDACTED") {
+		t.Fatalf("no Caddy debug log through slog: %s", logs)
+	}
+
+	for _, secret := range []string{"minted", "session=ok", "c2VjcmV0"} {
+		if strings.Contains(logs, secret) {
+			t.Errorf("a secret reached the logs: %q", secret)
+		}
+	}
+
+	// A node's own answer never reaches the browser on the hub origin:
+	// no cookie, no content, a hub problem with the same status.
+	_, resp, err = dial(t, nil, ws+"/nodes/evil/ws", h)
+	if err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("evil node: %v %v", err, resp)
+	}
+
+	body, _ = io.ReadAll(resp.Body)
+
+	if len(resp.Header.Values("Set-Cookie")) != 0 || strings.Contains(string(body), "script") ||
+		resp.Header.Get("Content-Type") != "application/problem+json" || resp.Header.Get("X-Content-Type-Options") != "nosniff" ||
+		!strings.Contains(resp.Header.Get("Content-Security-Policy"), "sandbox") || resp.Header.Get("Server") != "" {
+		t.Fatalf("node answer leaked: %v %q", resp.Header, body)
+	}
+
+	// No Server header on gateway answers either.
+	resp, err = http.Get(base + "/nodes/x/ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = resp.Body.Close()
+
+	if resp.Header.Get("Server") != "" {
+		t.Fatalf("Server header: %q", resp.Header.Get("Server"))
 	}
 }
 

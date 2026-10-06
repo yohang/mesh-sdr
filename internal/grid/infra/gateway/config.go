@@ -16,6 +16,9 @@ const NodeRoutePattern = `^/nodes/[a-z0-9][a-z0-9-]{1,62}/ws$`
 
 type obj = map[string]any
 
+// noServer drops Caddy's Server response header.
+var noServer = obj{"handler": "headers", "response": obj{"delete": []string{"Server"}}}
+
 // buildConfig returns the Caddy JSON config of c; binding names the
 // dependencies of the custom modules.
 func buildConfig(c Config, binding string) ([]byte, error) {
@@ -34,7 +37,7 @@ func buildConfig(c Config, binding string) ([]byte, error) {
 		nodeRoute(c, binding),
 		obj{
 			"match":    []any{obj{"path": []string{"/nodes/*", "/internal/*"}}},
-			"handle":   []any{obj{"handler": "static_response", "status_code": 404}},
+			"handle":   []any{noServer, obj{"handler": "static_response", "status_code": 404}},
 			"terminal": true,
 		},
 		obj{"handle": []any{obj{"handler": "meshsdr_hub", "binding": binding}}},
@@ -83,7 +86,7 @@ func buildConfig(c Config, binding string) ([]byte, error) {
 
 			servers["redirect"] = timeouts(obj{
 				"listen": []string{c.HTTPListen},
-				"routes": []any{obj{"handle": []any{obj{
+				"routes": []any{obj{"handle": []any{noServer, obj{
 					"handler":     "static_response",
 					"status_code": 308,
 					"headers":     obj{"Location": []string{strings.TrimRight(pub.Scheme+"://"+pub.Host, "/") + "{http.request.uri}"}},

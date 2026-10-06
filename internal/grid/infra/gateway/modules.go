@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -122,12 +123,15 @@ const maxAuthzBody = 64 << 10
 func (m *NodeAuthz) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	match := nodePath.FindStringSubmatch(r.URL.Path)
 	if match == nil {
+		w.Header().Del("Server")
 		w.WriteHeader(http.StatusNotFound)
 
 		return nil
 	}
 
 	id := match[1]
+
+	w.Header().Del("Server")
 
 	for name := range r.Header {
 		if strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Rx-") {
@@ -167,12 +171,118 @@ func (m *NodeAuthz) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		return caddyhttp.Error(http.StatusBadGateway, errors.New("authz answered without an upstream"))
 	}
 
-	r.Header.Set(HeaderAccessToken, rec.header.Get(HeaderAccessToken))
-	r.Header.Set(HeaderCID, rec.header.Get(HeaderCID))
+	// Nodes never see the browser's credentials (§5.8): only the WebSocket
+	// handshake, Origin and User-Agent go through, with the token and cid
+	// set by the authz.
+	forwarded := http.Header{}
+
+	for _, k := range forwardedRequestHeaders {
+		if v, ok := r.Header[k]; ok {
+			forwarded[k] = v
+		}
+	}
+
+	forwarded.Set(HeaderAccessToken, rec.header.Get(HeaderAccessToken))
+	forwarded.Set(HeaderCID, rec.header.Get(HeaderCID))
+	r.Header = forwarded
+
 	caddyhttp.SetVar(r.Context(), varNode, id)
 	caddyhttp.SetVar(r.Context(), varUpstream, upstream)
 
-	return next.ServeHTTP(w, r)
+	return next.ServeHTTP(&nodeResponse{ResponseWriter: w, r: r}, r)
+}
+
+// forwardedRequestHeaders are the browser headers a node receives.
+var forwardedRequestHeaders = []string{
+	"Connection", "Upgrade", "Sec-Websocket-Key", "Sec-Websocket-Version", "Sec-Websocket-Protocol",
+	"Sec-Websocket-Extensions", "Origin", "User-Agent",
+}
+
+// upgradeResponseHeaders are the node response headers the browser
+// receives on a successful upgrade.
+var upgradeResponseHeaders = []string{
+	"Connection", "Upgrade", "Sec-Websocket-Accept", "Sec-Websocket-Protocol", "Sec-Websocket-Extensions",
+}
+
+// nodeResponse filters what a node answers on the hub origin: a successful
+// upgrade keeps only its handshake headers; any other answer is replaced
+// by a hub problem with the same status, so no node content (cookies,
+// scripts, documents) is ever served on the hub origin.
+type nodeResponse struct {
+	http.ResponseWriter
+	r       *http.Request
+	done    bool
+	swallow bool
+}
+
+// Unwrap lets http.ResponseController reach Hijack and Flush.
+func (n *nodeResponse) Unwrap() http.ResponseWriter { return n.ResponseWriter }
+
+func (n *nodeResponse) upgrade(code int) bool {
+	if code == http.StatusSwitchingProtocols {
+		return true
+	}
+
+	// WebSocket over HTTP/2 extended CONNECT answers 200 (Caddy).
+	_, h2 := caddyhttp.GetVar(n.r.Context(), "extended_connect_websocket_body").(io.ReadCloser)
+
+	return code == http.StatusOK && h2
+}
+
+func (n *nodeResponse) WriteHeader(code int) {
+	if n.done {
+		return
+	}
+
+	h := n.ResponseWriter.Header()
+
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		clear(h)
+		n.ResponseWriter.WriteHeader(code)
+
+		return
+	}
+
+	n.done = true
+
+	if n.upgrade(code) {
+		for k := range h {
+			if !slices.Contains(upgradeResponseHeaders, http.CanonicalHeaderKey(k)) {
+				delete(h, k)
+			}
+		}
+
+		n.ResponseWriter.WriteHeader(code)
+
+		return
+	}
+
+	clear(h)
+
+	n.swallow = true
+	body, _ := json.Marshal(map[string]any{
+		"type": "about:blank", "title": http.StatusText(code), "status": code, "code": "node_refused",
+		"detail": "the node refused the connection",
+	})
+
+	h.Set("Content-Type", "application/problem+json")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	h.Set("Cache-Control", "no-store")
+	n.ResponseWriter.WriteHeader(code)
+	_, _ = n.ResponseWriter.Write(body)
+}
+
+func (n *nodeResponse) Write(b []byte) (int, error) {
+	if !n.done {
+		n.WriteHeader(http.StatusOK)
+	}
+
+	if n.swallow {
+		return len(b), nil
+	}
+
+	return n.ResponseWriter.Write(b)
 }
 
 // recorder records the authz answer.
@@ -372,11 +482,42 @@ func (s *slogSink) emit(line []byte) {
 		switch k {
 		case "level", "msg", "logger", "ts":
 		default:
-			rec.AddAttrs(slog.Any(k, v))
+			rec.AddAttrs(slog.Any(k, redact(k, v)))
 		}
 	}
 
 	_ = s.log.Handler().Handle(ctx, rec)
+}
+
+// secretHeaders are never logged, whatever Caddy's log level: the access
+// token and the browser's credentials.
+var secretHeaders = []string{"x-rx-access-token", "cookie", "set-cookie", "authorization", "proxy-authorization"}
+
+// redact replaces the values of secret headers anywhere in a decoded log
+// entry (request.headers, headers, …).
+func redact(key string, v any) any {
+	if slices.Contains(secretHeaders, strings.ToLower(key)) {
+		return "REDACTED"
+	}
+
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, x := range t {
+			out[k] = redact(k, x)
+		}
+
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, x := range t {
+			out[i] = redact("", x)
+		}
+
+		return out
+	default:
+		return v
+	}
 }
 
 var (
