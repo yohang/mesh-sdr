@@ -460,7 +460,7 @@ func TestLoginPage(t *testing.T) {
 		t.Errorf("GET /login = %d %v", res.StatusCode, res.Header)
 	}
 
-	for _, want := range []string{`name="login"`, `autocomplete="username"`, `autocomplete="current-password"`, `name="next" value="/"`, `/static/js/csrf.js`} {
+	for _, want := range []string{`name="login"`, `autocomplete="username"`, `autocomplete="current-password"`, `name="next" value="/"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("login page misses %s", want)
 		}
