@@ -122,3 +122,18 @@ func TestDisplayName(t *testing.T) {
 		t.Errorf("clear = %v", err)
 	}
 }
+
+func TestTakenAddressesAreNotRevealed(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, nil)
+	e.addUser(t, "alice", "", domain.RoleListener)
+	e.addUser(t, "bob", "bob@example.org", domain.RoleListener)
+	p := e.profile(&recNotifier{disabled: true})
+
+	_, taken := p.ChangeEmail(ctx, e.actor(t, "alice"), "BOB@example.org", password)
+	_, malformed := p.ChangeEmail(ctx, e.actor(t, "alice"), "not an address", password)
+
+	if !errors.Is(taken, domain.ErrInvalidEmail) || taken.Error() != domain.ErrEmailUnusable.Error() || !errors.Is(malformed, domain.ErrInvalidEmail) {
+		t.Errorf("taken = %v, malformed = %v", taken, malformed)
+	}
+}

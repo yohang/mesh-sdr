@@ -78,6 +78,11 @@ var (
 	ErrSessionNotFound = shared.NewError(shared.KindNotFound, "session_not_found", "session not found")
 	ErrUsernameTaken   = shared.NewError(shared.KindConflict, "username_taken", "the username is already used")
 	ErrEmailTaken      = shared.NewError(shared.KindConflict, "email_taken", "the e-mail address is already used")
+	// ErrEmailUnusable is the one answer for an address that cannot be
+	// used, whether it is malformed or another account's: account flows
+	// never tell that an address has an account (SR-06).
+	ErrEmailUnusable = ErrInvalidEmail.WithDetail("this e-mail address cannot be used")
+
 	ErrVersionConflict = shared.NewError(shared.KindConflict, "version_conflict", "the record was changed concurrently")
 )
 

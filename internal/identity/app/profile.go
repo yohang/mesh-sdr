@@ -208,7 +208,8 @@ func (s *Profile) emailToken(ctx context.Context, token string) (*domain.EmailCh
 }
 
 // ConfirmEmail applies the address of a confirmation link, verified. The
-// link works once; ErrEmailTaken means another account uses the address.
+// link works once; a link whose address another account took meanwhile
+// answers ErrInvalidToken like any dead link (SR-06).
 func (s *Profile) ConfirmEmail(ctx context.Context, token string, meta RequestMeta) error {
 	tok, err := s.emailToken(ctx, token)
 	if err != nil {
@@ -261,6 +262,16 @@ func (s *Profile) apply(ctx context.Context, actor domain.Actor, requestID strin
 		}
 
 		if err := s.users.Save(ctx, u); err != nil {
+			if errors.Is(err, domain.ErrEmailTaken) {
+				// Another account's address: the same answer as an
+				// unusable one (SR-06); a confirmation link is spent.
+				if verified {
+					return domain.ErrInvalidToken
+				}
+
+				return domain.ErrEmailUnusable
+			}
+
 			return err
 		}
 

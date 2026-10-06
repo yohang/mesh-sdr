@@ -128,14 +128,15 @@ func TestEmailChangeWithConfirmation(t *testing.T) {
 		t.Errorf("second use = %d", res.StatusCode)
 	}
 
-	// The address of another account cannot be confirmed.
+	// The address of another account cannot be confirmed, and the answer
+	// is the one of any dead link (SR-06).
 	res = c.api(http.MethodPost, "/api/v1/me/email", `{"email":"BOB@example.org","current_password":"`+password+`"}`)
 	if v := decode(t, res); res.StatusCode != http.StatusOK || v["pending"] != true {
 		t.Fatalf("API change = %d %v", res.StatusCode, v)
 	}
 
 	_, link = h.mail.last("BOB@example.org")
-	if res := anon.form("/account/email/verify", url.Values{"token": {strings.TrimPrefix(link, "/account/email/verify/")}}, false); res.StatusCode != http.StatusConflict {
+	if res := anon.form("/account/email/verify", url.Values{"token": {strings.TrimPrefix(link, "/account/email/verify/")}}, false); res.StatusCode != http.StatusNotFound {
 		t.Errorf("taken address = %d", res.StatusCode)
 	}
 }

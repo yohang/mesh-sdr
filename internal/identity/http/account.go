@@ -291,8 +291,6 @@ func (m *Module) emailVerifyAction(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		m.pages.Page(w, r, http.StatusOK, pageTitleEmail, emailVerifyResult(true, "Your e-mail address is confirmed."), nil)
-	case errors.Is(err, domain.ErrEmailTaken):
-		m.pages.Page(w, r, http.StatusConflict, pageTitleEmail, emailVerifyResult(false, "This address is already used by another account."), nil)
 	case errors.Is(err, domain.ErrInvalidToken):
 		m.pages.Page(w, r, http.StatusNotFound, pageTitleEmail, emailVerifyResult(false, "This link has expired or was already used."), nil)
 	default:

@@ -284,8 +284,15 @@ func (s *Invitations) Accept(ctx context.Context, in AcceptInput) (LoginResult, 
 		}
 
 		if err := s.users.Add(ctx, u); err != nil {
+			// Never tell that an address has an account (SR-06): an
+			// invited address refuses the invitation, a typed one is
+			// "unusable" like a malformed one.
 			if errors.Is(err, domain.ErrEmailTaken) && !inv.Email().IsZero() {
 				return domain.ErrInvitationInvalid
+			}
+
+			if errors.Is(err, domain.ErrEmailTaken) {
+				return domain.ErrEmailUnusable
 			}
 
 			return err
