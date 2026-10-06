@@ -719,8 +719,111 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /auth/logout-all:
+    post:
+      operationId: logoutAll
+      x-meshsdr-access: listener
+      summary: Sign out every session of the caller, this one included
+      tags: [auth]
+      responses:
+        "204":
+          description: Signed out everywhere. The session cookie is cleared.
+        default:
+          $ref: "#/components/responses/Problem"
+  /me/sessions:
+    get:
+      operationId: listOwnSessions
+      x-meshsdr-access: listener
+      summary: The caller's active sessions
+      tags: [account]
+      responses:
+        "200":
+          description: Active sessions, most recently seen first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        default:
+          $ref: "#/components/responses/Problem"
+  /me/sessions/{ref}:
+    parameters:
+      - $ref: "#/components/parameters/SessionRef"
+    delete:
+      operationId: revokeOwnSession
+      x-meshsdr-access: listener
+      summary: Sign out one of the caller's sessions
+      tags: [account]
+      responses:
+        "204":
+          description: Signed out
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      operationId: listUserSessions
+      x-meshsdr-access: admin
+      summary: Active sessions of a user
+      tags: [users]
+      responses:
+        "200":
+          description: Active sessions, most recently seen first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/sessions/{ref}:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+      - $ref: "#/components/parameters/SessionRef"
+    delete:
+      operationId: revokeUserSession
+      x-meshsdr-access: admin
+      summary: Sign out one session of a user
+      tags: [users]
+      responses:
+        "204":
+          description: Signed out
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/sessions/revoke:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      operationId: revokeUserSessions
+      x-meshsdr-access: admin
+      summary: Sign a user out everywhere
+      tags: [users]
+      responses:
+        "200":
+          description: Number of sessions signed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revoked"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
+    SessionRef:
+      name: ref
+      in: path
+      required: true
+      description: Public handle of a session (never its id).
+      schema:
+        type: string
+        maxLength: 32
     UserID:
       name: id
       in: path
@@ -737,6 +840,47 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    SessionList:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionView"
+    SessionView:
+      type: object
+      required: [id, current, created_at, last_seen_at, expires_at, browser, system]
+      properties:
+        id:
+          type: string
+          description: Public handle of the session.
+        current:
+          type: boolean
+          description: True for the session of this request.
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        ip:
+          type: string
+        user_agent:
+          type: string
+        browser:
+          type: string
+        system:
+          type: string
+    Revoked:
+      type: object
+      required: [revoked]
+      properties:
+        revoked:
+          type: integer
     RoleList:
       type: object
       required: [roles]

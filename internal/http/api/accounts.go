@@ -13,6 +13,12 @@ import (
 type Accounts interface {
 	User(ctx context.Context, id domain.UserID) (*domain.User, error)
 	SetRoles(ctx context.Context, by app.Actor, id domain.UserID, grants []domain.RoleGrant) (app.RolesResult, error)
+	OwnSessions(ctx context.Context, by app.Actor) ([]app.SessionView, error)
+	UserSessions(ctx context.Context, id domain.UserID) ([]app.SessionView, error)
+	RevokeOwnSession(ctx context.Context, by app.Actor, ref string) error
+	RevokeAllOwnSessions(ctx context.Context, by app.Actor) (int, error)
+	RevokeUserSession(ctx context.Context, by app.Actor, id domain.UserID, ref string) error
+	RevokeUserSessions(ctx context.Context, by app.Actor, id domain.UserID) (int, error)
 }
 
 // AccountHandlers serve /roles and /users/….
@@ -130,3 +136,122 @@ func (j jsonOK) write(w http.ResponseWriter) error {
 func (j jsonOK) VisitListRolesResponse(w http.ResponseWriter) error    { return j.write(w) }
 func (j jsonOK) VisitGetUserRolesResponse(w http.ResponseWriter) error { return j.write(w) }
 func (j jsonOK) VisitSetUserRolesResponse(w http.ResponseWriter) error { return j.write(w) }
+
+func sessionList(views []app.SessionView) SessionList {
+	out := SessionList{Sessions: make([]SessionView, 0, len(views))}
+
+	for _, v := range views {
+		sv := SessionView{
+			Id: v.Ref, Current: v.Current, CreatedAt: v.CreatedAt, LastSeenAt: v.LastSeenAt, ExpiresAt: v.ExpiresAt,
+			Browser: v.Browser, System: v.System,
+		}
+
+		if v.IP != "" {
+			ip := v.IP
+			sv.Ip = &ip
+		}
+
+		if v.UserAgent != "" {
+			ua := v.UserAgent
+			sv.UserAgent = &ua
+		}
+
+		out.Sessions = append(out.Sessions, sv)
+	}
+
+	return out
+}
+
+// ListOwnSessions implements StrictServerInterface.
+func (h AccountHandlers) ListOwnSessions(ctx context.Context, _ ListOwnSessionsRequestObject) (ListOwnSessionsResponseObject, error) {
+	views, err := h.accounts.OwnSessions(ctx, h.sessions.Actor(ctx))
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{sessionList(views)}, nil
+}
+
+// RevokeOwnSession implements StrictServerInterface.
+func (h AccountHandlers) RevokeOwnSession(ctx context.Context, req RevokeOwnSessionRequestObject) (RevokeOwnSessionResponseObject, error) {
+	if err := h.accounts.RevokeOwnSession(ctx, h.sessions.Actor(ctx), req.Ref); err != nil {
+		return nil, err
+	}
+
+	return noContent{}, nil
+}
+
+// LogoutAll implements StrictServerInterface.
+func (h AccountHandlers) LogoutAll(ctx context.Context, _ LogoutAllRequestObject) (LogoutAllResponseObject, error) {
+	if _, err := h.accounts.RevokeAllOwnSessions(ctx, h.sessions.Actor(ctx)); err != nil {
+		return nil, err
+	}
+
+	c, err := h.sessions.Logout(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return logoutResponse{cookie: c}, nil
+}
+
+// ListUserSessions implements StrictServerInterface.
+func (h AccountHandlers) ListUserSessions(ctx context.Context, req ListUserSessionsRequestObject) (ListUserSessionsResponseObject, error) {
+	id, err := parseUserID(req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	views, err := h.accounts.UserSessions(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{sessionList(views)}, nil
+}
+
+// RevokeUserSession implements StrictServerInterface.
+func (h AccountHandlers) RevokeUserSession(ctx context.Context, req RevokeUserSessionRequestObject) (RevokeUserSessionResponseObject, error) {
+	id, err := parseUserID(req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := h.accounts.RevokeUserSession(ctx, h.sessions.Actor(ctx), id, req.Ref); err != nil {
+		return nil, err
+	}
+
+	return noContent{}, nil
+}
+
+// RevokeUserSessions implements StrictServerInterface.
+func (h AccountHandlers) RevokeUserSessions(ctx context.Context, req RevokeUserSessionsRequestObject) (RevokeUserSessionsResponseObject, error) {
+	id, err := parseUserID(req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	n, err := h.accounts.RevokeUserSessions(ctx, h.sessions.Actor(ctx), id)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{Revoked{Revoked: n}}, nil
+}
+
+func (j jsonOK) VisitListOwnSessionsResponse(w http.ResponseWriter) error    { return j.write(w) }
+func (j jsonOK) VisitListUserSessionsResponse(w http.ResponseWriter) error   { return j.write(w) }
+func (j jsonOK) VisitRevokeUserSessionsResponse(w http.ResponseWriter) error { return j.write(w) }
+
+// noContent is an empty 204.
+type noContent struct{}
+
+func (noContent) write(w http.ResponseWriter) error {
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+
+	return nil
+}
+
+func (n noContent) VisitRevokeOwnSessionResponse(w http.ResponseWriter) error  { return n.write(w) }
+func (n noContent) VisitRevokeUserSessionResponse(w http.ResponseWriter) error { return n.write(w) }

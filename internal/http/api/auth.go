@@ -160,6 +160,10 @@ func (r rateLimited) write(w http.ResponseWriter) error {
 // logoutResponse clears the session cookie.
 type logoutResponse struct{ cookie *http.Cookie }
 
+func (l logoutResponse) VisitLogoutAllResponse(w http.ResponseWriter) error {
+	return l.VisitLogoutResponse(w)
+}
+
 func (l logoutResponse) VisitLogoutResponse(w http.ResponseWriter) error {
 	http.SetCookie(w, l.cookie)
 	w.Header().Set("Cache-Control", "no-store")
