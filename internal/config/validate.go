@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"net/url"
@@ -101,6 +102,33 @@ func (h *Hub) validate(o Origins) []Problem {
 
 	if n := h.DB.MaxReadConnections; n < 1 || n > 64 {
 		c.fail("db.max_read_connections", CodeInvalidValue, fmt.Sprintf("invalid value %d: want 1..64", n))
+	}
+
+	for _, id := range slices.Sorted(maps.Keys(h.Nodes)) {
+		n := h.Nodes[id]
+		key := "nodes." + id
+
+		if _, err := griddomain.NewNodeID(id); err != nil {
+			c.fail(key, CodeInvalidValue, "invalid node id "+strconv.Quote(id)+": must match ^[a-z0-9][a-z0-9-]{1,62}$")
+		}
+
+		if n.URL == "" {
+			c.fail(key+".url", CodeRequired, key+".url is required")
+		} else if _, err := griddomain.NewNodeURL(n.URL); err != nil {
+			c.fail(key+".url", CodeInvalidValue, "want https://host:port")
+		}
+
+		if n.Name != "" {
+			if _, err := griddomain.NewNodeName(n.Name); err != nil {
+				c.fail(key+".name", CodeInvalidValue, "name must be 1 to 128 printable characters")
+			}
+		}
+
+		if n.EnrollmentToken.IsSet() {
+			if _, err := griddomain.ParseEnrollmentToken(n.EnrollmentToken.Reveal()); err != nil {
+				c.fail(key+".enrollment_token", CodeInvalidValue, "enrollment token must be 22 to 256 printable ASCII characters")
+			}
+		}
 	}
 
 	if h.TLS.CACert != "" && !h.TLS.CAKey.IsSet() {

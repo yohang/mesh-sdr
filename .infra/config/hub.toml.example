@@ -41,6 +41,18 @@ max_read_connections = 4
 # ca_cert = "tls/ca.pem"
 # ca_key = { file = "tls/ca.key" }
 
+# Nodes declared in the hub config (GRID-004): locked in Admin > Nodes and
+# not deletable there. File-only: no env override. A node removed from the
+# files becomes an admin-managed node.
+# [nodes.attic]
+# Base URL the hub dials (required): https://host:port.
+# url = "https://10.8.0.12:8074"
+# Display name (defaults to the node id).
+# name = "Attic"
+# Enrollment token (secret, 22 to 256 printable ASCII characters), given to
+# `meshsdr node enroll` on the node; used once.
+# enrollment_token = { file = "/etc/meshsdr/secrets/node_attic.token" }
+
 [log]
 # debug | info | warn | error. --debug overrides it.
 level = "info"

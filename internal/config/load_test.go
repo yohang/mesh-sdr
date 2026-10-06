@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -470,8 +471,8 @@ func TestEnvNamesFollowKeys(t *testing.T) {
 	for _, v := range []any{&Hub{}, &Node{}} {
 		for _, lf := range leaves(v) {
 			want := strings.ToUpper(strings.ReplaceAll(lf.key, ".", "__"))
-			if lf.key == "schema_version" || lf.key == "allow_inline_secrets" {
-				want = ""
+			if lf.key == "schema_version" || lf.key == "allow_inline_secrets" || lf.value.Kind() == reflect.Map {
+				want = "" // map-of-tables keys are file-only (ADR 0008)
 			}
 
 			if lf.env != want {

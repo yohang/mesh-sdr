@@ -3,6 +3,7 @@ package config
 import (
 	"encoding"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -53,5 +54,53 @@ func walk(v reflect.Value, keyPrefix, envPrefix string, out *[]leaf) {
 		}
 
 		*out = append(*out, leaf{key: key, env: env, value: fv})
+	}
+}
+
+// expandMaps returns the leaves of the entries of every map-of-tables leaf
+// (nodes.<id>.*, devices.<id>.*), keyed "<map>.<entry>.<field>", as
+// addressable copies, and a store function writing the copies back into the
+// maps. Map entries have no env override (ADR 0008).
+func expandMaps(ls []leaf) ([]leaf, func()) {
+	var (
+		out    []leaf
+		stores []func()
+	)
+
+	for _, lf := range ls {
+		v := lf.value
+		if v.Kind() != reflect.Map || v.Type().Key().Kind() != reflect.String || v.Type().Elem().Kind() != reflect.Struct {
+			continue
+		}
+
+		keys := make([]string, 0, v.Len())
+		for _, k := range v.MapKeys() {
+			keys = append(keys, k.String())
+		}
+
+		slices.Sort(keys)
+
+		for _, k := range keys {
+			kv := reflect.ValueOf(k).Convert(v.Type().Key())
+			cp := reflect.New(v.Type().Elem()).Elem()
+			cp.Set(v.MapIndex(kv))
+
+			var sub []leaf
+
+			walk(cp, lf.key+"."+k+".", "", &sub)
+
+			for i := range sub {
+				sub[i].env = ""
+			}
+
+			out = append(out, sub...)
+			stores = append(stores, func() { v.SetMapIndex(kv, cp) })
+		}
+	}
+
+	return out, func() {
+		for _, s := range stores {
+			s()
+		}
 	}
 }

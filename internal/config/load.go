@@ -302,7 +302,9 @@ func (l *loader) decodeFile(path string, cfg any) {
 			Message: "unknown key" + suggest(key, l.keys())})
 	}
 
-	for _, lf := range l.leaves {
+	dynamic, _ := expandMaps(l.leaves)
+
+	for _, lf := range slices.Concat(l.leaves, dynamic) {
 		if !md.IsDefined(strings.Split(lf.key, ".")...) {
 			continue
 		}
@@ -415,7 +417,10 @@ func (l *loader) resolveSecrets() {
 		return v, ok
 	}
 
-	for _, lf := range l.leaves {
+	dynamic, store := expandMaps(l.leaves)
+	defer store()
+
+	for _, lf := range slices.Concat(l.leaves, dynamic) {
 		s, ok := lf.value.Addr().Interface().(*Secret)
 		if !ok || !s.IsSet() {
 			continue

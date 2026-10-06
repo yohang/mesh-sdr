@@ -30,16 +30,24 @@ type Hub struct {
 	SchemaVersion      int  `toml:"schema_version" env:"-" jsonschema:"required,enum=1,description=Config schema version. Required in every file."`
 	AllowInlineSecrets bool `toml:"allow_inline_secrets" env:"-" jsonschema:"description=Accept inline secret values in this file (startup warning). Applies only to the file that sets it."`
 
-	Hub HubSection `toml:"hub" envPrefix:"HUB__" jsonschema:"description=Hub bootstrap."`
-	DB  DB         `toml:"db" envPrefix:"DB__" jsonschema:"description=Database (through the DB adapter)."`
-	TLS HubTLS     `toml:"tls" envPrefix:"TLS__" jsonschema:"description=Hub internal CA for hub <-> node mTLS (ADR 0008). Without it the grid is disabled."`
-	Log Log        `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
+	Hub   HubSection            `toml:"hub" envPrefix:"HUB__" jsonschema:"description=Hub bootstrap."`
+	DB    DB                    `toml:"db" envPrefix:"DB__" jsonschema:"description=Database (through the DB adapter)."`
+	TLS   HubTLS                `toml:"tls" envPrefix:"TLS__" jsonschema:"description=Hub internal CA for hub <-> node mTLS (ADR 0008). Without it the grid is disabled."`
+	Nodes map[string]ConfigNode `toml:"nodes" env:"-" jsonschema:"description=Nodes declared in the hub config\\, keyed by node id. They are locked in Admin > Nodes. File-only (no env override)."`
+	Log   Log                   `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
 
 	Settings Settings `toml:"settings" envPrefix:"SETTINGS__" jsonschema:"description=Locked admin settings. Each key set in a file or the env is locked (read-only in the admin UI); unset keys fall back to the DB setting, then to the default."`
 
 	Auth  Auth  `toml:"auth" envPrefix:"AUTH__" jsonschema:"description=Authentication (password hashing)."`
 	Admin Admin `toml:"admin" envPrefix:"ADMIN__" jsonschema:"description=Admin access restrictions."`
 	HTTP  HTTP  `toml:"http" envPrefix:"HTTP__" jsonschema:"description=HTTP front: reverse proxies."`
+}
+
+// ConfigNode is one [nodes.<id>] table.
+type ConfigNode struct {
+	URL             string `toml:"url" env:"-" jsonschema:"description=Required. Base URL the hub dials: https://host:port (node API and control WebSocket)."`
+	Name            string `toml:"name" env:"-" jsonschema:"description=Display name (defaults to the node id)."`
+	EnrollmentToken Secret `toml:"enrollment_token" env:"-" jsonschema:"description=Enrollment token of the node (22 to 256 printable ASCII characters)\\, used until the node is enrolled."`
 }
 
 // Settings is the [settings] table: admin settings locked by config

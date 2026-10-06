@@ -55,12 +55,13 @@ func OpenDB(ctx context.Context, cfg config.DB, logger *slog.Logger) (db.Adapter
 	}
 }
 
-// Process is a role's network process: one HTTP(S) server and its
-// background workers.
+// Process is a role's network process: one HTTP(S) server, startup tasks
+// run before serving and background workers that live as long as it.
 type Process struct {
 	addr    string
 	server  *http.Server
 	logger  *slog.Logger
+	startup []func(ctx context.Context) error
 	workers []func(ctx context.Context)
 }
 
@@ -92,15 +93,22 @@ func (p *Process) Listen(ctx context.Context) (net.Listener, error) {
 	return ln, nil
 }
 
-// Serve starts the background workers and serves on ln until ctx is done,
-// then shuts down gracefully and waits for the workers.
+// Serve runs the startup tasks, starts the workers, then serves on ln
+// until ctx is done, shuts down gracefully and waits for the workers.
 func (p *Process) Serve(ctx context.Context, ln net.Listener) error {
-	ctx, cancel := context.WithCancel(ctx)
+	for _, task := range p.startup {
+		if err := task(ctx); err != nil {
+			_ = ln.Close()
+
+			return err
+		}
+	}
+
+	wctx, cancel := context.WithCancel(ctx)
 
 	var wg sync.WaitGroup
-
 	for _, w := range p.workers {
-		wg.Go(func() { w(ctx) })
+		wg.Go(func() { w(wctx) })
 	}
 
 	err := httpserver.Run(ctx, p.logger, p.server, ln)
@@ -133,9 +141,14 @@ func UserAdmin(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) *identit
 }
 
 // Hub builds the hub: web UI and REST API on hub.listen, backed by adapter,
-// and the session reaper. The caller checks the schema version before (see
+// the session reaper and the grid. The caller checks the schema version before (see
 // db.Migrator.Check).
 func Hub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Adapter) (*Process, error) {
+	g, err := newHubGrid(cfg, logger, adapter, time.Now)
+	if err != nil {
+		return nil, err
+	}
+
 	shellModule := shell.Wire(shell.Deps{Settings: cfg.Settings, Logger: logger})
 
 	idm, err := identity.Wire(ctx, identityDeps(cfg, logger, adapter), pages{shellModule.Renderer})
@@ -159,7 +172,8 @@ func Hub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Ad
 		addr:    cfg.Hub.Listen,
 		server:  httpserver.NewServer(cfg.Hub.Listen, router),
 		logger:  component(logger, "http.server"),
-		workers: []func(context.Context){func(ctx context.Context) { idm.Reaper.Run(ctx, identityapp.SessionReapEvery) }},
+		startup: g.startup,
+		workers: append([]func(context.Context){func(ctx context.Context) { idm.Reaper.Run(ctx, identityapp.SessionReapEvery) }}, g.workers...),
 	}, nil
 }
 
