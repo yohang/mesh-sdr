@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -193,6 +194,58 @@ func TestCheck(t *testing.T) {
 			t.Fatalf("Down on empty = %v, want ErrNoMigration", err)
 		}
 	})
+}
+
+func TestConcurrentMigrators(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "hub.db")
+	v2 := migrationFS("00001_a.sql", m1, "00002_b.sql", m2)
+
+	adapters := []*sqlite.Adapter{open(t, path, v2), open(t, path, v2), open(t, path, v2)}
+
+	var wg sync.WaitGroup
+
+	applied := make(chan int, len(adapters))
+	errs := make(chan error, len(adapters))
+
+	for _, a := range adapters {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			r, err := a.Migrator().Up(ctx)
+			applied <- len(r)
+			errs <- err
+		}()
+	}
+
+	wg.Wait()
+	close(applied)
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Up: %v", err)
+		}
+	}
+
+	total := 0
+	for n := range applied {
+		total += n
+	}
+
+	if total != 2 {
+		t.Fatalf("migrations applied %d times, want 2", total)
+	}
+
+	if err := adapters[0].Migrator().Check(ctx); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+
+	if _, err := os.Stat(path + ".migrate.lock"); err != nil {
+		t.Errorf("lock file: %v", err)
+	}
 }
 
 func TestPragmas(t *testing.T) {

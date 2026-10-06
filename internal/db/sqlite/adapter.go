@@ -98,7 +98,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		return nil, err
 	}
 
-	a.migrator, err = newMigrator(writer, reader, opts.Migrations)
+	a.migrator, err = newMigrator(opts.Path, writer, reader, opts.Migrations)
 	if err != nil {
 		_ = a.Close()
 

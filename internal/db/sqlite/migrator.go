@@ -28,6 +28,7 @@ const (
 
 // Migrator implements db.Migrator with goose and per-migration checksums.
 type Migrator struct {
+	lockPath string
 	writer   *sql.DB
 	reader   *sql.DB
 	fsys     fs.FS
@@ -36,7 +37,7 @@ type Migrator struct {
 
 var _ db.Migrator = (*Migrator)(nil)
 
-func newMigrator(writer, reader *sql.DB, fsys fs.FS) (*Migrator, error) {
+func newMigrator(dbPath string, writer, reader *sql.DB, fsys fs.FS) (*Migrator, error) {
 	p, err := goose.NewProvider(goose.DialectSQLite3, writer, fsys,
 		goose.WithDisableGlobalRegistry(true),
 		goose.WithTableName(versionTable),
@@ -45,12 +46,39 @@ func newMigrator(writer, reader *sql.DB, fsys fs.FS) (*Migrator, error) {
 		return nil, fmt.Errorf("sqlite: migrations: %w", err)
 	}
 
-	return &Migrator{writer: writer, reader: reader, fsys: fsys, provider: p}, nil
+	return &Migrator{lockPath: dbPath + ".migrate.lock", writer: writer, reader: reader, fsys: fsys, provider: p}, nil
+}
+
+// locked runs fn while holding the exclusive migration lock
+// (<db>.migrate.lock), so that two migration commands never interleave.
+func (m *Migrator) locked(ctx context.Context, fn func() error) (err error) {
+	l, err := lockFile(ctx, m.lockPath)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if uerr := l.unlock(); uerr != nil {
+			err = errors.Join(err, fmt.Errorf("sqlite: release migration lock: %w", uerr))
+		}
+	}()
+
+	return fn()
 }
 
 // Up implements db.Migrator. It refuses to run when an applied migration was
 // modified, then applies the pending ones and records their checksums.
-func (m *Migrator) Up(ctx context.Context) ([]db.MigrationResult, error) {
+func (m *Migrator) Up(ctx context.Context) (out []db.MigrationResult, err error) {
+	err = m.locked(ctx, func() error {
+		out, err = m.up(ctx)
+
+		return err
+	})
+
+	return out, err
+}
+
+func (m *Migrator) up(ctx context.Context) ([]db.MigrationResult, error) {
 	if err := m.ensureChecksumTable(ctx); err != nil {
 		return nil, err
 	}
@@ -80,7 +108,17 @@ func (m *Migrator) Up(ctx context.Context) ([]db.MigrationResult, error) {
 }
 
 // Down implements db.Migrator.
-func (m *Migrator) Down(ctx context.Context) (db.MigrationResult, error) {
+func (m *Migrator) Down(ctx context.Context) (out db.MigrationResult, err error) {
+	err = m.locked(ctx, func() error {
+		out, err = m.down(ctx)
+
+		return err
+	})
+
+	return out, err
+}
+
+func (m *Migrator) down(ctx context.Context) (db.MigrationResult, error) {
 	r, err := m.provider.Down(ctx)
 	if errors.Is(err, goose.ErrNoNextVersion) {
 		return db.MigrationResult{}, db.ErrNoMigration
