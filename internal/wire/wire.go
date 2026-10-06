@@ -20,6 +20,7 @@ import (
 	gridinfra "github.com/yohang/mesh-sdr/internal/grid/infra"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/http/api"
+	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 func component(logger *slog.Logger, name string) *slog.Logger {
@@ -107,9 +108,12 @@ func Hub(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) *Process {
 		HealthHandlers: api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
 	}
 
+	shellModule := shell.Wire(shell.Deps{Settings: cfg.Settings, Logger: logger})
+
 	router := httpserver.NewRouter(
 		component(logger, "http.router"),
 		api.NewHandler(apiServer, component(logger, "http.api")),
+		shellModule.HTTP,
 	)
 
 	return &Process{

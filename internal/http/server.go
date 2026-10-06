@@ -6,31 +6,51 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/yohang/mesh-sdr/internal/web"
-	"github.com/yohang/mesh-sdr/internal/web/templates"
 )
 
 // APIPrefix is the base path of the versioned REST API.
 const APIPrefix = "/api/v1"
 
-// NewRouter builds the hub router: the web UI and, under APIPrefix, the REST
-// API handler (which serves its own problem+json errors).
-func NewRouter(logger *slog.Logger, api http.Handler) http.Handler {
+// Module is a part of the hub that contributes to the router: global
+// middlewares and routes.
+type Module interface {
+	// Middlewares wrap every route (API, static assets and pages). They run
+	// in module order, after the router's own middlewares (request id,
+	// logging, panic recovery, security headers).
+	Middlewares() []func(http.Handler) http.Handler
+	// Routes registers the module's routes. It runs after every module's
+	// middlewares are installed, so it must not call r.Use (use r.Group or
+	// r.With for scoped middlewares).
+	Routes(r chi.Router)
+}
+
+// NewRouter builds the hub router: the router middlewares, then each
+// module's middlewares, then the REST API handler under APIPrefix (which
+// serves its own problem+json errors), the static assets and each module's
+// routes.
+func NewRouter(logger *slog.Logger, api http.Handler, modules ...Module) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
+	r.Use(securityHeaders)
+
+	for _, m := range modules {
+		r.Use(m.Middlewares()...)
+	}
 
 	r.Mount(APIPrefix, api)
 
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServerFS(web.Static())))
 
-	r.Get("/", templ.Handler(templates.Home()).ServeHTTP)
+	for _, m := range modules {
+		m.Routes(r)
+	}
 
 	return r
 }

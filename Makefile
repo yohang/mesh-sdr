@@ -6,6 +6,8 @@ export GID := $(shell id -g)
 
 COMPOSE ?= docker compose
 RUN     := $(COMPOSE) run --rm --no-deps app
+A11Y    := $(COMPOSE) -f .infra/a11y/compose.yaml
+A11Y_HUBS := hub-auto hub-light hub-dark
 
 HTMX_VERSION ?= 4.0.0
 IMAGE        ?= mesh-sdr
@@ -36,7 +38,7 @@ run: ## All-in-one: build image, generate, migrate, start the dev stack
 clean: ## Stop the stack, remove volumes (caches), generated files and Air output
 	$(COMPOSE) down -v --remove-orphans
 	find internal -name '*_templ.go' -delete -o -name '*.gen.go' -delete
-	rm -rf internal/db/sqlite/sqlc internal/http/api/openapi.json internal/web/static/css/app.css tmp
+	rm -rf internal/db/sqlite/sqlc internal/http/api/openapi.json internal/web/static/css/app.css internal/web/static/icons tmp
 
 .PHONY: logs
 logs: c=app
@@ -58,6 +60,12 @@ lint: generate ## Run golangci-lint
 .PHONY: test
 test: generate ## Run tests
 	$(RUN) go test ./...
+
+.PHONY: a11y
+a11y: ## Run the accessibility checks (axe-core, CI-only container) against the production image
+	trap '$(A11Y) down -v' EXIT; \
+	$(A11Y) up -d --build --wait $(A11Y_HUBS) && \
+	$(A11Y) run --rm --build --no-deps a11y
 
 .PHONY: migrate
 migrate: generate ## Run hub migrations (cmd=up|down|status, default up)

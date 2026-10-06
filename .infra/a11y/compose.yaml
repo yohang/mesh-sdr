@@ -1,0 +1,60 @@
+# Accessibility job: the production image of the hub, migrated, served in each
+# theme mode (auto, light, dark) and checked by the axe-core container.
+# `make a11y` (and the CI job a11y) runs, from the repository root:
+#   docker compose -f .infra/a11y/compose.yaml up -d --build --wait hub-auto hub-light hub-dark
+#   docker compose -f .infra/a11y/compose.yaml run --rm --build --no-deps a11y
+#   docker compose -f .infra/a11y/compose.yaml down -v
+# The three hubs share one migrated SQLite database (read-only use here).
+name: meshsdr-a11y
+
+x-hub: &hub
+  build:
+    context: ../..
+    dockerfile: .infra/docker/Dockerfile
+    target: prod
+  image: meshsdr-a11y-hub
+  environment: &hub-env
+    MESHSDR_HUB__URL: http://hub-auto:8073
+    MESHSDR_HUB__ALLOW_INSECURE_URL: "true"
+  volumes:
+    - data:/var/lib/meshsdr
+
+x-served: &served
+  <<: *hub
+  command: ["hub"]
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  migrate:
+    <<: *hub
+    command: ["hub", "migrate", "up"]
+
+  hub-auto:
+    <<: *served
+    environment:
+      <<: *hub-env
+      MESHSDR_SETTINGS__UI__THEME_MODE: auto
+
+  hub-light:
+    <<: *served
+    environment:
+      <<: *hub-env
+      MESHSDR_HUB__URL: http://hub-light:8073
+      MESHSDR_SETTINGS__UI__THEME_MODE: light
+
+  hub-dark:
+    <<: *served
+    environment:
+      <<: *hub-env
+      MESHSDR_HUB__URL: http://hub-dark:8073
+      MESHSDR_SETTINGS__UI__THEME_MODE: dark
+
+  a11y:
+    build: .
+    environment:
+      HUBS: auto=http://hub-auto:8073 light=http://hub-light:8073 dark=http://hub-dark:8073
+
+volumes:
+  data:

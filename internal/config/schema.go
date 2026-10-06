@@ -5,6 +5,7 @@ import (
 	"encoding"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/invopop/jsonschema"
 )
@@ -12,9 +13,10 @@ import (
 // Schema returns the JSON Schema (draft 2020-12) of a role's config files,
 // generated from the config structs (TECHNICAL_SPEC §7.4 "Format" rule 2).
 //
-// Every key carries the annotations x-scope (always "global" for bootstrap
-// keys) and lockable (false: bootstrap keys are config-only, never DB
-// settings); secret keys carry secret: true.
+// Every key carries the annotations x-scope ("global" for now) and lockable:
+// true for keys under [settings], which map to DB settings that a config
+// value locks; false for bootstrap keys, which are config-only. Secret keys
+// carry secret: true.
 func Schema(role Role) ([]byte, error) {
 	var (
 		target   any
@@ -105,7 +107,7 @@ func annotate(s *jsonschema.Schema, prefix string, defaults map[string]any) {
 		}
 
 		child.Extras["x-scope"] = "global"
-		child.Extras["lockable"] = false
+		child.Extras["lockable"] = strings.HasPrefix(key, "settings.")
 
 		if d, ok := defaults[key]; ok {
 			child.Default = d

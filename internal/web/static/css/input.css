@@ -1,3 +1,179 @@
 @import "tailwindcss" source(none);
 
-@source "../../templates";
+@source "../../layout";
+@source "../../../*/http";
+@source "../js";
+
+/*
+ * Design tokens (UI-008, ADR 0003 §2A).
+ *
+ * --msdr-* custom properties are the source of truth, readable from JS and
+ * canvases (static/js/tokens.js). Each color is defined once with
+ * light-dark(light, dark): the value follows the element's used color-scheme,
+ * which the server sets from the admin theme mode with
+ * <html data-theme="light|dark|auto">. auto keeps `color-scheme: light dark`,
+ * so the browser follows prefers-color-scheme with no JS and no flash.
+ *
+ * Colors are registered with @property (<color>) so that getComputedStyle()
+ * returns a resolved color. Contrast: text tokens meet 4.5:1 and UI tokens
+ * (border, focus) 3:1 against bg, surface and surface-raised in both themes;
+ * tokens_test.go enforces it. Keep each light-dark() value on one line.
+ *
+ * Feature-specific tokens (waterfall scale, envelope, bandplan, S-meter) are
+ * added by their features, following the same rules.
+ */
+@property --msdr-color-bg { syntax: "<color>"; inherits: true; initial-value: #f6f7f9; }
+@property --msdr-color-surface { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+@property --msdr-color-surface-raised { syntax: "<color>"; inherits: true; initial-value: #eceff3; }
+@property --msdr-color-fg { syntax: "<color>"; inherits: true; initial-value: #1b1f24; }
+@property --msdr-color-fg-muted { syntax: "<color>"; inherits: true; initial-value: #4b5563; }
+@property --msdr-color-border { syntax: "<color>"; inherits: true; initial-value: #767f8a; }
+@property --msdr-color-accent { syntax: "<color>"; inherits: true; initial-value: #0b5cad; }
+@property --msdr-color-accent-fg { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+@property --msdr-color-focus { syntax: "<color>"; inherits: true; initial-value: #9a3412; }
+@property --msdr-color-danger { syntax: "<color>"; inherits: true; initial-value: #b42318; }
+@property --msdr-color-warning { syntax: "<color>"; inherits: true; initial-value: #7a4f00; }
+@property --msdr-color-success { syntax: "<color>"; inherits: true; initial-value: #17692e; }
+@property --msdr-color-info { syntax: "<color>"; inherits: true; initial-value: #1f5f9e; }
+
+:root {
+  color-scheme: light dark;
+
+  /* Colors (placeholder palette; values may be retuned, tests keep contrast). */
+  --msdr-color-bg: light-dark(#f6f7f9, #0d1117);
+  --msdr-color-surface: light-dark(#ffffff, #161b22);
+  --msdr-color-surface-raised: light-dark(#eceff3, #1f2630);
+  --msdr-color-fg: light-dark(#1b1f24, #e6edf3);
+  --msdr-color-fg-muted: light-dark(#4b5563, #9da7b3);
+  --msdr-color-border: light-dark(#767f8a, #7d8590);
+  --msdr-color-accent: light-dark(#0b5cad, #58a6ff);
+  --msdr-color-accent-fg: light-dark(#ffffff, #0d1117);
+  --msdr-color-focus: light-dark(#9a3412, #f0b429);
+  --msdr-color-danger: light-dark(#b42318, #ff7b72);
+  --msdr-color-warning: light-dark(#7a4f00, #e3b341);
+  --msdr-color-success: light-dark(#17692e, #3fb950);
+  --msdr-color-info: light-dark(#1f5f9e, #79c0ff);
+
+  /* Typography. */
+  --msdr-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --msdr-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --msdr-text-xs: 0.75rem;
+  --msdr-text-sm: 0.875rem;
+  --msdr-text-base: 1rem;
+  --msdr-text-lg: 1.125rem;
+  --msdr-text-xl: 1.25rem;
+  --msdr-text-2xl: 1.5rem;
+
+  /* Spacing unit (Tailwind spacing scale multiplies it), radii, motion. */
+  --msdr-space: 0.25rem;
+  --msdr-radius-sm: 0.25rem;
+  --msdr-radius-md: 0.375rem;
+  --msdr-motion-duration: 150ms;
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* Map the tokens onto Tailwind's theme: utilities (bg-surface, text-fg-muted…) use them. */
+@theme inline {
+  --color-bg: var(--msdr-color-bg);
+  --color-surface: var(--msdr-color-surface);
+  --color-surface-raised: var(--msdr-color-surface-raised);
+  --color-fg: var(--msdr-color-fg);
+  --color-fg-muted: var(--msdr-color-fg-muted);
+  --color-border: var(--msdr-color-border);
+  --color-accent: var(--msdr-color-accent);
+  --color-accent-fg: var(--msdr-color-accent-fg);
+  --color-focus: var(--msdr-color-focus);
+  --color-danger: var(--msdr-color-danger);
+  --color-warning: var(--msdr-color-warning);
+  --color-success: var(--msdr-color-success);
+  --color-info: var(--msdr-color-info);
+  --font-sans: var(--msdr-font-sans);
+  --font-mono: var(--msdr-font-mono);
+  --text-xs: var(--msdr-text-xs);
+  --text-sm: var(--msdr-text-sm);
+  --text-base: var(--msdr-text-base);
+  --text-lg: var(--msdr-text-lg);
+  --text-xl: var(--msdr-text-xl);
+  --text-2xl: var(--msdr-text-2xl);
+  --spacing: var(--msdr-space);
+  --radius-sm: var(--msdr-radius-sm);
+  --radius-md: var(--msdr-radius-md);
+  --default-transition-duration: var(--msdr-motion-duration);
+}
+
+/* Breakpoints (UI-007): mobile < 768 px, tablet 768–1199 px, desktop ≥ 1200 px. */
+@theme {
+  --breakpoint-md: 48rem;
+  --breakpoint-xl: 75rem;
+}
+
+@layer base {
+  html {
+    background: var(--msdr-color-bg);
+    color: var(--msdr-color-fg);
+    font-family: var(--msdr-font-sans);
+  }
+
+  a {
+    color: var(--msdr-color-accent);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+
+  /* Visible focus on every focusable element, in both themes (UI-009). */
+  :focus-visible {
+    outline: 3px solid var(--msdr-color-focus);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Skip link (UI-009): off-screen until focused. */
+  .skip-link {
+    position: absolute;
+    left: 0.5rem;
+    top: -10rem;
+    z-index: 50;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--msdr-radius-md);
+    background: var(--msdr-color-surface);
+    color: var(--msdr-color-fg);
+  }
+
+  .skip-link:focus {
+    top: 0.5rem;
+  }
+
+  /* Long-form text (usage policy): readable measure and spacing. */
+  .prose-text {
+    max-width: 70ch;
+    line-height: 1.6;
+
+    & > * + * { margin-top: 1em; }
+    & h1 { font-size: var(--msdr-text-2xl); font-weight: 600; line-height: 1.25; }
+    & h2 { font-size: var(--msdr-text-xl); font-weight: 600; margin-top: 1.5em; }
+    & h3 { font-size: var(--msdr-text-lg); font-weight: 600; margin-top: 1.25em; }
+    & ul { list-style: disc; padding-left: 1.5em; }
+    & ol { list-style: decimal; padding-left: 1.5em; }
+    & code { font-family: var(--msdr-font-mono); }
+    & blockquote { border-left: 3px solid var(--msdr-color-border); padding-left: 1em; color: var(--msdr-color-fg-muted); }
+  }
+}
+
+/* Disable non-essential animation and smooth scrolling (UI-008, UI-009). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --msdr-motion-duration: 0s;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

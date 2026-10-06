@@ -1,0 +1,82 @@
+package layout
+
+import "strconv"
+
+// Document is the full app shell page: head, top bar, the #main region and the
+// footer. Boosted navigation (hx-boost on <body>, ADR 0003 §1A) fetches the
+// full page, keeps only its #main (select) and replaces the current #main
+// (outerHTML), so everything outside #main (top bar, shell modules such as the
+// audio engine, the live region) survives client-side navigation. Back/forward
+// restores only the [hx-history-elt] element.
+//
+// Slots for later tickets: the top bar gets the nav (UI-006), the UTC clock and
+// notifications (UI-006, UI-011) and the user menu (UI-010).
+templ Document(s Shell, p Page, content templ.Component) {
+	<!DOCTYPE html>
+	<html lang="en" data-theme={ string(s.Theme) }>
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="color-scheme" content={ s.Theme.ColorScheme() }/>
+			if s.Theme == ThemeAuto {
+				<meta name="theme-color" content={ ThemeColorLight } media="(prefers-color-scheme: light)"/>
+				<meta name="theme-color" content={ ThemeColorDark } media="(prefers-color-scheme: dark)"/>
+			} else {
+				<meta name="theme-color" content={ s.Theme.ThemeColor() }/>
+			}
+			<title>{ s.DocumentTitle(p) }</title>
+			<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48"/>
+			<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml"/>
+			<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png"/>
+			<link rel="manifest" href="/manifest.webmanifest"/>
+			<link rel="stylesheet" href="/static/css/app.css"/>
+			<script src="/static/vendor/htmx.min.js" nonce={ templ.GetNonce(ctx) } defer></script>
+			<script src="/static/js/shell.js" type="module" nonce={ templ.GetNonce(ctx) }></script>
+		</head>
+		<body
+			class="flex min-h-dvh flex-col bg-bg text-fg antialiased"
+			hx-boost:inherited='target:"#main" select:"#main" swap:"outerHTML"'
+		>
+			<a href="#main" class="skip-link">Skip to main content</a>
+			<header class="sticky top-0 z-10 border-b border-border bg-surface">
+				<div class="mx-auto flex h-14 max-w-screen-2xl items-center gap-4 px-4">
+					<a href="/" class="font-semibold tracking-tight text-fg no-underline">{ s.SiteName }</a>
+				</div>
+			</header>
+			@Main(p, content)
+			<footer class="border-t border-border bg-surface px-4 py-3 text-sm text-fg-muted">
+				if len(s.FooterLinks) > 0 {
+					<ul class="mx-auto flex max-w-screen-2xl flex-wrap gap-x-4 gap-y-1">
+						for _, l := range s.FooterLinks {
+							<li><a href={ templ.URL(l.Href) }>{ l.Label }</a></li>
+						}
+					</ul>
+				}
+			</footer>
+			<div id="msdr-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+		</body>
+	</html>
+}
+
+// Main is the region swapped by boosted navigation. It carries the page
+// section for the nav's aria-current, and is focused after navigation
+// (static/js/navigation.js).
+templ Main(p Page, content templ.Component) {
+	<main
+		id="main"
+		tabindex="-1"
+		hx-history-elt
+		data-section={ p.Section }
+		class="mx-auto w-full max-w-screen-2xl flex-1 px-4 py-6 focus:outline-none"
+	>
+		@content
+	</main>
+}
+
+// Error is the content of an error page (403, 404, 500…), rendered inside the
+// shell: htmx swaps error responses into #main too.
+templ Error(status int, title, message string) {
+	<h1 class="text-2xl font-semibold">{ title }</h1>
+	<p class="mt-2 text-fg-muted">{ message }</p>
+	<p class="mt-4 text-sm text-fg-muted">HTTP { strconv.Itoa(status) } · <a href="/">Back to the home page</a></p>
+}

@@ -106,6 +106,40 @@ max_read_connections = 3
 	}
 }
 
+// Settings keys lock like bootstrap keys: file or env value, with origin.
+func TestLoadHubSettings(t *testing.T) {
+	dir := writeFiles(t, map[string]string{"hub.toml": minimalHub})
+
+	cfg, meta, err := LoadHub(Options{Dir: dir, Env: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Settings.UI.ThemeMode != "auto" || meta.Origins.Of("settings.ui.theme_mode").Locked() {
+		t.Errorf("default theme_mode = %q (%s)", cfg.Settings.UI.ThemeMode, meta.Origins.Of("settings.ui.theme_mode"))
+	}
+
+	dir = writeFiles(t, map[string]string{"hub.toml": minimalHub + "\n[settings.ui]\ntheme_mode = \"dark\"\n"})
+
+	cfg, meta, err = LoadHub(Options{Dir: dir, Env: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if o := meta.Origins.Of("settings.ui.theme_mode"); cfg.Settings.UI.ThemeMode != "dark" || o.String() != "hub.toml:7" {
+		t.Errorf("file theme_mode = %q (%s)", cfg.Settings.UI.ThemeMode, o)
+	}
+
+	cfg, meta, err = LoadHub(Options{Dir: dir, Env: map[string]string{"MESHSDR_SETTINGS__UI__THEME_MODE": "light"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if o := meta.Origins.Of("settings.ui.theme_mode"); cfg.Settings.UI.ThemeMode != "light" || o.String() != "env:MESHSDR_SETTINGS__UI__THEME_MODE" {
+		t.Errorf("env theme_mode = %q (%s)", cfg.Settings.UI.ThemeMode, o)
+	}
+}
+
 func TestLoadNode(t *testing.T) {
 	dir := writeFiles(t, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n"})
 
@@ -188,6 +222,23 @@ func TestLoadErrors(t *testing.T) {
 			files: map[string]string{"hub.toml": minimalHub},
 			env:   map[string]string{"MESHSDR_DB__DSN": "postgres://db/x"},
 			code:  CodeDBEngineUnsupported, origin: "env:MESHSDR_DB__DSN",
+		},
+		{
+			name: "usage policy too long", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub},
+			env:   map[string]string{"MESHSDR_SETTINGS__RECEIVER__USAGE_POLICY_TEXT": strings.Repeat("é", 20001)},
+			code:  "invalid_usage_policy", origin: "env:MESHSDR_SETTINGS__RECEIVER__USAGE_POLICY_TEXT",
+		},
+		{
+			name: "usage policy not UTF-8", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub},
+			env:   map[string]string{"MESHSDR_SETTINGS__RECEIVER__USAGE_POLICY_TEXT": "rules \xff"},
+			code:  "invalid_usage_policy",
+		},
+		{
+			name: "invalid theme mode", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[settings.ui]\ntheme_mode = \"sepia\"\n"},
+			code:  CodeInvalidValue, origin: "hub.toml:6",
 		},
 		{
 			name: "read pool size", role: RoleHub,

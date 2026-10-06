@@ -41,8 +41,10 @@ internal/db/dbtest/     contract-test harness (engine contract, migrated test DB
 internal/http/          chi router, middlewares, server
 internal/http/api/      openapi.yaml (source of truth), oapi-codegen config, generated server, /api/v1 handlers
 internal/http/problem/  RFC 9457 problem+json errors, domain error → HTTP status
-internal/web/           embedded static assets, go:generate for templ + tailwind
-internal/web/templates/ templ components
+internal/web/           embedded static assets (tokens CSS, ES modules, vendored htmx), go:generate for templ + icons + tailwind
+internal/web/layout/    app shell templates (document, #main, error page), shared by every module
+internal/web/render/    render helper: full page vs htmx fragment, HTML headers, shell error pages
+internal/web/icongen/   icon generator (go:generate, golang.org/x/image/vector)
 internal/wire/          composition root (hand-written IoC)
 internal/shared/domain/ shared kernel (common VOs, domain error type)
 internal/<module>/      one bounded context / module, see Architecture
@@ -50,6 +52,7 @@ docs/adr/               architecture decision records
 .infra/                 infrastructure files
 .infra/docker/          Dockerfile (+ Dockerfile.dockerignore), dev/air.toml, dev/config/ (dev hub.toml, node.toml), prod/etc/meshsdr/ (image configs)
 .infra/config/          documented sample configs (hub.toml.example, node.toml.example)
+.infra/a11y/            CI-only accessibility checker (axe-core + Playwright container, urls.txt, compose.yaml)
 ```
 
 Modules (bounded contexts):
@@ -145,6 +148,7 @@ Everything runs in Docker; no local Go toolchain required. Run `make help` for t
 - `make migrate-create name=<name>` — new sequential goose SQL migration in `internal/db/sqlite/migrations/`
 - `make vendor [HTMX_VERSION=x.y.z]` — refresh vendored htmx
 - `make sh` — shell in dev container
+- `make a11y` — axe-core WCAG 2.1 AA checks of the production image (CI-only container; Node never enters the app or dev image)
 - `make build-prod` — production image (distroless, nonroot; `-f .infra/docker/Dockerfile`; config dir `/etc/meshsdr`, volume `/var/lib/meshsdr`, ports 8073/8074, `CMD ["hub"]`)
 
 VS Code: "Reopen in Container" (`.devcontainer/`) attaches to the compose `app` service (Air keeps running). The dev image ships gopls, dlv, golangci-lint and the go.mod tools (templ, sqlc, goose, air, oapi-codegen) on `PATH`; rebuild the image after bumping tool versions.
@@ -153,7 +157,7 @@ Dev containers are rootless: the `dev` stage creates an `app` user with the host
 
 ## Conventions
 
-- Generated files are never committed nor edited: `*_templ.go`, `*.gen.go`, `internal/db/sqlite/sqlc/`, `internal/http/api/openapi.json`, `internal/web/static/css/app.css`. Regenerate with `make generate`.
+- Generated files are never committed nor edited: `*_templ.go`, `*.gen.go`, `internal/db/sqlite/sqlc/`, `internal/http/api/openapi.json`, `internal/web/static/css/app.css`, `internal/web/static/icons/`. Regenerate with `make generate`.
 - Go tools are declared with the go.mod `tool` directive (`go get -tool <pkg>`) and run with `go tool <name>`.
 - Schema changes go through goose migrations only, per dialect; sqlc reads the schema from `internal/db/sqlite/migrations/`. Never edit an applied migration (checksums are verified).
 - Configuration only through the config structs in `internal/config` (TOML + `MESHSDR_` env; every leaf has `toml`, `env` and `jsonschema` description tags). Document new keys in `.infra/config/*.toml.example`.
@@ -166,3 +170,12 @@ Dev containers are rootless: the `dev` stage creates an `app` user with the host
 - Git: one branch + PR per epic (`epic/<area>-<n>`), split into ordered parts when another epic needs a subset first; PR body lists `Closes #<n>` per ticket; spikes get `spike/<key>-<topic>` branches. No AI attribution in commits or PRs.
 - Dockerfile (`.infra/docker/Dockerfile`, built from the repository root) stages: `base` → `dev` (Air) / `build` → `prod` (`gcr.io/distroless/static-debian13:nonroot`).
 - `.infra/docker/Dockerfile.dockerignore` whitelists: ignore everything, then `!` what the build needs.
+
+## UI
+
+ADR 0003 and ADR 0007 are binding. In short:
+
+- Pages render through `render.Renderer` (`Page` with an optional fragment, `Error`); handlers never write the layout themselves. A page URL returns its fragment for non-boosted htmx requests, the full page otherwise. Actions live on page-scoped paths; JSON only under `/api/v1`.
+- CSP is nonce-only. In templates: no inline `<script>` (except `templ.JSONScript`), no `style=""`/`<style>`, no `hx-on`/`js:`, no templ `css`/`script` components (`web.TestTemplateRules`). Behaviour lives in ES modules under `static/js/` and custom elements (islands); untrusted text goes through `textContent`.
+- Colors, type, spacing come from `--msdr-*` tokens (`static/css/input.css`, Tailwind utilities `bg-surface`, `text-fg-muted`…). New color tokens get both light and dark values and a contrast pair in `web.TestTokenContrast`. Long-lived resources (audio, WebSockets) live outside `#main`.
+- Accessibility (UI-009, WCAG 2.1 AA) is part of every page's definition of done: one `h1`, labelled controls, visible focus, color never the only cue, text equivalents for canvases, throttled `aria-live` for status, usable at 200 % zoom and 320 px width. Add the page to `.infra/a11y/urls.txt`; `make a11y` (CI job `a11y`) must pass.

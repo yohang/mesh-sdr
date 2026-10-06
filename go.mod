@@ -19,6 +19,8 @@ require (
 	github.com/invopop/jsonschema v0.14.0
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/spf13/cobra v1.10.2
+	github.com/yuin/goldmark v1.8.2
+	golang.org/x/image v0.43.0
 	modernc.org/sqlite v1.60.1
 )
 

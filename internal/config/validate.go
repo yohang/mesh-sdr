@@ -12,6 +12,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	shelldomain "github.com/yohang/mesh-sdr/internal/shell/domain"
 )
 
 type checker struct {
@@ -21,6 +22,19 @@ type checker struct {
 
 func (c *checker) fail(key, code, msg string) {
 	c.problems = append(c.problems, Problem{Key: key, Origin: c.origins.Of(key).String(), Code: code, Message: msg})
+}
+
+// domainError reports a value rejected by a domain value object, with the
+// domain error code when there is one.
+func (c *checker) domainError(key string, err error) {
+	var de *shared.Error
+	if errors.As(err, &de) {
+		c.fail(key, string(de.Code()), de.Message())
+
+		return
+	}
+
+	c.fail(key, CodeInvalidValue, err.Error())
 }
 
 func (c *checker) listen(key, v string) {
@@ -89,6 +103,15 @@ func (h *Hub) validate(o Origins) []Problem {
 	}
 
 	c.log(h.Log)
+	c.enum("settings.ui.theme_mode", h.Settings.UI.ThemeMode, "light", "dark", "auto")
+
+	// Empty means "use the built-in default"; any other value must be a
+	// valid policy, with the same rules as the shell's value object.
+	if text := h.Settings.Receiver.UsagePolicyText; strings.TrimSpace(text) != "" {
+		if _, err := shelldomain.NewPolicyText(text); err != nil {
+			c.domainError("settings.receiver.usage_policy_text", err)
+		}
+	}
 
 	return c.problems
 }
@@ -99,12 +122,7 @@ func (n *Node) validate(o Origins) []Problem {
 	if n.Node.ID == "" {
 		c.fail("node.id", CodeRequired, "node.id is required")
 	} else if _, err := griddomain.NewNodeID(n.Node.ID); err != nil {
-		var de *shared.Error
-		if errors.As(err, &de) {
-			c.fail("node.id", string(de.Code()), de.Message())
-		} else {
-			c.fail("node.id", CodeInvalidValue, err.Error())
-		}
+		c.domainError("node.id", err)
 	}
 
 	c.listen("node.listen", n.Node.Listen)

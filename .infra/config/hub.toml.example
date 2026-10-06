@@ -36,3 +36,18 @@ max_read_connections = 4
 level = "info"
 # text | json. --json overrides it.
 format = "json"
+
+# Admin settings (MESHSDR_SETTINGS__<TABLE>__<KEY>). Each key set here or in
+# the env is locked: read-only in the admin UI, which shows its origin. Leave
+# a key commented out to keep it admin-editable (DB setting, then default).
+[settings.ui]
+# Theme mode: light | dark | auto (follows the visitor's prefers-color-scheme).
+# A change applies on the next full page load.
+# theme_mode = "auto"
+
+[settings.receiver]
+# Usage policy shown at /policy, in Markdown (raw HTML is not rendered).
+# Unset: the built-in default policy.
+# usage_policy_text = """
+# This receiver is open to everyone. Be nice.
+# """

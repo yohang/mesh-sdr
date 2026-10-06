@@ -91,6 +91,7 @@ func TestHub(t *testing.T) {
 		{"/api/v1/openapi.json", 200, "application/json"},
 		{"/api/v1/nope", 404, "application/problem+json"},
 		{"/", 200, "text/html; charset=utf-8"},
+		{"/nope", 404, "text/html; charset=utf-8"},
 	}
 
 	for _, tt := range tests {
