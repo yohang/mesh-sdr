@@ -57,3 +57,6 @@ ON CONFLICT (serial) DO NOTHING;
 
 -- name: ListRevokedCertificates :many
 SELECT * FROM revoked_certificates WHERE not_after > ? ORDER BY serial;
+
+-- name: UpdateNodeStatus :execrows
+UPDATE nodes SET status = sqlc.arg(status), status_hint = sqlc.arg(status_hint) WHERE id = sqlc.arg(id);

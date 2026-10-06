@@ -31,6 +31,7 @@ type StatusListener func(ctx context.Context, id domain.NodeID, status domain.St
 // Status derives node health from the link state (§4.5, ADR 0008 Q20).
 type Status struct {
 	nodes     domain.NodeRepository
+	tx        Transactor
 	tracker   *Tracker
 	history   *History
 	timings   Timings
@@ -40,8 +41,8 @@ type Status struct {
 }
 
 // NewStatus returns the service.
-func NewStatus(nodes domain.NodeRepository, tracker *Tracker, history *History, timings Timings, now Clock, logger *slog.Logger) *Status {
-	return &Status{nodes: nodes, tracker: tracker, history: history, timings: timings, now: now, logger: logger}
+func NewStatus(nodes domain.NodeRepository, tx Transactor, tracker *Tracker, history *History, timings Timings, now Clock, logger *slog.Logger) *Status {
+	return &Status{nodes: nodes, tx: tx, tracker: tracker, history: history, timings: timings, now: now, logger: logger}
 }
 
 // Listen registers a transition listener (composition time only).
@@ -96,9 +97,37 @@ func abs(v int64) int64 {
 	return v
 }
 
-// Refresh re-evaluates one node and persists a transition.
+// Refresh re-evaluates one node and persists a transition. The node is
+// read and its status written in one transaction, and only the status
+// columns are written: a stale copy never overwrites the runtime state
+// recorded by the control channel.
 func (s *Status) Refresh(ctx context.Context, id domain.NodeID) {
-	n, err := s.nodes.Get(ctx, id)
+	var (
+		old, status domain.Status
+		hint        string
+		changed     bool
+	)
+
+	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		changed = false
+
+		n, err := s.nodes.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		link, known := s.tracker.State(id)
+		old = n.Runtime().Status
+		status, hint = s.Evaluate(n, link, known, s.now())
+
+		if !n.SetStatus(status, hint) {
+			return nil
+		}
+
+		changed = true
+
+		return s.nodes.SaveStatus(ctx, id, status, hint)
+	})
 	if errors.Is(err, domain.ErrNodeNotFound) {
 		s.tracker.Forget(id)
 		s.history.Forget(id)
@@ -107,26 +136,14 @@ func (s *Status) Refresh(ctx context.Context, id domain.NodeID) {
 	}
 
 	if err != nil {
-		s.logger.ErrorContext(ctx, "load node for status", slog.String("node_id", id.String()), slog.Any("error", err))
+		if ctx.Err() == nil {
+			s.logger.ErrorContext(ctx, "save node status", slog.String("node_id", id.String()), slog.Any("error", err))
+		}
 
 		return
 	}
 
-	s.apply(ctx, n)
-}
-
-func (s *Status) apply(ctx context.Context, n *domain.Node) {
-	link, known := s.tracker.State(n.ID())
-	status, hint := s.Evaluate(n, link, known, s.now())
-	old := n.Runtime().Status
-
-	if !n.SetStatus(status, hint) {
-		return
-	}
-
-	if err := s.nodes.SaveRuntime(ctx, n); err != nil {
-		s.logger.ErrorContext(ctx, "save node status", slog.String("node_id", n.ID().String()), slog.Any("error", err))
-
+	if !changed {
 		return
 	}
 
@@ -135,11 +152,11 @@ func (s *Status) apply(ctx context.Context, n *domain.Node) {
 		level = slog.LevelWarn
 	}
 
-	s.logger.LogAttrs(ctx, level, "node status changed", slog.String("node_id", n.ID().String()),
+	s.logger.LogAttrs(ctx, level, "node status changed", slog.String("node_id", id.String()),
 		slog.String("from", string(old)), slog.String("status", string(status)), slog.String("hint", hint))
 
 	for _, l := range s.listeners {
-		l(ctx, n.ID(), status, hint)
+		l(ctx, id, status, hint)
 	}
 }
 
@@ -155,7 +172,7 @@ func (s *Status) Sweep(ctx context.Context) {
 	}
 
 	for _, n := range nodes {
-		s.apply(ctx, n)
+		s.Refresh(ctx, n.ID())
 	}
 }
 

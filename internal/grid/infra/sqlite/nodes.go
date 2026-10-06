@@ -207,6 +207,22 @@ func (r *NodeRepository) SaveRuntime(ctx context.Context, n *domain.Node) error 
 	return nil
 }
 
+// SaveStatus implements domain.NodeRepository.
+func (r *NodeRepository) SaveStatus(ctx context.Context, id domain.NodeID, status domain.Status, hint string) error {
+	rows, err := sqlc.New(r.db.Writer(ctx)).UpdateNodeStatus(ctx, sqlc.UpdateNodeStatusParams{
+		Status: string(status), StatusHint: nullString(hint), ID: id.String(),
+	})
+	if err != nil {
+		return fmt.Errorf("update node %s status: %w", id, err)
+	}
+
+	if rows == 0 {
+		return domain.ErrNodeNotFound
+	}
+
+	return nil
+}
+
 // Delete implements domain.NodeRepository.
 func (r *NodeRepository) Delete(ctx context.Context, id domain.NodeID) error {
 	rows, err := sqlc.New(r.db.Writer(ctx)).DeleteNode(ctx, id.String())

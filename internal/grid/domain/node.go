@@ -517,6 +517,8 @@ type NodeRepository interface {
 	Save(ctx context.Context, n *Node, expectedVersion int) error
 	// SaveRuntime writes only the runtime columns of n.
 	SaveRuntime(ctx context.Context, n *Node) error
+	// SaveStatus writes only the status and its hint.
+	SaveStatus(ctx context.Context, id NodeID, status Status, hint string) error
 	// Delete removes a node and its dependent rows; ErrNodeNotFound if absent.
 	Delete(ctx context.Context, id NodeID) error
 }

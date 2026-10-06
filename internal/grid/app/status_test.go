@@ -14,7 +14,7 @@ import (
 func TestStatusEvaluate(t *testing.T) {
 	timings := app.DefaultTimings() // heartbeat 10 s, offline after 60 s
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	s := app.NewStatus(nil, app.NewTracker(), app.NewHistory(), timings, func() time.Time { return now }, discard)
+	s := app.NewStatus(nil, nil, app.NewTracker(), app.NewHistory(), timings, func() time.Time { return now }, discard)
 
 	tok, _ := domain.NewEnrollmentToken()
 	pending := domain.NewNode(domain.MustNodeID("attic"), domain.MustNodeName("a"), domain.MustNodeURL("https://x:1"), now)
@@ -75,7 +75,7 @@ func TestHeartbeatUpdatesNodeAndHistory(t *testing.T) {
 	n := enrolledNode(t, e)
 	c, tr := newControl(e, "1.0.0")
 	h := app.NewHistory()
-	s := app.NewStatus(e.nodes, tr, h, app.DefaultTimings(), e.clock.now, discard)
+	s := app.NewStatus(e.nodes, e.db, tr, h, app.DefaultTimings(), e.clock.now, discard)
 
 	var transitions []domain.Status
 

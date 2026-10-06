@@ -172,7 +172,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		})
 		g.nodes.SetLinks(g.manager)
 
-		g.status = app.NewStatus(nodeRepo, g.tracker, g.history, timings, now, component(logger, "grid.app.status"))
+		g.status = app.NewStatus(nodeRepo, adapter, g.tracker, g.history, timings, now, component(logger, "grid.app.status"))
 		g.control.Handle(rxv1.TypeNodeHeartbeat, g.status.HeartbeatHandler())
 		g.control.OnLinkChange(g.status.Refresh)
 		g.workers = append(g.workers, g.status.Run)

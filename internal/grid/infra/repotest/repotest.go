@@ -293,6 +293,19 @@ func testNodes(t *testing.T, r Repos) {
 		t.Errorf("runtime = %+v", rt)
 	}
 
+	// SaveStatus writes only the status: the runtime columns stay.
+	if err := repo.SaveStatus(ctx, g.ID(), domain.StatusOnline, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if rt := must(repo.Get(ctx, g.ID())).Runtime(); rt.Status != domain.StatusOnline || rt.StatusHint != "" || rt.BootID != boot || rt.CPUCores != 4 {
+		t.Errorf("runtime after SaveStatus = %+v", rt)
+	}
+
+	if err := repo.SaveStatus(ctx, domain.MustNodeID("nope"), domain.StatusOnline, ""); !errors.Is(err, domain.ErrNodeNotFound) {
+		t.Errorf("status of an unknown node = %v", err)
+	}
+
 	if err := repo.Delete(ctx, g.ID()); err != nil {
 		t.Fatal(err)
 	}
