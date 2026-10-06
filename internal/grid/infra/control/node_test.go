@@ -44,7 +44,7 @@ func startNode(t *testing.T, helloTimeout time.Duration) *node {
 
 	key, _ := pki.GenerateKey()
 	csr, _ := pki.CreateNodeCSR(key, "attic", "")
-	der, _ := ca.SignNodeCSR(csr, "attic", time.Now())
+	der, _ := ca.SignNodeCSR(csr, "attic", "", time.Now())
 
 	ag, err := agent.New(agent.Options{NodeID: "attic", Version: "dev", Buffer: agent.NewBuffer(100, 1<<20), Prober: prober{}, Now: time.Now, Logger: discard})
 	if err != nil {

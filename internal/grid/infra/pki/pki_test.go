@@ -2,6 +2,7 @@ package pki_test
 
 import (
 	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,16 +55,20 @@ func TestSignNodeCSR(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	csr, err := pki.CreateNodeCSR(key, "attic", "192.0.2.10:8074")
+	// The CSR asks for extra SANs; only the node URL host is granted.
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		URIs:     []*url.URL{pki.IdentityURI(pki.KindNode, "attic")},
+		DNSNames: []string{"bank.example.com"}, IPAddresses: []net.IP{net.ParseIP("203.0.113.9")},
+	}, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := ca.SignNodeCSR(csr, "garden", now); !errors.Is(err, pki.ErrInvalidCertificate) {
+	if _, err := ca.SignNodeCSR(csr, "garden", "", now); !errors.Is(err, pki.ErrInvalidCertificate) {
 		t.Fatalf("CSR for another node: err = %v", err)
 	}
 
-	der, err := ca.SignNodeCSR(csr, "attic", now)
+	der, err := ca.SignNodeCSR(csr, "attic", "192.0.2.10", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +82,8 @@ func TestSignNodeCSR(t *testing.T) {
 		t.Errorf("identity = %s %s %v", kind, id, ok)
 	}
 
-	if leaf.DNSNames[0] != "attic.nodes.rx.internal" || len(leaf.IPAddresses) != 1 {
+	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != "attic.nodes.rx.internal" ||
+		len(leaf.IPAddresses) != 1 || !leaf.IPAddresses[0].Equal(net.ParseIP("192.0.2.10")) {
 		t.Errorf("SANs = %v %v", leaf.DNSNames, leaf.IPAddresses)
 	}
 
@@ -130,7 +137,7 @@ func TestMutualTLS(t *testing.T) {
 
 	key, _ := pki.GenerateKey()
 	csr, _ := pki.CreateNodeCSR(key, "attic", "")
-	der, _ := ca.SignNodeCSR(csr, "attic", time.Now())
+	der, _ := ca.SignNodeCSR(csr, "attic", "node.example.org", time.Now())
 	nodeCert := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 
 	revoked := pki.NewRevokedSet()

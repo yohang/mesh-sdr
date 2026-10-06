@@ -127,7 +127,7 @@ func (c *HubClient) Enroll(ctx context.Context, t app.EnrollmentTarget) (domain.
 		return domain.CertInfo{}, fmt.Errorf("%w: invalid CSR MAC", app.ErrEnrollmentRejected)
 	}
 
-	leafDER, err := c.ca.SignNodeCSR(csr, t.ID.String(), c.now())
+	leafDER, err := c.ca.SignNodeCSR(csr, t.ID.String(), t.URL.Host(), c.now())
 	if err != nil {
 		return domain.CertInfo{}, fmt.Errorf("%w: %w", app.ErrEnrollmentRejected, err)
 	}

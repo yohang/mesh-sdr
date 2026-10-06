@@ -86,6 +86,16 @@ func MustNodeURL(s string) NodeURL {
 // String returns the URL.
 func (u NodeURL) String() string { return u.value }
 
+// Host returns the host of the URL (an IP or a DNS name, no port).
+func (u NodeURL) Host() string {
+	parsed, err := url.Parse(u.value)
+	if err != nil {
+		return ""
+	}
+
+	return parsed.Hostname()
+}
+
 // Endpoint returns the URL of path on the node with scheme (https or wss).
 func (u NodeURL) Endpoint(scheme, path string) string {
 	return scheme + strings.TrimPrefix(u.value, "https") + path

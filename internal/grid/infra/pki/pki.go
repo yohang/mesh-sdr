@@ -248,10 +248,11 @@ func (ca *CA) Fingerprint() [32]byte { return Fingerprint(ca.cert.Raw) }
 func (ca *CA) PEM() []byte { return EncodeCertsPEM(ca.cert.Raw) }
 
 // SignNodeCSR verifies a node CSR and issues its leaf certificate (DER).
-// The CSR must be self-consistent and carry urn:rx:node:<nodeID>; the leaf
-// gets that URI, the DNS name <nodeID>.nodes.rx.internal and the CSR's IP
-// and DNS SANs.
-func (ca *CA) SignNodeCSR(csrDER []byte, nodeID string, now time.Time) ([]byte, error) {
+// The CSR must be self-consistent and carry urn:rx:node:<nodeID>. The leaf
+// SANs are fixed by the hub, never taken from the CSR: the node URI, the
+// DNS name <nodeID>.nodes.rx.internal and host, the host of the node URL
+// the hub dials (an IP or a DNS name).
+func (ca *CA) SignNodeCSR(csrDER []byte, nodeID, host string, now time.Time) ([]byte, error) {
 	csr, err := x509.ParseCertificateRequest(csrDER)
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse CSR: %w", ErrInvalidCertificate, err)
@@ -272,13 +273,15 @@ func (ca *CA) SignNodeCSR(csrDER []byte, nodeID string, now time.Time) ([]byte, 
 
 	dns := []string{NodeServerName(nodeID)}
 
-	for _, d := range csr.DNSNames {
-		if d != dns[0] {
-			dns = append(dns, d)
-		}
+	var ips []net.IP
+
+	if ip := net.ParseIP(host); ip != nil {
+		ips = []net.IP{ip}
+	} else if host != "" && host != dns[0] {
+		dns = append(dns, host)
 	}
 
-	return ca.issueNode(csr.PublicKey, nodeID, csr.IPAddresses, dns, now)
+	return ca.issueNode(csr.PublicKey, nodeID, ips, dns, now)
 }
 
 // RenewNode issues a new leaf for the key and SANs of an existing node leaf.
