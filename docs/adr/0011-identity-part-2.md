@@ -54,6 +54,8 @@ Two other parts move in parallel:
   - every session of the user is revoked (`password_change`);
   - the request's session is replaced by a new one with the same absolute expiry and "remember me" state (§5.5 rotation);
   - the change is audited (`auth.password.change`).
+- **Concurrency.** The storing transaction re-checks that the request's session is still active and that the stored hash is the one verified, so a concurrent reset or change wins.
+- **Gate paths.** A request whose raw path differs from its decoded path is never allow-listed (chi routes on the raw path).
 - **Redirect.** A forced change redirects to the safe `next`; a voluntary one to `/account/password?changed=1`.
 - **Notification.** The e-mail notice (SR-04) comes with mail in PR 2.
 
@@ -64,6 +66,7 @@ Two other parts move in parallel:
   - `make vendor-passwords` keeps the 38 451 lower-cased entries of 8 characters or more (shorter ones already fail the length rule), sorted and gzipped (118 KB), with `LICENSE.SecLists`.
   - The check ignores case.
 - A refusal is `invalid_password` with one `password` violation whose code is the reason: `too_short`, `too_long`, `invalid_utf8`, `common` or `same_as_current`.
+- Passwords are normalised to Unicode NFC (`golang.org/x/text/unicode/norm`) before they are checked, hashed or verified, so the same characters typed on systems that compose them differently match. The common-list lookup also applies NFKC and trims surrounding spaces. Existing hashes of non-NFC passwords (pre-release only) would need a reset.
 
 ### Settings seam
 
@@ -84,7 +87,7 @@ Two other parts move in parallel:
 ### Tokens in URLs (SR-07)
 
 - Routes keep the spec paths: `/setup/{token}`, `/invite/{token}`, `/password/reset/{token}`.
-- The request log writes the route pattern of any route with a `{token}` parameter.
+- One helper (`internal/http/redact`) replaces the token after `/setup/`, `/invite/`, `/password/reset/`, `/account/email/verify/` and `/auth/invitations/`, wherever the prefix appears and whatever the case. Every logged request path goes through it (request log, 404/405, CSRF and role refusals, the forced-change gate, rendering and API errors), and `SafeNext` refuses a `next` that carries a token.
 - `static/js/token-url.js`, imported by the shell, replaces the address with the page's `data-replace-url`. The token stays in a hidden field.
 
 ### CLI — PR 1 (AUTH-010, AUTH-011), PR 2 (AUTH-009)

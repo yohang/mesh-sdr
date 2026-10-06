@@ -236,7 +236,7 @@ func (s *Setup) newAdmin(ctx context.Context, in SetupInput) (*domain.User, erro
 		}
 	}
 
-	pw, err := domain.NewPassword(in.Password, s.policies.Password(ctx))
+	pw, err := newPassword(in.Password, s.policies.Password(ctx))
 	if err != nil {
 		return nil, err
 	}

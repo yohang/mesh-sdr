@@ -267,3 +267,23 @@ func TestChangePasswordLosesToAConcurrentChange(t *testing.T) {
 		}
 	})
 }
+
+func TestPasswordsAreNormalisedToNFC(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, nil)
+
+	decomposed := "café au lait chaud"
+	composed := "café au lait chaud"
+
+	if _, err := e.admin.Add(ctx, app.AddUserInput{Username: "zoe", Password: decomposed}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.login("zoe", composed); err != nil {
+		t.Errorf("composed form refused: %v", err)
+	}
+
+	if _, err := e.login("zoe", decomposed); err != nil {
+		t.Errorf("decomposed form refused: %v", err)
+	}
+}

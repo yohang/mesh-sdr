@@ -94,7 +94,7 @@ func (s *Passwords) Change(ctx context.Context, in ChangePasswordInput) (ChangeP
 		return ChangePasswordResult{}, domain.ErrInvalidCurrentPassword
 	}
 
-	pw, err := domain.NewPassword(in.New, s.policies.Password(ctx))
+	pw, err := newPassword(in.New, s.policies.Password(ctx))
 	if err != nil {
 		return ChangePasswordResult{}, err
 	}
@@ -129,7 +129,7 @@ func (s *Passwords) Change(ctx context.Context, in ChangePasswordInput) (ChangeP
 		return ChangePasswordResult{}, s.wrap(err)
 	}
 
-	ok, err := s.hasher.Verify(ctx, in.Current, current)
+	ok, err := s.hasher.Verify(ctx, normalizePassword(in.Current), current)
 	if err != nil {
 		return ChangePasswordResult{}, fmt.Errorf("verify current password: %w", err)
 	}

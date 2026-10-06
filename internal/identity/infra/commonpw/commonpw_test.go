@@ -19,7 +19,7 @@ func TestEmbeddedList(t *testing.T) {
 		t.Errorf("list has %d entries", l.Len())
 	}
 
-	for _, pw := range []string{"password", "PASSWORD", "12345678", "iloveyou", "Password1"} {
+	for _, pw := range []string{"password", "PASSWORD", "12345678", "iloveyou", "Password1", " password ", "ｐａｓｓｗｏｒｄ"} {
 		if !l.Contains(pw) {
 			t.Errorf("%q not in the list", pw)
 		}

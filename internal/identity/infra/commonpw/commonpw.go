@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // File is the name of the embedded list, written by the vendor tool.
@@ -60,10 +62,11 @@ func Parse(gz []byte) (*List, error) {
 // Len returns the number of entries.
 func (l *List) Len() int { return len(l.entries) }
 
-// Contains reports whether password is in the list, ignoring case
-// (implements domain.CommonPasswords).
+// Contains reports whether password is in the list (implements
+// domain.CommonPasswords). The lookup ignores case, compatibility forms
+// (NFKC: full-width letters, ligatures…) and surrounding spaces.
 func (l *List) Contains(password string) bool {
-	_, ok := slices.BinarySearch(l.entries, strings.ToLower(password))
+	_, ok := slices.BinarySearch(l.entries, strings.ToLower(strings.TrimSpace(norm.NFKC.String(password))))
 
 	return ok
 }

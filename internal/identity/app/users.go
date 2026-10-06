@@ -107,7 +107,7 @@ func (s *UserAdmin) Add(ctx context.Context, in AddUserInput) (AddUserResult, er
 		plain = generated
 	}
 
-	pw, err := domain.NewPassword(plain, s.policy.Password(ctx))
+	pw, err := newPassword(plain, s.policy.Password(ctx))
 	if err != nil {
 		return AddUserResult{}, err
 	}
@@ -174,7 +174,7 @@ func (s *UserAdmin) ResetPassword(ctx context.Context, username, password string
 		password = generated
 	}
 
-	pw, err := domain.NewPassword(password, s.policy.Password(ctx))
+	pw, err := newPassword(password, s.policy.Password(ctx))
 	if err != nil {
 		return ResetPasswordResult{}, err
 	}

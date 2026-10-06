@@ -52,7 +52,7 @@ func (p *LocalProvider) Authenticate(ctx context.Context, c Credentials) (domain
 		hash = u.PasswordHash()
 	}
 
-	ok, err := p.hasher.Verify(ctx, c.Password, hash)
+	ok, err := p.hasher.Verify(ctx, normalizePassword(c.Password), hash)
 	if err != nil {
 		if errors.Is(err, domain.ErrRateLimited) {
 			return domain.Identity{}, err
@@ -73,7 +73,7 @@ func (p *LocalProvider) Authenticate(ctx context.Context, c Credentials) (domain
 	}
 
 	if p.hasher.NeedsRehash(hash) {
-		p.rehash(ctx, u.ID(), c.Password)
+		p.rehash(ctx, u.ID(), normalizePassword(c.Password))
 	}
 
 	return domain.LocalIdentity(u.ID()), nil
