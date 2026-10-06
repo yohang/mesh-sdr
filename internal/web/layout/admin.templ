@@ -4,10 +4,15 @@ package layout
 // (left on wide screens, above the content on narrow ones) and the section
 // content. The content starts with the page's h1.
 templ AdminPage(current string, content templ.Component) {
+	@AdminPageWith(current, AdminSections, content)
+}
+
+// AdminPageWith is AdminPage with the sections the visitor may open.
+templ AdminPageWith(current string, sections []AdminSection, content templ.Component) {
 	<div class="flex flex-col gap-6 md:flex-row">
 		<nav aria-label="Admin sections" class="shrink-0 md:w-52">
 			<ul class="flex flex-wrap gap-x-4 gap-y-2 md:flex-col md:gap-1">
-				for _, s := range AdminSections {
+				for _, s := range sections {
 					<li>
 						<a
 							href={ templ.URL(s.Href) }

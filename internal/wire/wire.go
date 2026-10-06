@@ -222,6 +222,11 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 			Actor: settingsActor, Images: imagesHTTP, Logger: component(logger, "settings.http"),
 		}),
 		imagesHTTP,
+		gridhttp.NewAdminModule(gridhttp.AdminDeps{
+			Render: shellModule.Renderer, Devices: g.devices, Nodes: g.nodes,
+			Operator: idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
+			IsAdmin: viewer.IsAdmin, Logger: component(logger, "grid.http.admin"),
+		}),
 		shellModule.HTTP,
 	)
 

@@ -13,3 +13,4 @@
 /admin/look-and-feel 200 signed-in
 /admin/retention 200 signed-in
 /admin/system 200 signed-in
+/admin/devices 200 signed-in

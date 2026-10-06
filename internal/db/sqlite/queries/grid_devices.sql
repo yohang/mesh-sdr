@@ -31,3 +31,6 @@ WHERE devices.node_id = excluded.node_id;
 
 -- name: SetNodeDevicesOffline :exec
 UPDATE devices SET online = 0 WHERE node_id = ? AND online = 1;
+
+-- name: DeleteMissingDevice :execrows
+DELETE FROM devices WHERE id = ? AND runtime_state = 'unavailable' AND runtime_reason = 'not_reported';

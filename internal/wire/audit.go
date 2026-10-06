@@ -3,6 +3,7 @@ package wire
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
@@ -48,7 +49,7 @@ func (a gridAuditor) Record(ctx context.Context, r gridapp.AuditRecord) {
 	e, err := identitydomain.NewAuditEntry(a.now(), a.actor(ctx, r.ActorKind), r.Action, identitydomain.AuditResult(r.Result))
 	if err == nil {
 		target := "node"
-		if r.Action == "device.register" {
+		if strings.HasPrefix(r.Action, "device.") {
 			target = "device"
 		}
 

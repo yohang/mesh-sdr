@@ -22,6 +22,7 @@ var (
 	ErrInvalidDeviceID         = shared.NewError(shared.KindInvalid, "invalid_device_id", "device id must match ^[a-z0-9][a-z0-9_-]{0,62}$")
 	ErrDeviceIDConflict        = shared.NewError(shared.KindConflict, "device_id_conflict", "the device id is owned by another node or has another type")
 	ErrDeviceNotFound          = shared.NewError(shared.KindNotFound, "device_not_found", "device not found")
+	ErrDeviceStillReported     = shared.NewError(shared.KindConflict, "device_reported", "the device is still reported by its node; remove it from the node config first")
 	ErrInvalidDevice           = shared.NewError(shared.KindInvalid, "invalid_device", "invalid device report")
 	ErrInvalidVersion          = shared.NewError(shared.KindInvalid, "invalid_version", "invalid product version")
 	ErrInvalidCapabilityReport = shared.NewError(shared.KindInvalid, "invalid_capability_report", "invalid capability report")

@@ -293,8 +293,11 @@ paths:
           pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"
     get:
       operationId: getDevice
-      x-meshsdr-access: admin
-      summary: One device of the registry (admin for now)
+      x-meshsdr-access: operator
+      summary: One device of the registry, with its node-config values (ADM-008)
+      description: |
+        Read-only: devices are configured only in their node config. A
+        device its node no longer reports carries `missing_since`.
       tags: [grid]
       responses:
         "200":
@@ -303,6 +306,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Device"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: forgetDevice
+      x-meshsdr-access: admin
+      summary: Forget a device its node no longer reports (ADM-009)
+      description: |
+        Deletes the registry entry of a device whose node reported its
+        devices without it (`missing_since` set). A device still reported,
+        or whose node is only offline, answers 409 `device_reported`: it is
+        removed by deleting it from the node config first. Audited.
+      tags: [grid]
+      responses:
+        "204":
+          description: Forgotten
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
   /connections:
@@ -694,6 +716,10 @@ components:
       type: object
       required: [id, node_id, name, type, freq_min, freq_max, sample_rates, enabled, operator_can_retune, always_on, scheduler_enabled, online, runtime_state, runtime_state_at, sort_order, reported_at]
       properties:
+        missing_since:
+          type: string
+          format: date-time
+          description: Set when the node reported its devices without this one (removed from the node config); it can then be forgotten.
         id:
           type: string
         node_id:

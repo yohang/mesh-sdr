@@ -29,10 +29,11 @@ type CapabilityReports interface {
 	Probe(ctx context.Context, id string) error
 }
 
-// DeviceRegistry reads the device registry.
+// DeviceRegistry reads the device registry and forgets missing devices.
 type DeviceRegistry interface {
 	List(ctx context.Context) ([]*domain.Device, error)
 	Get(ctx context.Context, id string) (*domain.Device, error)
+	Forget(ctx context.Context, actor, id string) error
 }
 
 // ConnectionRegistry reads the presence registry.
@@ -256,6 +257,10 @@ func deviceDTO(d *domain.Device) Device {
 		CenterFreq: s.CenterFreq, SortOrder: s.SortOrder, ReportedAt: s.ReportedAt,
 	}
 
+	if since, ok := d.Missing(); ok {
+		out.MissingSince = &since
+	}
+
 	if s.Flags.ListenPolicy != "" {
 		lp := DeviceListenPolicy(s.Flags.ListenPolicy)
 		out.ListenPolicy = &lp
@@ -297,6 +302,15 @@ func (h GridHandlers) GetDevice(ctx context.Context, req GetDeviceRequestObject)
 	}
 
 	return GetDevice200JSONResponse(deviceDTO(d)), nil
+}
+
+// ForgetDevice implements StrictServerInterface (ADM-009).
+func (h GridHandlers) ForgetDevice(ctx context.Context, req ForgetDeviceRequestObject) (ForgetDeviceResponseObject, error) {
+	if err := h.devices.Forget(ctx, actor, req.Id); err != nil {
+		return nil, err
+	}
+
+	return ForgetDevice204Response{}, nil
 }
 
 func uuidPtr(u shared.UUID) *openapi_types.UUID {

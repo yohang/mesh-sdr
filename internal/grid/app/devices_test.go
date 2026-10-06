@@ -101,6 +101,31 @@ func TestDeviceRegistrySync(t *testing.T) {
 		t.Errorf("registry = %d devices", len(list))
 	}
 
+	// Forget (ADM-009): only a device its node no longer reports.
+	if _, missing := hf.Missing(); missing {
+		t.Error("hf of an offline node reported missing")
+	}
+
+	if err := s.Forget(ctx, app.ActorUser, "hf"); !errors.Is(err, domain.ErrDeviceStillReported) {
+		t.Errorf("forget a reported device = %v", err)
+	}
+
+	if err := s.Forget(ctx, app.ActorUser, "vhf"); err != nil {
+		t.Fatalf("forget vhf: %v", err)
+	}
+
+	if _, err := s.Get(ctx, "vhf"); !errors.Is(err, domain.ErrDeviceNotFound) {
+		t.Errorf("vhf after forget = %v", err)
+	}
+
+	if err := s.Forget(ctx, app.ActorUser, "nope"); !errors.Is(err, domain.ErrDeviceNotFound) {
+		t.Errorf("forget an unknown device = %v", err)
+	}
+
+	if got := e.audit.actions(); got[len(got)-1] != "device.forget:vhf" {
+		t.Errorf("audit = %v", got)
+	}
+
 	// Devices go away with their node.
 	if err := e.nodes.Delete(ctx, garden.ID()); err != nil {
 		t.Fatal(err)

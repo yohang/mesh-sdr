@@ -1,0 +1,120 @@
+package http
+
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/grid/domain"
+)
+
+// devicesPage lists the device registry, read-only (devices are configured
+// in their node config). Devices of offline nodes are muted.
+templ devicesPage(devices []*domain.Device) {
+	<h1 class="text-2xl font-semibold">Devices</h1>
+	<p class="text-fg-muted">Devices are configured only in the node config of their node: this registry is read-only.</p>
+	if len(devices) == 0 {
+		<p>No device has been reported yet.</p>
+	} else {
+		<div class="overflow-x-auto">
+			<table class="w-full text-left">
+				<caption class="sr-only">Device registry</caption>
+				<thead>
+					<tr class="border-b border-border">
+						<th scope="col" class="py-1 pr-4">Device</th>
+						<th scope="col" class="py-1 pr-4">Node</th>
+						<th scope="col" class="py-1 pr-4">Type</th>
+						<th scope="col" class="py-1 pr-4">Frequency range</th>
+						<th scope="col" class="py-1">State</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, d := range devices {
+						<tr class={ "border-b border-border", templ.KV("text-fg-muted", !d.Online()) }>
+							<th scope="row" class="py-1 pr-4 font-medium">
+								<a href={ templ.URL("/admin/devices/" + d.ID().String()) }>{ d.Name() }</a>
+							</th>
+							<td class="py-1 pr-4">{ d.Node().String() }</td>
+							<td class="py-1 pr-4">{ d.Type() }</td>
+							<td class="py-1 pr-4">{ frequency(minFreq(d)) } – { frequency(maxFreq(d)) }</td>
+							<td class="py-1">
+								if since, ok := missing(d); ok {
+									no longer reported since { since }
+								} else {
+									{ state(d) }
+									if !d.Online() {
+										(offline)
+									}
+								}
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+func minFreq(d *domain.Device) int64 { lo, _ := d.FreqRange(); return lo }
+
+func maxFreq(d *domain.Device) int64 { _, hi := d.FreqRange(); return hi }
+
+// devicePage is the device detail (ADM-008): the device definition from
+// its node config, read-only, and "forget" for a missing device (ADM-009,
+// admins only).
+templ devicePage(v deviceView) {
+	<h1 class="text-2xl font-semibold">{ v.Device.Name() }</h1>
+	<p class="text-fg-muted">Defined in the node config of { v.NodeName } (node { v.Device.Node().String() }). Edit that file to change the device: this page is read-only.</p>
+	if v.Failure != "" {
+		<p class="font-semibold text-danger" role="alert">{ v.Failure }</p>
+	}
+	if since, ok := missing(v.Device); ok {
+		<section class="flex flex-col gap-2 rounded border border-warning p-4" aria-labelledby="title-missing">
+			<h2 id="title-missing" class="text-lg font-semibold">No longer reported</h2>
+			<p>The node has reported its devices without this one since { since }: it was removed from the node config.</p>
+			if v.CanAdmin {
+				<form method="post" action={ templ.SafeURL("/admin/devices/" + v.Device.ID().String() + "/forget") } hx-post={ "/admin/devices/" + v.Device.ID().String() + "/forget" } hx-confirm={ "Forget " + v.Device.Name() + "? Its registry entry is deleted; presets are not affected." }>
+					<button type="submit" class="rounded border border-border px-3 py-1">Forget this device</button>
+				</form>
+			}
+		</section>
+	}
+	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-definition">
+		<h2 id="title-definition" class="text-lg font-semibold">Definition</h2>
+		<dl class="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-[max-content_1fr]">
+			<dt class="font-medium">Device id</dt>
+			<dd class="font-mono">{ v.Device.ID().String() }</dd>
+			<dt class="font-medium">Type</dt>
+			<dd>{ v.Device.Type() }</dd>
+			<dt class="font-medium">Enabled</dt>
+			<dd>{ yesNo(v.Device.Flags().Enabled) }</dd>
+			<dt class="font-medium">Frequency range</dt>
+			<dd>{ frequency(minFreq(v.Device)) } – { frequency(maxFreq(v.Device)) }</dd>
+			<dt class="font-medium">Sample rates</dt>
+			<dd>{ sampleRates(v.Device.SampleRates()) }</dd>
+			<dt class="font-medium">Listen policy</dt>
+			<dd>{ listenPolicy(v.Device.Flags().ListenPolicy) }</dd>
+			<dt class="font-medium">Operators can retune</dt>
+			<dd>{ yesNo(v.Device.Flags().OperatorCanRetune) }</dd>
+			<dt class="font-medium">Always on</dt>
+			<dd>{ yesNo(v.Device.Flags().AlwaysOn) }</dd>
+			<dt class="font-medium">Scheduler enabled</dt>
+			<dd>{ yesNo(v.Device.Flags().SchedulerEnabled) }</dd>
+		</dl>
+	</section>
+	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-state">
+		<h2 id="title-state" class="text-lg font-semibold">State</h2>
+		<dl class="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-[max-content_1fr]">
+			<dt class="font-medium">State</dt>
+			<dd>{ state(v.Device) }</dd>
+			<dt class="font-medium">Online</dt>
+			<dd>{ yesNo(v.Device.Online()) }</dd>
+			if f := v.Device.CenterFreq(); f != nil {
+				<dt class="font-medium">Centre frequency</dt>
+				<dd>{ frequency(*f) }</dd>
+			}
+			<dt class="font-medium">Last report</dt>
+			<dd>{ utc(v.Device.ReportedAt()) }</dd>
+			<dt class="font-medium">Position in the node config</dt>
+			<dd>{ strconv.Itoa(v.Device.SortOrder() + 1) }</dd>
+		</dl>
+	</section>
+}
