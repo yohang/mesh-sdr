@@ -109,6 +109,7 @@ func testNodesDenied(t *testing.T, srv *httptest.Server, wantStatus int, wantCod
 		{http.MethodPatch, "/nodes/attic"},
 		{http.MethodDelete, "/nodes/attic"},
 		{http.MethodPost, "/nodes/attic/enrollment-token"},
+		{http.MethodPost, "/nodes/attic/revoke"},
 		{http.MethodGet, "/nodes/attic/capabilities"},
 		{http.MethodPost, "/nodes/attic/capabilities/probe"},
 		{http.MethodGet, "/devices"},
@@ -182,6 +183,14 @@ func TestNodesCRUD(t *testing.T) {
 
 	if status, out := call(t, srv, http.MethodGet, "/devices/hf", nil); status != http.StatusNotFound || out["code"] != "device_not_found" {
 		t.Errorf("unknown device = %d %v", status, out)
+	}
+
+	if status, out := call(t, srv, http.MethodPost, "/nodes/attic/revoke", nil); status != http.StatusOK || out["enrollment_state"] != "revoked" {
+		t.Errorf("revoke = %d %v", status, out)
+	}
+
+	if status, out := call(t, srv, http.MethodPost, "/nodes/attic/revoke", nil); status != http.StatusConflict || out["code"] != "node_revoked" {
+		t.Errorf("revoke twice = %d %v", status, out)
 	}
 
 	if status, _ := call(t, srv, http.MethodDelete, "/nodes/attic", nil); status != http.StatusNoContent {

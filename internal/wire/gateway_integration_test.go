@@ -157,3 +157,49 @@ func TestGatewayNodeOffline(t *testing.T) {
 		return st == http.StatusServiceUnavailable
 	})
 }
+
+// TestGatewayRevokedNode: revoking a node closes its media connections and
+// the gateway answers 404 for it; the node row stays, revoked (GRID-015).
+func TestGatewayRevokedNode(t *testing.T) {
+	e := newGridEnvWith(t, true, fastTimings())
+	e.enrollNode(t, fakeProber{})
+
+	ctx := context.Background()
+	id := domain.MustNodeID("attic")
+
+	eventually(t, "control channel", 15*time.Second, func() bool { return e.g.manager.Connected(id) })
+
+	origin := http.Header{}
+	origin.Set("Origin", e.hubCfg.Hub.URL)
+
+	var ws *websocket.Conn
+
+	eventually(t, "media connection", 5*time.Second, func() bool {
+		var st int
+		ws, st = e.browserDial(t, "attic", origin)
+
+		return st == http.StatusSwitchingProtocols
+	})
+
+	if _, err := e.g.nodes.Revoke(ctx, "cli", "attic"); err != nil {
+		t.Fatal(err)
+	}
+
+	for {
+		if _, err := readEnvelope(t, ws); err != nil {
+			if got := websocket.CloseStatus(err); got != websocket.StatusCode(rxv1.CloseForbidden) {
+				t.Fatalf("close status after revocation = %d (%v), want 4403", got, err)
+			}
+
+			break
+		}
+	}
+
+	if _, st := e.browserDial(t, "attic", origin); st != http.StatusNotFound {
+		t.Fatalf("revoked node: %d", st)
+	}
+
+	if n := e.node(t); n.Enrollment() != domain.EnrollmentRevoked {
+		t.Fatalf("node = %+v", n.Snapshot())
+	}
+}

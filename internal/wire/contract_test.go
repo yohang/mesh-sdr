@@ -468,6 +468,17 @@ func happyPaths(t *testing.T, h *contractHub) {
 	}
 
 	expect(admin, http.MethodDelete, "/devices/hf", nil, http.StatusNoContent)
+
+	// A revoked node stays listed until it is deleted (GRID-015).
+	revoked := expect(admin, http.MethodPost, "/nodes/attic/revoke", nil, http.StatusOK)
+	if revoked["enrollment_state"] != "revoked" {
+		t.Errorf("revoked node = %v", revoked)
+	}
+
+	if _, res := admin.do(http.MethodPost, "/nodes/attic/revoke", nil); res["code"] != "node_revoked" {
+		t.Errorf("second revocation = %v", res)
+	}
+
 	expect(admin, http.MethodDelete, "/nodes/attic", nil, http.StatusNoContent)
 
 	// Settings, retention and receiver images (ADR 0010).

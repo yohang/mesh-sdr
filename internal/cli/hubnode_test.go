@@ -49,6 +49,14 @@ func TestHubNodeCommands(t *testing.T) {
 		t.Fatalf("token = %+v", r)
 	}
 
+	if r := run(t, ctx, env, "hub", "node", "revoke", "attic"); r.code != ExitOK || !strings.Contains(r.stdout, "revoked") {
+		t.Fatalf("revoke = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "node", "revoke", "attic"); r.code != ExitFailure || !strings.Contains(r.stderr, "revoked") {
+		t.Fatalf("revoke twice = %+v", r)
+	}
+
 	if r := run(t, ctx, env, "hub", "node", "remove", "attic"); r.code != ExitOK {
 		t.Fatalf("remove = %+v", r)
 	}

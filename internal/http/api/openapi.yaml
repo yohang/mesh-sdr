@@ -238,6 +238,23 @@ paths:
                 $ref: "#/components/schemas/NodeEnrollment"
         default:
           $ref: "#/components/responses/Problem"
+  /nodes/{id}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/NodeID"
+    post:
+      operationId: revokeNode
+      x-meshsdr-access: admin
+      summary: Revoke the certificate of a node (admin; GRID-015). The node stays listed as revoked, its media connections are closed and the gateway answers 404 for it; re-enroll it with a new enrollment token. 409 node_revoked when already revoked.
+      tags: [grid]
+      responses:
+        "200":
+          description: Revoked node
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+        default:
+          $ref: "#/components/responses/Problem"
   /nodes/{id}/capabilities:
     parameters:
       - $ref: "#/components/parameters/NodeID"

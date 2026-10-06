@@ -220,6 +220,52 @@ func (s *Nodes) Delete(ctx context.Context, actor, id string) error {
 	return nil
 }
 
+// Revoke ends the trust of an enrolled node (GRID-015): its certificate
+// and any renewed one pending are added to the revocation list, the node
+// stays listed as revoked (re-enroll it with IssueToken), and its control
+// channel is closed after the revocation list is pushed, so the node closes
+// its media connections. Config-declared nodes can be revoked too: it is
+// not a deletion.
+func (s *Nodes) Revoke(ctx context.Context, actor, id string) (*domain.Node, error) {
+	n, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	now := s.now()
+
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		v := n.Version()
+		pending := n.PendingCertificate()
+
+		cert, err := n.Revoke(now)
+		if err != nil {
+			return err
+		}
+
+		if err := revoke(ctx, s.revocations, pending, n.ID(), "revoked", now); err != nil {
+			return err
+		}
+
+		if err := revoke(ctx, s.revocations, cert, n.ID(), "revoked", now); err != nil {
+			return err
+		}
+
+		return s.repo.Save(ctx, n, v)
+	})
+	if err != nil {
+		s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.revoke", Target: id, Result: ResultDenied, Detail: map[string]string{"reason": err.Error()}})
+
+		return nil, fmt.Errorf("revoke node %s: %w", id, err)
+	}
+
+	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.revoke", Target: id, Result: ResultOK})
+	s.logger.InfoContext(ctx, "node revoked", slog.String("node_id", id))
+	s.linksOrNone().Drop(ctx, n.ID())
+
+	return n, nil
+}
+
 // IssueToken issues a new enrollment token (re-enrollment). The current
 // certificate, if any, is revoked.
 func (s *Nodes) IssueToken(ctx context.Context, actor, id string) (Issued, error) {
