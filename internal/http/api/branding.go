@@ -4,13 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/yohang/mesh-sdr/internal/files/app"
 	"github.com/yohang/mesh-sdr/internal/files/domain"
@@ -164,73 +161,4 @@ func uploadLimits(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-var (
-	multipartOnce sync.Once
-	multipartOps  []multipartOp
-)
-
-type multipartOp struct {
-	method string
-	path   *regexp.Regexp
-}
-
-// AcceptsMultipart reports whether r targets an operation whose request
-// body is declared multipart/form-data in openapi.yaml (uploads): the
-// JSON-only rule of /api/v1 does not apply to it.
-func AcceptsMultipart(r *http.Request) bool {
-	multipartOnce.Do(func() { multipartOps = loadMultipartOps(specJSON) })
-
-	for _, op := range multipartOps {
-		if op.method == r.Method && op.path.MatchString(r.URL.Path) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func loadMultipartOps(spec []byte) []multipartOp {
-	var doc struct {
-		Paths map[string]map[string]json.RawMessage `json:"paths"`
-	}
-
-	if err := json.Unmarshal(spec, &doc); err != nil {
-		return nil
-	}
-
-	var out []multipartOp
-
-	for path, item := range doc.Paths {
-		for method, raw := range item {
-			var op struct {
-				RequestBody struct {
-					Content map[string]json.RawMessage `json:"content"`
-				} `json:"requestBody"`
-			}
-
-			if json.Unmarshal(raw, &op) != nil {
-				continue
-			}
-
-			if _, ok := op.RequestBody.Content["multipart/form-data"]; !ok {
-				continue
-			}
-
-			segments := strings.Split(path, "/")
-			for i, seg := range segments {
-				if strings.HasPrefix(seg, "{") {
-					segments[i] = `[^/]+`
-				} else {
-					segments[i] = regexp.QuoteMeta(seg)
-				}
-			}
-
-			pattern := "^/api/v1" + strings.Join(segments, "/") + "$"
-			out = append(out, multipartOp{method: strings.ToUpper(method), path: regexp.MustCompile(pattern)})
-		}
-	}
-
-	return out
 }

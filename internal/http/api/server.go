@@ -48,7 +48,7 @@ func NewHandler(srv StrictServerInterface, authz Authorizer, logger *slog.Logger
 	}
 
 	r := chi.NewRouter()
-	r.Use(problem.Recoverer(logger), uploadLimits)
+	r.Use(problem.Recoverer(logger), guard(authz), uploadLimits)
 	r.NotFound(problem.NotFound)
 	r.MethodNotAllowed(problem.MethodNotAllowed)
 
