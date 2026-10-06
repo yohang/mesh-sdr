@@ -91,6 +91,17 @@ func TestEnrollmentToken(t *testing.T) {
 		t.Error("CSR MAC does not bind the CSR")
 	}
 
+	// The MACs are domain-separated: a CSR MAC is never a valid chain MAC
+	// for the same bytes, and chain boundaries matter.
+	der := []byte("certificate")
+	if bytes.Equal(k.CSRMAC(nonce, der), k.ChainMAC(nonce, [][]byte{der})) {
+		t.Error("CSR and chain MACs are interchangeable")
+	}
+
+	if bytes.Equal(k.ChainMAC(nonce, [][]byte{[]byte("ab"), []byte("c")}), k.ChainMAC(nonce, [][]byte{[]byte("a"), []byte("bc")})) {
+		t.Error("chain MAC ignores certificate boundaries")
+	}
+
 	if bytes.Equal(k.ChainMAC(nonce, [][]byte{[]byte("a")}), k.ChainMAC([]byte("other"), [][]byte{[]byte("a")})) {
 		t.Error("chain MAC does not bind the nonce")
 	}

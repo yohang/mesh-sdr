@@ -104,7 +104,7 @@ func (e *NodeEnroller) serveEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	nonce, err := b64.DecodeString(req.Nonce)
-	if err != nil || len(nonce) < 16 || len(nonce) > 64 {
+	if err != nil || len(nonce) != domain.EnrollmentNonceSize {
 		problem.Write(w, problem.New(http.StatusBadRequest, problem.CodeBadRequest, "invalid nonce"))
 
 		return

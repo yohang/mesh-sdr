@@ -87,7 +87,7 @@ func (c *HubClient) Enroll(ctx context.Context, t app.EnrollmentTarget) (domain.
 	client := &http.Client{Transport: tr, Timeout: 15 * time.Second}
 	endpoint := t.URL.Endpoint("https", "/enroll")
 
-	nonce := make([]byte, 32)
+	nonce := make([]byte, domain.EnrollmentNonceSize)
 	if _, err := rand.Read(nonce); err != nil {
 		return domain.CertInfo{}, fmt.Errorf("nonce: %w", err)
 	}

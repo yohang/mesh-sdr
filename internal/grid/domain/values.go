@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -155,37 +156,58 @@ func EnrollmentKeyFromBytes(b []byte) (EnrollmentKey, error) {
 // Bytes returns a copy of the key.
 func (k EnrollmentKey) Bytes() []byte { return append([]byte(nil), k.k[:]...) }
 
-func (k EnrollmentKey) mac(parts ...[]byte) []byte {
+// EnrollmentNonceSize is the size of the nonce of an enrollment exchange.
+const EnrollmentNonceSize = 32
+
+// Domain-separation labels of the three enrollment MACs.
+const (
+	labelHello = "meshsdr enroll v1 hello"
+	labelCSR   = "meshsdr enroll v1 csr"
+	labelChain = "meshsdr enroll v1 chain"
+)
+
+// mac is HMAC(K, label ‖ 0 ‖ len-prefixed parts): each MAC is bound to its
+// phase and its fields cannot be shifted across boundaries.
+func (k EnrollmentKey) mac(label string, parts ...[]byte) []byte {
 	m := hmac.New(sha256.New, k.k[:])
+	m.Write([]byte(label))
+	m.Write([]byte{0})
+
 	for _, p := range parts {
+		var n [4]byte
+
+		binary.BigEndian.PutUint32(n[:], uint32(len(p))) //nolint:gosec // parts are far below 4 GiB
+		m.Write(n[:])
 		m.Write(p)
 	}
 
 	return m.Sum(nil)
 }
 
-// HelloProof is the hub proof of phase 1:
-// HMAC(K, nonce ‖ node_id ‖ sha256(node self-signed cert)).
+// HelloProof is the hub proof of phase 1, over the nonce, the node id and
+// the node self-signed certificate hash.
 func (k EnrollmentKey) HelloProof(nonce []byte, id NodeID, selfSignedHash [32]byte) []byte {
-	return k.mac(nonce, []byte(id.String()), selfSignedHash[:])
+	return k.mac(labelHello, nonce, []byte(id.String()), selfSignedHash[:])
 }
 
-// CSRMAC is the node answer of phase 1: HMAC(K, nonce ‖ sha256(CSR)).
+// CSRMAC is the node answer of phase 1, over the nonce and the CSR hash.
 func (k EnrollmentKey) CSRMAC(nonce []byte, csrDER []byte) []byte {
 	h := sha256.Sum256(csrDER)
 
-	return k.mac(nonce, h[:])
+	return k.mac(labelCSR, nonce, h[:])
 }
 
-// ChainMAC authenticates the certificate of phase 2:
-// HMAC(K, nonce ‖ sha256(DER chain concatenated)).
+// ChainMAC authenticates the certificate chain of phase 2, over the nonce
+// and the hash of each certificate.
 func (k EnrollmentKey) ChainMAC(nonce []byte, chain [][]byte) []byte {
-	h := sha256.New()
+	parts := [][]byte{nonce}
+
 	for _, c := range chain {
-		h.Write(c)
+		h := sha256.Sum256(c)
+		parts = append(parts, h[:])
 	}
 
-	return k.mac(nonce, h.Sum(nil))
+	return k.mac(labelChain, parts...)
 }
 
 // VerifyMAC compares two MACs in constant time.
