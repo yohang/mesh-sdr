@@ -1,9 +1,9 @@
-# ADR 0002: Gateway, Caddy embedded vs sidecar, and how per-node routes are applied
+# ADR 0002: Embedded Caddy gateway with dynamic node routing
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Deciders:** project owner
-- **Spike:** SPK-03 (#3). Prototype and raw measurements: [`spikes/spk-03-caddy/`](../../spikes/spk-03-caddy/README.md)
+- **Spike:** SPK-03 (#3). The prototype and raw measurements are on branch `spike/spk-03-caddy`, under `spikes/spk-03-caddy/`. They are not merged.
 - **Unblocks:** GRID-011 (#19), GRID-012 (#20). Related: INT-001 (#85)
 
 ## Context
@@ -127,53 +127,68 @@ Cons:
 
 ### Considered, not evaluated: no Caddy
 
-A gateway built from `net/http` + `httputil.ReverseProxy` + `certmagic` or `autocert` would avoid about 40 MiB and all Caddy globals: the baseline build is 6.6 MiB. It is outside the stack plan and P8's reference gateway, so the spike did not evaluate it. It is listed so the owner can weigh the size cost of A and C.
+A gateway built from `net/http` + `httputil.ReverseProxy` + `certmagic` or `autocert` would avoid about 40 MiB and all Caddy globals: the baseline build is 6.6 MiB. It is outside the stack plan and P8's reference gateway, so the spike did not evaluate it. It was listed so the owner could weigh the size cost of A and C.
 
-## Recommendation
+## Decision
 
-**Option C** (embedded, static node route with a hub-registry upstream module), built so that the per-node JSON builder from A remains the documented sidecar path (`gateway.mode = sidecar`, implemented later only if needed).
+The owner chose **Option C**, the option the spike recommended: Caddy embedded as a Go library in the hub, with one static `/nodes/{nodeId}/ws` route whose upstream is resolved per request from the hub node registry.
 
-Recommended details, if accepted:
+1. **Option C.** This diverges from TECHNICAL_SPEC §4.6 rule 1 ("one route per enrolled node"), §4.6 rule 4 (`@id node-<id>` per route) and the §4.10 step "POST /id/node-routes/routes". The divergence is recorded in this ADR only; there is no spec-change issue. GRID-011 behaviour is met:
+   - Nodes are added, removed or re-addressed with no restart and no Caddy reload.
+   - Unknown or disabled ids get 404 from forward auth.
+   - Offline nodes get 503.
+2. **Node removal and revocation.** The gateway does not track or cut connections. Open media WebSockets of a removed or revoked node are closed by the node on `ctl.revocations`, which the hub sends before closing the control channel. Token expiry (≤ `auth.token_ttl` + 30 s grace) is the backstop.
+3. **Binary size.** The default build includes the gateway, which adds about 40 MiB. A build tag (`nogateway`) produces a smaller node-only binary as a second release artifact. Code that needs Caddy must sit behind that tag. Roles that need the gateway (`hub`, `all`) MUST fail fast with a clear error in a `nogateway` build.
+4. **Certificate and ACME storage.** Caddy's `file_system` storage on the data volume at `/var/lib/meshsdr/caddy` holds ACME accounts, managed certificates and the internal-issuer CA if one is used. This is a documented exception to P4 ("the database is the only persistent store"). Operator-provided cert/key files are config, not state.
+5. **Globals exception.** Caddy builds modules from JSON and cannot inject constructor dependencies. A package-level binding table, which the hub fills at wiring time and the custom modules read at provisioning, is accepted as the documented exception to the AGENTS.md "no globals, constructor injection only" rule. It is confined to the gateway infra adapter `internal/grid/infra/gateway`, together with Caddy module registration. Everything else depends on a `Gateway` port.
+6. **`gateway.mode = sidecar` is deferred.** M0 ships embedded mode only. The per-node JSON shape (Option A) and the admin-API driver from the spike remain the starting point if a sidecar is ever needed.
+7. **Logging.** Caddy's log level follows `log.level`. Caddy logs go through a `caddy.logging.writers.slog` module, configured for both `logging.logs.default` and `logging.sink`, to the injected `*slog.Logger` with `component=gateway.caddy.<logger>`.
 
-1. Caddy is the only listener on the public port. The hub router is served in-process through a `meshsdr_hub` handler module. Forward auth goes to the hub's internal handler on a 0600 unix socket.
-2. Embedded mode sets `admin.disabled: true` and `admin.config.persist: false`, `storage` at `/data/caddy`, `protocols: ["h1","h2"]`, and `logging.logs.default` + `logging.sink` pointing at the slog writer, with the level mapped from `log.level`.
-3. Use `ca: {provider: file}` instead of the deprecated `root_ca_pem_files`. Pin `github.com/caddyserver/caddy/v2` to one minor version (v2.11.x), with a contract test of the custom modules on each bump.
-4. Confine the Caddy globals (module registration, binding table) to `internal/gateway/infra`, behind a `Gateway` port that the hub app layer uses (`Start`, `Stop`, `ApplyTLS`). This keeps the rest of the code compliant with the DI rules.
-5. Close sockets on node removal from the node side (`ctl.revocations` before the control channel is closed). Add a gateway-side connection tracker only if the owner requires gateway-enforced cut-off.
+### Implementation notes
 
-## Open questions for the owner
+- Caddy is the only listener on the public port.
+  - The hub router is served in-process through a `meshsdr_hub` handler module.
+  - Forward auth goes to the hub's internal authz handler on a 0600 unix socket.
+  - The node route keeps the §4.6 handler chain (strip `X-Rx-*`, forward auth with token injection, rewrite to `/ws`, `reverse_proxy` with `flush_interval: -1` and mTLS with the gateway client cert).
+  - The route matches `path_regexp ^/nodes/[a-z0-9][a-z0-9-]{1,62}/ws$`.
+  - It uses `dynamic_upstreams` from the hub registry, and TLS `server_name: "{http.vars.rx_node}.nodes.rx.internal"`, so node certificates carry that DNS SAN.
+- `stream_close_delay` and `stream_timeout` stay set to the spec defaults. They now matter only for reloads that are not caused by node changes (TLS or hub config changes).
+- Use `admin.disabled: true`, `admin.config.persist: false`, an explicit `storage` root and `protocols: ["h1","h2"]`.
+- Use `ca: {provider: "file"}` for the hub CA in the proxy transport.
+- Pin `github.com/caddyserver/caddy/v2` to one minor version (v2.11.x). Run a contract test of the custom modules (upstream source, hub handler, slog writer, placeholder `server_name`) on every Caddy bump.
 
-1. **Which option, A, B or C?** The spike recommends C.
-2. **If C:** do you accept the deviation from §4.6 rules 1 and 4 and §4.10 (one static route instead of one route per node)? If so, a separate spec-clarification issue will be opened, since this ADR does not edit the spec.
-3. **Socket cut-off on node removal or revocation:** is node-side closing (`ctl.revocations`) plus token expiry (≤ 5.5 min) enough? Or must the gateway itself cut a removed node's open WebSockets immediately? That would need a small connection-tracking module in C. In A and B it is a forced close after `stream_close_delay`, which is 2 h by default.
-4. **Binary size:** is +40 MiB on `meshsdr` (about 12 → about 50 MiB, and the same growth for the image) acceptable for every role, including `node`-only deployments that never use the gateway? Alternatively, should the gateway be excluded from node-only builds with a build tag? That would conflict with "one binary".
-5. **Persistent TLS state:** ACME accounts and certificates (and the internal-issuer CA, if used) live in Caddy storage. Is a file store on the `/data` volume (`/data/caddy`) acceptable under P4 ("DB is the only persistent store")? Or is a SQLite-backed `certmagic.Storage` module required? Operator-provided cert/key needs no storage.
-6. **Globals exception:** do you accept a package-level binding table, confined to the gateway infra adapter, as the documented exception to the AGENTS.md "no globals / constructor injection only" rule? Caddy cannot inject constructor dependencies into modules.
-7. **`gateway.mode = sidecar` in M0:** implement it now, defer it (keep only the config builder), or drop it?
-8. **If A or B is chosen:** keep the spec defaults `stream_close_delay = 2h` and `stream_timeout = 24h`, knowing that every listener connected at enrollment time is cut when the delay expires and that each reload fails about 1 new request in flight?
-9. **Caddy log level:** should Caddy follow `log.level` one-to-one? Or should it be capped at `info` unless a dedicated key (e.g. `gateway.log_level`) is set? At debug, Caddy logs about 2 records per request.
+## Gotchas found in the spike
+
+- **`@id` keys:** `caddy.Load` and the admin API accept them, because they index and then strip them. `caddy.Validate` rejects them (`unknown field "@id"`), so strip them before validating.
+- **Deprecated field:** `root_ca_pem_files` in the reverse_proxy TLS transport is deprecated and logs a WARN. Use `"ca": {"provider": "file", "pem_files": [...]}`.
+- **Placeholders in `server_name`:** the TLS transport's `server_name` does accept placeholders at request time, although the docs comment says otherwise. Option C depends on this; cover it with a contract test.
+- **Node id slug:** ids must match `^[a-z0-9][a-z0-9-]{1,62}$`, which means at least 2 characters. Validate the id (`path_regexp`) before using it in a server name.
+- **stdlib `log` redirect:** Caddy's package `init` redirects the stdlib `log` package to zap (`zap.RedirectStdLog`). `slog.Default()` writes through `log`, so it would end up in Caddy's logger. Always use the injected logger.
+- **Process-wide singleton:** Caddy has one config (`caddy.Load` / `caddy.Stop`), a global module registry and a global listener pool. Two gateways cannot run in one test binary in parallel.
+- **Admin `/stop`:** when enabled, the admin API's `POST /stop` calls `os.Exit` on the whole hub process. Keep it disabled in embedded mode.
+- **Writes outside the volume:** without `admin.config.persist: false` and an explicit `storage` root, Caddy writes under `$XDG_CONFIG_HOME` and `$XDG_DATA_HOME`. On distroless nonroot that is `/home/nonroot`, outside the volume.
+- **HTTP/3 listener:** the default protocols include HTTP/3, which opens a UDP listener. Use `protocols: ["h1","h2"]`. Use `automatic_https.disable_redirects` unless port 80 should be bound.
+- **Logging bypass:** without `logging.sink`, stdlib `log` output (for example module cleanup errors) bypasses the slog bridge. Even with it, one line ("redirected default logger") is printed on the first `Load`, before the config exists.
+- **Reloads cut everything:** any config reload, including an admin-API partial update, closes every proxied WebSocket. `stream_close_delay` only postpones the close. Each reload also makes about 1 new in-flight request fail with `EOF`. Option C avoids this for node changes only.
+- **Binary size:** the core `caddyhttp` and `caddytls` packages pull in cel-go, OTLP/gRPC, smallstep/certificates and quic-go. Trimming the module set saves only about 9 MiB compared with `modules/standard`.
 
 ## Consequences
 
-If C is accepted:
-
 - GRID-011 is implemented as follows:
-  - `internal/gateway` (infra adapter, Caddy JSON builder, custom modules) behind a `Gateway` port.
+  - `internal/grid/infra/gateway` holds the Caddy JSON builder, custom modules and binding table, behind a `Gateway` port.
   - The hub node registry is the source of truth for upstreams.
   - Authz answers 404, 503, 401, 403 or 429.
-  - There are no route add/remove calls in the enrollment flow.
-- GRID-012 is unaffected: nodes verify the token offline. The gateway only strips and injects.
-- The Risks entry "Gateway restart or config reload" now covers only hub restarts and TLS/config changes, not node lifecycle events.
-- `meshsdr` grows by about 40 MiB and gains about 140 modules in `go.sum`. Dependency updates (Renovate/Dependabot) must include a contract test of the custom modules against the pinned Caddy version.
-- The deployment needs `/data/caddy` (or the storage chosen in Q5) on the data volume. On distroless nonroot, binding :443 relies on Docker's default `net.ipv4.ip_unprivileged_port_start=0`, or on mapping a high port.
-- A future sidecar mode reuses the per-node JSON builder (Option A shape) and the admin-API driver from the spike. Both are already exercised.
-
-If A or B is chosen, the reload findings (all WS cut, about 1 failed request per reload) stay as the accepted risk the spec describes. Batching (≤ 1 apply per 5 s) and the client reconnect/resume path (TECHNICAL_SPEC §2.3, Protocol v1 `resume`) become mandatory parts of M0.
+  - The enrollment flow (§4.10) has no route add/remove call.
+- GRID-012 is unaffected: nodes verify the token offline. The gateway only strips and injects. GRID-015 relies on node-side closing (`ctl.revocations`) for open sockets.
+- The Risks entry "Gateway restart or config reload" now covers only hub restarts and TLS or config changes, not node lifecycle events.
+- The default `meshsdr` grows by about 40 MiB and gains about 140 modules in `go.sum`. The build and release pipeline produces a second, node-only artifact with `-tags nogateway`. Dependency bumps of Caddy must pass the module contract test.
+- The deployment needs `/var/lib/meshsdr/caddy` on the data volume. On distroless nonroot, binding :443 relies on Docker's default `net.ipv4.ip_unprivileged_port_start=0`, or on mapping a high port.
+- `gateway.admin_url` and `gateway.mode = sidecar` are not implemented in M0.
 
 ## References
 
 - TECHNICAL_SPEC §2.3 (Availability, Security baseline), §3.2, §3.5, §4.1–§4.3, §4.6, §4.9, §4.10, §5.8, §5.16. FEATURE_SPEC GRID-011, GRID-012, GRID-015, INT-001, P4, P8, config keys `gateway.*`.
-- Spike code and measurements: `spikes/spk-03-caddy/README.md`. Reference configs: `spikes/spk-03-caddy/examples/`.
+- Spike code, measurements and reference configs: branch `spike/spk-03-caddy`, `spikes/spk-03-caddy/README.md` and `spikes/spk-03-caddy/examples/`.
 - Caddy docs:
   - reverse_proxy, streaming (`stream_close_delay`, `stream_timeout`): https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#streaming
   - Admin API and `@id`: https://caddyserver.com/docs/api#using-id-in-json
