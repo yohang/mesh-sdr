@@ -196,7 +196,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	)
 
 	if d.Settings != nil {
-		p := settingsrc.New(d.Settings)
+		p := settingsrc.New(d.Settings, component(d.Logger, "identity.infra.settings"))
 		lifetimes, retention, passwords, values = p, p, policies(p), p
 		limiter = memory.NewDynamicIPLimiter(p.LoginRate, memory.DefaultCapacity)
 	} else {

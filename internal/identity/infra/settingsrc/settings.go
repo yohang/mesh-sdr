@@ -8,6 +8,7 @@ package settingsrc
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/app"
@@ -51,7 +52,10 @@ type Values interface {
 }
 
 // Policies adapts the settings store to the identity ports.
-type Policies struct{ values Values }
+type Policies struct {
+	values Values
+	logger *slog.Logger
+}
 
 var (
 	_ app.SessionPolicies = Policies{}
@@ -60,7 +64,9 @@ var (
 )
 
 // New returns the adapter.
-func New(values Values) Policies { return Policies{values: values} }
+func New(values Values, logger *slog.Logger) Policies {
+	return Policies{values: values, logger: logger}
+}
 
 // SessionPolicy implements app.SessionPolicies.
 func (p Policies) SessionPolicy() domain.SessionPolicy {
@@ -135,12 +141,19 @@ func (p Policies) PasswordResetTTL(context.Context) time.Duration {
 	return defaultPasswordResetTTL
 }
 
-// ListenPolicy implements app.Settings (listen_policy; anonymous when the
-// value is unavailable, as its default).
-func (p Policies) ListenPolicy(context.Context) domain.ListenPolicy {
-	if lp, err := domain.ParseListenPolicy(p.values.String(KeyListenPolicy)); err == nil {
-		return lp
+// ListenPolicy implements app.Settings (listen_policy). An unavailable or
+// invalid value fails closed: registered, so that a settings read error
+// never grants listen scopes to anonymous callers.
+func (p Policies) ListenPolicy(ctx context.Context) domain.ListenPolicy {
+	raw := p.values.String(KeyListenPolicy)
+
+	lp, err := domain.ParseListenPolicy(raw)
+	if err != nil {
+		p.logger.WarnContext(ctx, "listen policy unavailable or invalid, falling back to registered",
+			slog.String("key", KeyListenPolicy), slog.String("value", raw), slog.Any("error", err))
+
+		return domain.ListenRegistered
 	}
 
-	return domain.ListenAnonymous
+	return lp
 }
