@@ -1,6 +1,8 @@
 # Generated code
 *_templ.go
-/internal/db/sqlc/
+*.gen.go
+/internal/db/sqlite/sqlc/
+/internal/http/api/openapi.json
 /internal/web/static/css/app.css
 
 # Air build output

@@ -35,8 +35,8 @@ run: ## All-in-one: build image, generate, migrate, start the dev stack
 .PHONY: clean
 clean: ## Stop the stack, remove volumes (caches), generated files and Air output
 	$(COMPOSE) down -v --remove-orphans
-	find internal -name '*_templ.go' -delete
-	rm -rf internal/db/sqlc internal/web/static/css/app.css tmp
+	find internal -name '*_templ.go' -delete -o -name '*.gen.go' -delete
+	rm -rf internal/db/sqlite/sqlc internal/http/api/openapi.json internal/web/static/css/app.css tmp
 
 .PHONY: logs
 logs: c=app
@@ -48,7 +48,7 @@ sh: ## Open a shell in a dev container
 	$(RUN) bash
 
 .PHONY: generate
-generate: ## Generate code (templ, sqlc) and CSS (tailwind)
+generate: ## Generate code (templ, sqlc, oapi-codegen, openapi.json) and CSS (tailwind)
 	$(RUN) go generate ./...
 
 .PHONY: lint
@@ -60,13 +60,13 @@ test: generate ## Run tests
 	$(RUN) go test ./...
 
 .PHONY: migrate
-migrate: generate ## Run migrations (cmd=up|down|status, default up)
-	$(RUN) go run ./cmd/meshsdr migrate $(or $(cmd),up)
+migrate: generate ## Run hub migrations (cmd=up|down|status, default up)
+	$(RUN) go run ./cmd/meshsdr hub migrate $(or $(cmd),up)
 
 .PHONY: migrate-create
 migrate-create: ## Create a SQL migration (name=...)
 	@test -n "$(name)" || (echo "usage: make migrate-create name=<name>" && exit 1)
-	$(RUN) go tool goose -dir internal/db/migrations -s create $(name) sql
+	$(RUN) go tool goose -dir internal/db/sqlite/migrations -s create $(name) sql
 
 .PHONY: vendor
 vendor: ## Download vendored JS assets (HTMX_VERSION=...)
@@ -74,4 +74,4 @@ vendor: ## Download vendored JS assets (HTMX_VERSION=...)
 
 .PHONY: build-prod
 build-prod: ## Build the production image
-	docker build --target prod -t $(IMAGE) .
+	docker build -f .infra/docker/Dockerfile --target prod -t $(IMAGE) .

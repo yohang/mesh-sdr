@@ -2,14 +2,18 @@ services:
   app:
     build:
       context: .
+      dockerfile: .infra/docker/Dockerfile
       target: prod
     env_file:
       - path: .env
         required: false
+    environment:
+      MESHSDR_HUB__URL: ${MESHSDR_HUB__URL:-http://localhost:${HTTP_PORT:-3000}}
+      MESHSDR_HUB__ALLOW_INSECURE_URL: ${MESHSDR_HUB__ALLOW_INSECURE_URL:-true}
     ports:
-      - "${HTTP_PORT:-3000}:3000"
+      - "${HTTP_PORT:-3000}:8073"
     volumes:
-      - data:/data
+      - data:/var/lib/meshsdr
 
 volumes:
   data:

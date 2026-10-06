@@ -1,0 +1,15 @@
+# Dev stack hub config (compose sets MESHSDR_CONFIG_DIR to this directory).
+# Paths are relative to /app, the bind-mounted repository.
+schema_version = 1
+
+[hub]
+listen = "0.0.0.0:8073"
+url = "http://localhost:3000"
+allow_insecure_url = true
+
+[db]
+dsn = "sqlite:var/hub.db"
+
+[log]
+level = "debug"
+format = "text"
