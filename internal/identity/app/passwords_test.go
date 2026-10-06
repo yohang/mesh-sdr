@@ -15,9 +15,11 @@ import (
 
 const fresh = "a fresh and long passphrase"
 
-func (e *env) passwords() *app.Passwords {
+func (e *env) passwords() *app.Passwords { return e.passwordsWith(e.hasher) }
+
+func (e *env) passwordsWith(h app.PasswordHasher) *app.Passwords {
 	return app.NewPasswords(app.PasswordsDeps{
-		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Hasher: e.hasher, IDs: shared.NewUUIDv7Generator(),
+		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Hasher: h, IDs: shared.NewUUIDv7Generator(),
 		Now: e.clock.Now, Policies: app.NewPolicies(nil, nil), Throttle: domain.DefaultThrottlePolicy(),
 		SessionPolicy: domain.DefaultSessionPolicy(), Logger: slog.New(slog.DiscardHandler),
 	})
@@ -194,4 +196,74 @@ func TestResetPasswordFromTheCLI(t *testing.T) {
 	if stored.FailedLogins() != 0 {
 		t.Errorf("failures = %d", stored.FailedLogins())
 	}
+}
+
+// hookHasher runs hook once, after the first verification: it interleaves
+// another change between the check of the current password and the store.
+type hookHasher struct {
+	app.PasswordHasher
+
+	hook func()
+}
+
+func (h *hookHasher) Verify(ctx context.Context, pw string, hash domain.PasswordHash) (bool, error) {
+	ok, err := h.PasswordHasher.Verify(ctx, pw, hash)
+	if h.hook != nil {
+		hook := h.hook
+		h.hook = nil
+		hook()
+	}
+
+	return ok, err
+}
+
+func TestChangePasswordLosesToAConcurrentChange(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("reset and sessions revoked meanwhile", func(t *testing.T) {
+		e := newEnv(t, nil)
+		e.addUser(t, "alice", "", domain.RoleListener)
+		in, _ := e.login("alice", password)
+
+		h := &hookHasher{PasswordHasher: e.hasher, hook: func() {
+			if _, err := e.admin.ResetPassword(ctx, "alice", "an admin chose this one"); err != nil {
+				t.Error(err)
+			}
+		}}
+
+		if _, err := e.passwordsWith(h).Change(ctx, app.ChangePasswordInput{Session: in.Session, Current: password, New: fresh}); !errors.Is(err, domain.ErrUnauthenticated) {
+			t.Fatalf("change = %v", err)
+		}
+
+		if _, err := e.login("alice", "an admin chose this one"); err != nil {
+			t.Errorf("the reset was undone: %v", err)
+		}
+	})
+
+	t.Run("hash replaced meanwhile", func(t *testing.T) {
+		e := newEnv(t, nil)
+		u := e.addUser(t, "bob", "", domain.RoleListener)
+		in, _ := e.login("bob", password)
+
+		h := &hookHasher{PasswordHasher: e.hasher, hook: func() {
+			other, _ := e.hasher.Hash(ctx, "set by another request")
+			stored, _ := e.users.ByID(ctx, u.ID())
+
+			if err := stored.ChangePassword(other, e.clock.Now()); err != nil {
+				t.Error(err)
+			}
+
+			if err := e.users.Save(ctx, stored); err != nil {
+				t.Error(err)
+			}
+		}}
+
+		if _, err := e.passwordsWith(h).Change(ctx, app.ChangePasswordInput{Session: in.Session, Current: password, New: fresh}); !errors.Is(err, domain.ErrInvalidCurrentPassword) {
+			t.Fatalf("change = %v", err)
+		}
+
+		if _, err := e.login("bob", "set by another request"); err != nil {
+			t.Errorf("the other change was undone: %v", err)
+		}
+	})
 }

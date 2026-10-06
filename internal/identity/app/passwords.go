@@ -156,7 +156,7 @@ func (s *Passwords) Change(ctx context.Context, in ChangePasswordInput) (ChangeP
 		return ChangePasswordResult{}, fmt.Errorf("hash password: %w", err)
 	}
 
-	res, err := s.apply(ctx, in, hash)
+	res, err := s.apply(ctx, in, current, hash)
 	if err != nil {
 		return ChangePasswordResult{}, s.wrap(err)
 	}
@@ -167,15 +167,40 @@ func (s *Passwords) Change(ctx context.Context, in ChangePasswordInput) (ChangeP
 	return res, nil
 }
 
-func (s *Passwords) apply(ctx context.Context, in ChangePasswordInput, hash domain.PasswordHash) (ChangePasswordResult, error) {
+// apply stores the change. It re-checks, in its transaction, what was
+// checked before hashing: the request's session is still active, and the
+// stored hash is still the verified one. A concurrent reset, logout or
+// password change therefore wins over this change instead of being undone.
+func (s *Passwords) apply(ctx context.Context, in ChangePasswordInput, verified, hash domain.PasswordHash) (ChangePasswordResult, error) {
 	var res ChangePasswordResult
 
 	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		now := s.now()
 
-		u, err := s.users.ByID(ctx, in.Session.UserID())
+		sess, err := s.sessions.ByTokenHash(ctx, in.Session.TokenHash())
+		if errors.Is(err, domain.ErrSessionNotFound) || (err == nil && !sess.ActiveAt(now)) {
+			return domain.ErrUnauthenticated
+		}
+
 		if err != nil {
 			return err
+		}
+
+		u, err := s.users.ByID(ctx, in.Session.UserID())
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return domain.ErrUnauthenticated
+		}
+
+		if err != nil {
+			return err
+		}
+
+		if !u.Enabled() {
+			return domain.ErrUnauthenticated
+		}
+
+		if u.PasswordHash() != verified {
+			return domain.ErrInvalidCurrentPassword
 		}
 
 		res.Forced = u.MustChangePassword()
