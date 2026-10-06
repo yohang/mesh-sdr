@@ -35,6 +35,11 @@ const (
 	// First-admin setup requests per client address: 10, then 1 per minute.
 	setupIPBurst = 10
 	setupIPEvery = time.Minute
+	// Invitation checks and acceptances per client address: 10, then 1
+	// every 6 minutes (§5.12 sets 3/h; acceptance errors such as a taken
+	// username need retries).
+	inviteIPBurst = 10
+	inviteIPEvery = 6 * time.Minute
 )
 
 // Deps are the dependencies of the identity module.
@@ -116,11 +121,12 @@ func UserAdmin(d Deps) *app.UserAdmin {
 
 // Module is the wired identity module of the hub.
 type Module struct {
-	Profile  *app.Profile
-	Accounts *app.Accounts
-	Notifier app.Notifier
-	Auth     *app.Auth
-	Setup    *app.Setup
+	Invitations *app.Invitations
+	Profile     *app.Profile
+	Accounts    *app.Accounts
+	Notifier    app.Notifier
+	Auth        *app.Auth
+	Setup       *app.Setup
 	// Reaper (sessions.reap) and AuditPurger (audit.purge) are jobs run by
 	// the hub's jobs scheduler.
 	Reaper      *app.SessionReaper
@@ -144,12 +150,13 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		lifetimes app.SessionPolicies = app.DefaultSessionPolicies()
 		retention app.Retention       = app.FixedRetention{Sessions: app.DefaultSessionRetention, Audit: 365 * 24 * time.Hour}
 		passwords                     = policies(nil)
+		values    app.Settings        = settings.Defaults{}
 		limiter   *memory.IPLimiter
 	)
 
 	if d.Settings != nil {
 		p := settingsrc.New(d.Settings)
-		lifetimes, retention, passwords = p, p, policies(p)
+		lifetimes, retention, passwords, values = p, p, policies(p), p
 		limiter = memory.NewDynamicIPLimiter(p.LoginRate, memory.DefaultCapacity)
 	} else {
 		limiter = memory.NewIPLimiter(loginIPEvery, loginIPBurst, memory.DefaultCapacity)
@@ -188,8 +195,16 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Notifier: notifier, Links: app.NewLinks(d.Config.Hub.URL), Logger: component(d.Logger, "identity.app.profile"),
 	})
 
+	invitations := app.NewInvitations(app.InvitationsDeps{
+		Invitations: r.invitations, Users: r.users, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
+		Settings: values, Policies: passwords, Auth: auth, Notifier: notifier, Links: app.NewLinks(d.Config.Hub.URL),
+		Limiter: memory.NewIPLimiter(inviteIPEvery, inviteIPBurst, memory.DefaultCapacity),
+		Logger:  component(d.Logger, "identity.app.invitations"),
+	})
+
 	h, err := identityhttp.New(identityhttp.Services{
-		Auth: auth, Passwords: changer, Setup: setup, Profile: profile, Accounts: accounts,
+		Invitations: invitations,
+		Auth:        auth, Passwords: changer, Setup: setup, Profile: profile, Accounts: accounts,
 	}, pages, identityhttp.Config{
 		HubURL:           d.Config.Hub.URL,
 		TrustedProxies:   config.Prefixes(d.Config.HTTP.TrustedProxies),
@@ -201,6 +216,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	}
 
 	return &Module{
+		Invitations: invitations,
 		Profile:     profile,
 		Accounts:    accounts,
 		Notifier:    notifier,

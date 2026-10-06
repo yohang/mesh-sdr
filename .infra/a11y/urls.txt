@@ -16,3 +16,5 @@
 /admin/devices 200 signed-in
 /account 200 signed-in
 /account/email/verify/not-a-valid-token 404
+/admin/invitations 200 signed-in
+/invite/not-a-valid-token 404

@@ -882,8 +882,134 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /invitations:
+    get:
+      operationId: listInvitations
+      x-meshsdr-access: admin
+      summary: List invitations (pending, used, expired, revoked)
+      tags: [invitations]
+      responses:
+        "200":
+          description: Invitations, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createInvitation
+      x-meshsdr-access: admin
+      summary: Create an invitation
+      description: |
+        Returns the single-use link once (SR-08). With an e-mail address
+        and mail configured, the link is also e-mailed.
+      tags: [invitations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationCreated"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /invitations/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 36
+    delete:
+      operationId: revokeInvitation
+      x-meshsdr-access: admin
+      summary: Revoke a pending invitation
+      tags: [invitations]
+      responses:
+        "204":
+          description: Revoked
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/invitations/{token}:
+    parameters:
+      - $ref: "#/components/parameters/LinkToken"
+    get:
+      operationId: checkInvitation
+      x-meshsdr-access: anonymous
+      summary: Validate an invitation token
+      description: Unknown, expired, revoked and used invitations answer the same 404 `invitation_invalid`.
+      tags: [auth]
+      responses:
+        "200":
+          description: The pre-set role and e-mail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationCheck"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/invitations/{token}/accept:
+    parameters:
+      - $ref: "#/components/parameters/LinkToken"
+    post:
+      operationId: acceptInvitation
+      x-meshsdr-access: anonymous
+      summary: Accept an invitation
+      description: |
+        Creates the account (role from the invitation, never from the
+        request), marks the invitation used and signs in.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationAccept"
+      responses:
+        "201":
+          description: Account created and signed in. The session cookie is set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionInfo"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
+    LinkToken:
+      name: token
+      in: path
+      required: true
+      description: Single-use token of a link.
+      schema:
+        type: string
+        maxLength: 64
     SessionRef:
       name: ref
       in: path
@@ -908,6 +1034,107 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    InvitationList:
+      type: object
+      required: [invitations]
+      properties:
+        invitations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Invitation"
+    Invitation:
+      type: object
+      required: [id, role, delivery, state, created_at, expires_at]
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [listener, operator, admin]
+        device_id:
+          type: string
+        email:
+          type: string
+        delivery:
+          type: string
+          enum: [email, link]
+        state:
+          type: string
+          enum: [pending, redeemed, revoked, expired]
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        redeemed_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+    InvitationCreate:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [listener, operator, admin]
+        device_id:
+          type: string
+          maxLength: 64
+        email:
+          type: string
+          maxLength: 254
+        expires_in_hours:
+          type: integer
+          minimum: 1
+          maximum: 720
+          description: Validity; default `invitations.ttl_hours` (7 days).
+    InvitationCreated:
+      type: object
+      required: [invitation, link, mailed]
+      properties:
+        invitation:
+          $ref: "#/components/schemas/Invitation"
+        link:
+          type: string
+          description: The single-use link, returned only here.
+        mailed:
+          type: boolean
+    InvitationCheck:
+      type: object
+      required: [role, expires_at]
+      properties:
+        role:
+          type: string
+          enum: [listener, operator, admin]
+        device_id:
+          type: string
+        email:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    InvitationAccept:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          maxLength: 64
+        display_name:
+          type: string
+          maxLength: 256
+        password:
+          type: string
+          maxLength: 1024
+        email:
+          type: string
+          description: Used only when the invitation has no address.
+          maxLength: 254
     Me:
       type: object
       required: [id, username, email_verified, roles, identities, must_change_password]

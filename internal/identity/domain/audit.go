@@ -77,6 +77,9 @@ const (
 	ActionUserRoleUpdate    = "user.role.update"
 	ActionUserUpdate        = "user.update"
 	ActionEmailChange       = "user.email.change"
+	ActionInvitationCreate  = "invitation.create"
+	ActionInvitationRevoke  = "invitation.revoke"
+	ActionInvitationRedeem  = "invitation.redeem"
 )
 
 var actionPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)

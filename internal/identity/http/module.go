@@ -18,6 +18,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
@@ -82,13 +83,28 @@ type AccountService interface {
 	RevokeOtherSessions(ctx context.Context, by app.Actor) (int, error)
 }
 
+// InvitationService runs invitations (ACC-002).
+type InvitationService interface {
+	MailEnabled() bool
+	DefaultTTL(ctx context.Context) time.Duration
+	MinLength(ctx context.Context) int
+	Now() time.Time
+	Create(ctx context.Context, by app.Actor, in app.CreateInvitationInput) (app.CreatedInvitation, error)
+	List(ctx context.Context) ([]*domain.Invitation, error)
+	Revoke(ctx context.Context, by app.Actor, id domain.InvitationID) error
+	Check(ctx context.Context, token string, meta app.RequestMeta) (*domain.Invitation, error)
+	Accept(ctx context.Context, in app.AcceptInput) (app.LoginResult, error)
+	TestMail(ctx context.Context, by app.Actor) (domain.Email, error)
+}
+
 // Services are the application services behind the identity pages.
 type Services struct {
-	Auth      Authenticator
-	Passwords PasswordChanger
-	Setup     Bootstrapper
-	Profile   ProfileService
-	Accounts  AccountService
+	Invitations InvitationService
+	Auth        Authenticator
+	Passwords   PasswordChanger
+	Setup       Bootstrapper
+	Profile     ProfileService
+	Accounts    AccountService
 }
 
 // Pages renders HTML pages in the app shell.
@@ -117,11 +133,12 @@ type Config struct {
 
 // Module is the identity router module (internal/http.Module).
 type Module struct {
-	auth      Authenticator
-	passwords PasswordChanger
-	setup     Bootstrapper
-	profile   ProfileService
-	accounts  AccountService
+	auth        Authenticator
+	passwords   PasswordChanger
+	setup       Bootstrapper
+	profile     ProfileService
+	accounts    AccountService
+	invitations InvitationService
 	// adminLinks are the admin pages of the user menu.
 	adminLinks []layout.Link
 	pages      Pages
@@ -154,19 +171,21 @@ func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, e
 	}
 
 	return &Module{
-		auth:      svc.Auth,
-		passwords: svc.Passwords,
-		setup:     svc.Setup,
-		profile:   svc.Profile,
-		accounts:  svc.Accounts,
-		pages:     pages,
-		logger:    logger,
-		resolver:  clientip.NewResolver(cfg.TrustedProxies),
-		cop:       cop,
-		admin:     cfg.AdminNetworks,
-		secure:    secure,
-		preKey:    []byte(rand.Text()),
-		upload:    cfg.AcceptsMultipart,
+		auth:        svc.Auth,
+		passwords:   svc.Passwords,
+		setup:       svc.Setup,
+		profile:     svc.Profile,
+		accounts:    svc.Accounts,
+		pages:       pages,
+		logger:      logger,
+		resolver:    clientip.NewResolver(cfg.TrustedProxies),
+		cop:         cop,
+		admin:       cfg.AdminNetworks,
+		secure:      secure,
+		preKey:      []byte(rand.Text()),
+		upload:      cfg.AcceptsMultipart,
+		invitations: svc.Invitations,
+		adminLinks:  []layout.Link{{Label: "Invitations", Href: InvitationsPath}},
 	}, nil
 }
 
@@ -204,6 +223,18 @@ func (m *Module) Routes(r chi.Router) {
 	r.Head(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
 	r.Get(AccountPath+"/email/verify", m.emailVerifyLanding)
 	r.Post(AccountPath+"/email/verify", m.emailVerifyAction)
+
+	admin := r.With(m.Require(domain.RoleAdmin))
+	admin.Get(InvitationsPath, m.invitationsPage)
+	admin.Head(InvitationsPath, m.invitationsPage)
+	admin.Post(InvitationsPath, m.createInvitationAction)
+	admin.Post(InvitationsPath+"/test-mail", m.testMailAction)
+	admin.Post(InvitationsPath+"/{id}/revoke", m.revokeInvitationAction)
+
+	r.Get("/invite/{token}", m.invitePage)
+	r.Head("/invite/{token}", m.invitePage)
+	r.Get("/invite", m.inviteLanding)
+	r.Post("/invite", m.acceptAction)
 
 	r.With(m.Require(domain.RoleListener)).Get(PasswordChangePath, m.passwordPage)
 	r.With(m.Require(domain.RoleListener)).Head(PasswordChangePath, m.passwordPage)
@@ -358,7 +389,7 @@ func isAPI(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/api/")
 func limitAuthBodies(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/login" || p == "/logout" || p == PasswordChangePath || p == app.SetupPath || strings.HasPrefix(p, "/api/v1/auth/") {
+		if p == "/login" || p == "/logout" || p == PasswordChangePath || p == app.SetupPath || p == "/invite" || strings.HasPrefix(p, "/api/v1/auth/") {
 			r.Body = http.MaxBytesReader(w, r.Body, AuthBodyLimit)
 		}
 
@@ -560,6 +591,12 @@ func (m *Module) ChangePassword(ctx context.Context, current, newPassword string
 	}
 
 	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge), res.Forced, nil
+}
+
+// OpenedSession returns the principal, CSRF token and cookies of a session
+// opened by an invitation (API).
+func (m *Module) OpenedSession(res app.LoginResult) (domain.Principal, string, []*http.Cookie) {
+	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.sessionCookies(res)
 }
 
 // Logout ends the request's session and returns the cookie to clear it.

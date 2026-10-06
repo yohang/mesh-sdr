@@ -247,13 +247,14 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		shellModule.Renderer.Error, component(logger, "files.http"))
 
 	apiServer := api.Server{
-		HealthHandlers:    api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
-		AuthHandlers:      api.NewAuthHandlers(idm.HTTP),
-		GridHandlers:      api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
-		SettingsHandlers:  api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
-		RetentionHandlers: api.NewRetentionHandlers(retention, settingsActor),
-		BrandingHandlers:  api.NewBrandingHandlers(images, settingsActor),
-		AccountHandlers:   api.NewAccountHandlers(idm.HTTP, idm.Accounts, idm.Profile),
+		HealthHandlers:     api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
+		AuthHandlers:       api.NewAuthHandlers(idm.HTTP),
+		GridHandlers:       api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
+		SettingsHandlers:   api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
+		RetentionHandlers:  api.NewRetentionHandlers(retention, settingsActor),
+		BrandingHandlers:   api.NewBrandingHandlers(images, settingsActor),
+		AccountHandlers:    api.NewAccountHandlers(idm.HTTP, idm.Accounts, idm.Profile),
+		InvitationHandlers: api.NewInvitationHandlers(idm.HTTP, idm.HTTP, idm.Invitations),
 	}
 
 	router := httpserver.NewRouter(
