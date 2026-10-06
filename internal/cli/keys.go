@@ -34,10 +34,13 @@ func (a *app) newKeysCmd() *cobra.Command {
 			RunE:  func(cmd *cobra.Command, _ []string) error { return a.keysRotate(cmd.Context()) },
 		},
 		&cobra.Command{
-			Use:   "revoke <kid>",
+			Use:   "revoke [--] <kid>",
 			Short: "Revoke a key (compromise): nodes refuse its tokens at once",
-			Args:  cobra.ExactArgs(1),
-			RunE:  func(cmd *cobra.Command, args []string) error { return a.keysRevoke(cmd.Context(), args[0]) },
+			Long: "Revoke a key (compromise): nodes refuse its tokens at once.\n\n" +
+				"Key ids are base64url and may start with '-': put \"--\" before the kid so it is not read as a flag.",
+			Example: "  meshsdr hub keys revoke -- <kid>",
+			Args:    cobra.ExactArgs(1),
+			RunE:    func(cmd *cobra.Command, args []string) error { return a.keysRevoke(cmd.Context(), args[0]) },
 		},
 	)
 

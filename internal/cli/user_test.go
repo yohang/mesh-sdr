@@ -218,11 +218,11 @@ func TestKeysCommands(t *testing.T) {
 		t.Errorf("rotate = %+v", r)
 	}
 
-	if r := run(t, ctx, env, "hub", "keys", "revoke", keys[0].Kid); r.code != ExitOK || !strings.Contains(r.stdout, "revoked") {
+	if r := run(t, ctx, env, "hub", "keys", "revoke", "--", keys[0].Kid); r.code != ExitOK || !strings.Contains(r.stdout, "revoked") {
 		t.Errorf("revoke = %+v", r)
 	}
 
-	if r := run(t, ctx, env, "hub", "keys", "revoke", "nope"); r.code != ExitFailure {
+	if r := run(t, ctx, env, "hub", "keys", "revoke", "--", "-nope"); r.code != ExitFailure {
 		t.Errorf("revoke unknown = %+v", r)
 	}
 
