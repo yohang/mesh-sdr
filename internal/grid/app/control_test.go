@@ -197,3 +197,50 @@ func TestCertificateRenewalPin(t *testing.T) {
 		t.Errorf("revocations = %+v", revoked)
 	}
 }
+
+// Every hub-signed certificate that is dropped without being promoted is
+// revoked: a superseded renewal, a re-issued token, a deleted node.
+func TestDroppedPendingCertificatesAreRevoked(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	n := enrolledNode(t, e)
+	c, _ := newControl(e, "1.0.0")
+
+	pending := func(serial string) domain.CertInfo {
+		fp := [32]byte{serial[0]}
+		ci, _ := domain.NewCertInfo(fp[:], serial, e.clock.now().Add(90*24*time.Hour))
+
+		return ci
+	}
+
+	serials := func() map[string]string {
+		list, _ := e.revs.List(ctx, e.clock.now())
+		out := map[string]string{}
+
+		for _, r := range list {
+			out[r.Serial()] = r.Reason()
+		}
+
+		return out
+	}
+
+	if err := c.ProposeRenewal(ctx, n.ID(), pending("B1")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.ProposeRenewal(ctx, n.ID(), pending("B2")); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := serials(); got["B1"] != "superseded" || got["B2"] != "" {
+		t.Fatalf("after a superseded renewal: %v", got)
+	}
+
+	if _, err := e.svc.IssueToken(ctx, app.ActorCLI, "attic"); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := serials(); got["B2"] != "superseded" || got[n.Certificate().Serial()] != "reenrolled" {
+		t.Fatalf("after a token re-issue: %v", got)
+	}
+}

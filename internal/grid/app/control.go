@@ -252,6 +252,15 @@ func (c *Control) ProposeRenewal(ctx context.Context, id domain.NodeID, cert dom
 		}
 
 		v := n.Version()
+
+		// A previous renewal never confirmed is replaced: revoke it, it was
+		// signed and may have reached the node.
+		if p := n.PendingCertificate(); p.Serial() != cert.Serial() {
+			if err := revoke(ctx, c.revocations, p, id, "superseded", c.now()); err != nil {
+				return err
+			}
+		}
+
 		if err := n.ProposeCertificate(cert, c.now()); err != nil {
 			return err
 		}

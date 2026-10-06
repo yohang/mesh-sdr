@@ -192,6 +192,10 @@ func (s *Nodes) Delete(ctx context.Context, actor, id string) error {
 	now := s.now()
 
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		if err := revoke(ctx, s.revocations, n.PendingCertificate(), n.ID(), "deleted", now); err != nil {
+			return err
+		}
+
 		if c := n.Certificate(); !c.IsZero() {
 			r, err := domain.NewRevokedCertificate(c, n.ID(), "deleted", now)
 			if err != nil {
@@ -240,6 +244,12 @@ func (s *Nodes) IssueToken(ctx context.Context, actor, id string) (Issued, error
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		v := n.Version()
 		old := n.Certificate()
+
+		// A renewed certificate sent but not confirmed is dropped too.
+		if err := revoke(ctx, s.revocations, n.PendingCertificate(), n.ID(), "superseded", now); err != nil {
+			return err
+		}
+
 		n.IssueEnrollmentKey(tok.Key(), exp, now)
 
 		if !old.IsZero() {
@@ -263,4 +273,18 @@ func (s *Nodes) IssueToken(ctx context.Context, actor, id string) (Issued, error
 	s.linksOrNone().Drop(ctx, n.ID())
 
 	return Issued{Node: n, Token: tok, CAFingerprint: fp, ExpiresAt: n.Snapshot().KeyExpiresAt}, nil
+}
+
+// revoke adds cert, when set, to the revocation list.
+func revoke(ctx context.Context, repo domain.RevocationRepository, cert domain.CertInfo, id domain.NodeID, reason string, now time.Time) error {
+	if cert.IsZero() {
+		return nil
+	}
+
+	r, err := domain.NewRevokedCertificate(cert, id, reason, now)
+	if err != nil {
+		return err
+	}
+
+	return repo.Add(ctx, r)
 }
