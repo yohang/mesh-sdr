@@ -25,21 +25,21 @@ Owner decisions taken before this part: light DDD in `internal/identity/{domain,
 
 - Argon2id PHC strings: 16-byte salt, 32-byte key, parameters from `auth.argon2.memory_kib|iterations|parallelism` (defaults 65536/3/1). The config load refuses values below 19456 KiB and 2 iterations.
 - After a successful login, a hash with other parameters is re-hashed. A malformed stored hash makes only that account unusable.
-- A semaphore (`GOMAXPROCS`) limits concurrent hash computations.
+- A semaphore (`GOMAXPROCS`) limits concurrent hash computations, and at most 4 requests per CPU may wait for a slot. Beyond that, logins answer 429 `rate_limited`.
 - Every login attempt runs exactly one verification, against a dummy hash computed at startup when the account is unknown, disabled or has no local password.
 
 ### Sessions and cookies (AUTH-003)
 
 - The token is 32 random bytes, sent base64url in the cookie. Only its SHA-256 is stored (`sessions.token_hash`).
 - Lifetimes are idle 24 h and absolute 24 h, or 30 days with `remember_me` (Q7). The cookie gets a `Max-Age` only with "remember me".
-- `last_seen_at` is written at most once per minute.
+- `last_seen_at` is written at most once per minute, by a query that touches only unrevoked rows. Revocations use dedicated queries that keep an earlier revocation (`COALESCE`). A save never rewrites `revoked_at`, so a request recording activity from a stale copy cannot resurrect a session that was logged out, rotated or disabled meanwhile.
 - Login always creates a new session and revokes the session the browser presented (`revoke_reason = 'rotated'`).
 - Logout revokes the row (`revoke_reason = 'logout'`) rather than deleting it (Q8).
 - Disabling a user revokes all its sessions in the same transaction.
 - The hub runs a reaper hourly: it deletes rows 30 days after expiry or revocation, in batches (Q12).
 - Cookie names follow the `hub.url` scheme, because no `tls.mode` key exists:
   - `https`: `__Host-rx_session` / `__Host-rx_presession`, with `Secure`;
-  - `http`: `rx_session` / `rx_presession`.
+  - `http`: `rx_session` / `rx_presession`. This stays allowed (loopback, trusted LAN), but the hub logs a warning at startup.
   - Both are `HttpOnly; Path=/; SameSite=Lax` without `Domain`.
 
 ### CSRF (AUTH-019)
@@ -56,8 +56,10 @@ Owner decisions taken before this part: light DDD in `internal/identity/{domain,
 ### Rate limiting (AUTH-002, SR-05)
 
 - Per client address: an in-memory token bucket (`golang.org/x/time/rate`), 5 per minute, burst 5. It sits in an LRU of 100 000 entries, and IPv6 clients are keyed by /64.
-- Per account (the normalised identifier as typed): consecutive failures from the 5th impose a delay of 1 s, 2 s, 4 s and so on. The 10th locks the account for 15 minutes, doubling on each further failure up to 24 h. Success resets the counter.
-- While delayed or locked, attempts are refused with 429 `rate_limited` and `Retry-After`, without verifying the password.
+- Per account (the normalised identifier as typed): consecutive failures from the 5th impose a delay of 1 s, 2 s, 4 s and so on. The 10th locks the account for 15 minutes, doubling on each further failure up to 24 h.
+- Each attempt is reserved atomically before the password is verified: it is counted as a failure in a write transaction (accounts) or under a mutex (unknown identifiers), and the count is reset on success. Parallel guesses therefore cannot exceed the thresholds.
+- While delayed or locked, attempts are refused with 429 `rate_limited` and `Retry-After`, without verifying the password. Only the first refusal of a key (client address, login identifier) within its blocking window is audited; later ones are logged at Debug, so a flood does not turn into audit writes through the single writer.
+- Bodies of `/login`, `/logout` and `/api/v1/auth/*` are capped at 64 KiB. A login over 254 bytes or a password over 1024 bytes is refused as invalid credentials before any lookup or hash.
 - Existing users keep their counters in `users.failed_login_count` and `users.locked_until`. Identifiers that match no account are throttled in an in-memory LRU with the same algorithm (Q15), so answers are identical.
 - The thresholds are code constants until the settings store exists (Q4).
 
@@ -67,12 +69,15 @@ Owner decisions taken before this part: light DDD in `internal/identity/{domain,
 - `api.NewHandler` loads it from the embedded document, and a strict middleware enforces it. An operation without an access level fails a test and is refused at runtime.
 - HTML routes use `Module.Require(role)`: anonymous visitors are redirected to `/login?next=…`, and forbidden requests get a 403 page.
 - Admin requirements also check the resolved client address against `admin.allowed_networks` (403 `admin_network_denied`). Non-admin operations are never affected, even for admins (Q13).
-- Client address: the TCP peer, or, when the peer is in `http.trusted_proxies`, the right-most `X-Forwarded-For` hop that is not a trusted proxy. `Forwarded` is ignored. Addresses are canonicalised (IPv4-mapped, zones).
+- Client address: the TCP peer, or, when the peer is in `http.trusted_proxies`, the right-most `X-Forwarded-For` hop that is not a trusted proxy.
+  - Hops may carry a port (`ip:port`, `[v6]:port`).
+  - On a malformed hop, the right-most hop that parsed is used, or the address is unknown when none parsed; it never falls back to the proxy. Unknown addresses share one login rate-limit bucket and never pass the admin network check.
+  - `Forwarded` is ignored. Addresses are canonicalised (IPv4-mapped, zones).
 - Listen policy hook: `Principal.CanListen(effectivePolicy)`. Resolving the effective device policy belongs to the device registry (later).
 
 ### Audit log
 
-`audit_log` is created now with the §7.1 columns and a trigger that aborts every UPDATE (Q9). It records:
+`audit_log` is created now with the §7.1 columns and a trigger that aborts every UPDATE (Q9). DELETE is not blocked: the retention job (`retention.audit_log`) needs it. Tamper evidence (the SR-69 hash chain) is deferred. It records:
 
 - login success, failure (with the reason and provider in `after`) and lock-out;
 - logout;
@@ -129,7 +134,10 @@ The spec is not edited. These inconsistencies were found and resolved as follows
 14. **Origin check.** AUTH-019 checks `hub.url` only, while §5.7 adds `gateway.extra_origins`. ADR 0003 replaced the allow-list with `http.CrossOriginProtection`, so only `hub.url` is a trusted origin for now.
 15. **Access-token key names.** `auth.token_ttl_s`/`auth.signing_key_file` (FEATURE) vs `auth.access_token_ttl`/`auth.token_signing_key` (§7.4). This is for ACC-007.
 16. **CLI env var.** `$PRODUCT_PASSWORD` (AUTH-008) is `MESHSDR_PASSWORD`.
-17. **Unknown fields.** SR-20 requires rejecting unknown fields. The generated strict server decodes JSON without `DisallowUnknownFields`. `LoginRequest` declares `additionalProperties: false`, but this is not enforced at runtime yet.
+17. **Lock-out enumeration (SR-05, SR-06).** An account is throttled by one persisted counter, whichever identifier is typed (username or e-mail). An unknown identifier is throttled by an in-memory counter per typed string. By comparing the lock-out of a username with that of an e-mail, or by watching which counters survive a hub restart, an attacker can tell whether two identifiers belong to the same account, or whether an account exists. **Owner decision:** accepted and documented as a residual risk; no code change.
+18. **Dummy hash parameters.** The dummy hash uses the current Argon2 parameters. A user whose stored hash still has older parameters answers faster or slower than an unknown account until the next successful login re-hashes it. **Owner decision:** accepted as transitional.
+19. **`must_change_password` is not enforced yet** (AUTH-006). Users created with a generated password can sign in and use the hub without changing it. **Owner decision:** open point; enforcement and the change-password flow come first in `epic/auth-2`.
+20. **Unknown fields.** SR-20 requires rejecting unknown fields. The generated strict server decodes JSON without `DisallowUnknownFields`. `LoginRequest` declares `additionalProperties: false`, but this is not enforced at runtime yet.
 
 ## Consequences
 
