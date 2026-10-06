@@ -13,6 +13,10 @@ const (
 	MaxStoredImage = 2 << 20
 	// MaxImageSide bounds each side of an image, in pixels.
 	MaxImageSide = 8192
+	// MaxAvatarPixels and MaxPanoramaPixels bound the decoded size of an
+	// image (decoding cost and memory).
+	MaxAvatarPixels   = 1024 * 1024
+	MaxPanoramaPixels = 40_000_000
 )
 
 // Slot is a receiver image: the avatar or the panorama.
@@ -20,13 +24,14 @@ type Slot struct {
 	name      string
 	kind      Kind
 	maxUpload int64
+	maxPixels int
 	output    MIMEType
 }
 
 // Slots.
 var (
-	SlotAvatar   = Slot{name: "avatar", kind: KindReceiverAvatar, maxUpload: MaxAvatarUpload, output: MIMEPNG}
-	SlotPanorama = Slot{name: "panorama", kind: KindReceiverPhoto, maxUpload: MaxPanoramaUpload, output: MIMEJPEG}
+	SlotAvatar   = Slot{name: "avatar", kind: KindReceiverAvatar, maxUpload: MaxAvatarUpload, maxPixels: MaxAvatarPixels, output: MIMEPNG}
+	SlotPanorama = Slot{name: "panorama", kind: KindReceiverPhoto, maxUpload: MaxPanoramaUpload, maxPixels: MaxPanoramaPixels, output: MIMEJPEG}
 )
 
 // Slots lists the receiver images.
@@ -55,3 +60,6 @@ func (s Slot) MaxUpload() int64 { return s.maxUpload }
 // Output returns the type the image is re-encoded to: PNG for the avatar,
 // JPEG for the panorama.
 func (s Slot) Output() MIMEType { return s.output }
+
+// MaxPixels returns the largest accepted image, in pixels (width × height).
+func (s Slot) MaxPixels() int { return s.maxPixels }

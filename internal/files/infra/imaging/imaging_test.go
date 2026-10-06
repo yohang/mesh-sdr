@@ -2,6 +2,7 @@ package imaging_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"image"
 	"image/color"
@@ -66,9 +67,11 @@ func TestSniff(t *testing.T) {
 }
 
 func TestReencode(t *testing.T) {
-	p := imaging.Processor{}
+	p := imaging.NewProcessor()
+	ctx := context.Background()
+	big := domain.MaxPanoramaPixels
 
-	img, err := p.Reencode(pngOf(t, 20, 10), domain.MIMEJPEG)
+	img, err := p.Reencode(ctx, pngOf(t, 20, 10), domain.MIMEJPEG, big)
 	if err != nil || img.MIME != domain.MIMEJPEG || img.Width != 20 || img.Height != 10 || !bytes.HasPrefix(img.Data, []byte{0xff, 0xd8, 0xff}) {
 		t.Fatalf("png → jpeg = %+v, %v", img.MIME, err)
 	}
@@ -78,17 +81,32 @@ func TestReencode(t *testing.T) {
 		t.Fatal("fixture has no EXIF")
 	}
 
-	img, err = p.Reencode(src, domain.MIMEPNG)
+	img, err = p.Reencode(ctx, src, domain.MIMEPNG, big)
 	if err != nil || img.MIME != domain.MIMEPNG || bytes.Contains(img.Data, []byte("GPSLatitude")) || bytes.Contains(img.Data, []byte("Exif")) {
 		t.Errorf("metadata kept or error: %v", err)
 	}
 
-	if _, err := p.Reencode(pngOf(t, domain.MaxImageSide+1, 1), domain.MIMEPNG); !errors.Is(err, domain.ErrImageDimensions) {
+	if _, err := p.Reencode(ctx, pngOf(t, domain.MaxImageSide+1, 1), domain.MIMEPNG, big); !errors.Is(err, domain.ErrImageDimensions) {
 		t.Errorf("too wide: %v", err)
 	}
 
+	// Pixel cap of the slot, read before decoding.
+	if _, err := p.Reencode(ctx, pngOf(t, 1025, 1024), domain.MIMEPNG, domain.MaxAvatarPixels); !errors.Is(err, domain.ErrImageDimensions) {
+		t.Errorf("avatar over 1024²: %v", err)
+	}
+
+	// 16-bit images are refused before decoding.
+	var buf16 bytes.Buffer
+	if err := png.Encode(&buf16, image.NewRGBA64(image.Rect(0, 0, 4, 4))); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := p.Reencode(ctx, buf16.Bytes(), domain.MIMEPNG, big); !errors.Is(err, domain.ErrImageColorModel) {
+		t.Errorf("16-bit: %v", err)
+	}
+
 	truncated := pngOf(t, 4, 4)[:30]
-	if _, err := p.Reencode(truncated, domain.MIMEPNG); !errors.Is(err, domain.ErrUnsupportedImage) {
+	if _, err := p.Reencode(ctx, truncated, domain.MIMEPNG, big); !errors.Is(err, domain.ErrUnsupportedImage) {
 		t.Errorf("truncated: %v", err)
 	}
 }

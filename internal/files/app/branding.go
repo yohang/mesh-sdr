@@ -20,10 +20,11 @@ type Image struct {
 	Width, Height int
 }
 
-// ImageProcessor validates an upload (magic bytes, dimensions) and
-// re-encodes it to out, dropping its metadata.
+// ImageProcessor validates an upload (magic bytes, dimensions, colour
+// model, at most maxPixels pixels, read before decoding) and re-encodes it
+// to out, dropping its metadata.
 type ImageProcessor interface {
-	Reencode(data []byte, out domain.MIMEType) (Image, error)
+	Reencode(ctx context.Context, data []byte, out domain.MIMEType, maxPixels int) (Image, error)
 }
 
 // Transactor runs a unit of work in one write transaction.
@@ -99,7 +100,7 @@ func (b *Branding) Upload(ctx context.Context, actor Actor, slot domain.Slot, da
 		return nil, domain.ErrImageTooLarge.WithDetail(fmt.Sprintf("the %s must not exceed %d KiB", slot.Name(), slot.MaxUpload()>>10))
 	}
 
-	img, err := b.proc.Reencode(data, slot.Output())
+	img, err := b.proc.Reencode(ctx, data, slot.Output(), slot.MaxPixels())
 	if err != nil {
 		return nil, err
 	}

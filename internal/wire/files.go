@@ -16,7 +16,7 @@ import (
 // branding builds the receiver images use case (ADM-004).
 func branding(adapter db.Adapter, audit identitydomain.AuditLog) *filesapp.Branding {
 	return filesapp.NewBranding(filesapp.BrandingDeps{
-		Repo: filessqlite.NewFiles(adapter), Tx: adapter, Processor: imaging.Processor{},
+		Repo: filessqlite.NewFiles(adapter), Tx: adapter, Processor: imaging.NewProcessor(),
 		IDs: shared.NewUUIDv7Generator(), Audit: imageAuditor{log: audit}, Now: time.Now,
 	})
 }

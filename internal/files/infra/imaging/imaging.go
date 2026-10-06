@@ -7,6 +7,7 @@ package imaging
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"image"
@@ -24,10 +25,14 @@ import (
 // JPEGQuality is the quality of re-encoded JPEG images.
 const JPEGQuality = 85
 
-// Processor implements app.ImageProcessor.
-type Processor struct{}
+// Processor implements app.ImageProcessor. It decodes one image at a time:
+// a decode may take hundreds of megabytes and seconds of CPU.
+type Processor struct{ slot chan struct{} }
 
-var _ app.ImageProcessor = Processor{}
+var _ app.ImageProcessor = (*Processor)(nil)
+
+// NewProcessor returns a processor.
+func NewProcessor() *Processor { return &Processor{slot: make(chan struct{}, 1)} }
 
 // Sniff returns the type of an image from its magic bytes: PNG, JPEG or
 // WebP. Anything else (SVG, GIF, …) is refused.
@@ -60,8 +65,21 @@ func codecOf(t domain.MIMEType) codec {
 	}
 }
 
+// supportedModel reports 8-bit colour models; 16-bit models double the
+// decoding memory and are refused.
+func supportedModel(m color.Model) bool {
+	switch m {
+	case color.RGBAModel, color.NRGBAModel, color.GrayModel, color.YCbCrModel, color.NYCbCrAModel, color.CMYKModel, color.AlphaModel:
+		return true
+	}
+
+	_, palette := m.(color.Palette)
+
+	return palette
+}
+
 // Reencode implements app.ImageProcessor.
-func (Processor) Reencode(data []byte, out domain.MIMEType) (app.Image, error) {
+func (p *Processor) Reencode(ctx context.Context, data []byte, out domain.MIMEType, maxPixels int) (app.Image, error) {
 	t, err := Sniff(data)
 	if err != nil {
 		return app.Image{}, err
@@ -74,8 +92,21 @@ func (Processor) Reencode(data []byte, out domain.MIMEType) (app.Image, error) {
 		return app.Image{}, domain.ErrUnsupportedImage.WithDetail("the image cannot be read")
 	}
 
-	if cfg.Width < 1 || cfg.Height < 1 || cfg.Width > domain.MaxImageSide || cfg.Height > domain.MaxImageSide {
+	switch {
+	case cfg.Width < 1 || cfg.Height < 1 || cfg.Width > domain.MaxImageSide || cfg.Height > domain.MaxImageSide:
 		return app.Image{}, domain.ErrImageDimensions
+	case cfg.Width*cfg.Height > maxPixels:
+		return app.Image{}, domain.ErrImageDimensions.WithDetail(fmt.Sprintf("the image has %d × %d pixels; at most %d pixels are accepted",
+			cfg.Width, cfg.Height, maxPixels))
+	case !supportedModel(cfg.ColorModel):
+		return app.Image{}, domain.ErrImageColorModel
+	}
+
+	select {
+	case p.slot <- struct{}{}:
+		defer func() { <-p.slot }()
+	case <-ctx.Done():
+		return app.Image{}, ctx.Err()
 	}
 
 	img, err := c.decode(bytes.NewReader(data))
@@ -87,7 +118,7 @@ func (Processor) Reencode(data []byte, out domain.MIMEType) (app.Image, error) {
 
 	switch out {
 	case domain.MIMEPNG:
-		err = (&png.Encoder{CompressionLevel: png.BestCompression}).Encode(&buf, img)
+		err = (&png.Encoder{CompressionLevel: png.DefaultCompression}).Encode(&buf, img)
 	case domain.MIMEJPEG:
 		err = jpeg.Encode(&buf, flatten(img), &jpeg.Options{Quality: JPEGQuality})
 	default:

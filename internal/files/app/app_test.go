@@ -43,7 +43,7 @@ func TestBranding(t *testing.T) {
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 
 	b := app.NewBranding(app.BrandingDeps{
-		Repo: sqlite.NewFiles(a), Tx: a, Processor: imaging.Processor{}, IDs: shared.NewUUIDv7Generator(),
+		Repo: sqlite.NewFiles(a), Tx: a, Processor: imaging.NewProcessor(), IDs: shared.NewUUIDv7Generator(),
 		Audit: au, Now: func() time.Time { return now },
 	})
 

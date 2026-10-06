@@ -19,6 +19,7 @@ var (
 	ErrUnsupportedImage  = shared.NewError(shared.KindInvalid, "unsupported_image", "the image must be a PNG, JPEG or WebP file")
 	ErrImageTooLarge     = shared.NewError(shared.KindInvalid, "image_too_large", "the image is too large")
 	ErrImageDimensions   = shared.NewError(shared.KindInvalid, "image_dimensions", "the image is larger than 8192 × 8192 pixels")
+	ErrImageColorModel   = shared.NewError(shared.KindInvalid, "unsupported_image_colors", "the image must use 8-bit colours (no 16-bit images)")
 	ErrUnknownImageSlot  = shared.NewError(shared.KindNotFound, "unknown_image_slot", "unknown receiver image")
 	ErrImageNotSet       = shared.NewError(shared.KindNotFound, "image_not_set", "no image is set")
 	ErrUnsupportedKind   = shared.NewError(shared.KindInvalid, "unsupported_file_kind", "this kind of file is not supported yet")
