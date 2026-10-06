@@ -23,6 +23,7 @@ type Passwords struct {
 	now       Clock
 	policies  Policies
 	lifetimes SessionPolicies
+	notifier  Notifier
 	logger    *slog.Logger
 }
 
@@ -39,14 +40,17 @@ type PasswordsDeps struct {
 	// SessionPolicies gives the session and throttling policies, read on
 	// every use (DB settings, ADR 0010).
 	SessionPolicies SessionPolicies
-	Logger          *slog.Logger
+	// Notifier tells the account's address about the change (SR-04);
+	// optional.
+	Notifier Notifier
+	Logger   *slog.Logger
 }
 
 // NewPasswords returns the service.
 func NewPasswords(d PasswordsDeps) *Passwords {
 	return &Passwords{
 		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs, now: d.Now,
-		policies: d.Policies, lifetimes: d.SessionPolicies, logger: d.Logger,
+		policies: d.Policies, lifetimes: d.SessionPolicies, notifier: d.Notifier, logger: d.Logger,
 	}
 }
 
@@ -75,6 +79,21 @@ type ChangePasswordResult struct {
 	// RevokedSessions counts the sessions signed out, the replaced one
 	// included.
 	RevokedSessions int
+
+	email domain.Email
+}
+
+// notify tells the account's address that the password changed. A forced
+// change is the first password the user chooses: it is not notified. Mail
+// failures are logged: the change is done.
+func (s *Passwords) notify(ctx context.Context, to domain.Email) {
+	if s.notifier == nil || !s.notifier.Enabled() || to.IsZero() {
+		return
+	}
+
+	if err := s.notifier.PasswordChanged(ctx, to, s.now()); err != nil {
+		s.logger.WarnContext(ctx, "password change notice not sent", slog.Any("error", err))
+	}
 }
 
 // Change checks the current password, then sets the new one (which follows
@@ -163,6 +182,8 @@ func (s *Passwords) Change(ctx context.Context, in ChangePasswordInput) (ChangeP
 
 	s.logger.InfoContext(ctx, "password changed", slog.String("user_id", uid.String()), slog.Bool("forced", res.Forced),
 		slog.Int("revoked_sessions", res.RevokedSessions))
+
+	s.notify(ctx, res.email)
 
 	return res, nil
 }
@@ -256,6 +277,9 @@ func (s *Passwords) apply(ctx context.Context, in ChangePasswordInput, verified,
 		}
 
 		res.Token, res.Session, res.Principal = token, sess, domain.UserPrincipal(u, sess)
+		if !res.Forced {
+			res.email = u.Email()
+		}
 
 		return nil
 	})

@@ -1,0 +1,4 @@
+Hello,
+
+This is a test message from {{.Site}} ({{.HubURL}}), sent on {{date .At}}.
+Outgoing mail works.

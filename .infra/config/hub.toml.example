@@ -72,6 +72,17 @@ parallelism = 1
 # admin request against the resolved client address. Default: any.
 allowed_networks = ["0.0.0.0/0", "::/0"]
 
+[smtp]
+# Outgoing mail: invitations, password reset links and security notices.
+# Without a host, mail is off: links are shown to the admin to copy.
+# host = "smtp.example.org"
+# port = 587
+# starttls | implicit (verified certificates). none needs allow_insecure.
+# tls = "starttls"
+# username = "sdr@example.org"
+# password = { file = "secrets/smtp_password" }
+# from = "WebSDR <sdr@example.org>"
+
 [http]
 # Reverse proxies (CIDR) trusted for X-Forwarded-For. The client address is
 # the right-most hop that is not a trusted proxy. Default: none.

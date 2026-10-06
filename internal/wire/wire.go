@@ -28,6 +28,7 @@ import (
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/mail"
 	"github.com/yohang/mesh-sdr/internal/settings"
 	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -147,6 +148,26 @@ func identityDeps(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) ident
 	return identity.Deps{Config: cfg, Logger: logger, DB: adapter, IDs: shared.NewUUIDv7Generator(), Now: time.Now}
 }
 
+// mailQueue returns the outgoing mail queue, or nil when smtp.host is not
+// set.
+func mailQueue(cfg config.SMTP, logger *slog.Logger) *mail.Queue {
+	if !cfg.Enabled() {
+		logger.Info("mail is not configured (smtp.host): links are shown to copy, password reset by e-mail is off")
+
+		return nil
+	}
+
+	if cfg.TLS == string(mail.TLSNone) {
+		logger.Warn("smtp.tls = none: mail and SMTP credentials travel in clear; use this only with a local development relay",
+			slog.String("smtp_host", cfg.Host))
+	}
+
+	return mail.NewQueue(mail.NewSMTP(mail.SMTPConfig{
+		Host: cfg.Host, Port: cfg.Port, TLS: mail.TLSMode(cfg.TLS), Username: cfg.Username,
+		Password: cfg.Password.Reveal(), From: cfg.From,
+	}), component(logger, "mail.queue"))
+}
+
 // UserAdmin builds the user administration service of the hub CLI
 // (meshsdr hub user …), backed by adapter.
 func UserAdmin(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) *identityapp.UserAdmin {
@@ -186,6 +207,13 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	ideps := identityDeps(cfg, logger, adapter)
 	ideps.Settings = settingsModule.Store
 	ideps.AcceptsMultipart = api.AcceptsMultipart
+
+	var workers []func(context.Context)
+
+	if q := mailQueue(cfg.SMTP, logger); q != nil {
+		ideps.Mail = q
+		workers = append(workers, q.Run)
+	}
 
 	idm, err := identity.Wire(ctx, ideps, pages{shellModule.Renderer})
 	if err != nil {
@@ -240,7 +268,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		server:   httpserver.NewServer(cfg.Hub.Listen, router),
 		logger:   component(logger, "http.server"),
 		startup:  g.startup,
-		workers:  append([]func(context.Context){scheduler.Run}, g.workers...),
+		workers:  append(append(workers, scheduler.Run), g.workers...),
 		setupURL: setupURL,
 	}, g, nil
 }

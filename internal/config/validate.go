@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/mail"
 	"net/netip"
 	"net/url"
 	"slices"
@@ -156,8 +157,38 @@ func (h *Hub) validate(o Origins) []Problem {
 
 	c.cidrs("admin.allowed_networks", h.Admin.AllowedNetworks)
 	c.cidrs("http.trusted_proxies", h.HTTP.TrustedProxies)
+	c.smtp(h.SMTP)
 
 	return c.problems
+}
+
+// smtp checks the mail relay settings when mail is configured (SR-09: TLS
+// with a verified certificate unless explicitly allowed off).
+func (c *checker) smtp(s SMTP) {
+	c.enum("smtp.tls", s.TLS, "starttls", "implicit", "none")
+
+	if !s.Enabled() {
+		return
+	}
+
+	if net.ParseIP(s.Host) == nil && !isHostname(s.Host) {
+		c.fail("smtp.host", CodeInvalidValue, fmt.Sprintf("invalid host %q", s.Host))
+	}
+
+	if s.Port < 1 || s.Port > 65535 {
+		c.fail("smtp.port", CodeInvalidValue, fmt.Sprintf("invalid value %d: want 1..65535", s.Port))
+	}
+
+	if s.TLS == "none" && !s.AllowInsecure {
+		c.fail("smtp.tls", CodeInvalidValue, "smtp.tls = none sends mail in clear: set smtp.allow_insecure = true to allow it")
+	}
+
+	switch a, err := mail.ParseAddress(s.From); {
+	case s.From == "":
+		c.fail("smtp.from", CodeRequired, "smtp.from is required with smtp.host")
+	case err != nil || a.Address == "":
+		c.fail("smtp.from", CodeInvalidValue, fmt.Sprintf("invalid address %q", s.From))
+	}
 }
 
 // cidrs checks a list of CIDR prefixes (for example "10.0.0.0/8").

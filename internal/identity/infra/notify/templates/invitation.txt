@@ -1,0 +1,10 @@
+Hello,
+
+You are invited to create an account on {{.Site}}, with the {{.Role}} role.
+
+Open this link to choose your username and password:
+
+{{.Link}}
+
+The link works once and expires on {{date .Expires}}.
+If you did not expect this invitation, ignore this message.

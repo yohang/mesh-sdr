@@ -18,6 +18,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/infra/argon2"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/commonpw"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/notify"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settings"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
@@ -48,6 +49,8 @@ type Deps struct {
 	Settings settingsrc.Values
 	// AcceptsMultipart reports API upload operations (api.AcceptsMultipart).
 	AcceptsMultipart func(r *http.Request) bool
+	// Mail queues outgoing e-mail; nil when smtp.host is not set.
+	Mail notify.Outbox
 }
 
 func component(l *slog.Logger, name string) *slog.Logger {
@@ -113,8 +116,9 @@ func UserAdmin(d Deps) *app.UserAdmin {
 
 // Module is the wired identity module of the hub.
 type Module struct {
-	Auth  *app.Auth
-	Setup *app.Setup
+	Notifier app.Notifier
+	Auth     *app.Auth
+	Setup    *app.Setup
 	// Reaper (sessions.reap) and AuditPurger (audit.purge) are jobs run by
 	// the hub's jobs scheduler.
 	Reaper      *app.SessionReaper
@@ -158,10 +162,12 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Logger:          component(d.Logger, "identity.app.auth"),
 	})
 
+	notifier := notify.New(d.Mail, d.Config.Hub.URL)
+
 	changer := app.NewPasswords(app.PasswordsDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
 		Policies: passwords, SessionPolicies: lifetimes,
-		Logger: component(d.Logger, "identity.app.passwords"),
+		Notifier: notifier, Logger: component(d.Logger, "identity.app.passwords"),
 	})
 
 	setup := app.NewSetup(app.SetupDeps{
@@ -181,6 +187,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	}
 
 	return &Module{
+		Notifier:    notifier,
 		Auth:        auth,
 		Setup:       setup,
 		Reaper:      app.NewSessionReaper(r.sessions, retention, d.Now),
