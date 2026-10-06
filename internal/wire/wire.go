@@ -19,6 +19,7 @@ import (
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/http/api"
@@ -151,9 +152,9 @@ func Hub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Ad
 }
 
 func newHub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now func() time.Time,
-	timings gridapp.Timings,
+	timings gridapp.Timings, tweaks ...func(*control.HubOptions),
 ) (*Process, *hubGrid, error) {
-	g, err := newHubGrid(cfg, logger, adapter, now, timings)
+	g, err := newHubGrid(cfg, logger, adapter, now, timings, tweaks...)
 	if err != nil {
 		return nil, nil, err
 	}

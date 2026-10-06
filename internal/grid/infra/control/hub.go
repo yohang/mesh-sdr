@@ -37,6 +37,11 @@ type HubOptions struct {
 	MaxBackoff     time.Duration
 	PingInterval   time.Duration
 	PongTimeout    time.Duration
+	// RenewCheckEvery is the period of the certificate renewal check of an
+	// open channel (daily, ADR 0008).
+	RenewCheckEvery time.Duration
+	// RenewalDue decides whether a node certificate must be renewed.
+	RenewalDue func(leaf *x509.Certificate, now time.Time) bool
 }
 
 // Manager keeps exactly one control channel per enrolled, enabled node
@@ -91,6 +96,14 @@ func NewManager(o HubOptions) *Manager {
 
 	if o.PongTimeout == 0 {
 		o.PongTimeout = PongTimeout
+	}
+
+	if o.RenewCheckEvery == 0 {
+		o.RenewCheckEvery = 24 * time.Hour
+	}
+
+	if o.RenewalDue == nil {
+		o.RenewalDue = pki.RenewalDue
 	}
 
 	return &Manager{o: o, links: map[domain.NodeID]*link{}, wake: make(chan struct{}, 1)}
@@ -274,15 +287,16 @@ func (m *Manager) connect(ctx context.Context, id domain.NodeID, l *link) error 
 		return err
 	}
 
-	pin := n.Certificate()
-
 	var (
 		leafMu sync.Mutex
 		leaf   *x509.Certificate
 	)
 
 	check := func(c *x509.Certificate) error {
-		if pki.Fingerprint(c.Raw) != pin.Fingerprint() {
+		// The pin accepts the current certificate and a renewed one sent
+		// but not confirmed yet, so a lost acknowledgement never locks the
+		// node out.
+		if !n.AcceptsFingerprint(pki.Fingerprint(c.Raw)) {
 			return fmt.Errorf("%w: node certificate does not match the enrolled one", pki.ErrInvalidCertificate)
 		}
 
@@ -316,7 +330,7 @@ func (m *Manager) connect(ctx context.Context, id domain.NodeID, l *link) error 
 	})
 
 	leafMu.Lock()
-	s := &hubSession{m: m, id: id, conn: conn, leaf: leaf, logger: m.o.Logger.With(slog.String("node_id", id.String()))}
+	s := &hubSession{m: m, id: id, conn: conn, leaf: leaf, pending: n.PendingCertificate(), logger: m.o.Logger.With(slog.String("node_id", id.String()))}
 	leafMu.Unlock()
 
 	err = s.run(ctx, l)
@@ -352,7 +366,12 @@ type hubSession struct {
 
 	boot       shared.UUID
 	restricted bool
-	renewal    *domain.CertInfo
+	// pending is the renewed certificate proposed to the node, if any.
+	pending domain.CertInfo
+	// renewing is set while a ctl.cert.renew waits for its ack.
+	renewing bool
+	// renewedLeaf is the certificate of pending.
+	renewedLeaf *x509.Certificate
 }
 
 func (s *hubSession) run(ctx context.Context, l *link) error {
@@ -395,6 +414,7 @@ func (s *hubSession) run(ctx context.Context, l *link) error {
 	l.set(s)
 
 	s.pushRevocations(ctx)
+	s.confirmPending(ctx)
 
 	if !s.restricted {
 		s.maybeRenew(ctx)
@@ -465,11 +485,29 @@ func (s *hubSession) pushRevocations(ctx context.Context) {
 	_ = send(s.conn, rxv1.TypeCtlRevocations, rxv1.CorrelationID{}, ctl.Revocations{Sessions: []string{}, Users: []string{}, CertSerials: list})
 }
 
+// confirmPending promotes a renewed certificate the node presents: it
+// installed it but the acknowledgement was lost.
+func (s *hubSession) confirmPending(ctx context.Context) {
+	if s.pending.IsZero() || s.leaf == nil || pki.Fingerprint(s.leaf.Raw) != s.pending.Fingerprint() {
+		return
+	}
+
+	if err := s.m.o.Control.RecordRenewal(ctx, s.id, s.pending.Serial()); err != nil {
+		s.logger.ErrorContext(ctx, "confirm renewed certificate", slog.Any("error", err))
+
+		return
+	}
+
+	s.logger.InfoContext(ctx, "renewed node certificate confirmed by the node connection", slog.String("cert_serial", s.pending.Serial()))
+	s.pending = domain.CertInfo{}
+}
+
 // maybeRenew sends a renewed certificate when 2/3 of the current one's
-// validity has elapsed (§4.1).
+// validity has elapsed (§4.1). The new certificate is recorded as pending
+// before it is sent.
 func (s *hubSession) maybeRenew(ctx context.Context) {
 	o := s.m.o
-	if s.leaf == nil || !pki.RenewalDue(s.leaf, o.Now()) {
+	if s.renewing || s.leaf == nil || !o.RenewalDue(s.leaf, o.Now()) {
 		return
 	}
 
@@ -492,19 +530,27 @@ func (s *hubSession) maybeRenew(ctx context.Context) {
 		return
 	}
 
-	s.renewal = &info
+	if err := o.Control.ProposeRenewal(ctx, s.id, info); err != nil {
+		s.logger.ErrorContext(ctx, "record renewed certificate", slog.Any("error", err))
+
+		return
+	}
+
+	s.pending, s.renewing, s.renewedLeaf = info, true, leaf
 	chain := []string{b64(der), b64(o.CA.Certificate().Raw)}
 
 	if err := send(s.conn, rxv1.TypeCtlCertRenew, rxv1.MustCorrelationID("cert-renew"), ctl.CertRenew{CertificateChain: chain}); err != nil {
-		s.renewal = nil
+		s.renewing = false
 	}
 }
 
 func (s *hubSession) loop(ctx context.Context, reads <-chan readResult) error {
 	o := s.m.o
 	tick := time.NewTicker(BatchWindow)
+	renew := time.NewTicker(o.RenewCheckEvery)
 
 	defer tick.Stop()
+	defer renew.Stop()
 
 	var batch []app.Event
 
@@ -534,6 +580,10 @@ func (s *hubSession) loop(ctx context.Context, reads <-chan readResult) error {
 		case <-tick.C:
 			if err := flush(); err != nil {
 				return err
+			}
+		case <-renew.C:
+			if !s.restricted {
+				s.maybeRenew(ctx)
 			}
 		case r, ok := <-reads:
 			if !ok {
@@ -584,6 +634,12 @@ func (s *hubSession) handle(ctx context.Context, env rxv1.Envelope) (app.Event, 
 	case rxv1.TypeError:
 		s.logger.WarnContext(ctx, "node reported an error", slog.String("payload", string(env.Payload())))
 
+		if e, err := decode[rxv1.ErrorPayload](env); err == nil && e.Re != nil && e.Re.String() == "cert-renew" {
+			// The node kept its certificate: the pending one stays
+			// accepted until the next attempt replaces it.
+			s.renewing = false
+		}
+
 		return app.Event{}, false
 	case rxv1.TypeAck:
 		s.onAck(ctx, env)
@@ -610,11 +666,18 @@ func (s *hubSession) onAck(ctx context.Context, env rxv1.Envelope) {
 		return
 	}
 
-	if ack.Re.String() == "cert-renew" && s.renewal != nil {
-		if err := s.m.o.Control.RecordRenewal(ctx, s.id, *s.renewal); err != nil {
+	if ack.Re.String() == "cert-renew" && s.renewing {
+		s.renewing = false
+
+		if err := s.m.o.Control.RecordRenewal(ctx, s.id, s.pending.Serial()); err != nil {
+			// The certificate stays pending and accepted; the next
+			// connection presenting it promotes it.
 			s.logger.ErrorContext(ctx, "record renewed certificate", slog.Any("error", err))
+
+			return
 		}
 
-		s.renewal = nil
+		s.pending = domain.CertInfo{}
+		s.leaf = s.renewedLeaf
 	}
 }

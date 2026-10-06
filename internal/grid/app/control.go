@@ -44,13 +44,14 @@ var incompatibleTypes = []rxv1.MessageType{rxv1.TypeNodeCapabilities, rxv1.TypeN
 // Control is the hub side of the control channels: welcome handling,
 // idempotent event ingestion and channel lifecycle (§4.4, §4.9).
 type Control struct {
-	nodes      domain.NodeRepository
-	cursors    domain.EventCursorRepository
-	tx         Transactor
-	audit      Auditor
-	now        Clock
-	logger     *slog.Logger
-	hubVersion string
+	nodes       domain.NodeRepository
+	revocations domain.RevocationRepository
+	cursors     domain.EventCursorRepository
+	tx          Transactor
+	audit       Auditor
+	now         Clock
+	logger      *slog.Logger
+	hubVersion  string
 
 	handlers map[rxv1.MessageType]EventHandler
 	onBoot   []BootHandler
@@ -62,11 +63,11 @@ type Control struct {
 }
 
 // NewControl returns the service.
-func NewControl(nodes domain.NodeRepository, cursors domain.EventCursorRepository, tx Transactor, audit Auditor,
-	tracker *Tracker, hubVersion string, now Clock, logger *slog.Logger,
+func NewControl(nodes domain.NodeRepository, revocations domain.RevocationRepository, cursors domain.EventCursorRepository,
+	tx Transactor, audit Auditor, tracker *Tracker, hubVersion string, now Clock, logger *slog.Logger,
 ) *Control {
 	return &Control{
-		nodes: nodes, cursors: cursors, tx: tx, audit: audit, now: now, logger: logger, hubVersion: hubVersion,
+		nodes: nodes, revocations: revocations, cursors: cursors, tx: tx, audit: audit, now: now, logger: logger, hubVersion: hubVersion,
 		handlers: map[rxv1.MessageType]EventHandler{}, links: tracker, warned: map[rxv1.MessageType]bool{},
 	}
 }
@@ -241,8 +242,9 @@ func (c *Control) DialFailed(ctx context.Context, id domain.NodeID, cause error)
 	c.logger.DebugContext(ctx, "node dial failed", slog.String("node_id", id.String()), slog.Any("error", cause))
 }
 
-// RecordRenewal stores the renewed certificate of an enrolled node.
-func (c *Control) RecordRenewal(ctx context.Context, id domain.NodeID, cert domain.CertInfo) error {
+// ProposeRenewal records a renewed certificate before it is sent to the
+// node: from then on the hub accepts it as well as the current one.
+func (c *Control) ProposeRenewal(ctx context.Context, id domain.NodeID, cert domain.CertInfo) error {
 	err := c.tx.WithinTx(ctx, func(ctx context.Context) error {
 		n, err := c.nodes.Get(ctx, id)
 		if err != nil {
@@ -250,8 +252,47 @@ func (c *Control) RecordRenewal(ctx context.Context, id domain.NodeID, cert doma
 		}
 
 		v := n.Version()
-		if err := n.RenewCertificate(cert, c.now()); err != nil {
+		if err := n.ProposeCertificate(cert, c.now()); err != nil {
 			return err
+		}
+
+		return c.nodes.Save(ctx, n, v)
+	})
+	if err != nil {
+		return fmt.Errorf("propose renewed certificate of %s: %w", id, err)
+	}
+
+	return nil
+}
+
+// RecordRenewal promotes the pending certificate of serial once the node
+// uses it (acknowledgement or a connection presenting it), and revokes the
+// replaced certificate.
+func (c *Control) RecordRenewal(ctx context.Context, id domain.NodeID, serial string) error {
+	now := c.now()
+
+	err := c.tx.WithinTx(ctx, func(ctx context.Context) error {
+		n, err := c.nodes.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		v := n.Version()
+
+		old, err := n.PromoteCertificate(serial, now)
+		if err != nil {
+			return err
+		}
+
+		if !old.IsZero() {
+			r, err := domain.NewRevokedCertificate(old, id, "renewed", now)
+			if err != nil {
+				return err
+			}
+
+			if err := c.revocations.Add(ctx, r); err != nil {
+				return err
+			}
 		}
 
 		return c.nodes.Save(ctx, n, v)
@@ -261,7 +302,7 @@ func (c *Control) RecordRenewal(ctx context.Context, id domain.NodeID, cert doma
 	}
 
 	c.audit.Record(ctx, AuditRecord{ActorKind: ActorSystem, Action: "node.cert.renew", Target: id.String(), Result: ResultOK,
-		Detail: map[string]string{"cert_serial": cert.Serial()}})
+		Detail: map[string]string{"cert_serial": serial}})
 
 	return nil
 }

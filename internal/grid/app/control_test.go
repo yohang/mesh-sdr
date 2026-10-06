@@ -36,7 +36,7 @@ func enrolledNode(t *testing.T, e *env) *domain.Node {
 func newControl(e *env, hubVersion string) (*app.Control, *app.Tracker) {
 	tr := app.NewTracker()
 
-	return app.NewControl(e.nodes, sqlite.NewCursorRepository(e.db), e.db, e.audit, tr, hubVersion, e.clock.now, discard), tr
+	return app.NewControl(e.nodes, e.revs, sqlite.NewCursorRepository(e.db), e.db, e.audit, tr, hubVersion, e.clock.now, discard), tr
 }
 
 func TestControlIdempotentIngestion(t *testing.T) {
@@ -157,4 +157,43 @@ func welcome(t *testing.T, c *app.Control, id domain.NodeID, version string) sha
 	}
 
 	return boot
+}
+
+// A renewed certificate is accepted as soon as it is proposed, and the old
+// one is revoked when it is promoted.
+func TestCertificateRenewalPin(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	n := enrolledNode(t, e)
+	c, _ := newControl(e, "1.0.0")
+
+	old := n.Certificate()
+	fp := [32]byte{1}
+	renewed, _ := domain.NewCertInfo(fp[:], "0B", e.clock.now().Add(90*24*time.Hour))
+
+	if err := c.ProposeRenewal(ctx, n.ID(), renewed); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _ := e.nodes.Get(ctx, n.ID())
+	if !got.AcceptsFingerprint(old.Fingerprint()) || !got.AcceptsFingerprint(fp) || got.AcceptsFingerprint([32]byte{2}) {
+		t.Fatalf("pin during renewal: %+v", got.Snapshot())
+	}
+
+	if err := c.RecordRenewal(ctx, n.ID(), "0C"); err == nil {
+		t.Error("promotion of an unknown serial accepted")
+	}
+
+	if err := c.RecordRenewal(ctx, n.ID(), "0B"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _ = e.nodes.Get(ctx, n.ID())
+	if got.Certificate() != renewed || !got.PendingCertificate().IsZero() || got.AcceptsFingerprint(old.Fingerprint()) {
+		t.Errorf("after promotion: %+v", got.Snapshot())
+	}
+
+	if revoked, _ := e.revs.List(ctx, e.clock.now()); len(revoked) != 1 || revoked[0].Serial() != old.Serial() || revoked[0].Reason() != "renewed" {
+		t.Errorf("revocations = %+v", revoked)
+	}
 }

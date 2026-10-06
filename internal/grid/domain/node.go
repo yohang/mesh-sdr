@@ -71,6 +71,9 @@ type Node struct {
 	keyExpires time.Time
 	enrolledAt time.Time
 	cert       CertInfo
+	// pending is a renewed certificate sent to the node and not confirmed
+	// yet; the hub accepts it as well as cert until it is promoted.
+	pending CertInfo
 
 	runtime Runtime
 
@@ -227,6 +230,7 @@ func (n *Node) IssueEnrollmentKey(key EnrollmentKey, expiresAt, now time.Time) {
 	}
 
 	n.cert = CertInfo{}
+	n.pending = CertInfo{}
 	n.runtime.Status = StatusOffline
 	n.runtime.StatusHint = ""
 	n.touch(now)
@@ -275,8 +279,10 @@ func (n *Node) CompleteEnrollment(key EnrollmentKey, url NodeURL, cert CertInfo,
 	return nil
 }
 
-// RenewCertificate records a renewed certificate.
-func (n *Node) RenewCertificate(cert CertInfo, now time.Time) error {
+// ProposeCertificate records a renewed certificate about to be sent to the
+// node. Until PromoteCertificate, both certificates are accepted, so a
+// lost acknowledgement never locks the node out.
+func (n *Node) ProposeCertificate(cert CertInfo, now time.Time) error {
 	if n.enrollment != EnrollmentEnrolled {
 		return ErrNodeNotEnrolled
 	}
@@ -285,10 +291,38 @@ func (n *Node) RenewCertificate(cert CertInfo, now time.Time) error {
 		return ErrInvalidCertInfo
 	}
 
-	n.cert = cert
+	n.pending = cert
 	n.touch(now)
 
 	return nil
+}
+
+// PendingCertificate returns the proposed certificate (zero if none).
+func (n *Node) PendingCertificate() CertInfo { return n.pending }
+
+// PromoteCertificate makes the pending certificate of serial current and
+// returns the replaced one.
+func (n *Node) PromoteCertificate(serial string, now time.Time) (CertInfo, error) {
+	if n.enrollment != EnrollmentEnrolled {
+		return CertInfo{}, ErrNodeNotEnrolled
+	}
+
+	if n.pending.IsZero() || n.pending.Serial() != serial {
+		return CertInfo{}, ErrInvalidCertInfo.WithDetail("no pending certificate " + serial)
+	}
+
+	old := n.cert
+	n.cert = n.pending
+	n.pending = CertInfo{}
+	n.touch(now)
+
+	return old, nil
+}
+
+// AcceptsFingerprint reports whether fp is the current or the pending
+// certificate of the node.
+func (n *Node) AcceptsFingerprint(fp [32]byte) bool {
+	return (!n.cert.IsZero() && n.cert.Fingerprint() == fp) || (!n.pending.IsZero() && n.pending.Fingerprint() == fp)
 }
 
 // Revoke ends the node's trust. It returns the certificate to add to the
@@ -299,6 +333,7 @@ func (n *Node) Revoke(now time.Time) (CertInfo, error) {
 	}
 
 	cert := n.cert
+	n.pending = CertInfo{}
 	n.enrollment = EnrollmentRevoked
 	n.key = nil
 	n.keyExpires = time.Time{}
@@ -417,10 +452,36 @@ type NodeSnapshot struct {
 	CertFingerprint []byte
 	CertSerial      string
 	CertNotAfter    time.Time
+	PendingCert     CertSnapshot
 	Runtime         Runtime
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Version         int
+}
+
+// CertSnapshot is the persisted form of a CertInfo.
+type CertSnapshot struct {
+	Fingerprint []byte
+	Serial      string
+	NotAfter    time.Time
+}
+
+func certSnapshot(c CertInfo) CertSnapshot {
+	if c.IsZero() {
+		return CertSnapshot{}
+	}
+
+	fp := c.Fingerprint()
+
+	return CertSnapshot{Fingerprint: fp[:], Serial: c.Serial(), NotAfter: c.NotAfter()}
+}
+
+func (c CertSnapshot) info() (CertInfo, error) {
+	if c.Serial == "" {
+		return CertInfo{}, nil
+	}
+
+	return NewCertInfo(c.Fingerprint, c.Serial, c.NotAfter)
 }
 
 // Snapshot returns the persisted form of n.
@@ -435,6 +496,8 @@ func (n *Node) Snapshot() NodeSnapshot {
 	if n.key != nil {
 		s.EnrollmentKey = n.key.Bytes()
 	}
+
+	s.PendingCert = certSnapshot(n.pending)
 
 	if !n.cert.IsZero() {
 		fp := n.cert.Fingerprint()
@@ -499,6 +562,10 @@ func RehydrateNode(s NodeSnapshot) (*Node, error) {
 		}
 
 		n.cert = c
+	}
+
+	if n.pending, err = s.PendingCert.info(); err != nil {
+		return nil, err
 	}
 
 	return n, nil

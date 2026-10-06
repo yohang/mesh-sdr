@@ -114,6 +114,8 @@ func (r *NodeRepository) Create(ctx context.Context, n *domain.Node) error {
 		ProtocolVersion: rt.ProtocolVersion, Hostname: rt.Hostname, CpuCores: rt.CpuCores, ClockOffsetMs: rt.ClockOffsetMs,
 		Origin: string(s.Origin), LockedFields: string(locked), Disabled: boolInt(s.Disabled),
 		CreatedAt: toMS(s.CreatedAt), UpdatedAt: toMS(s.UpdatedAt), Version: int64(s.Version),
+		CertPendingFingerprint: s.PendingCert.Fingerprint, CertPendingSerial: nullString(s.PendingCert.Serial),
+		CertPendingNotAfter: nullMS(s.PendingCert.NotAfter),
 	})
 	if err != nil {
 		return fmt.Errorf("insert node %s: %w", s.ID, err)
@@ -175,7 +177,9 @@ func (r *NodeRepository) Save(ctx context.Context, n *domain.Node, expectedVersi
 		EnrollmentTokenDigest: s.EnrollmentKey, EnrollmentTokenExpiresAt: nullMS(s.KeyExpiresAt),
 		EnrolledAt: nullMS(s.EnrolledAt), CertFingerprint: s.CertFingerprint, CertSerial: nullString(s.CertSerial),
 		CertNotAfter: nullMS(s.CertNotAfter), Status: string(s.Runtime.Status), StatusHint: nullString(s.Runtime.StatusHint),
-		Origin: string(s.Origin), LockedFields: string(locked), Disabled: boolInt(s.Disabled),
+		CertPendingFingerprint: s.PendingCert.Fingerprint, CertPendingSerial: nullString(s.PendingCert.Serial),
+		CertPendingNotAfter: nullMS(s.PendingCert.NotAfter),
+		Origin:              string(s.Origin), LockedFields: string(locked), Disabled: boolInt(s.Disabled),
 		UpdatedAt: toMS(s.UpdatedAt), Version: int64(s.Version), ID: s.ID, ExpectedVersion: int64(expectedVersion),
 	})
 	if err != nil {
@@ -270,6 +274,9 @@ func nodeFromRow(row sqlc.Node) (*domain.Node, error) {
 		EnrollmentKey: row.EnrollmentTokenDigest, KeyExpiresAt: fromNullMS(row.EnrollmentTokenExpiresAt),
 		EnrolledAt: fromNullMS(row.EnrolledAt), CertFingerprint: row.CertFingerprint, CertSerial: row.CertSerial.String,
 		CertNotAfter: fromNullMS(row.CertNotAfter), Runtime: rt,
+		PendingCert: domain.CertSnapshot{
+			Fingerprint: row.CertPendingFingerprint, Serial: row.CertPendingSerial.String, NotAfter: fromNullMS(row.CertPendingNotAfter),
+		},
 		CreatedAt: fromMS(row.CreatedAt), UpdatedAt: fromMS(row.UpdatedAt), Version: int(row.Version),
 	})
 	if err != nil {

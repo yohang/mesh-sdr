@@ -3,6 +3,7 @@ package wire
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"log/slog"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
@@ -123,7 +126,7 @@ type gridEnv struct {
 	ca       *pki.CA
 }
 
-func newGridEnv(t *testing.T, timings gridapp.Timings) *gridEnv {
+func newGridEnv(t *testing.T, timings gridapp.Timings, tweaks ...func(*control.HubOptions)) *gridEnv {
 	t.Helper()
 
 	hubDir, nodeDir := t.TempDir(), t.TempDir()
@@ -190,7 +193,7 @@ sample_rates = [2_048_000]
 		t.Fatal(err)
 	}
 
-	p, g, err := newHub(context.Background(), hubCfg, quiet, adapter, time.Now, timings)
+	p, g, err := newHub(context.Background(), hubCfg, quiet, adapter, time.Now, timings, tweaks...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,5 +416,89 @@ func TestNodeStatusLifecycle(t *testing.T) {
 		rt := e.node(t).Runtime()
 
 		return rt.Status == domain.StatusOnline && rt.BootID != firstBoot
+	})
+}
+
+// TestCertificateRenewal renews the node certificate over the control
+// channel; the node keeps working with the new certificate after a restart.
+func TestCertificateRenewal(t *testing.T) {
+	var checks atomic.Int32
+
+	e := newGridEnv(t, fastTimings(), func(o *control.HubOptions) {
+		// Not due when the channel opens, due at the first periodic check
+		// of the open channel (the daily check, here every 50 ms).
+		o.RenewCheckEvery = 50 * time.Millisecond
+		o.RenewalDue = func(*x509.Certificate, time.Time) bool { return checks.Add(1) == 2 }
+	})
+	stop := e.enrollNode(t, fakeProber{})
+
+	id := domain.MustNodeID("attic")
+	first := e.node(t).Certificate()
+
+	eventually(t, "renewed certificate promoted", 15*time.Second, func() bool {
+		n := e.node(t)
+
+		return n.Certificate().Serial() != first.Serial() && n.PendingCertificate().IsZero()
+	})
+
+	if cert, err := pki.LoadKeyPair(e.nodeCfg.TLS.Cert, e.nodeCfg.TLS.Key); err != nil ||
+		pki.Fingerprint(cert.Certificate[0]) != e.node(t).Certificate().Fingerprint() {
+		t.Fatalf("node file does not hold the renewed certificate: %v", err)
+	}
+
+	stop()
+	e.startNode(t, fakeProber{})
+
+	eventually(t, "reconnected with the renewed certificate", 15*time.Second, func() bool {
+		return e.g.manager.Connected(id) && e.node(t).Runtime().Status == domain.StatusOnline
+	})
+}
+
+// TestRenewalSurvivesLostAck: the node installed a renewed certificate but
+// the hub never recorded the acknowledgement. The pending certificate is
+// accepted, so the node reconnects and the renewal is confirmed.
+func TestRenewalSurvivesLostAck(t *testing.T) {
+	e := newGridEnv(t, fastTimings())
+	stop := e.enrollNode(t, fakeProber{})
+	ctx := context.Background()
+	id := domain.MustNodeID("attic")
+
+	eventually(t, "connected", 15*time.Second, func() bool { return e.g.manager.Connected(id) })
+
+	old, err := pki.LoadKeyPair(e.nodeCfg.TLS.Cert, e.nodeCfg.TLS.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	leaf, _ := x509.ParseCertificate(old.Certificate[0])
+
+	der, err := e.ca.RenewNode(leaf, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := enroll.CertInfoOf(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The hub sent the certificate (pending) and the node installed it;
+	// the ack is lost when the node stops.
+	if err := e.g.control.ProposeRenewal(ctx, id, info); err != nil {
+		t.Fatal(err)
+	}
+
+	stop()
+
+	if err := pki.WriteFileAtomic(e.nodeCfg.TLS.Cert, pki.EncodeCertsPEM(der, e.ca.Certificate().Raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e.startNode(t, fakeProber{})
+
+	eventually(t, "reconnected and renewal confirmed", 15*time.Second, func() bool {
+		n := e.node(t)
+
+		return e.g.manager.Connected(id) && n.Certificate().Serial() == info.Serial() && n.PendingCertificate().IsZero()
 	})
 }

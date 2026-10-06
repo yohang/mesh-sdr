@@ -3,9 +3,10 @@ INSERT INTO nodes (
     id, name, url, enrollment_state, enrollment_token_digest, enrollment_token_expires_at,
     enrolled_at, cert_fingerprint, cert_serial, cert_not_after, status, status_hint,
     last_heartbeat_at, boot_id, software_version, protocol_version, hostname, cpu_cores,
-    clock_offset_ms, origin, locked_fields, disabled, created_at, updated_at, version
+    clock_offset_ms, origin, locked_fields, disabled, created_at, updated_at, version,
+    cert_pending_fingerprint, cert_pending_serial, cert_pending_not_after
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 ) ON CONFLICT (id) DO NOTHING;
 
 -- name: GetNode :one
@@ -25,6 +26,9 @@ UPDATE nodes SET
     cert_fingerprint = sqlc.arg(cert_fingerprint),
     cert_serial = sqlc.arg(cert_serial),
     cert_not_after = sqlc.arg(cert_not_after),
+    cert_pending_fingerprint = sqlc.arg(cert_pending_fingerprint),
+    cert_pending_serial = sqlc.arg(cert_pending_serial),
+    cert_pending_not_after = sqlc.arg(cert_pending_not_after),
     status = sqlc.arg(status),
     status_hint = sqlc.arg(status_hint),
     origin = sqlc.arg(origin),

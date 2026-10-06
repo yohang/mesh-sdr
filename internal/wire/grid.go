@@ -129,7 +129,9 @@ func DeclaredNodes(cfg map[string]config.ConfigNode) ([]app.DeclaredNode, error)
 	return out, nil
 }
 
-func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now func() time.Time, timings app.Timings) (*hubGrid, error) {
+func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now func() time.Time, timings app.Timings,
+	tweaks ...func(*control.HubOptions),
+) (*hubGrid, error) {
 	ca, err := LoadCA(cfg.TLS)
 	if err != nil {
 		return nil, err
@@ -164,13 +166,18 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 
 	if ca != nil {
 		g.tracker = app.NewTracker()
-		g.control = app.NewControl(nodeRepo, gridsqlite.NewCursorRepository(adapter), adapter, audit, g.tracker,
+		g.control = app.NewControl(nodeRepo, revocations, gridsqlite.NewCursorRepository(adapter), adapter, audit, g.tracker,
 			version.String(), now, component(logger, "grid.app.control"))
-		g.manager = control.NewManager(control.HubOptions{
+		hubOpts := control.HubOptions{
 			HubID: hubID, CA: ca, Client: pki.NewClientSource(ca, pki.KindHub, hubID, now),
 			Nodes: nodeRepo, Revocations: revocations, Control: g.control,
 			HeartbeatInterval: timings.HeartbeatInterval, Now: now, Logger: component(logger, "grid.infra.control"),
-		})
+		}
+		for _, t := range tweaks {
+			t(&hubOpts)
+		}
+
+		g.manager = control.NewManager(hubOpts)
 		g.nodes.SetLinks(g.manager)
 
 		g.status = app.NewStatus(nodeRepo, adapter, g.tracker, g.history, timings, now, component(logger, "grid.app.status"))
