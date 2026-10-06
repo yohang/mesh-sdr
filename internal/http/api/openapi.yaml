@@ -1000,6 +1000,30 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /auth/email/confirm:
+    post:
+      operationId: confirmEmail
+      x-meshsdr-access: anonymous
+      summary: Confirm a new e-mail address with the token of its link
+      description: |
+        The token of the link sent by `POST /me/email`. Single use: the
+        address applies, verified, and the previous address is told. A
+        dead link (expired, used, or whose address another account took
+        meanwhile) answers like an unknown one: 422 invalid_token.
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailConfirm"
+      responses:
+        "204":
+          description: Address confirmed
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
   /invitations:
     get:
       operationId: listInvitations
@@ -1059,6 +1083,26 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
         "409":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /mail/test:
+    post:
+      operationId: sendTestMail
+      x-meshsdr-access: admin
+      summary: Send a test e-mail to the caller's own address
+      description: Checks the SMTP relay. 503 mail_disabled when mail is not configured; 422 when the caller has no address.
+      tags: [invitations]
+      responses:
+        "200":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailTest"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
@@ -1802,6 +1846,21 @@ components:
         pending:
           type: boolean
           description: True when a confirmation link was sent to the new address.
+    EmailConfirm:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          maxLength: 64
+    MailTest:
+      type: object
+      required: [to]
+      properties:
+        to:
+          type: string
+          description: Address the test message was sent to.
     SessionList:
       type: object
       required: [sessions]

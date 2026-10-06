@@ -139,6 +139,28 @@ func TestEmailChangeWithConfirmation(t *testing.T) {
 	if res := anon.form("/account/email/verify", url.Values{"token": {strings.TrimPrefix(link, "/account/email/verify/")}}, false); res.StatusCode != http.StatusNotFound {
 		t.Errorf("taken address = %d", res.StatusCode)
 	}
+
+	// The API twin of the confirmation form.
+	res = c.api(http.MethodPost, "/api/v1/me/email", `{"email":"api@example.org","current_password":"`+password+`"}`)
+	if v := decode(t, res); res.StatusCode != http.StatusOK || v["pending"] != true {
+		t.Fatalf("API change = %d %v", res.StatusCode, v)
+	}
+
+	_, link = h.mail.last("api@example.org")
+	confirm := `{"token":"` + strings.TrimPrefix(link, "/account/email/verify/") + `"}`
+
+	if res := anon.api(http.MethodPost, "/api/v1/auth/email/confirm", confirm); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("API confirm = %d %s", res.StatusCode, body(t, res))
+	}
+
+	if v := decode(t, c.api(http.MethodGet, "/api/v1/me", "")); v["email"] != "api@example.org" || v["email_verified"] != true {
+		t.Errorf("me after API confirm = %v", v)
+	}
+
+	res = anon.api(http.MethodPost, "/api/v1/auth/email/confirm", confirm)
+	if v := decode(t, res); res.StatusCode != http.StatusUnprocessableEntity || v["code"] != "invalid_token" {
+		t.Errorf("API second use = %d %v", res.StatusCode, v)
+	}
 }
 
 func TestMeAPI(t *testing.T) {

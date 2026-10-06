@@ -40,6 +40,22 @@ func TestInvitationPages(t *testing.T) {
 		t.Errorf("test mail = %+v", m)
 	}
 
+	// The API twin of "Send a test e-mail".
+	sent := h.mail.count()
+
+	res = root.api(http.MethodPost, "/api/v1/mail/test", "")
+	if v := decode(t, res); res.StatusCode != http.StatusOK || v["to"] != "root@example.org" {
+		t.Errorf("API test mail = %d %v", res.StatusCode, v)
+	}
+
+	if m, _ := h.mail.last("root@example.org"); h.mail.count() != sent+1 || !strings.Contains(m.Subject, "Test") {
+		t.Errorf("API test mail = %+v", m)
+	}
+
+	if res := h.signedIn("bob").api(http.MethodPost, "/api/v1/mail/test", ""); res.StatusCode != http.StatusForbidden {
+		t.Errorf("API test mail as listener = %d", res.StatusCode)
+	}
+
 	// The invitee: the page, then the account.
 	invitee := h.client()
 

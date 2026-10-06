@@ -155,6 +155,14 @@ func (o *outbox) Enqueue(m mail.Message) error {
 	return nil
 }
 
+// count returns the number of queued e-mails.
+func (o *outbox) count() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	return len(o.sent)
+}
+
 // last returns the last message sent to an address, and the path of the
 // first hub link in it.
 func (o *outbox) last(to string) (mail.Message, string) {
