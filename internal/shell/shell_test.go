@@ -13,15 +13,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yohang/mesh-sdr/internal/config"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 var discard = slog.New(slog.DiscardHandler)
 
+// values are effective settings by key, over the defaults the shell reads.
+type values map[string]string
+
+func (v values) String(key string) string {
+	if s, ok := v[key]; ok {
+		return s
+	}
+
+	return map[string]string{"ui.theme_mode": "auto", "receiver.name": "MeshSDR", "receiver.usage_policy_url": "/policy"}[key]
+}
+
 // router serves the shell module the way the hub does, with a stub API.
-func router(settings config.Settings) http.Handler {
+func router(settings values) http.Handler {
 	m := shell.Wire(shell.Deps{Settings: settings, Logger: discard})
 	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 
@@ -63,7 +73,7 @@ func TestThemeMode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {
-			h := router(config.Settings{UI: config.SettingsUI{ThemeMode: tt.mode}})
+			h := router(values{"ui.theme_mode": tt.mode})
 
 			res, body := do(t, h, http.MethodGet, "/", nil)
 			if res.StatusCode != http.StatusOK {
@@ -85,7 +95,7 @@ func TestThemeMode(t *testing.T) {
 
 // TestRobots covers UI-005.
 func TestRobots(t *testing.T) {
-	res, body := do(t, router(config.DefaultHub().Settings), http.MethodGet, "/robots.txt", nil)
+	res, body := do(t, router(nil), http.MethodGet, "/robots.txt", nil)
 
 	if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
 		t.Fatalf("got %d %q", res.StatusCode, res.Header.Get("Content-Type"))
@@ -120,7 +130,7 @@ func TestPolicy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := router(config.Settings{Receiver: config.SettingsReceiver{UsagePolicyText: tt.text}})
+			h := router(values{"receiver.usage_policy_text": tt.text})
 
 			res, body := do(t, h, http.MethodGet, "/policy", nil)
 			if res.StatusCode != http.StatusOK {
@@ -150,7 +160,7 @@ func TestManifestAndIcons(t *testing.T) {
 
 	for mode, color := range colors {
 		t.Run(mode, func(t *testing.T) {
-			h := router(config.Settings{UI: config.SettingsUI{ThemeMode: mode}})
+			h := router(values{"ui.theme_mode": mode})
 
 			res, body := do(t, h, http.MethodGet, "/manifest.webmanifest", nil)
 			if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "application/manifest+json" {
@@ -190,14 +200,14 @@ func TestManifestAndIcons(t *testing.T) {
 	}
 
 	// Every icon and manifest link of the document resolves.
-	_, page := do(t, router(config.DefaultHub().Settings), http.MethodGet, "/", nil)
+	_, page := do(t, router(nil), http.MethodGet, "/", nil)
 
 	links := regexp.MustCompile(`<link rel="(icon|apple-touch-icon|manifest)" href="([^"]+)"`).FindAllStringSubmatch(page, -1)
 	if len(links) < 4 {
 		t.Fatalf("head links = %v", links)
 	}
 
-	h := router(config.DefaultHub().Settings)
+	h := router(nil)
 	types := map[string]string{".ico": "image/vnd.microsoft.icon", ".svg": "image/svg+xml", ".png": "image/png", ".webmanifest": "application/manifest+json"}
 
 	for _, l := range links {
@@ -240,7 +250,7 @@ func checkIcon(t *testing.T, h http.Handler, src, ctype, sizes string) {
 }
 
 func TestMethods(t *testing.T) {
-	h := router(config.DefaultHub().Settings)
+	h := router(nil)
 
 	for _, p := range []string{"/", "/policy", "/robots.txt", "/manifest.webmanifest", "/favicon.ico"} {
 		// The recorder keeps the body; net/http drops it on the wire.
@@ -257,7 +267,7 @@ func TestMethods(t *testing.T) {
 }
 
 func TestErrorPages(t *testing.T) {
-	h := router(config.DefaultHub().Settings)
+	h := router(nil)
 
 	tests := []struct {
 		method, path string

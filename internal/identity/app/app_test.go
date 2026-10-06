@@ -110,8 +110,7 @@ func newEnv(t *testing.T, ipLimiter app.IPLimiter) *env {
 
 	e.auth = app.NewAuth(app.AuthDeps{
 		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: a, IDs: ids, Now: c.Now, Provider: local,
-		IPLimiter: ipLimiter, Unknown: e.unknown, Refusals: memory.NewRefusalGate(100), Throttle: domain.DefaultThrottlePolicy(),
-		SessionPolicy: domain.DefaultSessionPolicy(), Logger: logger,
+		IPLimiter: ipLimiter, Unknown: e.unknown, Refusals: memory.NewRefusalGate(100), SessionPolicies: app.DefaultSessionPolicies(), Logger: logger,
 	})
 	e.admin = app.NewUserAdmin(app.UserAdminDeps{
 		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: a, Hasher: e.hasher, IDs: ids, Now: c.Now,
@@ -697,7 +696,7 @@ func TestSessionReaper(t *testing.T) {
 
 	fresh, _ := e.login("alice", password)
 
-	n, err := app.NewSessionReaper(e.sessions, e.clock.Now, slog.New(slog.DiscardHandler)).Reap(ctx)
+	n, err := app.NewSessionReaper(e.sessions, app.FixedRetention{Sessions: app.DefaultSessionRetention}, e.clock.Now, slog.New(slog.DiscardHandler)).Reap(ctx)
 	if err != nil || n != 1 {
 		t.Fatalf("reaped %d, %v", n, err)
 	}

@@ -13,12 +13,12 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/identity/app"
-	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/argon2"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/commonpw"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settings"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -42,6 +42,9 @@ type Deps struct {
 	DB     db.Adapter
 	IDs    *shared.UUIDv7Generator
 	Now    func() time.Time
+	// Settings reads the identity policies from the settings store. Nil
+	// means the built-in defaults (CLI commands).
+	Settings settingsrc.Values
 }
 
 func component(l *slog.Logger, name string) *slog.Logger {
@@ -112,18 +115,32 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		return nil, err
 	}
 
+	var (
+		lifetimes app.SessionPolicies = app.DefaultSessionPolicies()
+		retention app.Retention       = app.FixedRetention{Sessions: app.DefaultSessionRetention, Audit: 365 * 24 * time.Hour}
+		limiter   *memory.IPLimiter
+	)
+
+	if d.Settings != nil {
+		p := settingsrc.New(d.Settings)
+		lifetimes, retention = p, p
+		limiter = memory.NewDynamicIPLimiter(p.LoginRate, memory.DefaultCapacity)
+	} else {
+		limiter = memory.NewIPLimiter(loginIPEvery, loginIPBurst, memory.DefaultCapacity)
+	}
+
 	auth := app.NewAuth(app.AuthDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, IDs: d.IDs, Now: d.Now, Provider: local,
-		IPLimiter: memory.NewIPLimiter(loginIPEvery, loginIPBurst, memory.DefaultCapacity),
-		Unknown:   memory.NewThrottle(memory.DefaultCapacity),
-		Refusals:  memory.NewRefusalGate(memory.DefaultCapacity),
-		Throttle:  domain.DefaultThrottlePolicy(), SessionPolicy: domain.DefaultSessionPolicy(),
-		Logger: component(d.Logger, "identity.app.auth"),
+		IPLimiter:       limiter,
+		Unknown:         memory.NewThrottle(memory.DefaultCapacity),
+		Refusals:        memory.NewRefusalGate(memory.DefaultCapacity),
+		SessionPolicies: lifetimes,
+		Logger:          component(d.Logger, "identity.app.auth"),
 	})
 
 	passwords := app.NewPasswords(app.PasswordsDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
-		Policies: policies(), Throttle: domain.DefaultThrottlePolicy(), SessionPolicy: domain.DefaultSessionPolicy(),
+		Policies: policies(), SessionPolicies: lifetimes,
 		Logger: component(d.Logger, "identity.app.passwords"),
 	})
 
@@ -145,7 +162,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	return &Module{
 		Auth:   auth,
 		Setup:  setup,
-		Reaper: app.NewSessionReaper(r.sessions, d.Now, component(d.Logger, "identity.app.reaper")),
+		Reaper: app.NewSessionReaper(r.sessions, retention, d.Now, component(d.Logger, "identity.app.reaper")),
 		HTTP:   h,
 	}, nil
 }

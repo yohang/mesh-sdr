@@ -79,12 +79,27 @@ type IPLimiter struct {
 	mu    sync.Mutex
 	limit rate.Limit
 	burst int
+	rate  RateFunc
 	cache *lru[netip.Prefix, *rate.Limiter]
 }
+
+// RateFunc returns the current rate: burst attempts, then one per every.
+type RateFunc func() (every time.Duration, burst int)
 
 // NewIPLimiter allows burst attempts, then one per every, per client.
 func NewIPLimiter(every time.Duration, burst, capacity int) *IPLimiter {
 	return &IPLimiter{limit: rate.Every(every), burst: max(burst, 1), cache: newLRU[netip.Prefix, *rate.Limiter](capacity)}
+}
+
+// NewDynamicIPLimiter reads the rate on every attempt (a DB setting): a
+// change applies to the next attempt of every client, keeping the tokens
+// each client has left.
+func NewDynamicIPLimiter(r RateFunc, capacity int) *IPLimiter {
+	every, burst := r()
+	l := NewIPLimiter(every, burst, capacity)
+	l.rate = r
+
+	return l
 }
 
 // ipKey is the bucket of a client. Requests whose address is unknown share
@@ -112,10 +127,25 @@ func (l *IPLimiter) Allow(ip netip.Addr, now time.Time) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	if l.rate != nil {
+		every, burst := l.rate()
+		if every > 0 && burst > 0 {
+			l.limit, l.burst = rate.Every(every), burst
+		}
+	}
+
 	lim, ok := l.cache.get(key)
 	if !ok {
 		lim = rate.NewLimiter(l.limit, l.burst)
 		l.cache.put(key, lim)
+	}
+
+	if lim.Limit() != l.limit {
+		lim.SetLimitAt(now, l.limit)
+	}
+
+	if lim.Burst() != l.burst {
+		lim.SetBurstAt(now, l.burst)
 	}
 
 	r := lim.ReserveN(now, 1)

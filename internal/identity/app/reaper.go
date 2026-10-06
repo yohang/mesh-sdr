@@ -9,29 +9,47 @@ import (
 )
 
 // Session retention (TECHNICAL_SPEC §7.3 `sessions.reap`): rows are deleted
-// 30 days after expiry or revocation, hourly, in batches.
+// 30 days after expiry or revocation by default (retention.sessions),
+// hourly, in batches.
 const (
-	SessionRetention   = 30 * 24 * time.Hour
-	SessionReapEvery   = time.Hour
-	sessionReapBatchSz = 10_000
+	DefaultSessionRetention = 30 * 24 * time.Hour
+	SessionReapEvery        = time.Hour
+	sessionReapBatchSz      = 10_000
 )
+
+// Retention gives the current retention of the identity stores (DB
+// settings retention.sessions and retention.audit_log, ADR 0010).
+type Retention interface {
+	SessionRetention() time.Duration
+	AuditRetention() time.Duration
+}
+
+// FixedRetention is a constant retention (tests, defaults).
+type FixedRetention struct{ Sessions, Audit time.Duration }
+
+// SessionRetention implements Retention.
+func (r FixedRetention) SessionRetention() time.Duration { return r.Sessions }
+
+// AuditRetention implements Retention.
+func (r FixedRetention) AuditRetention() time.Duration { return r.Audit }
 
 // SessionReaper deletes ended sessions past their retention.
 type SessionReaper struct {
-	sessions domain.SessionRepository
-	now      Clock
-	logger   *slog.Logger
+	sessions  domain.SessionRepository
+	retention Retention
+	now       Clock
+	logger    *slog.Logger
 }
 
 // NewSessionReaper returns the reaper.
-func NewSessionReaper(sessions domain.SessionRepository, now Clock, logger *slog.Logger) *SessionReaper {
-	return &SessionReaper{sessions: sessions, now: now, logger: logger}
+func NewSessionReaper(sessions domain.SessionRepository, retention Retention, now Clock, logger *slog.Logger) *SessionReaper {
+	return &SessionReaper{sessions: sessions, retention: retention, now: now, logger: logger}
 }
 
-// Reap deletes every session that ended more than SessionRetention ago and
-// returns how many were deleted.
+// Reap deletes every session that ended more than the session retention
+// ago and returns how many were deleted.
 func (r *SessionReaper) Reap(ctx context.Context) (int, error) {
-	cutoff := r.now().Add(-SessionRetention)
+	cutoff := r.now().Add(-r.retention.SessionRetention())
 	total := 0
 
 	for {

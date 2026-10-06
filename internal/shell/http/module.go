@@ -42,10 +42,9 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 	}
 
 	return layout.Shell{
-		SiteName: v.SiteName,
-		Theme:    theme,
-		// The link target becomes settings.receiver.usage_policy_url (ADM-035).
-		FooterLinks: []layout.Link{{Label: "Usage policy", Href: "/policy"}},
+		SiteName:    v.SiteName,
+		Theme:       theme,
+		FooterLinks: []layout.Link{{Label: "Usage policy", Href: v.PolicyURL}},
 	}
 }
 
@@ -116,7 +115,7 @@ func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 // home is a placeholder home page until the Receiver section (UI-006) takes
 // over "/".
 func (m *Module) home(w http.ResponseWriter, r *http.Request) {
-	m.render.Page(w, r, http.StatusOK, layout.Page{}, homePage(app.SiteName), nil)
+	m.render.Page(w, r, http.StatusOK, layout.Page{}, homePage(m.shell.Shell(r).SiteName), nil)
 }
 
 // policyPage serves the usage policy (UI-003), public.

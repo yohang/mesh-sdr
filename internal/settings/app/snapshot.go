@@ -102,3 +102,31 @@ func (s *Snapshot) Geo(key string) (lat, lon float64, ok bool) {
 
 	return v.Lat(), v.Lon(), true
 }
+
+// Values reads typed settings from the current snapshot of a store on
+// every call: consumers hold it to see changes at once. *Store implements
+// it.
+type Values interface {
+	String(key string) string
+	Bool(key string) bool
+	Int(key string) int
+	Duration(key string) time.Duration
+	Rate(key string) (int, time.Duration)
+}
+
+var _ Values = (*Store)(nil)
+
+// String reads a string setting of the current snapshot.
+func (s *Store) String(key string) string { return s.Snapshot().String(key) }
+
+// Bool reads a boolean setting of the current snapshot.
+func (s *Store) Bool(key string) bool { return s.Snapshot().Bool(key) }
+
+// Int reads an integer setting of the current snapshot.
+func (s *Store) Int(key string) int { return s.Snapshot().Int(key) }
+
+// Duration reads a duration setting of the current snapshot.
+func (s *Store) Duration(key string) time.Duration { return s.Snapshot().Duration(key) }
+
+// Rate reads a rate setting of the current snapshot.
+func (s *Store) Rate(key string) (int, time.Duration) { return s.Snapshot().Rate(key) }

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
@@ -320,5 +321,42 @@ func TestEffectiveConfigAPI(t *testing.T) {
 
 	if e := byKey["db.max_read_connections"]; e["source"] != "default" || e["locked"] != false {
 		t.Errorf("db.max_read_connections = %v", e)
+	}
+}
+
+// A saved setting applies at once to its consumers (UI-001, ADR 0010).
+func TestSettingsApplyLive(t *testing.T) {
+	h := newAdminHub(t, nil)
+	b := h.browser("root")
+
+	body := `{"values":{"ui.theme_mode":"dark","receiver.name":"F4XYZ WebSDR","receiver.usage_policy_text":"# House rules","session.idle_timeout":"2h"}}`
+	if status, p, _ := b.json(http.MethodPatch, "/api/v1/settings", body); status != 200 {
+		t.Fatalf("PATCH = %d %v", status, p)
+	}
+
+	anon := h.browser("")
+
+	_, page := anon.do(http.MethodGet, "/", "", "", nil)
+	for _, want := range []string{`data-theme="dark"`, `<title>F4XYZ WebSDR</title>`} {
+		if !strings.Contains(string(page), want) {
+			t.Errorf("home page misses %s", want)
+		}
+	}
+
+	if _, policy := anon.do(http.MethodGet, "/policy", "", "", nil); !strings.Contains(string(policy), "House rules") {
+		t.Error("usage policy not applied")
+	}
+
+	// A new session gets the new idle timeout.
+	h.browser("op")
+
+	var idle, abs int64
+	if err := h.db.Reader(context.Background()).QueryRowContext(context.Background(),
+		"SELECT idle_expires_at - last_seen_at, absolute_expires_at - created_at FROM sessions ORDER BY created_at DESC LIMIT 1").Scan(&idle, &abs); err != nil {
+		t.Fatal(err)
+	}
+
+	if idle != (2*time.Hour).Milliseconds() || abs != (24*time.Hour).Milliseconds() {
+		t.Errorf("session lifetimes = %d ms idle, %d ms absolute", idle, abs)
 	}
 }

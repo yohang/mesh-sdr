@@ -18,6 +18,10 @@ type settings struct {
 }
 
 func (s settings) ThemeMode(context.Context) (domain.ThemeMode, error) { return s.mode, s.err }
+func (s settings) SiteName(context.Context) (string, error)            { return "F4XYZ", s.err }
+func (s settings) PolicyURL(context.Context) (string, error) {
+	return "https://example.org/rules", s.err
+}
 
 func TestLookAndFeel(t *testing.T) {
 	var logs bytes.Buffer
@@ -25,7 +29,7 @@ func TestLookAndFeel(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 
 	v := app.NewLookAndFeel(settings{mode: domain.MustThemeMode("dark")}, logger).View(context.Background())
-	if !v.ThemeMode.IsDark() || v.SiteName != app.SiteName {
+	if !v.ThemeMode.IsDark() || v.SiteName != "F4XYZ" || v.PolicyURL != "https://example.org/rules" {
 		t.Errorf("view = %+v", v)
 	}
 
@@ -34,7 +38,7 @@ func TestLookAndFeel(t *testing.T) {
 	}
 
 	v = app.NewLookAndFeel(settings{err: errors.New("db down")}, logger).View(context.Background())
-	if !v.ThemeMode.IsAuto() {
+	if !v.ThemeMode.IsAuto() || v.SiteName != app.DefaultSiteName || v.PolicyURL != app.DefaultPolicyURL {
 		t.Errorf("fallback = %s, want auto", v.ThemeMode)
 	}
 

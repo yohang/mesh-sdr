@@ -175,9 +175,12 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, fmt.Errorf("settings: %w", err)
 	}
 
-	shellModule := shell.Wire(shell.Deps{Settings: cfg.Settings, Logger: logger})
+	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, Logger: logger})
 
-	idm, err := identity.Wire(ctx, identityDeps(cfg, logger, adapter), pages{shellModule.Renderer})
+	ideps := identityDeps(cfg, logger, adapter)
+	ideps.Settings = settingsModule.Store
+
+	idm, err := identity.Wire(ctx, ideps, pages{shellModule.Renderer})
 	if err != nil {
 		return nil, nil, fmt.Errorf("identity: %w", err)
 	}

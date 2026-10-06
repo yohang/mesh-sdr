@@ -20,8 +20,8 @@ func (e *env) passwords() *app.Passwords { return e.passwordsWith(e.hasher) }
 func (e *env) passwordsWith(h app.PasswordHasher) *app.Passwords {
 	return app.NewPasswords(app.PasswordsDeps{
 		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Hasher: h, IDs: shared.NewUUIDv7Generator(),
-		Now: e.clock.Now, Policies: app.NewPolicies(nil, nil), Throttle: domain.DefaultThrottlePolicy(),
-		SessionPolicy: domain.DefaultSessionPolicy(), Logger: slog.New(slog.DiscardHandler),
+		Now: e.clock.Now, Policies: app.NewPolicies(nil, nil),
+		SessionPolicies: app.DefaultSessionPolicies(), Logger: slog.New(slog.DiscardHandler),
 	})
 }
 
