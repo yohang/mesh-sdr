@@ -51,13 +51,15 @@ A future PostgreSQL adapter adds `internal/db/postgres/{migrations,queries,sqlc}
 - Each migration runs in its own transaction, which is `BEGIN IMMEDIATE` through the writer connection.
 - Checksums:
   - goose has none, so the migrator keeps a `schema_migration_checksums` table (version, name, SHA-256, recorded_at).
-  - `Up` refuses to run when an applied migration was modified, then records the checksums of every applied migration that has none. That covers migrations applied by older binaries.
-  - `Down` deletes the checksum of the migration it rolls back.
-- `Migrator.Check` is read-only: it uses the read pool and never creates goose's table. It returns:
+  - `Up` refuses to run when an applied migration was modified. It then upserts the checksums of the migrations it applies (replacing a stale value left by down → edit → up) and fills in missing checksums of other applied migrations, which covers migrations applied by older binaries.
+  - `Down` deletes the checksum of the migration it rolls back, on the single writer connection right after goose's rollback transaction. The two cannot share a transaction; a checksum left behind by a crash in between is replaced by the next `Up`.
+- `Up` and `Down` hold an exclusive `flock` on `<db>.migrate.lock` (goose has no SQLite locker), so concurrent `meshsdr hub migrate` runs wait for each other.
+- The SQLite DSN escapes `%`, `?` and `#` in the file path, because SQLite decodes URI filenames.
+- `Migrator.Status` and `Migrator.Check` are read-only: they use the read pool and never create goose's table. `Check` returns:
   - `ErrSchemaTooNew` (a `VersionError` naming both versions) when the database is newer than the binary, or has an applied migration the binary does not know;
   - `ErrMigrationsPending` (a `VersionError`) when migrations are pending;
   - `ErrChecksumMismatch` when a checksum is modified or missing.
-- `meshsdr hub` calls `Check` before serving and refuses to start on any of these errors. `hub migrate status` prints it.
+- `meshsdr hub` calls `Check` before serving and refuses to start on any of these errors. `hub migrate status` prints it (`"schema":{"ok","code","message"}` with `--json`) and exits 1 when the schema is not current.
 - `down` exists for development only; production schema changes are forward-only.
 
 ### Contract tests
