@@ -14,6 +14,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/infra/gateway"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/ratelimit"
+	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -93,6 +94,15 @@ type routes func(r chi.Router)
 func (routes) Middlewares() []func(http.Handler) http.Handler { return nil }
 
 func (f routes) Routes(r chi.Router) { f(r) }
+
+// bodyLimit is a router module capping every request body at n bytes.
+type bodyLimit int64
+
+func (b bodyLimit) Middlewares() []func(http.Handler) http.Handler {
+	return []func(http.Handler) http.Handler{httpserver.LimitBody(int64(b))}
+}
+
+func (bodyLimit) Routes(chi.Router) {}
 
 // subject adapts an identity principal to the grid authz.
 type subject struct{ p identitydomain.Principal }
