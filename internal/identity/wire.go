@@ -40,6 +40,10 @@ const (
 	// username need retries).
 	inviteIPBurst = 10
 	inviteIPEvery = 6 * time.Minute
+	// Password reset requests per client address and per account: 3 per
+	// hour (§5.12).
+	resetIPBurst = 3
+	resetIPEvery = 20 * time.Minute
 )
 
 // Deps are the dependencies of the identity module.
@@ -121,6 +125,7 @@ func UserAdmin(d Deps) *app.UserAdmin {
 
 // Module is the wired identity module of the hub.
 type Module struct {
+	Resets      *app.Resets
 	Invitations *app.Invitations
 	Profile     *app.Profile
 	Accounts    *app.Accounts
@@ -202,7 +207,17 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Logger:  component(d.Logger, "identity.app.invitations"),
 	})
 
+	resets := app.NewResets(app.ResetsDeps{
+		Tokens: r.resets, Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
+		Now: d.Now, Settings: values, Policies: passwords, Notifier: notifier, Links: app.NewLinks(d.Config.Hub.URL),
+		Requests: memory.NewIPLimiter(resetIPEvery, resetIPBurst, memory.DefaultCapacity),
+		Accounts: memory.NewKeyLimiter(resetIPEvery, resetIPBurst, memory.DefaultCapacity),
+		Confirms: memory.NewIPLimiter(inviteIPEvery, inviteIPBurst, memory.DefaultCapacity),
+		Logger:   component(d.Logger, "identity.app.resets"),
+	})
+
 	h, err := identityhttp.New(identityhttp.Services{
+		Resets:      resets,
 		Invitations: invitations,
 		Auth:        auth, Passwords: changer, Setup: setup, Profile: profile, Accounts: accounts,
 	}, pages, identityhttp.Config{
@@ -216,6 +231,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	}
 
 	return &Module{
+		Resets:      resets,
 		Invitations: invitations,
 		Profile:     profile,
 		Accounts:    accounts,

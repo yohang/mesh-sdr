@@ -1000,6 +1000,73 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /auth/password-reset:
+    post:
+      operationId: requestPasswordReset
+      x-meshsdr-access: anonymous
+      summary: Ask for a password reset link
+      description: |
+        Always 202, whether or not the account exists (SR-06): the link is
+        e-mailed afterwards, to the account's address, when mail is
+        configured. Too many requests from a client address answer 429.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "202":
+          description: Accepted
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/password-reset/confirm:
+    post:
+      operationId: confirmPasswordReset
+      x-meshsdr-access: anonymous
+      summary: Set a new password with a reset token
+      description: Single use; every session of the user is revoked.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetConfirm"
+      responses:
+        "204":
+          description: Password set
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /users/{id}/password-reset:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      operationId: issuePasswordReset
+      x-meshsdr-access: admin
+      summary: Issue a password reset link for a user
+      description: E-mailed when mail is configured and the user has an address; otherwise returned once to copy.
+      tags: [users]
+      responses:
+        "200":
+          description: Issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReset"
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     LinkToken:
@@ -1034,6 +1101,35 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [login]
+      properties:
+        login:
+          type: string
+          description: Username or e-mail address.
+          maxLength: 254
+    PasswordResetConfirm:
+      type: object
+      additionalProperties: false
+      required: [token, new_password]
+      properties:
+        token:
+          type: string
+          maxLength: 64
+        new_password:
+          type: string
+          maxLength: 1024
+    AdminReset:
+      type: object
+      required: [mailed]
+      properties:
+        mailed:
+          type: boolean
+        link:
+          type: string
+          description: The link to copy, present only when it was not e-mailed.
     InvitationList:
       type: object
       required: [invitations]

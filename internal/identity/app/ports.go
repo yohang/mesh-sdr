@@ -39,6 +39,11 @@ type IDGenerator interface {
 // Clock returns the current time.
 type Clock func() time.Time
 
+// KeyLimiter rate-limits per key (an account).
+type KeyLimiter interface {
+	Allow(key string, now time.Time) (bool, time.Duration)
+}
+
 // IPLimiter rate-limits login attempts per client address.
 type IPLimiter interface {
 	Allow(ip netip.Addr, now time.Time) (bool, time.Duration)

@@ -105,6 +105,7 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 		AuthHandlers:       api.NewAuthHandlers(m.HTTP),
 		AccountHandlers:    api.NewAccountHandlers(m.HTTP, m.Accounts, m.Profile),
 		InvitationHandlers: api.NewInvitationHandlers(m.HTTP, m.HTTP, m.Invitations),
+		ResetHandlers:      api.NewResetHandlers(m.HTTP, m.Resets),
 	}
 
 	return &hub{

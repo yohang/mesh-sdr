@@ -97,8 +97,19 @@ type InvitationService interface {
 	TestMail(ctx context.Context, by app.Actor) (domain.Email, error)
 }
 
+// ResetService runs password reset by link (ACC-003).
+type ResetService interface {
+	MailEnabled() bool
+	TTL(ctx context.Context) time.Duration
+	MinLength(ctx context.Context) int
+	Request(ctx context.Context, login string, meta app.RequestMeta) error
+	Check(ctx context.Context, token string, meta app.RequestMeta) error
+	Confirm(ctx context.Context, token, password string, meta app.RequestMeta) error
+}
+
 // Services are the application services behind the identity pages.
 type Services struct {
+	Resets      ResetService
 	Invitations InvitationService
 	Auth        Authenticator
 	Passwords   PasswordChanger
@@ -139,6 +150,7 @@ type Module struct {
 	profile     ProfileService
 	accounts    AccountService
 	invitations InvitationService
+	resets      ResetService
 	// adminLinks are the admin pages of the user menu.
 	adminLinks []layout.Link
 	pages      Pages
@@ -176,6 +188,9 @@ func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, e
 		setup:       svc.Setup,
 		profile:     svc.Profile,
 		accounts:    svc.Accounts,
+		invitations: svc.Invitations,
+		resets:      svc.Resets,
+		adminLinks:  []layout.Link{{Label: "Invitations", Href: InvitationsPath}},
 		pages:       pages,
 		logger:      logger,
 		resolver:    clientip.NewResolver(cfg.TrustedProxies),
@@ -184,8 +199,6 @@ func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, e
 		secure:      secure,
 		preKey:      []byte(rand.Text()),
 		upload:      cfg.AcceptsMultipart,
-		invitations: svc.Invitations,
-		adminLinks:  []layout.Link{{Label: "Invitations", Href: InvitationsPath}},
 	}, nil
 }
 
@@ -230,6 +243,14 @@ func (m *Module) Routes(r chi.Router) {
 	admin.Post(InvitationsPath, m.createInvitationAction)
 	admin.Post(InvitationsPath+"/test-mail", m.testMailAction)
 	admin.Post(InvitationsPath+"/{id}/revoke", m.revokeInvitationAction)
+
+	r.Get(ForgotPath, m.forgotPage)
+	r.Head(ForgotPath, m.forgotPage)
+	r.Post(ForgotPath, m.forgotAction)
+	r.Get(ResetPath+"/{token}", m.resetPage)
+	r.Head(ResetPath+"/{token}", m.resetPage)
+	r.Get(ResetPath, m.resetLanding)
+	r.Post(ResetPath, m.resetAction)
 
 	r.Get("/invite/{token}", m.invitePage)
 	r.Head("/invite/{token}", m.invitePage)
@@ -389,7 +410,7 @@ func isAPI(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/api/")
 func limitAuthBodies(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/login" || p == "/logout" || p == PasswordChangePath || p == app.SetupPath || p == "/invite" || strings.HasPrefix(p, "/api/v1/auth/") {
+		if p == "/login" || p == "/logout" || p == PasswordChangePath || p == app.SetupPath || p == "/invite" || p == ForgotPath || p == ResetPath || strings.HasPrefix(p, "/api/v1/auth/") {
 			r.Body = http.MaxBytesReader(w, r.Body, AuthBodyLimit)
 		}
 

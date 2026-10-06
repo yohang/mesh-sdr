@@ -80,6 +80,8 @@ const (
 	ActionInvitationCreate  = "invitation.create"
 	ActionInvitationRevoke  = "invitation.revoke"
 	ActionInvitationRedeem  = "invitation.redeem"
+	ActionResetRequest      = "auth.password_reset.request"
+	ActionResetComplete     = "auth.password_reset.complete"
 )
 
 var actionPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
