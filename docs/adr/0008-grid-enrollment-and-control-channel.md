@@ -17,9 +17,9 @@ Numbers refer to the questions of the design proposal; every recommendation was 
 
 ### Missing foundations
 
-1. **Admin REST without identity (Q1).** The node, device and connection endpoints are declared in `openapi.yaml` and served, but every handler first asks an `Authorizer` port for the admin role. Production wiring uses a deny-all authorizer (401 `unauthenticated`) until the identity epic provides a real one; tests inject an allow-all one. The M0 admin path is the CLI: `meshsdr hub node add|list|show|token|remove`.
+1. **Admin REST (Q1).** The node, device and connection endpoints are declared in `openapi.yaml`. The decision was a deny-all `Authorizer` port until identity existed; identity (ADR 0009) landed first, so each grid operation carries `x-meshsdr-access` and the identity policy middleware authorises it: `admin` for nodes, capabilities and devices, `anonymous` for `GET /connections`, which returns the rows only when the caller is an admin. The CLI (`meshsdr hub node add|list|show|token|disable|enable|remove`) remains the OS-level admin path.
 2. **DB settings (Q2).** `grid.heartbeat_interval_s` (10 s), `grid.offline_after_s` (60 s), `grid.enrollment_ttl_minutes` (60 min) and `retention.connections` (30 d) are fields of a `grid/app.Timings` struct filled with the FEATURE_SPEC defaults at wiring. A settings port replaces it when the settings store exists.
-3. **Audit (Q3).** Enrollment, re-enrollment, revocation, removal and dropped node events go to an `Auditor` port. The only adapter logs the record at Info (`component=grid.infra.audit`). The identity epic creates `audit_log`; a later epic wires a DB adapter.
+3. **Audit (Q3).** Enrollment, re-enrollment, revocation, removal, renewals, config sync and refused devices go to an `Auditor` port. The hub wires it to the identity `audit_log` (`internal/wire/audit.go`): the signed-in user is the actor of REST calls, `cli` of the CLI, `system` of the hub and of node-originated records (the node id is the target). A log-only adapter remains for tests.
 4. **Admin UI (Q4).** Admin › Nodes is deferred to the app-shell epic. CLI and REST cover M0.
 
 ### Domain
@@ -103,7 +103,7 @@ A config-declared node that disappears from the files becomes `origin = 'db'` wi
 
 ### REST (`openapi.yaml`)
 
-`GET`/`POST /nodes`, `GET`/`PATCH`/`DELETE /nodes/{id}`, `POST /nodes/{id}/enrollment-token`, `GET /nodes/{id}/capabilities`, `POST /nodes/{id}/capabilities/probe`, `GET /devices`, `GET /devices/{id}`, `GET /connections`. All admin-only for now (Q1). Deferred: the public `/nodes` subset, `POST /nodes/{id}/revoke`, `/nodes/{id}/logs`.
+`GET`/`POST /nodes`, `GET`/`PATCH`/`DELETE /nodes/{id}`, `POST /nodes/{id}/enrollment-token`, `GET /nodes/{id}/capabilities`, `POST /nodes/{id}/capabilities/probe`, `GET /devices`, `GET /devices/{id}`, `GET /connections` (Q1). Deferred: the public `/nodes` subset, `POST /nodes/{id}/revoke`, `/nodes/{id}/logs`.
 
 ### Tickets (Q30)
 
@@ -118,7 +118,7 @@ The PR closes #12, #14, #16, #18 and #21, and references (without closing) #15 (
 - **Optimistic concurrency on REST.** `PATCH /nodes/{id}` carries the expected `version` in the body and answers 409 `version_conflict` (§7.1), not `If-Match`/412 (§6.10).
 - **Device order.** TOML tables lose their order once decoded, so `devices.sort_order` follows the device ids in lexical order.
 - **Media presence rows** created from `connection.opened` have an empty `ip` and role 0 until the gateway authz creates them first (GRID-011).
-- **`GET /devices`** is admin-only until the listen policy can be evaluated (identity epic); `GET /connections` returns the count to everyone and the rows to admins.
+- **`GET /devices`** is admin-only until the device listen policy is applied to it; `GET /connections` returns the count to everyone and the rows to admins.
 - **Security review fixes.**
   - Status transitions are evaluated and written in one transaction with a status-only `UPDATE`; no runtime column is ever rewritten from a stale copy.
   - Certificate renewal: the renewed certificate is stored as pending (`cert_pending_*`, migration 00007) before `ctl.cert.renew` is sent; the hub accepts the current or the pending fingerprint, promotes the pending one on the acknowledgement or when the node connects with it, and revokes the replaced one (`renewed`). Open channels re-check renewal every 24 h.
