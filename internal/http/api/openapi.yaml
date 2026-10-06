@@ -137,8 +137,267 @@ paths:
           description: Signed out. The session cookie is cleared.
         default:
           $ref: "#/components/responses/Problem"
+  /nodes:
+    get:
+      operationId: listNodes
+      x-meshsdr-access: admin
+      summary: List nodes and their status (admin)
+      tags: [grid]
+      responses:
+        "200":
+          description: Nodes, ordered by id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createNode
+      x-meshsdr-access: admin
+      summary: Declare a node and get its enrollment token, shown once (admin)
+      tags: [grid]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NodeCreate"
+      responses:
+        "201":
+          description: Node declared, pending enrollment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeEnrollment"
+        default:
+          $ref: "#/components/responses/Problem"
+  /nodes/{id}:
+    parameters:
+      - $ref: "#/components/parameters/NodeID"
+    get:
+      operationId: getNode
+      x-meshsdr-access: admin
+      summary: Node detail with recent load history (admin)
+      tags: [grid]
+      responses:
+        "200":
+          description: Node
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeDetail"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateNode
+      x-meshsdr-access: admin
+      summary: Update the name, URL or disabled flag of a node (admin; 409 setting_locked for config-set fields)
+      tags: [grid]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NodePatch"
+      responses:
+        "200":
+          description: Updated node
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteNode
+      x-meshsdr-access: admin
+      summary: Remove a node and revoke its certificate (admin; 409 entity_locked for config nodes)
+      tags: [grid]
+      responses:
+        "204":
+          description: Node removed
+        default:
+          $ref: "#/components/responses/Problem"
+  /nodes/{id}/enrollment-token:
+    parameters:
+      - $ref: "#/components/parameters/NodeID"
+    post:
+      operationId: issueNodeEnrollmentToken
+      x-meshsdr-access: admin
+      summary: Issue a new enrollment token (re-enrollment), shown once (admin)
+      tags: [grid]
+      responses:
+        "200":
+          description: Node back to pending enrollment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeEnrollment"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
+  parameters:
+    NodeID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    NodeCreate:
+      type: object
+      additionalProperties: false
+      required: [id, url]
+      properties:
+        id:
+          type: string
+          description: Stable node id (the node's node.id).
+          example: attic
+        name:
+          type: string
+          description: Display name; defaults to the id.
+        url:
+          type: string
+          description: Base URL the hub dials, https://host:port.
+          example: https://10.8.0.12:8074
+    NodePatch:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version:
+          type: integer
+          description: Expected version (optimistic concurrency, 409 version_conflict on mismatch).
+        name:
+          type: string
+        url:
+          type: string
+        disabled:
+          type: boolean
+    NodeEnrollment:
+      type: object
+      required: [node, enrollment_token, ca_fingerprint]
+      properties:
+        node:
+          $ref: "#/components/schemas/Node"
+        enrollment_token:
+          type: string
+          description: Single-use enrollment token. Shown only in this response.
+        ca_fingerprint:
+          type: string
+          description: SHA-256 fingerprint of the hub CA, to give to the node with the token.
+        expires_at:
+          type: string
+          format: date-time
+    NodeList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Node"
+    Node:
+      type: object
+      required: [id, name, url, origin, locked_fields, disabled, enrollment_state, health, status, created_at, updated_at, version]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        origin:
+          type: string
+          enum: [config, db]
+        locked_fields:
+          type: array
+          items:
+            type: string
+        disabled:
+          type: boolean
+        enrollment_state:
+          type: string
+          enum: [pending, enrolled, revoked]
+        health:
+          type: string
+          description: enrolling, revoked, or the runtime status.
+          enum: [enrolling, online, degraded, offline, unreachable, incompatible, revoked]
+        status:
+          type: string
+          enum: [online, degraded, offline, unreachable, incompatible]
+        status_hint:
+          type: string
+        enrollment_expires_at:
+          type: string
+          format: date-time
+        enrolled_at:
+          type: string
+          format: date-time
+        cert_serial:
+          type: string
+        cert_fingerprint:
+          type: string
+        cert_not_after:
+          type: string
+          format: date-time
+        last_heartbeat_at:
+          type: string
+          format: date-time
+        software_version:
+          type: string
+        protocol_version:
+          type: string
+        hostname:
+          type: string
+        cpu_cores:
+          type: integer
+        clock_offset_ms:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+    NodeDetail:
+      type: object
+      required: [node, load_history]
+      properties:
+        node:
+          $ref: "#/components/schemas/Node"
+        load_history:
+          type: array
+          description: Recent heartbeats (RAM ring, last hour).
+          items:
+            $ref: "#/components/schemas/LoadSample"
+    LoadSample:
+      type: object
+      required: [at, cpu, load1, mem_available_bytes, mem_total_bytes]
+      properties:
+        at:
+          type: string
+          format: date-time
+        cpu:
+          type: number
+          format: double
+        load1:
+          type: number
+          format: double
+        temp_c:
+          type: number
+          format: double
+        mem_available_bytes:
+          type: integer
+          format: int64
+        mem_total_bytes:
+          type: integer
+          format: int64
     SessionInfo:
       type: object
       required: [authenticated, roles, csrf_token, providers]

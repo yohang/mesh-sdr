@@ -30,15 +30,26 @@ func TestCAInit(t *testing.T) {
 	}
 
 	// The hub config accepts the CA files with paths relative to the config dir.
-	f, err := os.OpenFile(filepath.Join(dir, "hub.toml"), os.O_APPEND|os.O_WRONLY, 0)
+	appendFile(t, dir, "hub.toml", "\n[tls]\nca_cert = \"tls/ca.pem\"\nca_key = { file = \"tls/ca.key\" }\n")
+
+	if r := run(t, context.Background(), env, "-c", dir, "hub", "config", "check"); r.code != ExitOK {
+		t.Fatalf("config check = %+v", r)
+	}
+}
+
+func appendFile(t *testing.T, dir, name, text string) {
+	t.Helper()
+
+	f, err := os.OpenFile(filepath.Join(dir, name), os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, _ = f.WriteString("\n[tls]\nca_cert = \"tls/ca.pem\"\nca_key = { file = \"tls/ca.key\" }\n")
-	_ = f.Close()
+	if _, err := f.WriteString(text); err != nil {
+		t.Fatal(err)
+	}
 
-	if r := run(t, context.Background(), env, "-c", dir, "hub", "config", "check"); r.code != ExitOK {
-		t.Fatalf("config check = %+v", r)
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

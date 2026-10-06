@@ -229,6 +229,21 @@ func padHex(s string) string {
 // Fingerprint returns the SHA-256 of the certificate.
 func (c CertInfo) Fingerprint() [32]byte { return c.fingerprint }
 
+// FingerprintString renders the fingerprint as colon-separated upper-case
+// hex.
+func (c CertInfo) FingerprintString() string { return FormatFingerprint(c.fingerprint) }
+
+// FormatFingerprint renders a SHA-256 fingerprint as colon-separated
+// upper-case hex.
+func FormatFingerprint(fp [32]byte) string {
+	parts := make([]string, len(fp))
+	for i, b := range fp {
+		parts[i] = strings.ToUpper(hex.EncodeToString([]byte{b}))
+	}
+
+	return strings.Join(parts, ":")
+}
+
 // Serial returns the serial in upper-case hex.
 func (c CertInfo) Serial() string { return c.serial }
 

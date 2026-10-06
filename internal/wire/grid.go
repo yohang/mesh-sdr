@@ -39,6 +39,7 @@ type hubGrid struct {
 	ca         *pki.CA
 	hubID      string
 	nodes      *app.Nodes
+	history    *app.History
 	enrollment *app.Enrollment
 	startup    []func(ctx context.Context) error
 	workers    []func(ctx context.Context)
@@ -140,9 +141,10 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 	revocations := gridsqlite.NewRevocationRepository(adapter)
 
 	g := &hubGrid{
-		ca:    ca,
-		hubID: hubID,
-		nodes: app.NewNodes(nodeRepo, revocations, adapter, audit, caInfo{ca: ca}, timings, now, component(logger, "grid.app.nodes")),
+		ca:      ca,
+		hubID:   hubID,
+		history: app.NewHistory(),
+		nodes:   app.NewNodes(nodeRepo, revocations, adapter, audit, caInfo{ca: ca}, timings, now, component(logger, "grid.app.nodes")),
 	}
 
 	gridLogger := component(logger, "grid.wire")
@@ -166,4 +168,17 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 	})
 
 	return g, nil
+}
+
+// HubNodes builds the node registry service for the admin CLI.
+func HubNodes(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) (*app.Nodes, error) {
+	ca, err := LoadCA(cfg.TLS)
+	if err != nil {
+		return nil, err
+	}
+
+	audit := gridinfra.NewLogAuditor(component(logger, "grid.infra.audit"))
+
+	return app.NewNodes(gridsqlite.NewNodeRepository(adapter), gridsqlite.NewRevocationRepository(adapter), adapter,
+		audit, caInfo{ca: ca}, app.DefaultTimings(), time.Now, component(logger, "grid.app.nodes")), nil
 }

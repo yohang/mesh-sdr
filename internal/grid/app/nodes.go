@@ -26,6 +26,7 @@ type Nodes struct {
 	now         Clock
 	timings     Timings
 	ca          CAInfo
+	links       Links
 	logger      *slog.Logger
 }
 

@@ -159,6 +159,7 @@ func Hub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Ad
 	apiServer := api.Server{
 		HealthHandlers: api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
 		AuthHandlers:   api.NewAuthHandlers(idm.HTTP),
+		GridHandlers:   api.NewGridHandlers(g.nodes, g.history),
 	}
 
 	router := httpserver.NewRouter(

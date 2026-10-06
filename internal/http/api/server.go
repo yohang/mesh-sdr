@@ -28,6 +28,7 @@ type Server struct {
 	MetaHandlers
 	HealthHandlers
 	AuthHandlers
+	GridHandlers
 }
 
 var _ StrictServerInterface = Server{}
@@ -93,7 +94,7 @@ func NewHealthHandlers(db Pinger, logger *slog.Logger) HealthHandlers {
 
 // GetLiveness implements StrictServerInterface.
 func (HealthHandlers) GetLiveness(context.Context, GetLivenessRequestObject) (GetLivenessResponseObject, error) {
-	return GetLiveness200JSONResponse{Status: Ok}, nil
+	return GetLiveness200JSONResponse{Status: HealthStatusOk}, nil
 }
 
 // GetReadiness implements StrictServerInterface.
@@ -101,8 +102,8 @@ func (h HealthHandlers) GetReadiness(ctx context.Context, _ GetReadinessRequestO
 	if err := h.db.Ping(ctx); err != nil {
 		h.logger.WarnContext(ctx, "not ready: database unavailable", slog.Any("error", err))
 
-		return GetReadiness503JSONResponse{Status: Degraded}, nil
+		return GetReadiness503JSONResponse{Status: HealthStatusDegraded}, nil
 	}
 
-	return GetReadiness200JSONResponse{Status: Ok}, nil
+	return GetReadiness200JSONResponse{Status: HealthStatusOk}, nil
 }
