@@ -279,6 +279,10 @@ func (s *Invitations) Accept(ctx context.Context, in AcceptInput) (LoginResult, 
 			return err
 		}
 
+		if err := s.creatorStillAdmin(ctx, inv); err != nil {
+			return err
+		}
+
 		if err := s.users.Add(ctx, u); err != nil {
 			if errors.Is(err, domain.ErrEmailTaken) && !inv.Email().IsZero() {
 				return domain.ErrInvitationInvalid
@@ -315,6 +319,30 @@ func (s *Invitations) Accept(ctx context.Context, in AcceptInput) (LoginResult, 
 	s.logger.InfoContext(ctx, "invitation accepted", slog.String("invitation_id", inv.ID().String()), slog.String("user_id", u.ID().String()))
 
 	return s.auth.OpenSession(ctx, u.ID(), LoginInput{Previous: in.Previous, Meta: in.Meta})
+}
+
+// creatorStillAdmin refuses an invitation whose creator is no longer an
+// enabled admin (demoted, disabled or deleted): what it granted was the
+// creator's to grant.
+func (s *Invitations) creatorStillAdmin(ctx context.Context, inv *domain.Invitation) error {
+	if inv.CreatedBy().IsZero() {
+		return domain.ErrInvitationInvalid
+	}
+
+	u, err := s.users.ByID(ctx, inv.CreatedBy())
+	if errors.Is(err, domain.ErrUserNotFound) {
+		return domain.ErrInvitationInvalid
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if !u.Enabled() || !u.IsAdmin() {
+		return domain.ErrInvitationInvalid
+	}
+
+	return nil
 }
 
 func (s *Invitations) newUser(ctx context.Context, inv *domain.Invitation, in AcceptInput) (*domain.User, error) {
@@ -367,8 +395,9 @@ func (s *Invitations) newUser(ctx context.Context, inv *domain.Invitation, in Ac
 		return nil, err
 	}
 
-	// The invitation proves the address it was sent to (§5.4).
-	if !inv.Email().IsZero() {
+	// An e-mailed invitation proves the address it was sent to (§5.4); a
+	// copied link proves nothing.
+	if inv.Delivery() == domain.DeliveryEmail {
 		u.SetEmail(email, true, now)
 	}
 

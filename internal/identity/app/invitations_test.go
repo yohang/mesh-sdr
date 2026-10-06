@@ -180,3 +180,61 @@ func TestInvitationRefusals(t *testing.T) {
 		t.Errorf("test mail without mail: %v", err)
 	}
 }
+
+func TestInvitationFollowsItsCreator(t *testing.T) {
+	ctx := context.Background()
+	meta := app.RequestMeta{IP: ip}
+
+	for name, change := range map[string]func(e *env, creator *domain.User) error{
+		"demoted": func(e *env, c *domain.User) error {
+			_, err := e.accounts(nil).SetRoles(ctx, e.actor(t, "root"), c.ID(), nil)
+
+			return err
+		},
+		"disabled": func(e *env, c *domain.User) error {
+			_, err := e.accounts(nil).SetEnabled(ctx, e.actor(t, "root"), c.ID(), false)
+
+			return err
+		},
+		"deleted": func(e *env, c *domain.User) error { return e.accounts(nil).Delete(ctx, e.actor(t, "root"), c.ID()) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, nil)
+			e.addUser(t, "root", "", domain.RoleAdmin)
+			creator := e.addUser(t, "other", "", domain.RoleAdmin)
+			inv := e.invitations(&recNotifier{disabled: true})
+
+			created, err := inv.Create(ctx, e.actor(t, "other"), app.CreateInvitationInput{Role: domain.RoleAdmin, Email: "x@example.org"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := change(e, creator); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := inv.Accept(ctx, app.AcceptInput{Token: tokenOf(t, created.Link), Username: "newbie", Password: fresh, Meta: meta}); !errors.Is(err, domain.ErrInvitationInvalid) {
+				t.Errorf("accept = %v", err)
+			}
+		})
+	}
+}
+
+func TestCopiedInvitationDoesNotConfirmTheAddress(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, nil)
+	e.addUser(t, "root", "", domain.RoleAdmin)
+	inv := e.invitations(&recNotifier{disabled: true})
+
+	created, _ := inv.Create(ctx, e.actor(t, "root"), app.CreateInvitationInput{Role: domain.RoleListener, Email: "x@example.org"})
+
+	res, err := inv.Accept(ctx, app.AcceptInput{Token: tokenOf(t, created.Link), Username: "newbie", Password: fresh, Meta: app.RequestMeta{IP: ip}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	u, _ := e.users.ByID(ctx, res.Principal.UserID())
+	if u.Email().String() != "x@example.org" || !u.EmailVerifiedAt().IsZero() {
+		t.Errorf("e-mail = %v verified %v", u.Email(), u.EmailVerifiedAt())
+	}
+}
