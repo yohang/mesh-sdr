@@ -25,6 +25,7 @@ type Passwords struct {
 	lifetimes SessionPolicies
 	notifier  Notifier
 	revoked   RevocationPublisher
+	pending   PendingLinks
 	logger    *slog.Logger
 }
 
@@ -46,14 +47,16 @@ type PasswordsDeps struct {
 	Notifier Notifier
 	// Revocations tells nodes that the user's sessions ended; optional.
 	Revocations RevocationPublisher
-	Logger      *slog.Logger
+	// Pending invalidates the user's pending reset and e-mail links.
+	Pending PendingLinks
+	Logger  *slog.Logger
 }
 
 // NewPasswords returns the service.
 func NewPasswords(d PasswordsDeps) *Passwords {
 	return &Passwords{
 		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs, now: d.Now,
-		policies: d.Policies, lifetimes: d.SessionPolicies, notifier: d.Notifier, revoked: d.Revocations, logger: d.Logger,
+		policies: d.Policies, lifetimes: d.SessionPolicies, notifier: d.Notifier, revoked: d.Revocations, pending: d.Pending, logger: d.Logger,
 	}
 }
 
@@ -208,6 +211,10 @@ func (s *Passwords) apply(ctx context.Context, in ChangePasswordInput, verified,
 		}
 
 		if res.RevokedSessions, err = s.sessions.RevokeAllForUser(ctx, u.ID(), domain.RevokePasswordChange, now); err != nil {
+			return err
+		}
+
+		if err := s.pending.invalidate(ctx, u.ID(), now); err != nil {
 			return err
 		}
 

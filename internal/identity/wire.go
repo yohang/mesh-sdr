@@ -72,6 +72,8 @@ type Deps struct {
 	// Revocations tells nodes about revoked sessions and users
 	// (ctl.revocations); nil publishes nothing.
 	Revocations app.RevocationPublisher
+	// Erasers remove a deleted user's data kept by other modules (SR-64).
+	Erasers []app.UserEraser
 }
 
 // noDevices is the device access without a grid.
@@ -146,6 +148,7 @@ func UserAdmin(d Deps) *app.UserAdmin {
 	r := newRepos(d)
 
 	return app.NewUserAdmin(app.UserAdminDeps{
+		Pending: app.PendingLinks{Resets: r.resets, Emails: r.emailChanges}, Erasers: d.Erasers,
 		Invitations: r.invitations,
 		Users:       r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
 		Now: d.Now, Policy: policies(nil), Logger: component(d.Logger, "identity.app.users"),
@@ -212,7 +215,8 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	notifier := notify.New(d.Mail, d.Config.Hub.URL)
 
 	changer := app.NewPasswords(app.PasswordsDeps{
-		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
+		Pending: app.PendingLinks{Resets: r.resets, Emails: r.emailChanges},
+		Users:   r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
 		Policies: passwords, SessionPolicies: lifetimes,
 		Notifier: notifier, Revocations: d.Revocations, Logger: component(d.Logger, "identity.app.passwords"),
 	})
@@ -224,14 +228,16 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	})
 
 	accounts := app.NewAccounts(app.AccountsDeps{
-		Hasher: r.hasher, Policies: passwords,
+		Pending: app.PendingLinks{Resets: r.resets, Emails: r.emailChanges},
+		Hasher:  r.hasher, Policies: passwords,
 		Users: r.users, Sessions: r.sessions, Invitations: r.invitations, Audit: r.audit, Tx: d.DB, Now: d.Now, Passwords: changer,
-		Revocations: d.Revocations,
-		Logger:      component(d.Logger, "identity.app.accounts"),
+		Revocations: d.Revocations, Erasers: d.Erasers,
+		Logger: component(d.Logger, "identity.app.accounts"),
 	})
 
 	profile := app.NewProfile(app.ProfileDeps{
-		Users: r.users, Tokens: r.emailChanges, Audit: r.audit, Tx: d.DB, IDs: d.IDs, Now: d.Now, Passwords: changer,
+		Pending: app.PendingLinks{Resets: r.resets, Emails: r.emailChanges},
+		Users:   r.users, Tokens: r.emailChanges, Audit: r.audit, Tx: d.DB, IDs: d.IDs, Now: d.Now, Passwords: changer,
 		Notifier: notifier, Links: app.NewLinks(d.Config.Hub.URL), Logger: component(d.Logger, "identity.app.profile"),
 	})
 
@@ -243,7 +249,8 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	})
 
 	resets := app.NewResets(app.ResetsDeps{
-		Tokens: r.resets, Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
+		Pending: app.PendingLinks{Resets: r.resets, Emails: r.emailChanges},
+		Tokens:  r.resets, Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
 		Now: d.Now, Settings: values, Policies: passwords, Notifier: notifier, Links: app.NewLinks(d.Config.Hub.URL),
 		Requests: memory.NewIPLimiter(resetIPEvery, resetIPBurst, memory.DefaultCapacity),
 		Accounts: memory.NewKeyLimiter(resetIPEvery, resetIPBurst, memory.DefaultCapacity),

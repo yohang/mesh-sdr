@@ -57,6 +57,10 @@ func (s *Accounts) SetEnabled(ctx context.Context, by Actor, id domain.UserID, e
 			if n, err = s.sessions.RevokeAllForUser(ctx, id, domain.RevokeUserDisabled, now); err != nil {
 				return err
 			}
+
+			if err := s.pending.invalidate(ctx, id, now); err != nil {
+				return err
+			}
 		}
 
 		changed = true
@@ -144,6 +148,10 @@ func (s *Accounts) SetGeneratedPassword(ctx context.Context, by Actor, id domain
 
 		n, err := s.sessions.RevokeAllForUser(ctx, id, domain.RevokePasswordReset, now)
 		if err != nil {
+			return err
+		}
+
+		if err := s.pending.invalidate(ctx, id, now); err != nil {
 			return err
 		}
 

@@ -15,7 +15,8 @@ import (
 
 func (e *env) profile(n app.Notifier) *app.Profile {
 	return app.NewProfile(app.ProfileDeps{
-		Users: e.users, Tokens: sqlite.NewEmailChanges(e.db), Audit: e.audit, Tx: e.db, IDs: shared.NewUUIDv7Generator(),
+		Pending: e.pending(),
+		Users:   e.users, Tokens: sqlite.NewEmailChanges(e.db), Audit: e.audit, Tx: e.db, IDs: shared.NewUUIDv7Generator(),
 		Now: e.clock.Now, Passwords: e.passwords(), Notifier: n, Links: app.NewLinks("https://hub.example"),
 		Logger: slog.New(slog.DiscardHandler),
 	})

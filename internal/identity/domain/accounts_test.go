@@ -176,7 +176,17 @@ func TestUserProfileAndGrants(t *testing.T) {
 	}
 
 	h, _ := domain.NewPasswordHash("$argon2id$v=19$m=19456,t=2,p=1$bmV3$bmV3")
-	if err := u.CompleteReset(h, t0); err != nil || u.EmailVerifiedAt().IsZero() || u.MustChangePassword() {
+	// A link shown to an admin, or mailed to another address, confirms
+	// nothing.
+	if err := u.CompleteReset(h, domain.Email{}, t0); err != nil || !u.EmailVerifiedAt().IsZero() || u.MustChangePassword() {
+		t.Errorf("complete reset without a mailed address: %v", err)
+	}
+
+	if _ = u.CompleteReset(h, mail, t0); !u.EmailVerifiedAt().IsZero() {
+		t.Error("another address confirmed")
+	}
+
+	if err := u.CompleteReset(h, other, t0); err != nil || u.EmailVerifiedAt().IsZero() {
 		t.Errorf("complete reset: %v", err)
 	}
 

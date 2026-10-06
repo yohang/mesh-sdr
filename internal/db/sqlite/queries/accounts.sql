@@ -63,9 +63,9 @@ DELETE FROM invitations WHERE id IN (
 );
 
 -- name: InsertPasswordResetToken :exec
-INSERT INTO password_reset_tokens (id, user_id, token_hash, created_at, expires_at, used_at, requested_ip)
+INSERT INTO password_reset_tokens (id, user_id, token_hash, created_at, expires_at, used_at, requested_ip, sent_to)
 VALUES (sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(token_hash), sqlc.arg(created_at), sqlc.arg(expires_at),
-        sqlc.narg(used_at), sqlc.narg(requested_ip));
+        sqlc.narg(used_at), sqlc.narg(requested_ip), sqlc.narg(sent_to));
 
 -- name: InvalidatePasswordResetTokens :exec
 UPDATE password_reset_tokens SET used_at = CAST(sqlc.arg(now) AS INTEGER)

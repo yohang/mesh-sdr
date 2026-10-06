@@ -317,14 +317,16 @@ func (u *User) ClearLoginFailures(now time.Time) {
 }
 
 // CompleteReset sets the password chosen through a reset link (ACC-003):
-// it clears must_change_password and the login throttling, and marks the
-// e-mail verified, since the link reached it.
-func (u *User) CompleteReset(h PasswordHash, now time.Time) error {
+// it clears must_change_password and the login throttling, and confirms
+// the address the link was e-mailed to (sentTo) when it is still the
+// account's address; a link shown to an admin (zero sentTo) confirms
+// nothing.
+func (u *User) CompleteReset(h PasswordHash, sentTo Email, now time.Time) error {
 	if err := u.ResetPassword(h, false, now); err != nil {
 		return err
 	}
 
-	if !u.email.IsZero() && u.emailVerifiedAt.IsZero() {
+	if !sentTo.IsZero() && sentTo.Key() == u.email.Key() && u.emailVerifiedAt.IsZero() {
 		u.emailVerifiedAt = now.UTC().Truncate(time.Millisecond)
 	}
 

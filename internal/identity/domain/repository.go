@@ -81,6 +81,8 @@ type PasswordResetRepository interface {
 	Save(ctx context.Context, t *PasswordResetToken) error
 	// ByTokenHash returns a token or ErrInvalidToken.
 	ByTokenHash(ctx context.Context, h TokenHash) (*PasswordResetToken, error)
+	// InvalidateForUser marks every unused token of a user used.
+	InvalidateForUser(ctx context.Context, id UserID, now time.Time) error
 	// DeleteEndedBefore deletes up to limit tokens that expired or were
 	// used before cutoff.
 	DeleteEndedBefore(ctx context.Context, cutoff time.Time, limit int) (int, error)
@@ -94,6 +96,8 @@ type EmailChangeRepository interface {
 	Save(ctx context.Context, t *EmailChangeToken) error
 	// ByTokenHash returns a token or ErrInvalidToken.
 	ByTokenHash(ctx context.Context, h TokenHash) (*EmailChangeToken, error)
+	// InvalidateForUser marks every unused token of a user used.
+	InvalidateForUser(ctx context.Context, id UserID, now time.Time) error
 	DeleteEndedBefore(ctx context.Context, cutoff time.Time, limit int) (int, error)
 }
 

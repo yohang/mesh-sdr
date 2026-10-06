@@ -19,7 +19,8 @@ import (
 
 func (e *env) resets(n app.Notifier, rv app.RevocationPublisher) *app.Resets {
 	return app.NewResets(app.ResetsDeps{
-		Tokens: sqlite.NewPasswordResets(e.db), Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Hasher: e.hasher,
+		Pending: e.pending(),
+		Tokens:  sqlite.NewPasswordResets(e.db), Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Hasher: e.hasher,
 		IDs: shared.NewUUIDv7Generator(), Now: e.clock.Now, Settings: settings.Defaults{}, Policies: app.NewPolicies(nil, nil),
 		Notifier: n, Links: app.NewLinks("https://hub.example"),
 		Requests: memory.NewIPLimiter(time.Hour, 3, 10), Accounts: memory.NewKeyLimiter(time.Hour, 2, 10),

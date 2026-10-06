@@ -20,6 +20,7 @@ type PasswordChecker interface {
 type Profile struct {
 	users     domain.UserRepository
 	tokens    domain.EmailChangeRepository
+	pending   PendingLinks
 	audit     domain.AuditLog
 	tx        Transactor
 	ids       IDGenerator
@@ -32,8 +33,11 @@ type Profile struct {
 
 // ProfileDeps are the dependencies of Profile.
 type ProfileDeps struct {
-	Users     domain.UserRepository
-	Tokens    domain.EmailChangeRepository
+	Users  domain.UserRepository
+	Tokens domain.EmailChangeRepository
+	// Pending invalidates the user's pending links when the address
+	// changes (a reset link went to the old one).
+	Pending   PendingLinks
 	Audit     domain.AuditLog
 	Tx        Transactor
 	IDs       IDGenerator
@@ -47,7 +51,7 @@ type ProfileDeps struct {
 // NewProfile returns the service.
 func NewProfile(d ProfileDeps) *Profile {
 	return &Profile{
-		users: d.Users, tokens: d.Tokens, audit: d.Audit, tx: d.Tx, ids: d.IDs, now: d.Now, passwords: d.Passwords,
+		users: d.Users, tokens: d.Tokens, pending: d.Pending, audit: d.Audit, tx: d.Tx, ids: d.IDs, now: d.Now, passwords: d.Passwords,
 		notifier: d.Notifier, links: d.Links, logger: d.Logger,
 	}
 }
@@ -241,11 +245,20 @@ func (s *Profile) apply(ctx context.Context, actor domain.Actor, requestID strin
 
 		previous = u.Email()
 
+		// A confirmation link of a disabled account is useless.
+		if verified && !u.Enabled() {
+			return domain.ErrInvalidToken
+		}
+
 		if !u.SetEmail(next, verified, s.now()) {
 			return nil
 		}
 
 		changed = true
+
+		if err := s.pending.invalidate(ctx, uid, s.now()); err != nil {
+			return err
+		}
 
 		if err := s.users.Save(ctx, u); err != nil {
 			return err

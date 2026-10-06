@@ -268,6 +268,8 @@ func RunAccounts(t *testing.T, open Factory) {
 		u := addUser(t, r, "alice", "")
 
 		first, firstTok, _ := domain.NewPasswordResetToken(tokenID(t), u.ID(), "192.0.2.1", t0, 30*time.Minute)
+		sent, _ := domain.NewEmail("alice@example.org")
+		first.MailTo(sent)
 		second, secondTok, _ := domain.NewPasswordResetToken(tokenID(t), u.ID(), "", t0.Add(time.Minute), 30*time.Minute)
 
 		for _, tok := range []*domain.PasswordResetToken{first, second} {
@@ -277,7 +279,8 @@ func RunAccounts(t *testing.T, open Factory) {
 		}
 
 		// Issuing the second token invalidated the first.
-		if got, err := r.Resets.ByTokenHash(ctx, firstTok.Hash()); err != nil || got.ValidAt(t0.Add(2*time.Minute)) || got.RequestedIP() != "192.0.2.1" {
+		if got, err := r.Resets.ByTokenHash(ctx, firstTok.Hash()); err != nil || got.ValidAt(t0.Add(2*time.Minute)) || got.RequestedIP() != "192.0.2.1" ||
+			got.SentTo() != sent {
 			t.Errorf("first token = %v", err)
 		}
 
@@ -302,7 +305,20 @@ func RunAccounts(t *testing.T, open Factory) {
 			t.Errorf("unknown token: %v", err)
 		}
 
-		if n, err := r.Resets.DeleteEndedBefore(ctx, t0.Add(48*time.Hour), 10); err != nil || n != 2 {
+		third, thirdTok, _ := domain.NewPasswordResetToken(tokenID(t), u.ID(), "", t0, 30*time.Minute)
+		if err := r.Resets.Add(ctx, third); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := r.Resets.InvalidateForUser(ctx, u.ID(), t0.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+
+		if got, _ := r.Resets.ByTokenHash(ctx, thirdTok.Hash()); got.ValidAt(t0.Add(2 * time.Minute)) {
+			t.Error("token valid after InvalidateForUser")
+		}
+
+		if n, err := r.Resets.DeleteEndedBefore(ctx, t0.Add(48*time.Hour), 10); err != nil || n != 3 {
 			t.Errorf("deleted %d, %v", n, err)
 		}
 	})
@@ -331,7 +347,20 @@ func RunAccounts(t *testing.T, open Factory) {
 			t.Errorf("second use: %v", err)
 		}
 
-		if n, err := r.EmailChanges.DeleteEndedBefore(ctx, t0.Add(48*time.Hour), 10); err != nil || n != 1 {
+		other, otherLink, _ := domain.NewEmailChangeToken(tokenID(t), u.ID(), mail, t0)
+		if err := r.EmailChanges.Add(ctx, other); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := r.EmailChanges.InvalidateForUser(ctx, u.ID(), t0); err != nil {
+			t.Fatal(err)
+		}
+
+		if again, _ := r.EmailChanges.ByTokenHash(ctx, otherLink.Hash()); again.ValidAt(t0.Add(time.Minute)) {
+			t.Error("e-mail token valid after InvalidateForUser")
+		}
+
+		if n, err := r.EmailChanges.DeleteEndedBefore(ctx, t0.Add(48*time.Hour), 10); err != nil || n != 2 {
 			t.Errorf("deleted %d, %v", n, err)
 		}
 	})

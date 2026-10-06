@@ -196,3 +196,30 @@ func (l Links) PasswordReset(t domain.LinkToken) string {
 func (l Links) EmailConfirmation(t domain.LinkToken) string {
 	return l.base + "/account/email/verify/" + t.Text()
 }
+
+// PendingLinks invalidates the pending single-use links of a user (password
+// reset, e-mail change) whenever its access changes: password change or
+// reset, generated password, disable, sign-out everywhere, e-mail change.
+// Otherwise a link started by someone who knew the old password could be
+// used after the owner recovered the account.
+type PendingLinks struct {
+	Resets domain.PasswordResetRepository
+	Emails domain.EmailChangeRepository
+}
+
+// invalidate runs in the caller's transaction.
+func (l PendingLinks) invalidate(ctx context.Context, id domain.UserID, now time.Time) error {
+	if l.Resets != nil {
+		if err := l.Resets.InvalidateForUser(ctx, id, now); err != nil {
+			return err
+		}
+	}
+
+	if l.Emails != nil {
+		if err := l.Emails.InvalidateForUser(ctx, id, now); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

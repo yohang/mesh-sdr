@@ -15,6 +15,8 @@ import (
 // the hub host (AUTH-008, AUTH-012, AUTH-013, AUTH-014).
 type UserAdmin struct {
 	invitations domain.InvitationRepository
+	pending     PendingLinks
+	erasers     []UserEraser
 	users       domain.UserRepository
 	sessions    domain.SessionRepository
 	audit       domain.AuditLog
@@ -30,22 +32,26 @@ type UserAdmin struct {
 type UserAdminDeps struct {
 	// Invitations lets Remove clear the address of redeemed invitations.
 	Invitations domain.InvitationRepository
-	Users       domain.UserRepository
-	Sessions    domain.SessionRepository
-	Audit       domain.AuditLog
-	Tx          Transactor
-	Hasher      PasswordHasher
-	IDs         IDGenerator
-	Now         Clock
-	Policy      Policies
-	Logger      *slog.Logger
+	// Pending invalidates pending links on reset and disable.
+	Pending PendingLinks
+	// Erasers remove the personal data other modules keep (Remove).
+	Erasers  []UserEraser
+	Users    domain.UserRepository
+	Sessions domain.SessionRepository
+	Audit    domain.AuditLog
+	Tx       Transactor
+	Hasher   PasswordHasher
+	IDs      IDGenerator
+	Now      Clock
+	Policy   Policies
+	Logger   *slog.Logger
 }
 
 // NewUserAdmin returns the service.
 func NewUserAdmin(d UserAdminDeps) *UserAdmin {
 	return &UserAdmin{
-		invitations: d.Invitations,
-		users:       d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs,
+		invitations: d.Invitations, pending: d.Pending, erasers: d.Erasers,
+		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs,
 		now: d.Now, policy: d.Policy, logger: d.Logger,
 	}
 }
@@ -206,6 +212,10 @@ func (s *UserAdmin) ResetPassword(ctx context.Context, username, password string
 			return err
 		}
 
+		if err := s.pending.invalidate(ctx, u.ID(), now); err != nil {
+			return err
+		}
+
 		res.User, res.RevokedSessions = u, n
 
 		return s.appendAudit(ctx, domain.ActionUserPasswordReset, u, nil, map[string]string{
@@ -291,6 +301,10 @@ func (s *UserAdmin) Disable(ctx context.Context, username string) (DisableResult
 
 		n, err := s.sessions.RevokeAllForUser(ctx, u.ID(), domain.RevokeUserDisabled, now)
 		if err != nil {
+			return err
+		}
+
+		if err := s.pending.invalidate(ctx, u.ID(), now); err != nil {
 			return err
 		}
 

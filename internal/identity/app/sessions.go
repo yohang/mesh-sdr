@@ -111,7 +111,7 @@ func (s *Accounts) RevokeOwnSession(ctx context.Context, by Actor, ref string) e
 		return domain.ErrUnauthenticated
 	}
 
-	n, err := s.revoke(ctx, by, by.Principal.UserID(), domain.RevokeLogout, func(x *domain.Session) bool { return x.Ref() == ref })
+	n, err := s.revoke(ctx, by, by.Principal.UserID(), domain.RevokeLogout, false, func(x *domain.Session) bool { return x.Ref() == ref })
 
 	return oneRevoked(n, err)
 }
@@ -133,7 +133,7 @@ func (s *Accounts) RevokeOtherSessions(ctx context.Context, by Actor) (int, erro
 
 	current := by.Principal.SessionID()
 
-	return s.revoke(ctx, by, by.Principal.UserID(), domain.RevokeLogout, func(x *domain.Session) bool { return x.ID() != current })
+	return s.revoke(ctx, by, by.Principal.UserID(), domain.RevokeLogout, true, func(x *domain.Session) bool { return x.ID() != current })
 }
 
 // RevokeAllOwnSessions signs out every session of the actor, the request's
@@ -143,12 +143,12 @@ func (s *Accounts) RevokeAllOwnSessions(ctx context.Context, by Actor) (int, err
 		return 0, domain.ErrUnauthenticated
 	}
 
-	return s.revoke(ctx, by, by.Principal.UserID(), domain.RevokeLogout, func(*domain.Session) bool { return true })
+	return s.revoke(ctx, by, by.Principal.UserID(), domain.RevokeLogout, true, func(*domain.Session) bool { return true })
 }
 
 // RevokeUserSession signs out one session of a user (admin).
 func (s *Accounts) RevokeUserSession(ctx context.Context, by Actor, id domain.UserID, ref string) error {
-	return oneRevoked(s.revoke(ctx, by, id, domain.RevokeAdmin, func(x *domain.Session) bool { return x.Ref() == ref }))
+	return oneRevoked(s.revoke(ctx, by, id, domain.RevokeAdmin, false, func(x *domain.Session) bool { return x.Ref() == ref }))
 }
 
 // RevokeUserSessions signs out every session of a user (admin) and returns
@@ -158,12 +158,15 @@ func (s *Accounts) RevokeUserSessions(ctx context.Context, by Actor, id domain.U
 		return 0, wrap("load user", err)
 	}
 
-	return s.revoke(ctx, by, id, domain.RevokeAdmin, func(*domain.Session) bool { return true })
+	return s.revoke(ctx, by, id, domain.RevokeAdmin, true, func(*domain.Session) bool { return true })
 }
 
 // revoke revokes the active sessions of a user that match, audits each and
-// publishes them.
-func (s *Accounts) revoke(ctx context.Context, by Actor, id domain.UserID, reason domain.RevokeReason, match func(*domain.Session) bool) (int, error) {
+// publishes them. everywhere (sign out of other or all sessions) also
+// invalidates the user's pending reset and e-mail links.
+func (s *Accounts) revoke(ctx context.Context, by Actor, id domain.UserID, reason domain.RevokeReason, everywhere bool,
+	match func(*domain.Session) bool,
+) (int, error) {
 	var refs []string
 
 	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
@@ -172,6 +175,12 @@ func (s *Accounts) revoke(ctx context.Context, by Actor, id domain.UserID, reaso
 		list, err := s.sessions.ActiveForUser(ctx, id, now)
 		if err != nil {
 			return err
+		}
+
+		if everywhere {
+			if err := s.pending.invalidate(ctx, id, now); err != nil {
+				return err
+			}
 		}
 
 		for _, x := range list {

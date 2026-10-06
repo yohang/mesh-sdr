@@ -208,12 +208,22 @@ func (r *PasswordResets) Add(ctx context.Context, t *domain.PasswordResetToken) 
 		if err := q.InsertPasswordResetToken(ctx, sqlc.InsertPasswordResetTokenParams{
 			ID: t.ID().Bytes(), UserID: t.UserID().Bytes(), TokenHash: t.TokenHash().Bytes(), CreatedAt: ms(t.CreatedAt()),
 			ExpiresAt: ms(t.ExpiresAt()), UsedAt: nullMS(t.UsedAt()), RequestedIp: nullString(t.RequestedIP()),
+			SentTo: nullString(t.SentTo().String()),
 		}); err != nil {
 			return fmt.Errorf("insert reset token: %w", err)
 		}
 
 		return nil
 	})
+}
+
+// InvalidateForUser marks every unused reset token of a user used.
+func (r *PasswordResets) InvalidateForUser(ctx context.Context, id domain.UserID, now time.Time) error {
+	if err := sqlc.New(r.db.Writer(ctx)).InvalidatePasswordResetTokens(ctx, sqlc.InvalidatePasswordResetTokensParams{Now: ms(now), UserID: id.Bytes()}); err != nil {
+		return fmt.Errorf("invalidate reset tokens: %w", err)
+	}
+
+	return nil
 }
 
 // Save stores the use of a token; it returns ErrInvalidToken when it was
@@ -247,7 +257,14 @@ func (r *PasswordResets) ByTokenHash(ctx context.Context, h domain.TokenHash) (*
 		return nil, err
 	}
 
-	return domain.RehydratePasswordResetToken(s, row.RequestedIp.String)
+	var sentTo domain.Email
+	if row.SentTo.Valid {
+		if sentTo, err = domain.NewEmail(row.SentTo.String); err != nil {
+			return nil, err
+		}
+	}
+
+	return domain.RehydratePasswordResetToken(s, row.RequestedIp.String, sentTo)
 }
 
 // DeleteEndedBefore deletes ended reset tokens.
@@ -286,6 +303,15 @@ func (r *EmailChanges) Add(ctx context.Context, t *domain.EmailChangeToken) erro
 
 		return nil
 	})
+}
+
+// InvalidateForUser marks every unused e-mail token of a user used.
+func (r *EmailChanges) InvalidateForUser(ctx context.Context, id domain.UserID, now time.Time) error {
+	if err := sqlc.New(r.db.Writer(ctx)).InvalidateEmailChangeTokens(ctx, sqlc.InvalidateEmailChangeTokensParams{Now: ms(now), UserID: id.Bytes()}); err != nil {
+		return fmt.Errorf("invalidate e-mail tokens: %w", err)
+	}
+
+	return nil
 }
 
 // Save stores the use of a token.

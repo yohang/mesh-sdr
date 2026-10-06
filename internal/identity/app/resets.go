@@ -32,6 +32,7 @@ type Resets struct {
 	confirms    IPLimiter
 	revocations RevocationPublisher
 	async       func(func())
+	pending     PendingLinks
 	logger      *slog.Logger
 }
 
@@ -59,8 +60,10 @@ type ResetsDeps struct {
 	// Async runs the work of a reset request after the answer, so that the
 	// answer takes the same time whether or not the account exists
 	// (SR-06). Nil: a new goroutine.
-	Async  func(func())
-	Logger *slog.Logger
+	Async func(func())
+	// Pending invalidates the user's other pending links on completion.
+	Pending PendingLinks
+	Logger  *slog.Logger
 }
 
 // NewResets returns the service.
@@ -76,7 +79,7 @@ func NewResets(d ResetsDeps) *Resets {
 	return &Resets{
 		tokens: d.Tokens, users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs,
 		now: d.Now, settings: d.Settings, policies: d.Policies, notifier: d.Notifier, links: d.Links, requests: d.Requests,
-		accounts: d.Accounts, confirms: d.Confirms, revocations: d.Revocations, async: d.Async, logger: d.Logger,
+		accounts: d.Accounts, confirms: d.Confirms, revocations: d.Revocations, async: d.Async, pending: d.Pending, logger: d.Logger,
 	}
 }
 
@@ -189,6 +192,11 @@ func (s *Resets) issue(ctx context.Context, u *domain.User, actor domain.Actor, 
 		return "", false, err
 	}
 
+	mail := send && s.MailEnabled() && !u.Email().IsZero()
+	if mail {
+		tok.MailTo(u.Email())
+	}
+
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		if err := s.tokens.Add(ctx, tok); err != nil {
 			return err
@@ -200,7 +208,7 @@ func (s *Resets) issue(ctx context.Context, u *domain.User, actor domain.Actor, 
 		}
 
 		return s.audit.Append(ctx, e.WithTarget("user", u.ID().String()).WithRequestID(meta.RequestID).
-			WithAfter(map[string]string{"emailed": strconv.FormatBool(send && s.MailEnabled() && !u.Email().IsZero())}))
+			WithAfter(map[string]string{"emailed": strconv.FormatBool(mail)}))
 	})
 	if err != nil {
 		return "", false, wrap("issue reset token", err)
@@ -208,7 +216,7 @@ func (s *Resets) issue(ctx context.Context, u *domain.User, actor domain.Actor, 
 
 	url := s.links.PasswordReset(link)
 
-	if !send || !s.MailEnabled() || u.Email().IsZero() {
+	if !mail {
 		return url, false, nil
 	}
 
@@ -326,7 +334,12 @@ func (s *Resets) Confirm(ctx context.Context, token, password string, meta Reque
 			return err
 		}
 
-		if err := u.CompleteReset(hash, now); err != nil {
+		// A disabled account stays locked out: the link is useless.
+		if !u.Enabled() {
+			return domain.ErrInvalidToken
+		}
+
+		if err := u.CompleteReset(hash, tok.SentTo(), now); err != nil {
 			return err
 		}
 
@@ -336,6 +349,10 @@ func (s *Resets) Confirm(ctx context.Context, token, password string, meta Reque
 
 		n, err := s.sessions.RevokeAllForUser(ctx, u.ID(), domain.RevokePasswordReset, now)
 		if err != nil {
+			return err
+		}
+
+		if err := s.pending.invalidate(ctx, u.ID(), now); err != nil {
 			return err
 		}
 

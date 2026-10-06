@@ -23,8 +23,8 @@ func (e *env) passwordsWith(h app.PasswordHasher) *app.Passwords {
 
 func (e *env) passwordsWithNotifier(h app.PasswordHasher, n app.Notifier) *app.Passwords {
 	return app.NewPasswords(app.PasswordsDeps{
-		Notifier: n,
-		Users:    e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Hasher: h, IDs: shared.NewUUIDv7Generator(),
+		Notifier: n, Pending: e.pending(),
+		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Hasher: h, IDs: shared.NewUUIDv7Generator(),
 		Now: e.clock.Now, Policies: app.NewPolicies(nil, nil),
 		SessionPolicies: app.DefaultSessionPolicies(), Logger: slog.New(slog.DiscardHandler),
 	})

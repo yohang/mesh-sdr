@@ -53,6 +53,7 @@ type Accounts struct {
 	invitations domain.InvitationRepository
 	erasers     []UserEraser
 	passwords   PasswordChecker
+	pending     PendingLinks
 	audit       domain.AuditLog
 	tx          Transactor
 	now         Clock
@@ -74,6 +75,8 @@ type AccountsDeps struct {
 	Revocations RevocationPublisher
 	// Passwords checks the current password before an own deletion.
 	Passwords PasswordChecker
+	// Pending invalidates a user's pending links when its access changes.
+	Pending PendingLinks
 	// Erasers remove a deleted user's personal data kept by other modules
 	// (SR-64: connections, …).
 	Erasers []UserEraser
@@ -88,7 +91,7 @@ func NewAccounts(d AccountsDeps) *Accounts {
 
 	return &Accounts{
 		hasher: d.Hasher, policies: d.Policies,
-		users: d.Users, sessions: d.Sessions, invitations: d.Invitations, erasers: d.Erasers, passwords: d.Passwords, audit: d.Audit, tx: d.Tx, now: d.Now,
+		users: d.Users, sessions: d.Sessions, invitations: d.Invitations, erasers: d.Erasers, passwords: d.Passwords, pending: d.Pending, audit: d.Audit, tx: d.Tx, now: d.Now,
 		revocations: d.Revocations,
 		logger:      d.Logger,
 	}

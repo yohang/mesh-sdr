@@ -131,6 +131,7 @@ type PasswordResetToken struct {
 	oneTime
 
 	requestedIP string
+	sentTo      Email
 }
 
 // NewPasswordResetToken issues a reset token for a user, valid for ttl (at
@@ -149,14 +150,22 @@ func NewPasswordResetToken(id TokenID, user UserID, requestedIP string, now time
 }
 
 // RehydratePasswordResetToken rebuilds a stored reset token.
-func RehydratePasswordResetToken(s OneTimeState, requestedIP string) (*PasswordResetToken, error) {
+func RehydratePasswordResetToken(s OneTimeState, requestedIP string, sentTo Email) (*PasswordResetToken, error) {
 	o, err := rehydrateOneTime(s)
 	if err != nil {
 		return nil, err
 	}
 
-	return &PasswordResetToken{oneTime: o, requestedIP: requestedIP}, nil
+	return &PasswordResetToken{oneTime: o, requestedIP: requestedIP, sentTo: sentTo}, nil
 }
+
+// MailTo records that the link is e-mailed to an address: completing the
+// reset confirms that address (and no other).
+func (t *PasswordResetToken) MailTo(e Email) { t.sentTo = e }
+
+// SentTo returns the address the link was e-mailed to (zero when it was
+// shown to an admin instead).
+func (t *PasswordResetToken) SentTo() Email { return t.sentTo }
 
 // RequestedIP returns the address that requested the reset ("" for an
 // admin-issued link).

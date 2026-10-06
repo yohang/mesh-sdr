@@ -206,7 +206,7 @@ func (s *UserAdmin) Remove(ctx context.Context, username string) error {
 			return err
 		}
 
-		return eraseUser(ctx, s.users, s.invitations, nil, s.audit, e, id)
+		return eraseUser(ctx, s.users, s.invitations, s.erasers, s.audit, e, id)
 	})
 	if err != nil {
 		return err
