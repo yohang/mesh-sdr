@@ -80,12 +80,13 @@ UI-001 stays open: its admin rights (edit as admin only) need ADM-002 and AUTH.
   - a `Dockerfile` based on `mcr.microsoft.com/playwright` (pinned tag and digest);
   - `package.json` and `package-lock.json` (`playwright`, `@axe-core/playwright`, exact versions);
   - `run.mjs`, `urls.txt` and `compose.yaml`.
-- **How it runs.** The compose file builds the hub's production image, migrates a fresh volume, starts the hub in `auto` theme mode, then runs the checker. The CI job `a11y` (after `check`) and `make a11y` use it.
+- **How it runs.** The compose file builds the hub's production image and migrates a fresh volume. It then starts three hubs on that database, one per theme mode (`auto`, `light`, `dark`, set with `MESHSDR_SETTINGS__UI__THEME_MODE`), and runs the checker. The CI job `a11y` (after `check`, 20-minute timeout) and `make a11y` use it, and always tear the stack down.
 - **What it checks.**
   - Each `urls.txt` entry gets its expected status and axe-core with tags `wcag2a`, `wcag2aa`, `wcag21a` and `wcag21aa`.
-  - Every entry runs in the light and dark color schemes, at 390×844 and 1280×800.
+  - Every entry runs for each theme mode, in the light and dark OS color schemes, at 390×844 and 1280×800.
+  - The theme is applied: `data-theme` is the mode, and the page background is the token set the mode selects (a forced mode ignores the OS scheme).
   - One boosted navigation is checked: the document stays the same, focus lands on `#main`, the new page is announced and the title changes.
-  - Any CSP violation or page error fails the run.
+  - These fail the run: any CSP or Permissions-Policy console message, page error, failed request, or subresource answering 400 or more.
 - **Contract with features.** Feature tickets add their pages to `urls.txt`. Authenticated pages will need a login fixture once AUTH lands.
 - **Contrast in Go.** `web.TestTokenContrast` parses the `light-dark()` color tokens and enforces 4.5:1 for text and 3:1 for UI parts in both sets.
 - **Template rules.** `web.TestTemplateRules` enforces the template rules of ADR 0003.

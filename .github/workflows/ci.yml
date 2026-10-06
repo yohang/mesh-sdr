@@ -51,6 +51,7 @@ jobs:
     name: Accessibility (axe-core)
     runs-on: ubuntu-latest
     needs: check
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -58,17 +59,17 @@ jobs:
 
       # The production image of the hub, migrated, checked by the CI-only
       # axe-core container (.infra/a11y). Node never enters the app images.
-      - name: Start the hub
-        run: docker compose -f .infra/a11y/compose.yaml up -d --build --wait hub
+      - name: Start the hubs (theme modes auto, light, dark)
+        run: docker compose -f .infra/a11y/compose.yaml up -d --build --wait hub-auto hub-light hub-dark
 
       - name: Check accessibility
         run: docker compose -f .infra/a11y/compose.yaml run --rm --build --no-deps a11y
 
       - name: Hub logs
         if: failure()
-        run: docker compose -f .infra/a11y/compose.yaml logs hub
+        run: docker compose -f .infra/a11y/compose.yaml logs migrate hub-auto hub-light hub-dark
 
-      - name: Stop the hub
+      - name: Stop the hubs
         if: always()
         run: docker compose -f .infra/a11y/compose.yaml down -v
 
