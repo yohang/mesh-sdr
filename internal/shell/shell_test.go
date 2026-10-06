@@ -1,10 +1,15 @@
 package shell_test
 
 import (
+	"encoding/json"
+	"fmt"
+	"image/png"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -134,6 +139,103 @@ func TestPolicy(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestManifestAndIcons covers UI-004: the manifest carries the name, the
+// theme colors of the mode and its icons, and every icon linked from the
+// document or the manifest is served with its type and declared size.
+func TestManifestAndIcons(t *testing.T) {
+	colors := map[string]string{"light": "#ffffff", "dark": "#161b22", "auto": "#ffffff"}
+
+	for mode, color := range colors {
+		t.Run(mode, func(t *testing.T) {
+			h := router(config.Settings{UI: config.SettingsUI{ThemeMode: mode}})
+
+			res, body := do(t, h, http.MethodGet, "/manifest.webmanifest", nil)
+			if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "application/manifest+json" {
+				t.Fatalf("manifest: %d %q", res.StatusCode, res.Header.Get("Content-Type"))
+			}
+
+			var m struct {
+				Name            string
+				ShortName       string `json:"short_name"`
+				StartURL        string `json:"start_url"`
+				Display         string
+				BackgroundColor string `json:"background_color"`
+				ThemeColor      string `json:"theme_color"`
+				Icons           []struct{ Src, Sizes, Type, Purpose string }
+			}
+			if err := json.Unmarshal([]byte(body), &m); err != nil {
+				t.Fatal(err)
+			}
+
+			if m.Name != "MeshSDR" || m.ShortName != "MeshSDR" || m.StartURL != "/" || m.Display != "standalone" || m.ThemeColor != color || m.BackgroundColor != color {
+				t.Errorf("manifest = %+v", m)
+			}
+
+			var maskable, large bool
+
+			for _, icon := range m.Icons {
+				checkIcon(t, h, icon.Src, icon.Type, icon.Sizes)
+
+				maskable = maskable || icon.Purpose == "maskable"
+				large = large || icon.Sizes == "512x512"
+			}
+
+			if !maskable || !large {
+				t.Errorf("icons = %+v: want a 512px and a maskable icon", m.Icons)
+			}
+		})
+	}
+
+	// Every icon and manifest link of the document resolves.
+	_, page := do(t, router(config.DefaultHub().Settings), http.MethodGet, "/", nil)
+
+	links := regexp.MustCompile(`<link rel="(icon|apple-touch-icon|manifest)" href="([^"]+)"`).FindAllStringSubmatch(page, -1)
+	if len(links) < 4 {
+		t.Fatalf("head links = %v", links)
+	}
+
+	h := router(config.DefaultHub().Settings)
+	types := map[string]string{".ico": "image/vnd.microsoft.icon", ".svg": "image/svg+xml", ".png": "image/png", ".webmanifest": "application/manifest+json"}
+
+	for _, l := range links {
+		checkIcon(t, h, l[2], types[path.Ext(l[2])], "")
+	}
+}
+
+// checkIcon fetches src and checks its type and, for PNGs, its size.
+func checkIcon(t *testing.T, h http.Handler, src, ctype, sizes string) {
+	t.Helper()
+
+	res, body := do(t, h, http.MethodGet, src, nil)
+	if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != ctype {
+		t.Errorf("%s: %d %q, want 200 %q", src, res.StatusCode, res.Header.Get("Content-Type"), ctype)
+
+		return
+	}
+
+	switch ctype {
+	case "image/png":
+		img, err := png.Decode(strings.NewReader(body))
+		if err != nil {
+			t.Errorf("%s: %v", src, err)
+
+			return
+		}
+
+		if b := img.Bounds(); sizes != "" && fmt.Sprintf("%dx%d", b.Dx(), b.Dy()) != sizes {
+			t.Errorf("%s: %v, want %s", src, b.Size(), sizes)
+		}
+	case "image/vnd.microsoft.icon":
+		if !strings.HasPrefix(body, "\x00\x00\x01\x00") {
+			t.Errorf("%s: not an ICO file", src)
+		}
+	case "image/svg+xml":
+		if !strings.HasPrefix(body, "<svg") {
+			t.Errorf("%s: not an SVG", src)
+		}
 	}
 }
 

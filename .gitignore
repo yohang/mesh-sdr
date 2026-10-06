@@ -4,6 +4,7 @@
 /internal/db/sqlite/sqlc/
 /internal/http/api/openapi.json
 /internal/web/static/css/app.css
+/internal/web/static/icons/
 
 # Air build output
 /tmp/

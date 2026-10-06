@@ -9,6 +9,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shell/app"
 	shellhttp "github.com/yohang/mesh-sdr/internal/shell/http"
 	"github.com/yohang/mesh-sdr/internal/shell/infra"
+	"github.com/yohang/mesh-sdr/internal/web"
 	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
@@ -34,10 +35,11 @@ func Wire(d Deps) Module {
 	settings := infra.NewConfigSettings(d.Settings)
 	lookAndFeel := app.NewLookAndFeel(settings, component("shell.app.look_and_feel"))
 	policy := app.NewPolicy(settings, component("shell.app.policy"))
-	rd := render.New(shellhttp.NewShellSource(lookAndFeel), component("web.render"))
+	source := shellhttp.NewShellSource(lookAndFeel)
+	rd := render.New(source, component("web.render"))
 
 	return Module{
 		Renderer: rd,
-		HTTP:     shellhttp.NewModule(rd, policy, component("shell.http")),
+		HTTP:     shellhttp.NewModule(rd, source, policy, web.Static(), component("shell.http")),
 	}
 }

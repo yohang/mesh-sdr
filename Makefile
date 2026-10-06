@@ -36,7 +36,7 @@ run: ## All-in-one: build image, generate, migrate, start the dev stack
 clean: ## Stop the stack, remove volumes (caches), generated files and Air output
 	$(COMPOSE) down -v --remove-orphans
 	find internal -name '*_templ.go' -delete -o -name '*.gen.go' -delete
-	rm -rf internal/db/sqlite/sqlc internal/http/api/openapi.json internal/web/static/css/app.css tmp
+	rm -rf internal/db/sqlite/sqlc internal/http/api/openapi.json internal/web/static/css/app.css internal/web/static/icons tmp
 
 .PHONY: logs
 logs: c=app

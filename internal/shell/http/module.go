@@ -4,6 +4,7 @@
 package http
 
 import (
+	"io/fs"
 	"log/slog"
 	"net/http"
 
@@ -50,14 +51,17 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 // Module is the shell's router module (internal/http.Module).
 type Module struct {
 	render   *render.Renderer
+	shell    render.ShellSource
 	policy   *app.Policy
+	static   fs.FS
 	markdown *markdown
 	logger   *slog.Logger
 }
 
-// NewModule returns the shell router module.
-func NewModule(rd *render.Renderer, policy *app.Policy, logger *slog.Logger) *Module {
-	return &Module{render: rd, policy: policy, markdown: newMarkdown(), logger: logger}
+// NewModule returns the shell router module. static is the embedded static
+// assets filesystem (web.Static).
+func NewModule(rd *render.Renderer, shell render.ShellSource, policy *app.Policy, static fs.FS, logger *slog.Logger) *Module {
+	return &Module{render: rd, shell: shell, policy: policy, static: static, markdown: newMarkdown(), logger: logger}
 }
 
 // Middlewares implements internal/http.Module: the shell has none.
@@ -72,6 +76,8 @@ func (m *Module) Routes(r chi.Router) {
 	r.Get("/", m.home)
 	r.Get("/robots.txt", robots)
 	r.Get("/policy", m.policyPage)
+	r.Get("/manifest.webmanifest", m.manifest)
+	r.Get("/favicon.ico", favicon(m.static))
 }
 
 // home is a placeholder home page until the Receiver section (UI-006) takes

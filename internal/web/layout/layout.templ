@@ -25,6 +25,10 @@ templ Document(s Shell, p Page, content templ.Component) {
 				<meta name="theme-color" content={ s.Theme.ThemeColor() }/>
 			}
 			<title>{ s.DocumentTitle(p) }</title>
+			<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48"/>
+			<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml"/>
+			<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png"/>
+			<link rel="manifest" href="/manifest.webmanifest"/>
 			<link rel="stylesheet" href="/static/css/app.css"/>
 			<script src="/static/vendor/htmx.min.js" nonce={ templ.GetNonce(ctx) } defer></script>
 			<script src="/static/js/shell.js" type="module" nonce={ templ.GetNonce(ctx) }></script>
