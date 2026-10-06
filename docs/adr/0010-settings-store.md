@@ -58,11 +58,12 @@ Each consumer declares its port in its own `app` package. An adapter in its `inf
 | Consumer | Port | Adapter | Keys |
 |---|---|---|---|
 | shell | `shell/app.Settings` (`ThemeMode`, `SiteName`, `PolicyURL`), `shell/app.PolicySettings` (`UsagePolicy`) | `shell/infra.StoreSettings` | `ui.theme_mode`, `receiver.name`, `receiver.usage_policy_url`, `receiver.usage_policy_text` |
-| identity | `identity/app.Policies` (`SessionPolicy()`, `ThrottlePolicy()`) | `identity/infra/settingsrc.Policies` | `session.*`, `auth.lockout.*` |
+| identity | `identity/app.SessionPolicies` (`SessionPolicy()`, `ThrottlePolicy()`), read by login, session resolution and password change | `identity/infra/settingsrc.Policies` | `session.*`, `auth.lockout.*` |
+| identity | `identity/app.Settings` (`PasswordMinLength`, ADR 0011), behind the password policy | same | `auth.password_min_length` |
 | identity | per-address limiter rate (`settingsrc.Policies.LoginRate`, read by `memory.NewDynamicIPLimiter` on each attempt) | same | `auth.login_rate_limit` |
 | identity jobs | `identity/app.Retention` (`SessionRetention()`, `AuditRetention()`, never under 30 days) | same | `retention.sessions`, `retention.audit_log` |
 
-The identity part 2 (`epic/acc-1`) reads these through the same ports, and adds its keys to `config.Settings` and its jobs to the scheduler (`jobs/app.Scheduler.Register`, `jobs/app.Store` for the retention page). Without a store (CLI commands), identity uses `app.DefaultPolicies()` and the built-in retention.
+The identity part 2 (`epic/acc-1`) reads these through the same ports, and adds its keys to `config.Settings` and its jobs to the scheduler (`jobs/app.Scheduler.Register`, `jobs/app.Store` for the retention page). Without a store (CLI commands), identity uses `app.DefaultSessionPolicies()`, the ADR 0011 interim `identity/infra/settings.Defaults` and the built-in retention.
 
 ### Keys of this part
 
@@ -87,6 +88,7 @@ The identity part 2 (`epic/acc-1`) reads these through the same ports, and adds 
 | `ui.recorder_enabled` | boolean | `true` | Access |
 | `bookmarks.eibi_range_km`, `.repeater_range_km` | `0`–`20000` km | `0` | Look & feel |
 | `session.idle_timeout`, `.absolute_timeout`, `.remember_me_timeout` (Q4) | duration | `24h`, `24h`, `30d` | Access |
+| `auth.password_min_length` (ADR 0011) | `8`–`256` characters | `10` | Access |
 | `auth.login_rate_limit` (Q5) | `<count>/<window>` per client address | `5/1m` | Access |
 | `auth.lockout.delay_after`, `.lock_after`, `.lock_for`, `.max_lock` (Q5) | count, duration | `5`, `10`, `15m`, `24h` | Access |
 | `retention.sessions` | duration ≥ 1d | `30d` | Retention |
