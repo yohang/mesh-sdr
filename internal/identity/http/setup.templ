@@ -1,0 +1,110 @@
+package http
+
+import "strconv"
+
+// setupPage is the first-admin form of the one-time setup link (AUTH-018).
+// The token moves from the address bar into a hidden field:
+// static/js/token-url.js replaces the URL with data-replace-url (SR-07).
+templ setupPage(f setupForm) {
+	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="setup-title" data-replace-url="/setup">
+		<h1 id="setup-title" class="text-2xl font-bold">Create the first admin</h1>
+		<p>No admin account exists yet. This account gets the admin role.</p>
+		@setupFormView(f)
+	</section>
+}
+
+// setupFormView is the form, also returned alone (htmx fragment) with the
+// error after a failed attempt.
+templ setupFormView(f setupForm) {
+	<form id="setup-form" class="flex flex-col gap-3" method="post" action="/setup" hx-post="/setup" hx-target="this" hx-swap="outerHTML">
+		if f.Error != "" {
+			<p id="setup-error" class="font-semibold" role="alert">{ f.Error }</p>
+		}
+		<input type="hidden" name="token" value={ f.Token }/>
+		<label class="flex flex-col gap-1">
+			<span>Username</span>
+			<input
+				class="rounded border px-2 py-1"
+				type="text"
+				name="username"
+				value={ f.Username }
+				autocomplete="username"
+				autocapitalize="none"
+				spellcheck="false"
+				pattern="[A-Za-z0-9_.\-]{2,64}"
+				required
+				if f.Field == "username" {
+					aria-describedby="setup-error"
+					aria-invalid="true"
+				}
+			/>
+		</label>
+		<label class="flex flex-col gap-1">
+			<span>E-mail (optional)</span>
+			<input
+				class="rounded border px-2 py-1"
+				type="email"
+				name="email"
+				value={ f.Email }
+				autocomplete="email"
+				if f.Field == "email" {
+					aria-describedby="setup-error"
+					aria-invalid="true"
+				}
+			/>
+		</label>
+		<label class="flex flex-col gap-1">
+			<span>Display name (optional)</span>
+			<input
+				class="rounded border px-2 py-1"
+				type="text"
+				name="display_name"
+				value={ f.DisplayName }
+				autocomplete="name"
+				maxlength="64"
+				if f.Field == "display_name" {
+					aria-describedby="setup-error"
+					aria-invalid="true"
+				}
+			/>
+		</label>
+		<label class="flex flex-col gap-1">
+			<span>Password</span>
+			<input
+				class="rounded border px-2 py-1"
+				type="password"
+				name="password"
+				autocomplete="new-password"
+				minlength={ strconv.Itoa(f.MinLength) }
+				maxlength="256"
+				required
+				if f.Field == "password" {
+					aria-describedby="setup-rules setup-error"
+					aria-invalid="true"
+				} else {
+					aria-describedby="setup-rules"
+				}
+			/>
+		</label>
+		<p id="setup-rules" class="text-sm">At least { strconv.Itoa(f.MinLength) } characters. Common passwords are refused.</p>
+		<label class="flex flex-col gap-1">
+			<span>Repeat the password</span>
+			<input class="rounded border px-2 py-1" type="password" name="confirm_password" autocomplete="new-password" required/>
+		</label>
+		<button class="rounded border px-3 py-1 font-semibold" type="submit">Create the admin account</button>
+	</form>
+}
+
+// setupInvalid is shown for an unknown, expired or used setup link, or when
+// too many setup requests came from the client (msg).
+templ setupInvalid(msg string) {
+	<section class="mx-auto flex w-full max-w-prose flex-col gap-4 p-4" aria-labelledby="setup-title">
+		<h1 id="setup-title" class="text-2xl font-bold">Setup link not valid</h1>
+		if msg != "" {
+			<p role="alert">{ msg }</p>
+		} else {
+			<p>This setup link is not valid: it has expired, was already used, or an admin account exists.</p>
+			<p>Restart the hub to get a new link, or create an admin on the hub host with <code>meshsdr hub user add --role admin</code>.</p>
+		}
+	</section>
+}

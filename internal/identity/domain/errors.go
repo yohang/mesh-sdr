@@ -49,6 +49,10 @@ var (
 	// ErrRateLimited means too many attempts; see RateLimitError.
 	ErrRateLimited = shared.NewError(shared.KindRateLimited, "rate_limited", "too many attempts")
 
+	// ErrSetupTokenInvalid means the first-admin setup link is unknown,
+	// expired, used, or useless because an admin exists (AUTH-018).
+	ErrSetupTokenInvalid = shared.NewError(shared.KindNotFound, "setup_token_invalid", "the setup link is not valid")
+
 	ErrUserNotFound    = shared.NewError(shared.KindNotFound, "user_not_found", "user not found")
 	ErrSessionNotFound = shared.NewError(shared.KindNotFound, "session_not_found", "session not found")
 	ErrUsernameTaken   = shared.NewError(shared.KindConflict, "username_taken", "the username is already used")

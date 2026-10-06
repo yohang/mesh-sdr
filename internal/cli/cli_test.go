@@ -120,6 +120,26 @@ func TestHubLifecycle(t *testing.T) {
 		t.Fatalf("hub = %+v", r)
 	}
 
+	// Without an admin, the hub prints a one-time setup URL once, outside
+	// the logs (AUTH-018).
+	_, after, ok := strings.Cut(r.stderr, "http://localhost/setup/")
+	token, _, _ := strings.Cut(after, "\n")
+
+	if !ok || len(token) != 43 || strings.Count(r.stderr, token) != 1 || !strings.Contains(r.stderr, "one-time setup URL") {
+		t.Fatalf("setup URL output = %s", r.stderr)
+	}
+
+	if r := run(t, ctx, env, "--noninteractive", "hub", "user", "add", "root", "--role", "admin"); r.code != ExitOK {
+		t.Fatalf("add admin = %+v", r)
+	}
+
+	runCtx, cancel = context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	if r := run(t, runCtx, env, "hub"); r.code != ExitOK || strings.Contains(r.stderr, "/setup/") {
+		t.Fatalf("hub with an admin = %+v", r)
+	}
+
 	r = run(t, ctx, env, "--silent", "hub", "migrate", "down")
 	if r.code != ExitOK || r.stdout != "" {
 		t.Fatalf("migrate down --silent = %+v", r)

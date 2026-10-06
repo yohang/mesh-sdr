@@ -4,6 +4,7 @@ package http
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -75,6 +76,20 @@ func NewServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
+// loggedPath is the request path as logged. A path that carries a
+// single-use token (setup, invitation and password reset links: routes with
+// a {token} parameter) is logged as its route pattern, so that the token
+// never reaches the logs (SR-07).
+func loggedPath(r *http.Request) string {
+	if rc := chi.RouteContext(r.Context()); rc != nil {
+		if p := rc.RoutePattern(); strings.Contains(p, "{token}") {
+			return p
+		}
+	}
+
+	return r.URL.Path
+}
+
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +100,7 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 
 			logger.LogAttrs(r.Context(), slog.LevelInfo, "http request",
 				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
+				slog.String("path", loggedPath(r)),
 				slog.Int("status", ww.Status()),
 				slog.Int("bytes", ww.BytesWritten()),
 				slog.Duration("duration", time.Since(start)),

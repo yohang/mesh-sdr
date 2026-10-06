@@ -60,15 +60,21 @@ func OpenDB(ctx context.Context, cfg config.DB, logger *slog.Logger) (db.Adapter
 // Process is a role's network process: one HTTP(S) server, startup tasks
 // run before serving and background workers that live as long as it.
 type Process struct {
-	addr    string
-	server  *http.Server
-	logger  *slog.Logger
-	startup []func(ctx context.Context) error
-	workers []func(ctx context.Context)
+	addr     string
+	server   *http.Server
+	logger   *slog.Logger
+	startup  []func(ctx context.Context) error
+	workers  []func(ctx context.Context)
+	setupURL string
 }
 
 // Addr returns the configured listen address.
 func (p *Process) Addr() string { return p.addr }
+
+// SetupURL returns the one-time URL that creates the first admin when the
+// hub has no admin (AUTH-018), or "". The caller prints it once, on stderr
+// and not through the logger, since it carries a secret token.
+func (p *Process) SetupURL() string { return p.setupURL }
 
 // Listen opens the listening socket. The address decides IPv4 or IPv6: an
 // IPv4 literal (0.0.0.0) listens on IPv4 only, an IPv6 literal ([::]) on
@@ -179,12 +185,18 @@ func newHub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db
 		shellModule.HTTP,
 	)
 
+	setupURL, err := idm.Setup.Begin(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("identity setup: %w", err)
+	}
+
 	return &Process{
-		addr:    cfg.Hub.Listen,
-		server:  httpserver.NewServer(cfg.Hub.Listen, router),
-		logger:  component(logger, "http.server"),
-		startup: g.startup,
-		workers: append([]func(context.Context){func(ctx context.Context) { idm.Reaper.Run(ctx, identityapp.SessionReapEvery) }}, g.workers...),
+		addr:     cfg.Hub.Listen,
+		server:   httpserver.NewServer(cfg.Hub.Listen, router),
+		logger:   component(logger, "http.server"),
+		startup:  g.startup,
+		workers:  append([]func(context.Context){func(ctx context.Context) { idm.Reaper.Run(ctx, identityapp.SessionReapEvery) }}, g.workers...),
+		setupURL: setupURL,
 	}, g, nil
 }
 

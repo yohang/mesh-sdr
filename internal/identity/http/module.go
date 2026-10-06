@@ -55,6 +55,14 @@ type PasswordChanger interface {
 	MinLength(ctx context.Context) int
 }
 
+// Bootstrapper creates the first admin through the one-time setup link
+// (AUTH-018).
+type Bootstrapper interface {
+	Check(token string, meta app.RequestMeta) error
+	Complete(ctx context.Context, in app.SetupInput) (app.LoginResult, error)
+	MinLength(ctx context.Context) int
+}
+
 // Pages renders HTML pages in the app shell.
 type Pages interface {
 	// Page writes a page; fragment, when not nil, is written alone for htmx
@@ -80,6 +88,7 @@ type Config struct {
 type Module struct {
 	auth      Authenticator
 	passwords PasswordChanger
+	setup     Bootstrapper
 	pages     Pages
 	logger    *slog.Logger
 	resolver  *clientip.Resolver
@@ -91,7 +100,7 @@ type Module struct {
 }
 
 // New returns the module.
-func New(auth Authenticator, passwords PasswordChanger, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
+func New(auth Authenticator, passwords PasswordChanger, setup Bootstrapper, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
 	u, err := url.Parse(cfg.HubURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("hub.url %q: not an absolute URL", cfg.HubURL)
@@ -111,6 +120,7 @@ func New(auth Authenticator, passwords PasswordChanger, pages Pages, cfg Config,
 	return &Module{
 		auth:      auth,
 		passwords: passwords,
+		setup:     setup,
 		pages:     pages,
 		logger:    logger,
 		resolver:  clientip.NewResolver(cfg.TrustedProxies),
@@ -136,6 +146,12 @@ func (m *Module) Routes(r chi.Router) {
 	r.Head("/login", m.loginPage)
 	r.Post("/login", m.loginAction)
 	r.Post("/logout", m.logoutAction)
+
+	r.Get(app.SetupPath+"/{token}", m.setupPage)
+	r.Head(app.SetupPath+"/{token}", m.setupPage)
+	r.Get(app.SetupPath, m.setupLanding)
+	r.Head(app.SetupPath, m.setupLanding)
+	r.Post(app.SetupPath, m.setupAction)
 
 	r.With(m.Require(domain.RoleListener)).Get(PasswordChangePath, m.passwordPage)
 	r.With(m.Require(domain.RoleListener)).Head(PasswordChangePath, m.passwordPage)
@@ -290,7 +306,7 @@ func isAPI(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/api/")
 func limitAuthBodies(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/login" || p == "/logout" || p == PasswordChangePath || strings.HasPrefix(p, "/api/v1/auth/") {
+		if p == "/login" || p == "/logout" || p == PasswordChangePath || p == app.SetupPath || strings.HasPrefix(p, "/api/v1/auth/") {
 			r.Body = http.MaxBytesReader(w, r.Body, AuthBodyLimit)
 		}
 
@@ -445,17 +461,21 @@ func (m *Module) Login(ctx context.Context, login, password string, remember boo
 		return domain.Principal{}, "", nil, err
 	}
 
+	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.sessionCookies(res), nil
+}
+
+// sessionCookies are the cookies of a new session: the session cookie
+// (persistent with "remember me") and the cleared pre-session cookie.
+func (m *Module) sessionCookies(res app.LoginResult) []*http.Cookie {
 	maxAge := 0
-	if remember {
+	if res.Remember {
 		maxAge = int(res.Session.AbsoluteExpiresAt().Sub(res.Session.CreatedAt()).Seconds())
 	}
 
-	cookies := []*http.Cookie{
+	return []*http.Cookie{
 		m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge),
 		m.cookie(m.presessionCookieName(), "", -1),
 	}
-
-	return res.Principal, res.Session.CSRFSecret().Token(res.Token), cookies, nil
 }
 
 // ChangePassword changes the password of the request's user, and returns

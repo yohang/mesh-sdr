@@ -24,6 +24,9 @@ type UserRepository interface {
 	// List returns the enabled users, or every user with includeDisabled,
 	// ordered by case-insensitive username.
 	List(ctx context.Context, includeDisabled bool) ([]*User, error)
+	// CountEnabledAdmins returns the number of enabled users holding the
+	// global admin role.
+	CountEnabledAdmins(ctx context.Context) (int, error)
 }
 
 // SessionRepository stores sessions.

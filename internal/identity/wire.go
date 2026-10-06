@@ -30,6 +30,9 @@ const (
 	loginIPBurst    = 5
 	loginIPEvery    = 12 * time.Second
 	hashQueuePerCPU = 4
+	// First-admin setup requests per client address: 10, then 1 per minute.
+	setupIPBurst = 10
+	setupIPEvery = time.Minute
 )
 
 // Deps are the dependencies of the identity module.
@@ -94,6 +97,7 @@ func UserAdmin(d Deps) *app.UserAdmin {
 // Module is the wired identity module of the hub.
 type Module struct {
 	Auth   *app.Auth
+	Setup  *app.Setup
 	Reaper *app.SessionReaper
 	HTTP   *identityhttp.Module
 }
@@ -123,7 +127,13 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Logger: component(d.Logger, "identity.app.passwords"),
 	})
 
-	h, err := identityhttp.New(auth, passwords, pages, identityhttp.Config{
+	setup := app.NewSetup(app.SetupDeps{
+		Users: r.users, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now, Policies: policies(),
+		Auth: auth, Limiter: memory.NewIPLimiter(setupIPEvery, setupIPBurst, memory.DefaultCapacity),
+		HubURL: d.Config.Hub.URL, Logger: component(d.Logger, "identity.app.setup"),
+	})
+
+	h, err := identityhttp.New(auth, passwords, setup, pages, identityhttp.Config{
 		HubURL:         d.Config.Hub.URL,
 		TrustedProxies: config.Prefixes(d.Config.HTTP.TrustedProxies),
 		AdminNetworks:  config.Prefixes(d.Config.Admin.AllowedNetworks),
@@ -134,6 +144,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 
 	return &Module{
 		Auth:   auth,
+		Setup:  setup,
 		Reaper: app.NewSessionReaper(r.sessions, d.Now, component(d.Logger, "identity.app.reaper")),
 		HTTP:   h,
 	}, nil

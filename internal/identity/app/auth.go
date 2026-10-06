@@ -201,6 +201,14 @@ func (a *Auth) reserve(ctx context.Context, known *domain.User, login domain.Log
 	return r, nil
 }
 
+// OpenSession opens a session for a user that was authenticated otherwise
+// (first admin setup, later invitation acceptance): it records the login
+// and revokes the session in.Previous, like Login. in.Login and
+// in.Password are ignored.
+func (a *Auth) OpenSession(ctx context.Context, id domain.UserID, in LoginInput) (LoginResult, error) {
+	return a.open(ctx, id, domain.Login{}, in, a.now())
+}
+
 func (a *Auth) open(ctx context.Context, id domain.UserID, login domain.Login, in LoginInput, now time.Time) (LoginResult, error) {
 	var res LoginResult
 
@@ -262,7 +270,10 @@ func (a *Auth) open(ctx context.Context, id domain.UserID, login domain.Login, i
 		return LoginResult{}, fmt.Errorf("open session: %w", err)
 	}
 
-	a.unknown.Reset(login.Key())
+	if login.String() != "" {
+		a.unknown.Reset(login.Key())
+	}
+
 	a.logger.InfoContext(ctx, "user logged in", slog.String("user_id", id.String()), slog.String("provider", a.provider.ID().String()))
 
 	return res, nil

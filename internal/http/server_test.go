@@ -150,3 +150,27 @@ func TestNewServerTimeouts(t *testing.T) {
 		t.Errorf("WriteTimeout = %v, want unset (long-lived WebSocket responses)", srv.WriteTimeout)
 	}
 }
+
+// tokenModule serves a route that carries a single-use token.
+type tokenModule struct{}
+
+func (tokenModule) Middlewares() []func(http.Handler) http.Handler { return nil }
+
+func (tokenModule) Routes(r chi.Router) {
+	r.Get("/invite/{token}", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+}
+
+func TestRequestLogHidesTokens(t *testing.T) {
+	var logs strings.Builder
+
+	h := httpserver.NewRouter(slog.New(slog.NewTextHandler(&logs, nil)), http.NotFoundHandler(), tokenModule{}, module{"a"})
+
+	for _, path := range []string{"/invite/s3cr3t-t0ken", "/a"} {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+	}
+
+	if out := logs.String(); strings.Contains(out, "s3cr3t-t0ken") || !strings.Contains(out, "path=/invite/{token}") ||
+		!strings.Contains(out, "path=/a ") {
+		t.Errorf("logs = %s", out)
+	}
+}

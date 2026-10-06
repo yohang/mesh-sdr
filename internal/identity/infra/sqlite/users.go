@@ -193,6 +193,17 @@ func (r *Users) List(ctx context.Context, includeDisabled bool) ([]*domain.User,
 	return out, nil
 }
 
+// CountEnabledAdmins returns the number of enabled global admins. Inside a
+// write transaction it reads the transaction's view.
+func (r *Users) CountEnabledAdmins(ctx context.Context) (int, error) {
+	n, err := sqlc.New(r.db.Reader(ctx)).CountEnabledAdmins(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count admins: %w", err)
+	}
+
+	return int(n), nil
+}
+
 func (r *Users) load(ctx context.Context, q *sqlc.Queries, get func() (sqlc.User, error)) (*domain.User, error) {
 	row, err := get()
 	if errors.Is(err, sql.ErrNoRows) {

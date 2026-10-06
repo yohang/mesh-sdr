@@ -232,6 +232,10 @@ func RunUsers(t *testing.T, open Factory) {
 			t.Errorf("enabled = %q", got)
 		}
 
+		if n, err := r.CountEnabledAdmins(ctx); err != nil || n != 1 {
+			t.Errorf("admins = %d, %v", n, err)
+		}
+
 		all, _ := r.List(ctx, true)
 		if got := names(all, nil); got != "Bob carl zoe " || all[0].Role() != domain.RoleAdmin || len(all[0].Identities()) != 1 {
 			t.Errorf("all = %q", got)
