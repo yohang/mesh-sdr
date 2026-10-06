@@ -18,7 +18,15 @@ func TestExportAndDeletion(t *testing.T) {
 
 	alice := h.signedIn("alice")
 
-	res := alice.do(http.MethodGet, "/account/export", "", "", nil)
+	if res := alice.do(http.MethodGet, "/account/export", "", "", nil); res.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET export = %d", res.StatusCode)
+	}
+
+	if res := alice.do(http.MethodPost, "/account/export", "", "", nil); res.StatusCode != http.StatusForbidden {
+		t.Errorf("export without CSRF = %d", res.StatusCode)
+	}
+
+	res := alice.form("/account/export", nil, false)
 
 	var exp struct {
 		Account struct {
@@ -51,7 +59,7 @@ func TestExportAndDeletion(t *testing.T) {
 	root := h.signedIn("root")
 	bobID := h.userID("bob")
 
-	if res := root.api(http.MethodGet, "/api/v1/users/"+bobID+"/export", ""); res.StatusCode != http.StatusOK {
+	if res := root.api(http.MethodPost, "/api/v1/users/"+bobID+"/export", ""); res.StatusCode != http.StatusOK {
 		t.Errorf("admin export = %d", res.StatusCode)
 	}
 

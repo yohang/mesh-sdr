@@ -67,7 +67,6 @@ type auditView struct {
 	Form   auditForm
 	Rows   []app.AuditRow
 	NextQS string
-	Export string
 }
 
 func (m *Module) auditPage(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +84,7 @@ func (m *Module) auditPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v := auditView{Form: form, Rows: rows, Export: form.values().Encode()}
+	v := auditView{Form: form, Rows: rows}
 
 	if next > 0 {
 		nv := form.values()
@@ -123,8 +122,15 @@ func csvCell(s string) string {
 	return s
 }
 
+// auditExport answers a POST: a bulk read of personal data needs the CSRF
+// header like an action, and a cross-site page cannot trigger it. The
+// filters come in the form body (static/js/download.js).
 func (m *Module) auditExport(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+	if !m.parseForm(w, r) {
+		return
+	}
+
+	q := r.PostForm
 	f := readAuditForm(q).filter()
 	format := q.Get("format")
 

@@ -1224,7 +1224,7 @@ paths:
   /users/{id}/export:
     parameters:
       - $ref: "#/components/parameters/UserID"
-    get:
+    post:
       operationId: exportUser
       x-meshsdr-access: admin
       summary: Export a user's data (GDPR request)
@@ -1241,7 +1241,7 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
   /me/export:
-    get:
+    post:
       operationId: exportMe
       x-meshsdr-access: listener
       summary: Export the caller's data (account and sessions)

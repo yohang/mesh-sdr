@@ -199,7 +199,10 @@ templ userPage(v userView) {
 		</section>
 		<section class="flex flex-col gap-3" aria-labelledby="user-data-title">
 			<h2 id="user-data-title" class="text-xl font-semibold">Data</h2>
-			<p><a href={ templ.SafeURL(userURL(v.User) + "/export") } hx-boost="false" download>Download the user's data (JSON)</a></p>
+			<p class="flex flex-wrap items-center gap-3">
+				<button class="rounded border px-3 py-1" type="button" data-download={ userURL(v.User) + "/export" } data-download-name={ v.User.Username().String() + ".json" } data-download-status="user-export-status">Download the user's data (JSON)</button>
+				<span id="user-export-status" role="status"></span>
+			</p>
 			<details class="rounded border p-3">
 				<summary class="cursor-pointer font-semibold">Delete the account</summary>
 				<form class="mt-3 flex flex-col gap-3" method="post" action={ templ.SafeURL(userURL(v.User) + "/delete") }>

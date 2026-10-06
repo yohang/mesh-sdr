@@ -28,7 +28,8 @@ func (m *Module) jwks(w http.ResponseWriter, r *http.Request) {
 	jwks, revoked := m.keys.Published(m.now())
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=60")
+	// Shorter than the publish lead of a new key (60 s).
+	w.Header().Set("Cache-Control", "public, max-age=30")
 	w.WriteHeader(http.StatusOK)
 
 	if r.Method != http.MethodHead {

@@ -5,7 +5,7 @@ package http
 templ auditPage(v auditView) {
 	<section class="flex w-full max-w-6xl flex-col gap-6 p-4" aria-labelledby="audit-title">
 		<h1 id="audit-title" class="text-2xl font-bold">Audit log</h1>
-		<form class="flex flex-wrap items-end gap-3" method="get" action="/admin/audit" role="search">
+		<form id="audit-filters" class="flex flex-wrap items-end gap-3" method="get" action="/admin/audit" role="search">
 			<label class="flex flex-col gap-1">
 				<span>Actor (username)</span>
 				<input class="rounded border px-2 py-1" type="text" name="actor" value={ v.Form.Actor }/>
@@ -32,9 +32,10 @@ templ auditPage(v auditView) {
 			</label>
 			<button class="rounded border px-3 py-1 font-semibold" type="submit">Filter</button>
 		</form>
-		<p class="flex flex-wrap gap-4">
-			<a href={ templ.SafeURL("/admin/audit/export?format=csv&" + v.Export) } hx-boost="false" download>Export as CSV</a>
-			<a href={ templ.SafeURL("/admin/audit/export?format=json&" + v.Export) } hx-boost="false" download>Export as JSON</a>
+		<p class="flex flex-wrap items-center gap-4">
+			<button class="rounded border px-3 py-1" type="button" data-download="/admin/audit/export" data-download-form="audit-filters" data-download-fields="format=csv" data-download-name="audit-log.csv" data-download-status="audit-export-status">Export as CSV</button>
+			<button class="rounded border px-3 py-1" type="button" data-download="/admin/audit/export" data-download-form="audit-filters" data-download-fields="format=json" data-download-name="audit-log.json" data-download-status="audit-export-status">Export as JSON</button>
+			<span id="audit-export-status" role="status"></span>
 		</p>
 		if len(v.Rows) == 0 {
 			<p>No entry matches.</p>

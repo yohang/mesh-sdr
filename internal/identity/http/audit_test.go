@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func TestAuditPages(t *testing.T) {
 		t.Errorf("page = %d %s", res.StatusCode, b)
 	}
 
-	res = root.do(http.MethodGet, "/admin/audit/export?format=csv", "", "", nil)
+	res = root.form("/admin/audit/export", url.Values{"format": {"csv"}}, false)
 	csv, _ := io.ReadAll(res.Body)
 
 	if res.StatusCode != http.StatusOK || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/csv") ||
@@ -48,14 +49,14 @@ func TestAuditPages(t *testing.T) {
 		}
 	}
 
-	res = root.do(http.MethodGet, "/admin/audit/export?format=json&action=auth.login.success", "", "", nil)
+	res = root.form("/admin/audit/export", url.Values{"format": {"json"}, "action": {"auth.login.success"}}, false)
 
 	var entries []map[string]any
 	if err := json.NewDecoder(res.Body).Decode(&entries); err != nil || len(entries) != 2 {
 		t.Errorf("json export = %v, %d entries", err, len(entries))
 	}
 
-	if res := root.do(http.MethodGet, "/admin/audit/export?format=xml", "", "", nil); res.StatusCode != http.StatusBadRequest {
+	if res := root.form("/admin/audit/export", url.Values{"format": {"xml"}}, false); res.StatusCode != http.StatusBadRequest {
 		t.Errorf("unknown format = %d", res.StatusCode)
 	}
 
