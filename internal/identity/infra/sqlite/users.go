@@ -1,0 +1,268 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/yohang/mesh-sdr/internal/db"
+	"github.com/yohang/mesh-sdr/internal/db/sqlite/sqlc"
+	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+)
+
+// IDGenerator returns new UUIDv7 surrogate keys (for user_roles rows).
+type IDGenerator interface {
+	New(now time.Time) (shared.UUID, error)
+}
+
+// Users is the SQLite UserRepository.
+type Users struct {
+	db  db.Adapter
+	ids IDGenerator
+}
+
+var _ domain.UserRepository = (*Users)(nil)
+
+// NewUsers returns the repository.
+func NewUsers(a db.Adapter, ids IDGenerator) *Users { return &Users{db: a, ids: ids} }
+
+// Add inserts the user, its identities and its role grants in one
+// transaction.
+func (r *Users) Add(ctx context.Context, u *domain.User) error {
+	return r.db.WithinTx(ctx, func(ctx context.Context) error {
+		q := sqlc.New(r.db.Writer(ctx))
+
+		err := q.InsertUser(ctx, sqlc.InsertUserParams{
+			ID:                 u.ID().Bytes(),
+			Username:           u.Username().String(),
+			Email:              nullString(u.Email().String()),
+			EmailVerifiedAt:    nullMS(u.EmailVerifiedAt()),
+			DisplayName:        nullString(u.DisplayName().String()),
+			PasswordHash:       nullString(u.PasswordHash().String()),
+			MustChangePassword: boolInt(u.MustChangePassword()),
+			Enabled:            boolInt(u.Enabled()),
+			FailedLoginCount:   int64(u.FailedLogins()),
+			LockedUntil:        nullMS(u.LockedUntil()),
+			LastLoginAt:        nullMS(u.LastLoginAt()),
+			Origin:             string(u.Origin()),
+			CreatedAt:          ms(u.CreatedAt()),
+			UpdatedAt:          ms(u.UpdatedAt()),
+			Version:            int64(u.Version()),
+		})
+		if err != nil {
+			return uniqueViolation(err, u)
+		}
+
+		for _, i := range u.Identities() {
+			if err := q.InsertUserIdentity(ctx, sqlc.InsertUserIdentityParams{
+				UserID: u.ID().Bytes(), Provider: i.Provider().String(), Subject: i.Subject(), CreatedAt: ms(u.CreatedAt()),
+			}); err != nil {
+				return fmt.Errorf("insert identity of user %s: %w", u.ID(), err)
+			}
+		}
+
+		for _, g := range u.Grants() {
+			id, err := r.ids.New(u.CreatedAt())
+			if err != nil {
+				return fmt.Errorf("role grant id: %w", err)
+			}
+
+			if err := q.InsertUserRole(ctx, sqlc.InsertUserRoleParams{
+				ID: id.Bytes(), UserID: u.ID().Bytes(), RoleID: int64(g.Role().ID()),
+				DeviceID: nullString(g.Device().String()), GrantedAt: ms(u.CreatedAt()),
+			}); err != nil {
+				return fmt.Errorf("insert role grant of user %s: %w", u.ID(), err)
+			}
+		}
+
+		return nil
+	})
+}
+
+func uniqueViolation(err error, u *domain.User) error {
+	msg := err.Error()
+
+	switch {
+	case strings.Contains(msg, "ux_users_username_lower"):
+		return domain.ErrUsernameTaken
+	case strings.Contains(msg, "ux_users_email_lower"):
+		return domain.ErrEmailTaken
+	default:
+		return fmt.Errorf("insert user %s: %w", u.ID(), err)
+	}
+}
+
+// Save updates the user's mutable fields when its version matches.
+func (r *Users) Save(ctx context.Context, u *domain.User) error {
+	n, err := sqlc.New(r.db.Writer(ctx)).UpdateUser(ctx, sqlc.UpdateUserParams{
+		Email:              nullString(u.Email().String()),
+		EmailVerifiedAt:    nullMS(u.EmailVerifiedAt()),
+		DisplayName:        nullString(u.DisplayName().String()),
+		PasswordHash:       nullString(u.PasswordHash().String()),
+		MustChangePassword: boolInt(u.MustChangePassword()),
+		Enabled:            boolInt(u.Enabled()),
+		FailedLoginCount:   int64(u.FailedLogins()),
+		LockedUntil:        nullMS(u.LockedUntil()),
+		LastLoginAt:        nullMS(u.LastLoginAt()),
+		UpdatedAt:          ms(u.UpdatedAt()),
+		ID:                 u.ID().Bytes(),
+		Version:            int64(u.Version()),
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "ux_users_email_lower") {
+			return domain.ErrEmailTaken
+		}
+
+		return fmt.Errorf("update user %s: %w", u.ID(), err)
+	}
+
+	if n == 0 {
+		return domain.ErrVersionConflict
+	}
+
+	u.Saved()
+
+	return nil
+}
+
+// ByID returns a user.
+func (r *Users) ByID(ctx context.Context, id domain.UserID) (*domain.User, error) {
+	q := sqlc.New(r.db.Reader(ctx))
+
+	return r.load(ctx, q, func() (sqlc.User, error) { return q.GetUserByID(ctx, id.Bytes()) })
+}
+
+// ByUsername returns a user by case-insensitive username.
+func (r *Users) ByUsername(ctx context.Context, name domain.Username) (*domain.User, error) {
+	q := sqlc.New(r.db.Reader(ctx))
+
+	return r.load(ctx, q, func() (sqlc.User, error) { return q.GetUserByUsername(ctx, name.String()) })
+}
+
+// ByLogin returns a user by username or, for a login containing '@', by
+// e-mail.
+func (r *Users) ByLogin(ctx context.Context, l domain.Login) (*domain.User, error) {
+	q := sqlc.New(r.db.Reader(ctx))
+
+	if l.IsEmail() {
+		return r.load(ctx, q, func() (sqlc.User, error) { return q.GetUserByEmail(ctx, l.String()) })
+	}
+
+	return r.load(ctx, q, func() (sqlc.User, error) { return q.GetUserByUsername(ctx, l.String()) })
+}
+
+// ByIdentity returns the user owning a login identity.
+func (r *Users) ByIdentity(ctx context.Context, i domain.Identity) (*domain.User, error) {
+	q := sqlc.New(r.db.Reader(ctx))
+
+	return r.load(ctx, q, func() (sqlc.User, error) {
+		return q.GetUserByIdentity(ctx, sqlc.GetUserByIdentityParams{Provider: i.Provider().String(), Subject: i.Subject()})
+	})
+}
+
+func (r *Users) load(ctx context.Context, q *sqlc.Queries, get func() (sqlc.User, error)) (*domain.User, error) {
+	row, err := get()
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, domain.ErrUserNotFound
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("load user: %w", err)
+	}
+
+	identities, err := q.ListUserIdentities(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load identities: %w", err)
+	}
+
+	roles, err := q.ListUserRoles(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load role grants: %w", err)
+	}
+
+	u, err := rehydrateUser(row, identities, roles)
+	if err != nil {
+		return nil, fmt.Errorf("rehydrate user %x: %w", row.ID, err)
+	}
+
+	return u, nil
+}
+
+func rehydrateUser(row sqlc.User, identities []sqlc.ListUserIdentitiesRow, roles []sqlc.ListUserRolesRow) (*domain.User, error) {
+	id, err := domain.UserIDFromBytes(row.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	name, err := domain.NewUsername(row.Username)
+	if err != nil {
+		return nil, err
+	}
+
+	s := domain.UserState{
+		ID: id, Username: name, EmailVerifiedAt: fromNullMS(row.EmailVerifiedAt),
+		MustChangePassword: row.MustChangePassword == 1, Enabled: row.Enabled == 1,
+		FailedLogins: int(row.FailedLoginCount), LockedUntil: fromNullMS(row.LockedUntil),
+		LastLoginAt: fromNullMS(row.LastLoginAt), Origin: domain.Origin(row.Origin),
+		CreatedAt: fromMS(row.CreatedAt), UpdatedAt: fromMS(row.UpdatedAt), Version: int(row.Version),
+	}
+
+	if row.Email.Valid {
+		if s.Email, err = domain.NewEmail(row.Email.String); err != nil {
+			return nil, err
+		}
+	}
+
+	if row.DisplayName.Valid {
+		if s.DisplayName, err = domain.NewDisplayName(row.DisplayName.String); err != nil {
+			return nil, err
+		}
+	}
+
+	// A malformed stored hash keeps the user loadable: it is left out, so
+	// password login fails for this account only (AUTH-017).
+	if row.PasswordHash.Valid {
+		s.PasswordHash, _ = domain.NewPasswordHash(row.PasswordHash.String)
+	}
+
+	for _, i := range identities {
+		p, err := domain.NewProviderID(i.Provider)
+		if err != nil {
+			return nil, err
+		}
+
+		ident, err := domain.NewIdentity(p, i.Subject)
+		if err != nil {
+			return nil, err
+		}
+
+		s.Identities = append(s.Identities, ident)
+	}
+
+	for _, g := range roles {
+		role, err := domain.RoleFromID(g.RoleID)
+		if err != nil {
+			return nil, err
+		}
+
+		var dev domain.DeviceID
+		if g.DeviceID.Valid {
+			if dev, err = domain.NewDeviceID(g.DeviceID.String); err != nil {
+				return nil, err
+			}
+		}
+
+		grant, err := domain.NewRoleGrant(role, dev)
+		if err != nil {
+			return nil, err
+		}
+
+		s.Grants = append(s.Grants, grant)
+	}
+
+	return domain.RehydrateUser(s)
+}
