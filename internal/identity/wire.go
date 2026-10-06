@@ -92,6 +92,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, IDs: d.IDs, Now: d.Now, Provider: local,
 		IPLimiter: memory.NewIPLimiter(loginIPEvery, loginIPBurst, memory.DefaultCapacity),
 		Unknown:   memory.NewThrottle(memory.DefaultCapacity),
+		Refusals:  memory.NewRefusalGate(memory.DefaultCapacity),
 		Throttle:  domain.DefaultThrottlePolicy(), SessionPolicy: domain.DefaultSessionPolicy(),
 		Logger: component(d.Logger, "identity.app.auth"),
 	})

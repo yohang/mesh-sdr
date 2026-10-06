@@ -52,6 +52,15 @@ type LoginThrottle interface {
 	Reset(key string)
 }
 
+// RefusalGate bounds the audit of refused logins: only the first refusal
+// of a key (client address, login identifier) within its blocking window
+// is audited, so that a flood cannot turn into a stream of audit writes.
+type RefusalGate interface {
+	// First reports whether this refusal of key, blocked until until, is
+	// the first one of its window.
+	First(key string, until, now time.Time) bool
+}
+
 // Credentials are what a user submits to a provider. The local provider
 // reads Login and Password.
 type Credentials struct {

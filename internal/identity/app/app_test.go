@@ -109,7 +109,7 @@ func newEnv(t *testing.T, ipLimiter app.IPLimiter) *env {
 
 	e.auth = app.NewAuth(app.AuthDeps{
 		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: a, IDs: ids, Now: c.Now, Provider: local,
-		IPLimiter: ipLimiter, Unknown: e.unknown, Throttle: domain.DefaultThrottlePolicy(),
+		IPLimiter: ipLimiter, Unknown: e.unknown, Refusals: memory.NewRefusalGate(100), Throttle: domain.DefaultThrottlePolicy(),
 		SessionPolicy: domain.DefaultSessionPolicy(), Logger: logger,
 	})
 	e.admin = app.NewUserAdmin(app.UserAdminDeps{
@@ -395,6 +395,58 @@ func TestLoginIPRateLimit(t *testing.T) {
 	if _, err := e.login("alice", password); !errors.Is(err, domain.ErrRateLimited) {
 		t.Errorf("6th attempt from one address: %v", err)
 	}
+}
+
+// A flood of refused logins writes one audit row per key and window.
+func TestRefusedLoginsAreAuditedOncePerWindow(t *testing.T) {
+	count := func(e *env, entry string) int {
+		n := 0
+		for _, a := range e.actions(t) {
+			if a == entry {
+				n++
+			}
+		}
+
+		return n
+	}
+
+	t.Run("address", func(t *testing.T) {
+		e := newEnv(t, memory.NewIPLimiter(time.Minute, 1, 100))
+		e.addUser(t, "alice", "", domain.RoleListener)
+
+		for range 20 {
+			_, _ = e.login("alice", password)
+		}
+
+		if n := count(e, domain.ActionLoginFailure+":ip_rate_limited"); n != 1 {
+			t.Errorf("%d audit rows for refused addresses, want 1", n)
+		}
+
+		e.clock.Advance(time.Minute)
+		_, _ = e.login("alice", password)
+		_, _ = e.login("alice", password)
+
+		if n := count(e, domain.ActionLoginFailure+":ip_rate_limited"); n != 2 {
+			t.Errorf("%d audit rows after a new window, want 2", n)
+		}
+	})
+
+	t.Run("account", func(t *testing.T) {
+		e := newEnv(t, nil)
+		e.addUser(t, "alice", "", domain.RoleListener)
+
+		for range 30 {
+			_, _ = e.login("alice", "wrong password!")
+		}
+
+		if n := count(e, domain.ActionLoginFailure+":throttled"); n != 1 {
+			t.Errorf("%d audit rows for throttled attempts, want 1", n)
+		}
+
+		if n := count(e, domain.ActionLoginFailure+":invalid_credentials"); n != 5 {
+			t.Errorf("%d audit rows for wrong passwords, want 5", n)
+		}
+	})
 }
 
 func TestLoginRehashesOutdatedHashes(t *testing.T) {

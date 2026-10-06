@@ -22,6 +22,7 @@ type Auth struct {
 	provider   Provider
 	ipLimit    IPLimiter
 	unknown    LoginThrottle
+	refusals   RefusalGate
 	throttle   domain.ThrottlePolicy
 	sessionPol domain.SessionPolicy
 	logger     *slog.Logger
@@ -38,6 +39,7 @@ type AuthDeps struct {
 	Provider      Provider
 	IPLimiter     IPLimiter
 	Unknown       LoginThrottle
+	Refusals      RefusalGate
 	Throttle      domain.ThrottlePolicy
 	SessionPolicy domain.SessionPolicy
 	Logger        *slog.Logger
@@ -47,7 +49,7 @@ type AuthDeps struct {
 func NewAuth(d AuthDeps) *Auth {
 	return &Auth{
 		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, ids: d.IDs, now: d.Now,
-		provider: d.Provider, ipLimit: d.IPLimiter, unknown: d.Unknown, throttle: d.Throttle,
+		provider: d.Provider, ipLimit: d.IPLimiter, unknown: d.Unknown, refusals: d.Refusals, throttle: d.Throttle,
 		sessionPol: d.SessionPolicy, logger: d.Logger,
 	}
 }
@@ -82,7 +84,7 @@ func (a *Auth) Login(ctx context.Context, in LoginInput) (LoginResult, error) {
 	now := a.now()
 
 	if ok, wait := a.ipLimit.Allow(in.Meta.IP, now); !ok {
-		a.auditFailure(ctx, in.Meta, nil, "ip_rate_limited")
+		a.refused(ctx, in.Meta, nil, "ip:"+in.Meta.IP.String(), now.Add(wait), "ip_rate_limited")
 
 		return LoginResult{}, domain.NewRateLimitError(wait)
 	}
@@ -107,7 +109,7 @@ func (a *Auth) Login(ctx context.Context, in LoginInput) (LoginResult, error) {
 	}
 
 	if r.blocked {
-		a.auditFailure(ctx, in.Meta, known, "throttled")
+		a.refused(ctx, in.Meta, known, "login:"+login.Key(), r.until, "throttled")
 
 		return LoginResult{}, domain.NewRateLimitError(r.until.Sub(now))
 	}
@@ -285,6 +287,18 @@ func (a *Auth) revokePrevious(ctx context.Context, cookie string, now time.Time)
 	}
 
 	return nil
+}
+
+// refused audits a rate-limited login the first time per key and window;
+// later refusals of the window are only logged at Debug.
+func (a *Auth) refused(ctx context.Context, meta RequestMeta, u *domain.User, key string, until time.Time, reason string) {
+	if a.refusals.First(key, until, a.now()) {
+		a.auditFailure(ctx, meta, u, reason)
+
+		return
+	}
+
+	a.logger.DebugContext(ctx, "login refused (already audited in this window)", slog.String("reason", reason))
 }
 
 // auditFailure records a failed login. Audit failures of failed logins are

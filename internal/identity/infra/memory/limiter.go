@@ -169,3 +169,29 @@ func (t *Throttle) Reset(key string) {
 
 	t.cache.remove(key)
 }
+
+// RefusalGate remembers, per key, the end of the window whose first refusal
+// was audited (app.RefusalGate).
+type RefusalGate struct {
+	mu    sync.Mutex
+	cache *lru[string, time.Time]
+}
+
+// NewRefusalGate returns a gate holding at most capacity keys.
+func NewRefusalGate(capacity int) *RefusalGate {
+	return &RefusalGate{cache: newLRU[string, time.Time](capacity)}
+}
+
+// First reports whether this refusal opens a new window for key.
+func (g *RefusalGate) First(key string, until, now time.Time) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if end, ok := g.cache.get(key); ok && end.After(now) {
+		return false
+	}
+
+	g.cache.put(key, until)
+
+	return true
+}

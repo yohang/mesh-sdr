@@ -119,3 +119,23 @@ func TestThrottle(t *testing.T) {
 		t.Errorf("throttle not bounded: %d", th.cache.len())
 	}
 }
+
+func TestRefusalGate(t *testing.T) {
+	g := NewRefusalGate(10)
+
+	if !g.First("ip:x", t0.Add(time.Minute), t0) {
+		t.Error("first refusal not reported")
+	}
+
+	if g.First("ip:x", t0.Add(2*time.Minute), t0.Add(30*time.Second)) {
+		t.Error("second refusal of the window reported")
+	}
+
+	if !g.First("ip:y", t0.Add(time.Minute), t0) {
+		t.Error("another key shares the window")
+	}
+
+	if !g.First("ip:x", t0.Add(3*time.Minute), t0.Add(time.Minute)) {
+		t.Error("refusal of the next window not reported")
+	}
+}
