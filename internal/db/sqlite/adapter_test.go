@@ -195,6 +195,11 @@ func TestCheck(t *testing.T) {
 
 		_ = a.Migrator().Check(ctx)
 
+		statuses, err := a.Migrator().Status(ctx)
+		if err != nil || len(statuses) != 1 || statuses[0].Applied || statuses[0].Name != "00001_a.sql" {
+			t.Fatalf("Status = %+v, %v", statuses, err)
+		}
+
 		var n int
 		if err := a.Reader(ctx).QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema").Scan(&n); err != nil {
 			t.Fatal(err)

@@ -68,8 +68,25 @@ func TestHubLifecycle(t *testing.T) {
 	}
 
 	r = run(t, ctx, nil, "-c", dir, "hub", "migrate", "status")
-	if r.code != ExitOK || !strings.Contains(r.stdout, "pending") {
-		t.Fatalf("migrate status = %+v", r)
+	if r.code != ExitFailure || !strings.Contains(r.stdout, "00001_init.sql") || !strings.Contains(r.stdout, "schema: migrations_pending") {
+		t.Fatalf("migrate status on a fresh database = %+v", r)
+	}
+
+	r = run(t, ctx, env, "--json", "hub", "migrate", "status")
+
+	var status struct {
+		Migrations []struct {
+			Name    string `json:"name"`
+			Applied bool   `json:"applied"`
+		} `json:"migrations"`
+		Schema struct {
+			OK   bool   `json:"ok"`
+			Code string `json:"code"`
+		} `json:"schema"`
+	}
+	if r.code != ExitFailure || json.Unmarshal([]byte(r.stdout), &status) != nil ||
+		status.Schema.OK || status.Schema.Code != "migrations_pending" || len(status.Migrations) != 1 || status.Migrations[0].Applied {
+		t.Fatalf("migrate status --json = %+v (%+v)", r, status)
 	}
 
 	r = run(t, ctx, env, "hub", "migrate")
@@ -85,8 +102,13 @@ func TestHubLifecycle(t *testing.T) {
 	}
 
 	r = run(t, ctx, env, "hub", "migrate", "status")
-	if r.code != ExitOK || !strings.Contains(r.stdout, "schema: up to date") {
+	if r.code != ExitOK || !strings.Contains(r.stdout, "schema: up to date") || !strings.Contains(r.stdout, "applied 20") {
 		t.Fatalf("migrate status = %+v", r)
+	}
+
+	r = run(t, ctx, env, "--json", "hub", "migrate", "status")
+	if r.code != ExitOK || json.Unmarshal([]byte(r.stdout), &status) != nil || !status.Schema.OK || !status.Migrations[0].Applied {
+		t.Fatalf("migrate status --json = %+v (%+v)", r, status)
 	}
 
 	// The hub now starts, and stops gracefully when its context ends.

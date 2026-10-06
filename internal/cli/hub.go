@@ -203,29 +203,50 @@ func (a *app) migrateStatus(ctx context.Context) error {
 		checkErr := m.Check(ctx)
 
 		if a.json {
-			out := make([]migrationJSON, 0, len(statuses))
+			out := statusJSON{Migrations: make([]migrationJSON, 0, len(statuses)), Schema: schemaJSON{OK: checkErr == nil}}
 			for _, s := range statuses {
-				out = append(out, migrationJSON{Version: s.Version, Name: s.Name, Applied: s.Applied, AppliedAt: s.AppliedAt})
+				out.Migrations = append(out.Migrations, migrationJSON{Version: s.Version, Name: s.Name, Applied: s.Applied, AppliedAt: s.AppliedAt})
 			}
 
-			return a.printJSON(out)
-		}
-
-		for _, s := range statuses {
-			state := "pending"
-			if s.Applied {
-				state = "applied " + s.AppliedAt.UTC().Format(time.RFC3339)
+			if checkErr != nil {
+				out.Schema.Code, out.Schema.Message = errorCode(checkErr), checkErr.Error()
 			}
 
-			a.print("%-40s %s", s.Name, state)
+			if err := a.printJSON(out); err != nil {
+				return err
+			}
+		} else {
+			for _, s := range statuses {
+				state := "pending"
+				if s.Applied {
+					state = "applied " + s.AppliedAt.UTC().Format(time.RFC3339)
+				}
+
+				a.print("%-40s %s", s.Name, state)
+			}
+
+			if checkErr == nil {
+				a.print("schema: up to date")
+			} else {
+				a.print("schema: %s", errorCode(checkErr))
+			}
 		}
 
 		if checkErr != nil {
-			a.print("schema: %v", checkErr)
-		} else {
-			a.print("schema: up to date")
+			return fmt.Errorf("schema is not current: %w", checkErr)
 		}
 
 		return nil
 	})
+}
+
+type statusJSON struct {
+	Migrations []migrationJSON `json:"migrations"`
+	Schema     schemaJSON      `json:"schema"`
+}
+
+type schemaJSON struct {
+	OK      bool   `json:"ok"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
 }

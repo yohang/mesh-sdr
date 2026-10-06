@@ -152,21 +152,78 @@ func (m *Migrator) down(ctx context.Context) (db.MigrationResult, error) {
 	return db.MigrationResult{Version: r.Source.Version, Name: path.Base(r.Source.Path), Duration: r.Duration}, nil
 }
 
-// Status implements db.Migrator.
+// Status implements db.Migrator. Like Check, it only reads through the
+// read-only pool: unlike goose's Status, it never creates the version table.
 func (m *Migrator) Status(ctx context.Context) ([]db.MigrationStatus, error) {
-	statuses, err := m.provider.Status(ctx)
+	appliedAt := map[int64]time.Time{}
+
+	exists, err := tableExists(ctx, m.reader, versionTable)
 	if err != nil {
-		return nil, fmt.Errorf("sqlite: migrate status: %w", err)
+		return nil, err
 	}
 
-	out := make([]db.MigrationStatus, 0, len(statuses))
-	for _, s := range statuses {
+	if exists {
+		appliedAt, err = applyTimes(ctx, m.reader)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	sources := m.provider.ListSources()
+	out := make([]db.MigrationStatus, 0, len(sources))
+
+	for _, src := range sources {
+		at, applied := appliedAt[src.Version]
 		out = append(out, db.MigrationStatus{
-			Version:   s.Source.Version,
-			Name:      path.Base(s.Source.Path),
-			Applied:   s.State == goose.StateApplied,
-			AppliedAt: s.AppliedAt,
+			Version:   src.Version,
+			Name:      path.Base(src.Path),
+			Applied:   applied,
+			AppliedAt: at,
 		})
+	}
+
+	return out, nil
+}
+
+// applyTimes returns when each applied version was applied.
+func applyTimes(ctx context.Context, q *sql.DB) (map[int64]time.Time, error) {
+	rows, err := q.QueryContext(ctx,
+		"SELECT version_id, MAX(tstamp) FROM "+versionTable+" WHERE version_id > 0 AND is_applied GROUP BY version_id")
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: read applied migrations: %w", err)
+	}
+
+	defer func() { _ = rows.Close() }()
+
+	out := map[int64]time.Time{}
+
+	for rows.Next() {
+		var (
+			v  int64
+			ts any
+		)
+
+		if err := rows.Scan(&v, &ts); err != nil {
+			return nil, fmt.Errorf("sqlite: read applied migrations: %w", err)
+		}
+
+		switch t := ts.(type) {
+		case time.Time:
+			out[v] = t.UTC()
+		case string:
+			parsed, err := time.Parse(time.DateTime, t)
+			if err != nil {
+				return nil, fmt.Errorf("sqlite: applied time of migration %d: %w", v, err)
+			}
+
+			out[v] = parsed
+		default:
+			out[v] = time.Time{}
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlite: read applied migrations: %w", err)
 	}
 
 	return out, nil
