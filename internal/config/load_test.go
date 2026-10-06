@@ -571,3 +571,34 @@ func TestSMTP(t *testing.T) {
 		t.Errorf("explicitly insecure relay refused: %v", err)
 	}
 }
+
+// The operator key of the public listener must be a 0600 file.
+func TestGatewayKeyFileMode(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"hub.toml": minimalHub + "[gateway]\ntls_mode = \"files\"\ntls_cert = \"tls/pub.pem\"\ntls_key = \"tls/pub.key\"\n",
+		"tls/pub.pem": "cert", "tls/pub.key": "key",
+	})
+
+	if _, _, err := LoadHub(Options{Dir: dir, Env: map[string]string{}}); err != nil {
+		t.Fatalf("0600 key: %v", err)
+	}
+
+	if err := os.Chmod(filepath.Join(dir, "tls", "pub.key"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := LoadHub(Options{Dir: dir, Env: map[string]string{}})
+
+	var cerr *Error
+	if !errors.As(err, &cerr) || cerr.Problems[0].Code != CodeInsecureSecretFile || cerr.Problems[0].Key != "gateway.tls_key" {
+		t.Fatalf("world-readable key: %v", err)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "tls", "pub.key")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := LoadHub(Options{Dir: dir, Env: map[string]string{}}); !errors.As(err, &cerr) || cerr.Problems[0].Key != "gateway.tls_key" {
+		t.Fatalf("missing key: %v", err)
+	}
+}

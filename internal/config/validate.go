@@ -9,6 +9,7 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -245,6 +246,8 @@ func (c *checker) gateway(h *Hub) {
 
 		if g.TLSKey == "" {
 			c.fail("gateway.tls_key", CodeRequired, "gateway.tls_key is required with gateway.tls_mode = files")
+		} else {
+			c.privateKeyFile("gateway.tls_key", g.TLSKey)
 		}
 	}
 
@@ -276,6 +279,21 @@ func (c *checker) gateway(h *Hub) {
 
 	if g.MaxBody.Bytes() < 64<<10 {
 		c.fail("gateway.max_body", CodeInvalidValue, "want at least 64KiB")
+	}
+}
+
+// privateKeyFile checks that a private key file exists and is readable by
+// its owner only (mode 0600 or stricter).
+func (c *checker) privateKeyFile(key, path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		c.fail(key, CodeInvalidValue, fmt.Sprintf("cannot read %s: %v", path, err))
+
+		return
+	}
+
+	if info.Mode().Perm()&0o077 != 0 {
+		c.fail(key, CodeInsecureSecretFile, fmt.Sprintf("%s has mode %04o, want 0600", path, info.Mode().Perm()))
 	}
 }
 
