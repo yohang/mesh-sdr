@@ -47,6 +47,9 @@ templ Document(s Shell, p Page, content templ.Component) {
 					</a>
 					@mainNav(s.Nav, p.Section)
 					<div class="ml-auto flex items-center gap-3 text-sm">
+						<msdr-utc-clock class="whitespace-nowrap font-mono tabular-nums text-fg-muted">
+							<time datetime={ s.ClockDateTime() }>{ s.ClockText() }</time> UTC
+						</msdr-utc-clock>
 						@userMenu(s.User)
 					</div>
 				</div>

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -25,12 +26,16 @@ type ShellSource struct {
 	lookAndFeel *app.LookAndFeel
 	nav         *app.Navigation
 	user        func(r *http.Request) *layout.User
+	now         func() time.Time
 }
 
 // NewShellSource returns a ShellSource. user returns the signed-in user of
-// a request for the top bar (nil: anonymous) and may be nil.
-func NewShellSource(lookAndFeel *app.LookAndFeel, nav *app.Navigation, user func(r *http.Request) *layout.User) *ShellSource {
-	return &ShellSource{lookAndFeel: lookAndFeel, nav: nav, user: user}
+// a request for the top bar (nil: anonymous) and may be nil. now is the
+// clock of the top bar.
+func NewShellSource(lookAndFeel *app.LookAndFeel, nav *app.Navigation, user func(r *http.Request) *layout.User,
+	now func() time.Time,
+) *ShellSource {
+	return &ShellSource{lookAndFeel: lookAndFeel, nav: nav, user: user, now: now}
 }
 
 // Shell implements render.ShellSource.
@@ -62,6 +67,7 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 		Theme:       theme,
 		FooterLinks: []layout.Link{{Label: "Usage policy", Href: v.PolicyURL}},
 		Nav:         nav,
+		Now:         s.now(),
 	}
 }
 

@@ -5,6 +5,7 @@ package shell
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/shell/app"
 	"github.com/yohang/mesh-sdr/internal/shell/domain"
@@ -26,6 +27,8 @@ type Deps struct {
 	// User returns the signed-in user of a request for the top bar (nil:
 	// anonymous). Optional.
 	User func(r *http.Request) *layout.User
+	// Now is the clock (time.Now when nil).
+	Now func() time.Time
 }
 
 // Module is the wired shell module.
@@ -53,7 +56,12 @@ func Wire(d Deps) Module {
 		domain.SectionFiles:    app.Everyone,
 		domain.SectionAdmin:    d.AdminGate,
 	})
-	source := shellhttp.NewShellSource(lookAndFeel, nav, d.User)
+	now := d.Now
+	if now == nil {
+		now = time.Now
+	}
+
+	source := shellhttp.NewShellSource(lookAndFeel, nav, d.User, now)
 	rd := render.New(source, component("web.render"))
 
 	return Module{

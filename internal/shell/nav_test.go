@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/shell"
@@ -114,5 +115,20 @@ func TestSectionPages(t *testing.T) {
 				t.Error("boosted navigation did not get the full page")
 			}
 		})
+	}
+}
+
+// TestUTCClock covers the top bar clock: HH:MM UTC of the render time, with
+// a machine-readable datetime, not a live region.
+func TestUTCClock(t *testing.T) {
+	now := func() time.Time { return time.Date(2026, 10, 6, 21, 7, 59, 0, time.FixedZone("CEST", 2*3600)) }
+	m := shell.Wire(shell.Deps{Settings: values{}, Now: now, Logger: discard})
+	h := httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP)
+
+	_, body := do(t, h, http.MethodGet, "/policy", nil)
+
+	want := `<msdr-utc-clock class="whitespace-nowrap font-mono tabular-nums text-fg-muted"><time datetime="2026-10-06T19:07Z">19:07</time> UTC</msdr-utc-clock>`
+	if !strings.Contains(body, want) {
+		t.Errorf("body lacks %s", want)
 	}
 }

@@ -8,6 +8,8 @@
 // expressions, no templ css/script components.
 package layout
 
+import "time"
+
 // Theme is the theme mode the shell renders (UI-001, UI-008).
 type Theme string
 
@@ -61,6 +63,9 @@ type Shell struct {
 	// Nav are the top-level sections the visitor may open, in order
 	// (UI-006). Below 768 px the same nav is the bottom tab bar.
 	Nav []Link
+	// Now is the render time, shown by the UTC clock until its island
+	// takes over (UI-006, RX-034).
+	Now time.Time
 	// User is the signed-in visitor of the user menu (UI-010); nil for an
 	// anonymous visitor, who gets a "Sign in" link.
 	User *User
@@ -108,3 +113,10 @@ func (s Shell) DocumentTitle(p Page) string {
 
 	return p.Title + " · " + s.SiteName
 }
+
+// ClockText returns the UTC clock text (HH:MM) of the render time.
+func (s Shell) ClockText() string { return s.Now.UTC().Format("15:04") }
+
+// ClockDateTime returns the datetime attribute of the UTC clock (a valid
+// global date and time string, to the minute).
+func (s Shell) ClockDateTime() string { return s.Now.UTC().Format("2006-01-02T15:04Z") }
