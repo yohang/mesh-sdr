@@ -193,7 +193,7 @@ sample_rates = [2_048_000]
 		t.Fatal(err)
 	}
 
-	p, g, err := newHub(context.Background(), hubCfg, quiet, adapter, time.Now, timings, tweaks...)
+	p, g, err := newHub(context.Background(), hubCfg, config.Origins{}, quiet, adapter, time.Now, timings, tweaks...)
 	if err != nil {
 		t.Fatal(err)
 	}

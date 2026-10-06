@@ -25,6 +25,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/http/api"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
+	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shell"
 )
@@ -151,18 +153,26 @@ func UserAdmin(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) *identit
 // Hub builds the hub: web UI and REST API on hub.listen, backed by adapter,
 // the session reaper and the grid. The caller checks the schema version before (see
 // db.Migrator.Check).
-func Hub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Adapter) (*Process, error) {
-	p, _, err := newHub(ctx, cfg, logger, adapter, time.Now, gridapp.DefaultTimings())
+func Hub(ctx context.Context, cfg config.Hub, origins config.Origins, logger *slog.Logger, adapter db.Adapter) (*Process, error) {
+	p, _, err := newHub(ctx, cfg, origins, logger, adapter, time.Now, gridapp.DefaultTimings())
 
 	return p, err
 }
 
-func newHub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now func() time.Time,
-	timings gridapp.Timings, tweaks ...func(*control.HubOptions),
+func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger *slog.Logger, adapter db.Adapter,
+	now func() time.Time, timings gridapp.Timings, tweaks ...func(*control.HubOptions),
 ) (*Process, *hubGrid, error) {
 	g, err := newHubGrid(cfg, logger, adapter, now, timings, tweaks...)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	settingsModule, err := settings.Wire(ctx, settings.Deps{
+		Config: cfg, Origins: origins, DB: adapter, Now: now, Logger: logger,
+		Audit: settingsAuditor{log: identitysqlite.NewAuditLog(adapter)},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("settings: %w", err)
 	}
 
 	shellModule := shell.Wire(shell.Deps{Settings: cfg.Settings, Logger: logger})
@@ -173,9 +183,10 @@ func newHub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db
 	}
 
 	apiServer := api.Server{
-		HealthHandlers: api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
-		AuthHandlers:   api.NewAuthHandlers(idm.HTTP),
-		GridHandlers:   api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
+		HealthHandlers:   api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
+		AuthHandlers:     api.NewAuthHandlers(idm.HTTP),
+		GridHandlers:     api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
+		SettingsHandlers: api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
 	}
 
 	router := httpserver.NewRouter(

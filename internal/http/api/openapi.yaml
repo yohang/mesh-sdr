@@ -351,6 +351,152 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /settings:
+    get:
+      operationId: getSettings
+      x-meshsdr-access: admin
+      summary: Every setting with its effective value, source and lock (ADM-002)
+      description: |
+        Each setting is resolved with the precedence config (locked) > DB >
+        default. A key set in hub.toml or the env is locked: writes answer
+        409 `setting_locked`. Secret values are never returned (`set`
+        only). The ETag is the settings revision.
+      tags: [settings]
+      responses:
+        "200":
+          description: Settings
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsList"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: patchSettings
+      x-meshsdr-access: admin
+      summary: Write settings atomically (ADM-002)
+      description: |
+        `values` maps keys to new values; `null` resets a key to its
+        default. `versions` gives, per key, the version last read (`0`
+        when the key had no DB value): a stale version answers 409
+        `version_conflict`. Invalid values answer 422 `invalid_setting`
+        with one entry per key in `errors`. A locked key answers 409
+        `setting_locked`. Nothing is written unless every change is valid.
+      tags: [settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsPatch"
+      responses:
+        "200":
+          description: Settings after the write
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsList"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /settings/{key}:
+    delete:
+      operationId: deleteSetting
+      x-meshsdr-access: admin
+      summary: Reset a setting to its default (same as PATCH with null)
+      tags: [settings]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 160
+        - name: version
+          in: query
+          description: Version last read (0 when the key had no DB value). Omitted, any version is reset.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        "204":
+          description: Reset
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /settings/schema:
+    get:
+      operationId: getSettingsSchema
+      x-meshsdr-access: admin
+      summary: JSON Schema of the settings namespace
+      description: |
+        The [settings] table of hub.toml: property paths are the setting
+        keys. Annotations: `lockable`, `secret`, `x-scope`, `x-apply`,
+        `x-public`, `x-widget`, `x-label`, `x-min-duration`,
+        `x-max-duration`.
+      tags: [settings]
+      responses:
+        "200":
+          description: JSON Schema (draft 2020-12)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          $ref: "#/components/responses/Problem"
+  /settings/public:
+    get:
+      operationId: getPublicSettings
+      x-meshsdr-access: anonymous
+      summary: Public settings (look and feel, station information)
+      tags: [settings]
+      responses:
+        "200":
+          description: Effective values of the public keys, by key
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        default:
+          $ref: "#/components/responses/Problem"
+  /config/effective:
+    get:
+      operationId: getEffectiveConfig
+      x-meshsdr-access: admin
+      summary: Effective configuration with sources, secrets masked (ADM-010)
+      tags: [settings]
+      parameters:
+        - name: download
+          in: query
+          description: Send the document as an attachment.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Every config key and setting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EffectiveConfig"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     NodeID:
@@ -771,6 +917,112 @@ components:
           example: required
         message:
           type: string
+    SettingsList:
+      type: object
+      required: [revision, settings]
+      properties:
+        revision:
+          type: integer
+          format: int64
+          description: Settings revision (also the ETag).
+        settings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Setting"
+    Setting:
+      type: object
+      required: [key, source, origin, locked, version, secret, public, apply, label]
+      properties:
+        key:
+          type: string
+          example: ui.theme_mode
+        value:
+          description: Effective value. Absent for secrets.
+        set:
+          type: boolean
+          description: Secrets only. Whether a value is set.
+        default:
+          description: Built-in default. Absent for secrets.
+        source:
+          type: string
+          enum: [cfg, db, default]
+        origin:
+          type: string
+          description: '"hub.toml:42", "env:MESHSDR_…", "db" or "default".'
+        locked:
+          type: boolean
+        version:
+          type: integer
+          format: int64
+          description: Version of the DB value (0 when there is none), to send back on writes.
+        shadowed_value:
+          description: DB value hidden by a config value ("overridden by config"). Absent for secrets.
+        secret:
+          type: boolean
+        public:
+          type: boolean
+        apply:
+          type: string
+          enum: [live, restart]
+        label:
+          type: string
+        description:
+          type: string
+    SettingsPatch:
+      type: object
+      additionalProperties: false
+      required: [values]
+      properties:
+        values:
+          type: object
+          description: New values by key; null resets a key to its default.
+          additionalProperties: {}
+        versions:
+          type: object
+          description: Version last read, by key (0 when the key had no DB value).
+          additionalProperties:
+            type: integer
+            format: int64
+            minimum: 0
+    EffectiveConfig:
+      type: object
+      required: [generated_at, revision, entries]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        revision:
+          type: integer
+          format: int64
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConfigEntry"
+    ConfigEntry:
+      type: object
+      required: [key, class, source, origin, locked, secret]
+      properties:
+        key:
+          type: string
+          description: Dotted key; settings keys keep their hub.toml name (settings.…).
+        class:
+          type: string
+          enum: [cfg, db]
+          description: cfg for config-only keys, db for settings (lockable).
+        value:
+          description: Effective value. Absent for secrets.
+        set:
+          type: boolean
+          description: Secrets only.
+        source:
+          type: string
+          enum: [cfg, db, default]
+        origin:
+          type: string
+        locked:
+          type: boolean
+        secret:
+          type: boolean
   responses:
     Problem:
       description: Error

@@ -33,27 +33,27 @@ func (a *app) newHubCmd() *cobra.Command {
 }
 
 // loadHub loads the hub config and builds the logger.
-func (a *app) loadHub(ctx context.Context) (config.Hub, *slog.Logger, error) {
+func (a *app) loadHub(ctx context.Context) (config.Hub, config.Meta, *slog.Logger, error) {
 	cfg, meta, err := config.LoadHub(a.configOptions())
 	if err != nil {
-		return config.Hub{}, nil, err
+		return config.Hub{}, meta, nil, err
 	}
 
 	logger, err := a.newLogger(cfg.Log)
 	if err != nil {
-		return config.Hub{}, nil, err
+		return config.Hub{}, meta, nil, err
 	}
 
 	logConfig(ctx, logger, config.RoleHub, meta)
 
-	return cfg, logger, nil
+	return cfg, meta, logger, nil
 }
 
 func (a *app) runHub(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, logger, err := a.loadHub(ctx)
+	cfg, meta, logger, err := a.loadHub(ctx)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func (a *app) runHub(ctx context.Context) error {
 
 	logger.InfoContext(ctx, "hub starting", slog.String("listen", cfg.Hub.Listen), slog.String("url", cfg.Hub.URL))
 
-	hub, err := wire.Hub(ctx, cfg, logger, adapter)
+	hub, err := wire.Hub(ctx, cfg, meta.Origins, logger, adapter)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func (a *app) newMigrateCmd() *cobra.Command {
 
 // withMigrator opens the hub database and calls fn with its migrator.
 func (a *app) withMigrator(ctx context.Context, fn func(db.Migrator, *slog.Logger) error) error {
-	cfg, logger, err := a.loadHub(ctx)
+	cfg, _, logger, err := a.loadHub(ctx)
 	if err != nil {
 		return err
 	}

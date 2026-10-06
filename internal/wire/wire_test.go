@@ -59,7 +59,7 @@ func hub(t *testing.T, cfg config.Hub, a db.Adapter) *wire.Process {
 	cfg.Hub.AllowInsecureURL = true
 	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
 
-	p, err := wire.Hub(context.Background(), cfg, discard, a)
+	p, err := wire.Hub(context.Background(), cfg, config.Origins{}, discard, a)
 	if err != nil {
 		t.Fatal(err)
 	}
