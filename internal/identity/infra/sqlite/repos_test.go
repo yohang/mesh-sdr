@@ -17,12 +17,16 @@ func open(t *testing.T) repotest.Repos {
 	a := dbtest.NewSQLite(t)
 
 	return repotest.Repos{
-		Users:    sqlite.NewUsers(a, shared.NewUUIDv7Generator()),
-		Sessions: sqlite.NewSessions(a),
-		Audit:    sqlite.NewAuditLog(a),
+		Users:        sqlite.NewUsers(a, shared.NewUUIDv7Generator()),
+		Sessions:     sqlite.NewSessions(a),
+		Audit:        sqlite.NewAuditLog(a),
+		Invitations:  sqlite.NewInvitations(a),
+		Resets:       sqlite.NewPasswordResets(a),
+		EmailChanges: sqlite.NewEmailChanges(a),
 	}
 }
 
+func TestAccounts(t *testing.T) { repotest.RunAccounts(t, open) }
 func TestUsers(t *testing.T)    { repotest.RunUsers(t, open) }
 func TestSessions(t *testing.T) { repotest.RunSessions(t, open) }
 func TestAudit(t *testing.T)    { repotest.RunAudit(t, open) }

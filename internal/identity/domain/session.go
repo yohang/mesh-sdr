@@ -336,6 +336,15 @@ func (s *Session) RevokedAt() time.Time { return s.revokedAt }
 // RevokeReason returns why the session was revoked.
 func (s *Session) RevokeReason() RevokeReason { return s.revokeReason }
 
+// Ref returns the public handle of the session: what users and admins see
+// to revoke it, and the `sid` claim of access tokens. The session id itself
+// is never sent to clients (§7.1).
+func (s *Session) Ref() string {
+	h := sha256.Sum256(append([]byte("rx-sid:"), s.id.Bytes()...))
+
+	return base64.RawURLEncoding.EncodeToString(h[:16])
+}
+
 // Persistent reports whether the session was opened with "remember me": its
 // absolute lifetime exceeds the policy's plain lifetime.
 func (s *Session) Persistent(p SessionPolicy) bool {

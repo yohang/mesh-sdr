@@ -55,19 +55,25 @@ func component(l *slog.Logger, name string) *slog.Logger {
 }
 
 type repos struct {
-	users    *sqlite.Users
-	sessions *sqlite.Sessions
-	audit    *sqlite.AuditLog
-	hasher   *argon2.Hasher
+	users        *sqlite.Users
+	sessions     *sqlite.Sessions
+	audit        *sqlite.AuditLog
+	invitations  *sqlite.Invitations
+	resets       *sqlite.PasswordResets
+	emailChanges *sqlite.EmailChanges
+	hasher       *argon2.Hasher
 }
 
 func newRepos(d Deps) repos {
 	a := d.Config.Auth.Argon2
 
 	return repos{
-		users:    sqlite.NewUsers(d.DB, d.IDs),
-		sessions: sqlite.NewSessions(d.DB),
-		audit:    sqlite.NewAuditLog(d.DB),
+		users:        sqlite.NewUsers(d.DB, d.IDs),
+		sessions:     sqlite.NewSessions(d.DB),
+		audit:        sqlite.NewAuditLog(d.DB),
+		invitations:  sqlite.NewInvitations(d.DB),
+		resets:       sqlite.NewPasswordResets(d.DB),
+		emailChanges: sqlite.NewEmailChanges(d.DB),
 		hasher: argon2.New(argon2.Params{MemoryKiB: a.MemoryKiB, Iterations: a.Iterations, Parallelism: a.Parallelism},
 			runtime.GOMAXPROCS(0), hashQueuePerCPU*runtime.GOMAXPROCS(0)),
 	}
@@ -113,7 +119,9 @@ type Module struct {
 	// the hub's jobs scheduler.
 	Reaper      *app.SessionReaper
 	AuditPurger *app.AuditPurger
-	HTTP        *identityhttp.Module
+	// Purges delete ended invitations and one-time tokens.
+	Purges []*app.PurgeJob
+	HTTP   *identityhttp.Module
 }
 
 // Wire builds the identity module. pages renders the login page in the
@@ -178,5 +186,10 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Reaper:      app.NewSessionReaper(r.sessions, retention, d.Now),
 		AuditPurger: app.NewAuditPurger(r.audit, retention, d.Now),
 		HTTP:        h,
+		Purges: []*app.PurgeJob{
+			app.NewPurgeJob(app.JobInvitationsPurge, app.InvitationRetention, r.invitations, d.Now),
+			app.NewPurgeJob(app.JobResetTokensPurge, app.TokenRetention, r.resets, d.Now),
+			app.NewPurgeJob(app.JobEmailTokensPurge, app.TokenRetention, r.emailChanges, d.Now),
+		},
 	}, nil
 }

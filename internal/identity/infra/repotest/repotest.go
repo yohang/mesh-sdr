@@ -17,14 +17,18 @@ import (
 // AuditReader is the audit repository with its read side.
 type AuditReader interface {
 	domain.AuditLog
+	domain.AuditReader
 	Recent(ctx context.Context, limit int) ([]domain.AuditEntry, error)
 }
 
 // Repos are the repositories of one fresh, migrated database.
 type Repos struct {
-	Users    domain.UserRepository
-	Sessions domain.SessionRepository
-	Audit    AuditReader
+	Users        domain.UserRepository
+	Sessions     domain.SessionRepository
+	Audit        AuditReader
+	Invitations  domain.InvitationRepository
+	Resets       domain.PasswordResetRepository
+	EmailChanges domain.EmailChangeRepository
 }
 
 // Factory opens fresh repositories for a test.

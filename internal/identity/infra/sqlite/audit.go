@@ -16,7 +16,10 @@ import (
 // trigger that aborts any UPDATE.
 type AuditLog struct{ db db.Adapter }
 
-var _ domain.AuditLog = (*AuditLog)(nil)
+var (
+	_ domain.AuditLog    = (*AuditLog)(nil)
+	_ domain.AuditReader = (*AuditLog)(nil)
+)
 
 // NewAuditLog returns the repository.
 func NewAuditLog(a db.Adapter) *AuditLog { return &AuditLog{db: a} }
@@ -81,45 +84,9 @@ func (r *AuditLog) Recent(ctx context.Context, limit int) ([]domain.AuditEntry, 
 	out := make([]domain.AuditEntry, 0, len(rows))
 
 	for _, row := range rows {
-		var actor domain.Actor
-
-		ip := parseIP(row.ActorIp)
-
-		switch domain.ActorKind(row.ActorKind) {
-		case domain.ActorUser:
-			id, err := domain.UserIDFromBytes(row.ActorUserID)
-			if err != nil {
-				return nil, fmt.Errorf("audit entry %d: %w", row.ID, err)
-			}
-
-			actor = domain.UserActor(id, ip)
-		case domain.ActorAnonymous:
-			actor = domain.AnonymousActor(ip)
-		case domain.ActorCLI:
-			actor = domain.CLIActor()
-		default:
-			actor = domain.SystemActor()
-		}
-
-		e, err := domain.NewAuditEntry(fromMS(row.At), actor, row.Action, domain.AuditResult(row.Result))
+		e, err := auditEntry(row)
 		if err != nil {
-			return nil, fmt.Errorf("audit entry %d: %w", row.ID, err)
-		}
-
-		e = e.WithTarget(row.TargetType.String, row.TargetID.String).WithRequestID(row.RequestID.String)
-
-		if row.Before.Valid {
-			var m map[string]string
-			if err := json.Unmarshal([]byte(row.Before.String), &m); err == nil {
-				e = e.WithBefore(m)
-			}
-		}
-
-		if row.After.Valid {
-			var m map[string]string
-			if err := json.Unmarshal([]byte(row.After.String), &m); err == nil {
-				e = e.WithAfter(m)
-			}
+			return nil, err
 		}
 
 		out = append(out, e)
@@ -136,4 +103,94 @@ func (r *AuditLog) DeleteBefore(ctx context.Context, cutoff time.Time, limit int
 	}
 
 	return int(n), nil
+}
+
+// Search returns the entries matching q, newest first.
+func (r *AuditLog) Search(ctx context.Context, q domain.AuditQuery) ([]domain.AuditRecord, error) {
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	var actor []byte
+	if !q.ActorUserID.IsZero() {
+		actor = q.ActorUserID.Bytes()
+	}
+
+	var from, to int64
+	if !q.From.IsZero() {
+		from = ms(q.From)
+	}
+
+	if !q.To.IsZero() {
+		to = ms(q.To)
+	}
+
+	rows, err := sqlc.New(r.db.Reader(ctx)).SearchAuditEntries(ctx, sqlc.SearchAuditEntriesParams{
+		BeforeID: q.BeforeID, ActorUserID: actor, ActorKind: string(q.ActorKind), ActionPrefix: q.ActionPrefix,
+		TargetType: q.TargetType, TargetID: q.TargetID, FromMs: from, ToMs: to, MaxRows: int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search audit entries: %w", err)
+	}
+
+	out := make([]domain.AuditRecord, 0, len(rows))
+
+	for _, row := range rows {
+		e, err := auditEntry(row)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, domain.AuditRecord{ID: row.ID, Entry: e})
+	}
+
+	return out, nil
+}
+
+func auditEntry(row sqlc.AuditLog) (domain.AuditEntry, error) {
+	var actor domain.Actor
+
+	ip := parseIP(row.ActorIp)
+
+	switch domain.ActorKind(row.ActorKind) {
+	case domain.ActorUser:
+		id, err := domain.UserIDFromBytes(row.ActorUserID)
+		if err != nil {
+			return domain.AuditEntry{}, fmt.Errorf("audit entry %d: %w", row.ID, err)
+		}
+
+		actor = domain.UserActor(id, ip)
+	case domain.ActorAnonymous:
+		actor = domain.AnonymousActor(ip)
+	case domain.ActorCLI:
+		actor = domain.CLIActor()
+	case domain.ActorNode:
+		actor = domain.NodeActor(ip)
+	default:
+		actor = domain.SystemActor()
+	}
+
+	e, err := domain.NewAuditEntry(fromMS(row.At), actor, row.Action, domain.AuditResult(row.Result))
+	if err != nil {
+		return domain.AuditEntry{}, fmt.Errorf("audit entry %d: %w", row.ID, err)
+	}
+
+	e = e.WithTarget(row.TargetType.String, row.TargetID.String).WithRequestID(row.RequestID.String)
+
+	if row.Before.Valid {
+		var m map[string]string
+		if err := json.Unmarshal([]byte(row.Before.String), &m); err == nil {
+			e = e.WithBefore(m)
+		}
+	}
+
+	if row.After.Valid {
+		var m map[string]string
+		if err := json.Unmarshal([]byte(row.After.String), &m); err == nil {
+			e = e.WithAfter(m)
+		}
+	}
+
+	return e, nil
 }

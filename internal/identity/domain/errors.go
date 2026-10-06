@@ -26,6 +26,7 @@ var (
 	ErrInvalidToken       = shared.NewError(shared.KindInvalid, "invalid_token", "invalid token")
 	ErrInvalidSession     = shared.NewError(shared.KindInvalid, "invalid_session", "invalid session")
 	ErrInvalidUser        = shared.NewError(shared.KindInvalid, "invalid_user", "invalid user")
+	ErrInvalidInvitation  = shared.NewError(shared.KindInvalid, "invalid_invitation", "invalid invitation")
 	ErrInvalidAudit       = shared.NewError(shared.KindInvalid, "invalid_audit_entry", "invalid audit entry")
 
 	// ErrInvalidCredentials is the one generic login error (SR-06): unknown
@@ -52,6 +53,16 @@ var (
 	// ErrSetupTokenInvalid means the first-admin setup link is unknown,
 	// expired, used, or useless because an admin exists (AUTH-018).
 	ErrSetupTokenInvalid = shared.NewError(shared.KindNotFound, "setup_token_invalid", "the setup link is not valid")
+
+	// ErrInvitationInvalid means an invitation link is unknown, expired,
+	// revoked or used (one answer for all, ACC-002).
+	ErrInvitationInvalid = shared.NewError(shared.KindNotFound, "invitation_invalid", "this invitation is no longer valid")
+	// ErrInvitationNotFound means no invitation has this id.
+	ErrInvitationNotFound = shared.NewError(shared.KindNotFound, "invitation_not_found", "invitation not found")
+	// ErrInvitationNotPending means the invitation can no longer be revoked.
+	ErrInvitationNotPending = shared.NewError(shared.KindConflict, "invitation_not_pending", "the invitation was already used, revoked or has expired")
+	// ErrLastAdmin means the change would leave no enabled admin (ACC-006).
+	ErrLastAdmin = shared.NewError(shared.KindConflict, "last_admin", "the last enabled admin cannot lose the admin role, be disabled or be deleted")
 
 	ErrUserNotFound    = shared.NewError(shared.KindNotFound, "user_not_found", "user not found")
 	ErrSessionNotFound = shared.NewError(shared.KindNotFound, "session_not_found", "session not found")

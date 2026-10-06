@@ -137,6 +137,28 @@ func rehydrateSession(row sqlc.Session) (*domain.Session, error) {
 	})
 }
 
+// ActiveForUser returns the active sessions of a user, most recently seen
+// first.
+func (r *Sessions) ActiveForUser(ctx context.Context, id domain.UserID, now time.Time) ([]*domain.Session, error) {
+	rows, err := sqlc.New(r.db.Reader(ctx)).ListActiveUserSessions(ctx, sqlc.ListActiveUserSessionsParams{UserID: id.Bytes(), Now: ms(now)})
+	if err != nil {
+		return nil, fmt.Errorf("list sessions of user %s: %w", id, err)
+	}
+
+	out := make([]*domain.Session, 0, len(rows))
+
+	for _, row := range rows {
+		s, err := rehydrateSession(row)
+		if err != nil {
+			return nil, fmt.Errorf("rehydrate session %x: %w", row.ID, err)
+		}
+
+		out = append(out, s)
+	}
+
+	return out, nil
+}
+
 // RevokeAllForUser revokes every unrevoked session of a user.
 func (r *Sessions) RevokeAllForUser(ctx context.Context, id domain.UserID, reason domain.RevokeReason, now time.Time) (int, error) {
 	n, err := sqlc.New(r.db.Writer(ctx)).RevokeUserSessions(ctx, sqlc.RevokeUserSessionsParams{
