@@ -57,18 +57,19 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
    - **429 `rate_limited`** with `Retry-After`: 10 upgrades per minute per client address, and 30 tokens per minute per session (per address when anonymous).
    - **Scopes (`scp`).** `listen` and `demod` where the effective listen policy admits the subject; `preset` for operators of the device; `retune` for them when the node sets `operator_can_retune`; everything for admins.
    - **401 / 403 on scopes.** A node whose devices are all out of reach answers 401 to anonymous visitors and 403 to users.
-   - **Global listen policy.** It is `settings.listen_policy` (default `anonymous`) until the settings store exists.
+   - **Global listen policy.** It is the `listen_policy` setting (ADR 0010), read like the token issuer does: a value that cannot be read fails closed to `registered`.
    - **Presence.** The `connections` row is created with the cid before the token is returned.
 10. **Token contract (Q8, option b).** The neutral package `internal/protocol/rxv1/token` (`golang-jwt/jwt/v5`, already approved) holds:
     - the claims, `Sign`, and an offline `Verify` with a 30 s leeway;
     - the Ed25519 JWK/JWKS types with RFC 7638 kids;
     - `SessionRef`, the single derivation of `sid` and of the session entries of `ctl.revocations`.
 
-    The hub ports are `KeySource`, `TokenIssuer` and `RevocationBroadcaster`. Until the identity keyring of ACC-007 is merged, an interim adapter holds one ephemeral Ed25519 key per hub process. After acc-1 merges, the wiring will:
-    - adapt `idm.Keys` as the `KeySource`;
-    - route identity's `RevocationPublisher` to the grid broadcaster;
-    - bind the authz cid to `POST /api/v1/auth/token`;
-    - clear `connections.user_id` on account deletion.
+    The hub ports are `KeySource`, `TokenIssuer` and `RevocationBroadcaster`. The composition root wires them to identity (ACC-007, ADR 0011):
+    - the identity keyring is the `KeySource` (its key changes push `ctl.keys.update`) and signs the tokens of the gateway authz;
+    - identity's `RevocationPublisher` goes to the grid broadcaster, dated with the hub clock;
+    - the identity `ConnectionBinder` is the presence registry: `POST /api/v1/auth/token` refreshes only an open connection the gateway authz issued on that node to the same user and session, or to an anonymous caller for an anonymous row, so anonymous refreshes work;
+    - account deletion clears `connections.user_id` (the eraser of ADR 0011);
+    - `Session.Ref`, the session handle and `sid`, is `token.SessionRef` of the session id, pinned by a test.
 11. **Distribution.**
     - `ctl.keys.update {issuer, keys, revoked_kids}` is pushed on every control connect and on key changes.
     - `ctl.revocations` now carries `sessions` and `users` as `{id, at}` entries, where `at` is the hub time of the revocation in Unix milliseconds. They are pushed to every channel and re-pushed for 15 minutes to channels that reconnect. The node refuses the tokens issued at or before `at` (`iat` uses the same hub clock), so a re-push never refuses a later sign-in and node clock skew does not matter. Neither side ever moves an entry to a later time.
@@ -124,7 +125,6 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
 | `gateway.storage_dir` | `/var/lib/meshsdr/caddy` |
 | `gateway.stream_close_delay`, `gateway.stream_timeout` | `2h`, `24h` |
 | `gateway.max_body` | `1MiB` |
-| `settings.listen_policy` | `anonymous` |
 
 Removed: `hub.listen`.
 
@@ -155,11 +155,10 @@ Recorded here; the spec is not edited.
 
 - The default `meshsdr` binary grows to about 55 MiB (stripped); the node-only artifact is about 16 MiB.
 - Any Caddy reload (only a hub restart today) closes the proxied WebSockets after `stream_close_delay`.
-- Media connections opened before a hub restart end with it. The interim key changes at every hub start until the identity keyring replaces it.
+- Media connections opened before a hub restart end with it.
 - Media connections are refused until the node has received the keys over its control channel.
 - Tickets:
-  - **Closed:** #19, #20, #22, #11, #85 and #15. The schedule part of #23 waits for the schedules epic, and #23 closes with this part.
-  - **Waiting on acc-1:** ACC-007 (#54) closes when its keyring and revocation publisher are wired here, after acc-1 merges.
+  - **Closed:** #19, #20, #22, #11, #85, #15 and ACC-007 (#54, whose keyring and revocation publisher are wired here). The schedule part of #23 waits for the schedules epic, and #23 closes with this part.
 
 ## References
 

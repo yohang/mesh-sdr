@@ -18,7 +18,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
-	"github.com/yohang/mesh-sdr/internal/grid/infra/tokenkey"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/version"
@@ -40,7 +39,7 @@ func (c caInfo) Fingerprint() (string, error) {
 
 // hubGrid is the hub side of the grid module.
 type hubGrid struct {
-	keys          *tokenkey.Ephemeral
+	keys          *hubKeys
 	caPath        string
 	revocations   domain.RevocationRepository
 	nodeRepo      domain.NodeRepository
@@ -154,11 +153,9 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		return nil, err
 	}
 
-	// Interim access-token key until the identity keyring (ACC-007).
-	keys, err := tokenkey.NewEphemeral()
-	if err != nil {
-		return nil, err
-	}
+	// The identity keyring is built after the grid; it is attached to keys
+	// once identity is wired (newHub).
+	keys := newHubKeys(now)
 
 	audit := newGridAuditor(adapter, now, logger)
 	nodeRepo := gridsqlite.NewNodeRepository(adapter)

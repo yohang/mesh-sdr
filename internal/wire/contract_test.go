@@ -31,6 +31,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/http/api/apitest"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // API-002 contract tests: the whole hub, its REST API validated against
@@ -453,7 +454,30 @@ func happyPaths(t *testing.T, h *contractHub) {
 	expect(admin, http.MethodGet, "/nodes/attic/capabilities", nil, http.StatusOK)
 	expect(admin, http.MethodGet, "/devices", nil, http.StatusOK)
 	expect(admin, http.MethodGet, "/devices/hf", nil, http.StatusOK)
-	expect(admin, http.MethodPost, "/auth/token", map[string]any{"node_id": "attic", "cid": "c1"}, http.StatusOK)
+	// POST /auth/token refreshes a media connection the gateway authz
+	// issued to the caller (ADR 0012): here an anonymous one, so another
+	// caller is refused.
+	cid, err := shared.NewUUIDv7(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := domain.NewConnection(domain.ConnectionInfo{
+		ID: cid, Kind: domain.ConnectionMedia, IP: "10.0.0.1", NodeID: "attic",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := gridsqlite.NewConnectionRepository(h.adapter).Open(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+
+	expect(anon, http.MethodPost, "/auth/token", map[string]any{"node_id": "attic", "cid": cid.String()}, http.StatusOK)
+
+	if _, res := admin.do(http.MethodPost, "/auth/token", map[string]any{"node_id": "attic", "cid": cid.String()}); res["code"] != "invalid_connection" {
+		t.Errorf("token for another caller's connection = %v", res)
+	}
 
 	// A device its node no longer reports can be forgotten.
 	dev.MarkUnavailable(now)

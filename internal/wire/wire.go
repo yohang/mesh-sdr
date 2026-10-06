@@ -34,6 +34,7 @@ import (
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/keyring"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/mail"
 	"github.com/yohang/mesh-sdr/internal/settings"
@@ -317,10 +318,21 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		workers = append(workers, q.Run)
 	}
 
+	// Grid ↔ identity (ACC-007, GRID-011/012): revoked sessions and users
+	// go to the nodes, and POST /auth/token refreshes only connections the
+	// gateway authz issued to the caller.
+	if g.manager != nil {
+		ideps.Revocations = nodeRevocations{b: g.manager, now: now}
+	}
+
+	ideps.Binder = connectionBinder{repo: gridsqlite.NewConnectionRepository(adapter)}
+
 	idm, err := identity.Wire(ctx, ideps, pages{shellModule.Renderer})
 	if err != nil {
 		return nil, nil, fmt.Errorf("identity: %w", err)
 	}
+
+	g.keys.attach(idm.Keys)
 
 	workers = append(workers, func(ctx context.Context) {
 		idm.RunKeyMaintenance(ctx, now, component(logger, "identity.infra.keyring"))
@@ -336,7 +348,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	imagesHTTP := fileshttp.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), filesActor,
 		shellModule.Renderer.Error, component(logger, "files.http"))
-	access, err := g.mediaAccess(cfg, logger)
+	access, err := g.mediaAccess(cfg, listenPolicy{settingsrc.New(settingsModule.Store, component(logger, "grid.infra.settings"))}, logger)
 	if err != nil {
 		return nil, nil, err
 	}
