@@ -94,6 +94,13 @@ func Open(opts Options, now time.Time) (*Keyring, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
+	unlock, err := lockDir(opts.Dir)
+	if err != nil {
+		return nil, err
+	}
+
+	defer unlock()
+
 	if err := k.load(); err != nil {
 		return nil, err
 	}
@@ -294,7 +301,10 @@ func (k *Keyring) signing(now time.Time) (entry, bool) {
 	return best, found
 }
 
-// Signer returns the key that signs at now and its kid.
+// Signer returns the key that signs at now and its kid. It reads the state
+// loaded last: a revocation made by `meshsdr hub keys revoke` in another
+// process takes effect at the next Maintain (at most a minute; the nodes
+// get revoked_kids at the same time).
 func (k *Keyring) Signer(now time.Time) (ed25519.PrivateKey, string, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -383,13 +393,22 @@ func (k *Keyring) changed(now time.Time) func() {
 func (k *Keyring) Rotate(now time.Time) (string, error) {
 	k.mu.Lock()
 
-	if err := k.load(); err != nil {
+	unlock, err := lockDir(k.opts.Dir)
+	if err != nil {
 		k.mu.Unlock()
 
 		return "", err
 	}
 
-	err := k.add(now, now.Add(PublishLead))
+	if err := k.load(); err != nil {
+		unlock()
+		k.mu.Unlock()
+
+		return "", err
+	}
+
+	err = k.add(now, now.Add(PublishLead))
+	unlock()
 	kid := k.entries[len(k.entries)-1].Kid
 	notify := k.changed(now)
 	k.mu.Unlock()
@@ -403,6 +422,15 @@ func (k *Keyring) Rotate(now time.Time) (string, error) {
 // compromised).
 func (k *Keyring) Revoke(kid string, now time.Time) error {
 	k.mu.Lock()
+
+	unlock, err := lockDir(k.opts.Dir)
+	if err != nil {
+		k.mu.Unlock()
+
+		return err
+	}
+
+	defer unlock()
 
 	if err := k.load(); err != nil {
 		k.mu.Unlock()
@@ -422,7 +450,6 @@ func (k *Keyring) Revoke(kid string, now time.Time) error {
 		k.entries[i].RetiresAt = now.UTC()
 	}
 
-	var err error
 	if _, ok := k.signing(now); !ok {
 		err = k.add(now, now)
 	} else {
@@ -443,7 +470,12 @@ func (k *Keyring) Revoke(kid string, now time.Time) error {
 func (k *Keyring) Maintain(now time.Time) error {
 	k.mu.Lock()
 
-	err := k.maintainLocked(now)
+	unlock, err := lockDir(k.opts.Dir)
+	if err == nil {
+		err = k.maintainLocked(now)
+		unlock()
+	}
+
 	notify := k.changed(now)
 	k.mu.Unlock()
 	notify()
@@ -519,6 +551,13 @@ type Key struct {
 func (k *Keyring) List(now time.Time) ([]Key, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+
+	unlock, err := lockDir(k.opts.Dir)
+	if err != nil {
+		return nil, err
+	}
+
+	defer unlock()
 
 	if err := k.load(); err != nil {
 		return nil, err

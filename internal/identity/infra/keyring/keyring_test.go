@@ -190,3 +190,42 @@ func TestInsecurePermissions(t *testing.T) {
 		t.Errorf("world-readable key accepted: %v", err)
 	}
 }
+
+// The hub and the CLI work on the same directory: neither loses the
+// other's change.
+func TestConcurrentProcesses(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "keys")
+	hub := open(t, dir)
+	cli := open(t, dir)
+	_, first, _ := hub.Signer(t0)
+
+	done := make(chan error, 20)
+
+	for range 10 {
+		go func() { done <- hub.Maintain(t0) }()
+		go func() { _, err := cli.Rotate(t0); done <- err }()
+	}
+
+	for range 20 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := cli.Revoke(first, t0); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := hub.Maintain(t0); err != nil {
+		t.Fatal(err)
+	}
+
+	keys, _ := hub.List(t0)
+	if len(keys) != 12 {
+		t.Errorf("keys = %d, want the first, 10 rotations and the replacement of the revoked one", len(keys))
+	}
+
+	if _, revoked := hub.Published(t0); len(revoked) != 1 || revoked[0] != first {
+		t.Errorf("revoked = %v", revoked)
+	}
+}
