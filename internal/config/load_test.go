@@ -575,7 +575,7 @@ func TestSMTP(t *testing.T) {
 // The operator key of the public listener must be a 0600 file.
 func TestGatewayKeyFileMode(t *testing.T) {
 	dir := writeFiles(t, map[string]string{
-		"hub.toml": minimalHub + "[gateway]\ntls_mode = \"files\"\ntls_cert = \"tls/pub.pem\"\ntls_key = \"tls/pub.key\"\n",
+		"hub.toml":    minimalHub + "[gateway]\ntls_mode = \"files\"\ntls_cert = \"tls/pub.pem\"\ntls_key = \"tls/pub.key\"\n",
 		"tls/pub.pem": "cert", "tls/pub.key": "key",
 	})
 

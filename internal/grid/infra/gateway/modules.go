@@ -234,7 +234,7 @@ func (n *nodeResponse) WriteHeader(code int) {
 		return
 	}
 
-	h := n.ResponseWriter.Header()
+	h := n.Header()
 
 	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
 		clear(h)

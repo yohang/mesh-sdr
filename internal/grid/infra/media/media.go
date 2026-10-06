@@ -83,9 +83,9 @@ type Server struct {
 	sessions  map[string]*session
 	// used remembers every cid until its token can no longer be valid
 	// (exp + leeway): a cid serves one connection only (§5.8).
-	used map[string]time.Time
-	revSess   map[string]time.Time
-	revUsers  map[string]time.Time
+	used     map[string]time.Time
+	revSess  map[string]time.Time
+	revUsers map[string]time.Time
 }
 
 // NewServer returns the server. Until Run binds it, upgrades are refused.
