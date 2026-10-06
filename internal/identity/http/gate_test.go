@@ -110,3 +110,25 @@ func TestPasswordGateIgnoresOtherUsers(t *testing.T) {
 		t.Errorf("anonymous GET /receiver = %d", res.StatusCode)
 	}
 }
+
+// The forced-change gate allow-lists by the decoded path only when it is
+// also the path chi routes on.
+func TestPasswordGateRefusesEncodedPaths(t *testing.T) {
+	h := newHub(t)
+	pw := h.addFlagged("alice", domain.RoleListener)
+
+	c := h.client()
+	c.session()
+	c.login("alice", pw, false)
+
+	for _, p := range []string{"/account%2Fpassword", "/static%2F..%2Freceiver", "/api/v1/auth%2Fsession"} {
+		res := c.do(http.MethodGet, p, "", "", nil)
+		if res.StatusCode != http.StatusSeeOther && res.StatusCode != http.StatusForbidden {
+			t.Errorf("GET %s = %d, want refused", p, res.StatusCode)
+		}
+
+		if loc := res.Header.Get("Location"); res.StatusCode == http.StatusSeeOther && !strings.HasPrefix(loc, identityhttp.PasswordChangePath) {
+			t.Errorf("GET %s → %q", p, loc)
+		}
+	}
+}

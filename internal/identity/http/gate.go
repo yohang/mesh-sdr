@@ -52,7 +52,11 @@ func allowedWhilePending(path string) bool {
 func (m *Module) passwordGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := FromContext(r.Context()).Principal()
-		if p.IsAnonymous() || !p.MustChangePassword() || allowedWhilePending(r.URL.Path) {
+		// chi routes on the raw path when it differs from the decoded one:
+		// such a request is never allow-listed.
+		allowed := allowedWhilePending(r.URL.Path) && (r.URL.RawPath == "" || r.URL.RawPath == r.URL.Path)
+
+		if p.IsAnonymous() || !p.MustChangePassword() || allowed {
 			next.ServeHTTP(w, r)
 
 			return
