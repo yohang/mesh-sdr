@@ -115,8 +115,19 @@ func ErrorHandler(logger *slog.Logger) func(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// BadRequest handles request decoding errors (malformed body or parameters).
+// CodeTooLarge is the code of a request body over its limit.
+const CodeTooLarge = "request_too_large"
+
+// BadRequest handles request decoding errors (malformed body or
+// parameters); a body over its limit answers 413.
 func BadRequest(w http.ResponseWriter, _ *http.Request, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		Write(w, New(http.StatusRequestEntityTooLarge, CodeTooLarge, "the request body is too large"))
+
+		return
+	}
+
 	Write(w, New(http.StatusBadRequest, CodeBadRequest, err.Error()))
 }
 

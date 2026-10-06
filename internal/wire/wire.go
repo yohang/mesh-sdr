@@ -16,6 +16,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite"
+	fileshttp "github.com/yohang/mesh-sdr/internal/files/http"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
@@ -25,6 +26,10 @@ import (
 	"github.com/yohang/mesh-sdr/internal/http/api"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
+	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/settings"
+	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shell"
 )
@@ -151,37 +156,77 @@ func UserAdmin(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) *identit
 // Hub builds the hub: web UI and REST API on hub.listen, backed by adapter,
 // the session reaper and the grid. The caller checks the schema version before (see
 // db.Migrator.Check).
-func Hub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Adapter) (*Process, error) {
-	p, _, err := newHub(ctx, cfg, logger, adapter, time.Now, gridapp.DefaultTimings())
+func Hub(ctx context.Context, cfg config.Hub, origins config.Origins, logger *slog.Logger, adapter db.Adapter) (*Process, error) {
+	p, _, err := newHub(ctx, cfg, origins, logger, adapter, time.Now, gridapp.DefaultTimings())
 
 	return p, err
 }
 
-func newHub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now func() time.Time,
-	timings gridapp.Timings, tweaks ...func(*control.HubOptions),
+func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger *slog.Logger, adapter db.Adapter,
+	now func() time.Time, timings gridapp.Timings, tweaks ...func(*control.HubOptions),
 ) (*Process, *hubGrid, error) {
 	g, err := newHubGrid(cfg, logger, adapter, now, timings, tweaks...)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	shellModule := shell.Wire(shell.Deps{Settings: cfg.Settings, Logger: logger})
+	auditLog := identitysqlite.NewAuditLog(adapter)
 
-	idm, err := identity.Wire(ctx, identityDeps(cfg, logger, adapter), pages{shellModule.Renderer})
+	settingsModule, err := settings.Wire(ctx, settings.Deps{
+		Config: cfg, Origins: origins, DB: adapter, Now: now, Logger: logger,
+		Audit: settingsAuditor{log: auditLog},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("settings: %w", err)
+	}
+
+	viewer := &adminViewer{}
+	shellModule := shell.Wire(shell.Deps{Settings: settingsModule.Store, Viewer: viewer, Logger: logger})
+
+	ideps := identityDeps(cfg, logger, adapter)
+	ideps.Settings = settingsModule.Store
+	ideps.AcceptsMultipart = api.AcceptsMultipart
+
+	idm, err := identity.Wire(ctx, ideps, pages{shellModule.Renderer})
 	if err != nil {
 		return nil, nil, fmt.Errorf("identity: %w", err)
 	}
 
+	viewer.authz = idm.HTTP
+
+	scheduler, retention, err := jobs(adapter, idm, settingsModule.Store, auditLog, logger)
+	if err != nil {
+		return nil, nil, fmt.Errorf("jobs: %w", err)
+	}
+
+	images := branding(adapter, auditLog)
+	imagesHTTP := fileshttp.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), filesActor,
+		shellModule.Renderer.Error, component(logger, "files.http"))
+
 	apiServer := api.Server{
-		HealthHandlers: api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
-		AuthHandlers:   api.NewAuthHandlers(idm.HTTP),
-		GridHandlers:   api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
+		HealthHandlers:    api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
+		AuthHandlers:      api.NewAuthHandlers(idm.HTTP),
+		GridHandlers:      api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
+		SettingsHandlers:  api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
+		RetentionHandlers: api.NewRetentionHandlers(retention, settingsActor),
+		BrandingHandlers:  api.NewBrandingHandlers(images, settingsActor),
 	}
 
 	router := httpserver.NewRouter(
 		component(logger, "http.router"),
 		api.NewHandler(apiServer, idm.HTTP, component(logger, "http.api")),
 		idm.HTTP,
+		settingshttp.New(settingshttp.Deps{
+			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin),
+			Store: settingsModule.Store, Config: settingsModule.Effective, Retention: retentionRows{r: retention},
+			Actor: settingsActor, Images: imagesHTTP, Logger: component(logger, "settings.http"),
+		}),
+		imagesHTTP,
+		gridhttp.NewAdminModule(gridhttp.AdminDeps{
+			Render: shellModule.Renderer, Devices: g.devices, Nodes: g.nodes,
+			Operator: idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
+			IsAdmin: viewer.IsAdmin, Logger: component(logger, "grid.http.admin"),
+		}),
 		shellModule.HTTP,
 	)
 
@@ -195,7 +240,7 @@ func newHub(ctx context.Context, cfg config.Hub, logger *slog.Logger, adapter db
 		server:   httpserver.NewServer(cfg.Hub.Listen, router),
 		logger:   component(logger, "http.server"),
 		startup:  g.startup,
-		workers:  append([]func(context.Context){func(ctx context.Context) { idm.Reaper.Run(ctx, identityapp.SessionReapEvery) }}, g.workers...),
+		workers:  append([]func(context.Context){scheduler.Run}, g.workers...),
 		setupURL: setupURL,
 	}, g, nil
 }

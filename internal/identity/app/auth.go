@@ -13,49 +13,49 @@ import (
 
 // Auth runs logins, resolves sessions and logs out.
 type Auth struct {
-	users      domain.UserRepository
-	sessions   domain.SessionRepository
-	audit      domain.AuditLog
-	tx         Transactor
-	ids        IDGenerator
-	now        Clock
-	provider   Provider
-	ipLimit    IPLimiter
-	unknown    LoginThrottle
-	refusals   RefusalGate
-	throttle   domain.ThrottlePolicy
-	sessionPol domain.SessionPolicy
-	logger     *slog.Logger
+	users    domain.UserRepository
+	sessions domain.SessionRepository
+	audit    domain.AuditLog
+	tx       Transactor
+	ids      IDGenerator
+	now      Clock
+	provider Provider
+	ipLimit  IPLimiter
+	unknown  LoginThrottle
+	refusals RefusalGate
+	policies SessionPolicies
+	logger   *slog.Logger
 }
 
 // AuthDeps are the dependencies of Auth.
 type AuthDeps struct {
-	Users         domain.UserRepository
-	Sessions      domain.SessionRepository
-	Audit         domain.AuditLog
-	Tx            Transactor
-	IDs           IDGenerator
-	Now           Clock
-	Provider      Provider
-	IPLimiter     IPLimiter
-	Unknown       LoginThrottle
-	Refusals      RefusalGate
-	Throttle      domain.ThrottlePolicy
-	SessionPolicy domain.SessionPolicy
-	Logger        *slog.Logger
+	Users     domain.UserRepository
+	Sessions  domain.SessionRepository
+	Audit     domain.AuditLog
+	Tx        Transactor
+	IDs       IDGenerator
+	Now       Clock
+	Provider  Provider
+	IPLimiter IPLimiter
+	Unknown   LoginThrottle
+	Refusals  RefusalGate
+	// SessionPolicies gives the session and throttling policies, read on
+	// every use (DB settings, ADR 0010).
+	SessionPolicies SessionPolicies
+	Logger          *slog.Logger
 }
 
 // NewAuth returns the service.
 func NewAuth(d AuthDeps) *Auth {
 	return &Auth{
 		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, ids: d.IDs, now: d.Now,
-		provider: d.Provider, ipLimit: d.IPLimiter, unknown: d.Unknown, refusals: d.Refusals, throttle: d.Throttle,
-		sessionPol: d.SessionPolicy, logger: d.Logger,
+		provider: d.Provider, ipLimit: d.IPLimiter, unknown: d.Unknown, refusals: d.Refusals, policies: d.SessionPolicies,
+		logger: d.Logger,
 	}
 }
 
 // SessionPolicy returns the session lifetimes.
-func (a *Auth) SessionPolicy() domain.SessionPolicy { return a.sessionPol }
+func (a *Auth) SessionPolicy() domain.SessionPolicy { return a.policies.SessionPolicy() }
 
 // MaxPasswordBytes bounds the password of a login attempt (the policy
 // allows 256 characters, at most 1024 bytes in UTF-8).
@@ -171,7 +171,7 @@ type reservation struct {
 // a successful login resets the count.
 func (a *Auth) reserve(ctx context.Context, known *domain.User, login domain.Login, now time.Time) (reservation, error) {
 	if known == nil {
-		blocked, until, locked := a.unknown.Reserve(login.Key(), now, a.throttle)
+		blocked, until, locked := a.unknown.Reserve(login.Key(), now, a.policies.ThrottlePolicy())
 
 		return reservation{blocked: blocked, until: until, locked: locked}, nil
 	}
@@ -190,7 +190,7 @@ func (a *Auth) reserve(ctx context.Context, known *domain.User, login domain.Log
 			return nil
 		}
 
-		r.locked = u.RecordLoginFailure(now, a.throttle)
+		r.locked = u.RecordLoginFailure(now, a.policies.ThrottlePolicy())
 
 		return a.users.Save(ctx, u)
 	})
@@ -240,7 +240,7 @@ func (a *Auth) open(ctx context.Context, id domain.UserID, login domain.Login, i
 
 		s, token, err := domain.StartSession(domain.StartSessionParams{
 			ID: sessionID, UserID: u.ID(), Provider: a.provider.ID(), Remember: in.Remember,
-			IP: in.Meta.IP, UserAgent: in.Meta.UserAgent, Policy: a.sessionPol, Now: now,
+			IP: in.Meta.IP, UserAgent: in.Meta.UserAgent, Policy: a.policies.SessionPolicy(), Now: now,
 		})
 		if err != nil {
 			return err
@@ -387,7 +387,7 @@ func (a *Auth) Resolve(ctx context.Context, cookie string) (Resolution, error) {
 		return Resolution{}, domain.ErrUnauthenticated
 	}
 
-	if s.Touch(now, a.sessionPol) {
+	if s.Touch(now, a.policies.SessionPolicy()) {
 		if err := a.sessions.Touch(ctx, s); err != nil {
 			// Activity tracking is best effort; the session stays valid.
 			a.logger.WarnContext(ctx, "session activity not recorded", slog.String("session_id", s.ID().String()), slog.Any("error", err))

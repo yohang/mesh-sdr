@@ -7,3 +7,10 @@
 /login 200
 /setup/not-a-valid-token 404
 /account/password 200 signed-in
+/admin 200 signed-in
+/admin/site 200 signed-in
+/admin/access 200 signed-in
+/admin/look-and-feel 200 signed-in
+/admin/retention 200 signed-in
+/admin/system 200 signed-in
+/admin/devices 200 signed-in

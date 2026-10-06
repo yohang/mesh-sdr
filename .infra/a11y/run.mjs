@@ -5,7 +5,8 @@
 // mode is applied, and fails on any Content Security Policy or
 // Permissions-Policy console message, page error, failed request or
 // subresource answering >= 400. Finally it checks the shell's boosted
-// navigation (same document, focus on #main, announcement, title).
+// navigation (same document, focus on #main, announcement, title), and a
+// rejected admin form (inline errors and summary) once signed in.
 //
 // Usage: HUBS="auto=http://hub-auto:8073 light=http://hub-light:8073" node run.mjs
 
@@ -56,6 +57,22 @@ async function signIn(context, where) {
   await page.close();
 }
 
+// checkFormErrors submits an invalid admin form (signed in as the seeded
+// admin) and audits the error state: inline errors and summary.
+async function checkFormErrors(context, where) {
+  const page = await context.newPage();
+  watch(page, where, ["422 /admin/access"]);
+  await page.goto("/admin/access", { waitUntil: "networkidle" });
+  await page.getByLabel("Idle timeout").fill("1m");
+  await page.getByRole("button", { name: "Save Sessions" }).click();
+  await page.getByRole("alert").waitFor();
+  if ((await page.getByLabel("Idle timeout").getAttribute("aria-invalid")) !== "true") {
+    fail(where, "the invalid field is not marked aria-invalid");
+  }
+  await audit(page, where);
+  await page.close();
+}
+
 let failures = 0;
 const fail = (where, msg) => {
   failures++;
@@ -77,7 +94,8 @@ async function waitForHub(url) {
 }
 
 // watch fails on policy violations, page errors and broken subresources.
-function watch(page, where) {
+// expected lists the "<status> <path>" answers a check provokes on purpose.
+function watch(page, where, expected = []) {
   page.on("console", (msg) => {
     const text = msg.text();
     if (text.includes("Content Security Policy") || text.includes("Permissions-Policy")) {
@@ -87,7 +105,8 @@ function watch(page, where) {
   page.on("pageerror", (err) => fail(where, `page error: ${err.message}`));
   page.on("requestfailed", (req) => fail(where, `request failed: ${req.url()} (${req.failure()?.errorText})`));
   page.on("response", (res) => {
-    if (res.status() >= 400 && !res.request().isNavigationRequest()) {
+    const answer = `${res.status()} ${new URL(res.url()).pathname}`;
+    if (res.status() >= 400 && !res.request().isNavigationRequest() && !expected.includes(answer)) {
       fail(where, `subresource ${res.url()} answered ${res.status()}`);
     }
   });
@@ -140,6 +159,10 @@ for (const { mode, url } of hubs) {
         await checkTheme(page, where, mode, scheme);
         await audit(page, where);
         await page.close();
+      }
+
+      if (signedIn) {
+        await checkFormErrors(context, `/admin/access invalid form [mode ${mode}, os ${scheme}, ${name}]`);
       }
 
       // Boosted navigation keeps the shell, moves focus to #main and

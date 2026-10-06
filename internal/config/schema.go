@@ -107,7 +107,23 @@ func annotate(s *jsonschema.Schema, prefix string, defaults map[string]any) {
 		}
 
 		child.Extras["x-scope"] = "global"
-		child.Extras["lockable"] = strings.HasPrefix(key, "settings.")
+		child.Extras["lockable"] = strings.HasPrefix(key, settingsPrefix)
+
+		// jsonschema_extras values are strings: publish flags as booleans.
+		for k, v := range child.Extras {
+			switch v {
+			case "true":
+				child.Extras[k] = true
+			case "false":
+				child.Extras[k] = false
+			}
+		}
+
+		if strings.HasPrefix(key, settingsPrefix) {
+			if _, ok := child.Extras["x-apply"]; !ok {
+				child.Extras["x-apply"] = "live"
+			}
+		}
 
 		if d, ok := defaults[key]; ok {
 			child.Default = d

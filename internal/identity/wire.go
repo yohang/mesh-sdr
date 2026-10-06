@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"runtime"
 	"sync"
 	"time"
@@ -13,12 +14,12 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/identity/app"
-	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/argon2"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/commonpw"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settings"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -42,6 +43,11 @@ type Deps struct {
 	DB     db.Adapter
 	IDs    *shared.UUIDv7Generator
 	Now    func() time.Time
+	// Settings reads the identity policies from the settings store. Nil
+	// means the built-in defaults (CLI commands).
+	Settings settingsrc.Values
+	// AcceptsMultipart reports API upload operations (api.AcceptsMultipart).
+	AcceptsMultipart func(r *http.Request) bool
 }
 
 func component(l *slog.Logger, name string) *slog.Logger {
@@ -78,10 +84,15 @@ var commonPasswords = sync.OnceValue(func() *commonpw.List {
 	return l
 })
 
-// policies returns the password policy source: settings (defaults until the
-// settings store is wired) and the bundled common-password list.
-func policies() app.Policies {
-	return app.NewPolicies(settings.Defaults{}, commonPasswords())
+// policies returns the password policy source: the settings (the settings
+// store in the hub, the defaults for CLI commands without one) and the
+// bundled common-password list.
+func policies(s app.Settings) app.Policies {
+	if s == nil {
+		s = settings.Defaults{}
+	}
+
+	return app.NewPolicies(s, commonPasswords())
 }
 
 // UserAdmin builds the user administration service used by the CLI.
@@ -90,16 +101,19 @@ func UserAdmin(d Deps) *app.UserAdmin {
 
 	return app.NewUserAdmin(app.UserAdminDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
-		Now: d.Now, Policy: policies(), Logger: component(d.Logger, "identity.app.users"),
+		Now: d.Now, Policy: policies(nil), Logger: component(d.Logger, "identity.app.users"),
 	})
 }
 
 // Module is the wired identity module of the hub.
 type Module struct {
-	Auth   *app.Auth
-	Setup  *app.Setup
-	Reaper *app.SessionReaper
-	HTTP   *identityhttp.Module
+	Auth  *app.Auth
+	Setup *app.Setup
+	// Reaper (sessions.reap) and AuditPurger (audit.purge) are jobs run by
+	// the hub's jobs scheduler.
+	Reaper      *app.SessionReaper
+	AuditPurger *app.AuditPurger
+	HTTP        *identityhttp.Module
 }
 
 // Wire builds the identity module. pages renders the login page in the
@@ -112,40 +126,57 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		return nil, err
 	}
 
+	var (
+		lifetimes app.SessionPolicies = app.DefaultSessionPolicies()
+		retention app.Retention       = app.FixedRetention{Sessions: app.DefaultSessionRetention, Audit: 365 * 24 * time.Hour}
+		passwords                     = policies(nil)
+		limiter   *memory.IPLimiter
+	)
+
+	if d.Settings != nil {
+		p := settingsrc.New(d.Settings)
+		lifetimes, retention, passwords = p, p, policies(p)
+		limiter = memory.NewDynamicIPLimiter(p.LoginRate, memory.DefaultCapacity)
+	} else {
+		limiter = memory.NewIPLimiter(loginIPEvery, loginIPBurst, memory.DefaultCapacity)
+	}
+
 	auth := app.NewAuth(app.AuthDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, IDs: d.IDs, Now: d.Now, Provider: local,
-		IPLimiter: memory.NewIPLimiter(loginIPEvery, loginIPBurst, memory.DefaultCapacity),
-		Unknown:   memory.NewThrottle(memory.DefaultCapacity),
-		Refusals:  memory.NewRefusalGate(memory.DefaultCapacity),
-		Throttle:  domain.DefaultThrottlePolicy(), SessionPolicy: domain.DefaultSessionPolicy(),
-		Logger: component(d.Logger, "identity.app.auth"),
+		IPLimiter:       limiter,
+		Unknown:         memory.NewThrottle(memory.DefaultCapacity),
+		Refusals:        memory.NewRefusalGate(memory.DefaultCapacity),
+		SessionPolicies: lifetimes,
+		Logger:          component(d.Logger, "identity.app.auth"),
 	})
 
-	passwords := app.NewPasswords(app.PasswordsDeps{
+	changer := app.NewPasswords(app.PasswordsDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
-		Policies: policies(), Throttle: domain.DefaultThrottlePolicy(), SessionPolicy: domain.DefaultSessionPolicy(),
+		Policies: passwords, SessionPolicies: lifetimes,
 		Logger: component(d.Logger, "identity.app.passwords"),
 	})
 
 	setup := app.NewSetup(app.SetupDeps{
-		Users: r.users, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now, Policies: policies(),
+		Users: r.users, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now, Policies: passwords,
 		Auth: auth, Limiter: memory.NewIPLimiter(setupIPEvery, setupIPBurst, memory.DefaultCapacity),
 		HubURL: d.Config.Hub.URL, Logger: component(d.Logger, "identity.app.setup"),
 	})
 
-	h, err := identityhttp.New(auth, passwords, setup, pages, identityhttp.Config{
-		HubURL:         d.Config.Hub.URL,
-		TrustedProxies: config.Prefixes(d.Config.HTTP.TrustedProxies),
-		AdminNetworks:  config.Prefixes(d.Config.Admin.AllowedNetworks),
+	h, err := identityhttp.New(auth, changer, setup, pages, identityhttp.Config{
+		HubURL:           d.Config.Hub.URL,
+		TrustedProxies:   config.Prefixes(d.Config.HTTP.TrustedProxies),
+		AdminNetworks:    config.Prefixes(d.Config.Admin.AllowedNetworks),
+		AcceptsMultipart: d.AcceptsMultipart,
 	}, component(d.Logger, "identity.http"))
 	if err != nil {
 		return nil, fmt.Errorf("identity http: %w", err)
 	}
 
 	return &Module{
-		Auth:   auth,
-		Setup:  setup,
-		Reaper: app.NewSessionReaper(r.sessions, d.Now, component(d.Logger, "identity.app.reaper")),
-		HTTP:   h,
+		Auth:        auth,
+		Setup:       setup,
+		Reaper:      app.NewSessionReaper(r.sessions, retention, d.Now),
+		AuditPurger: app.NewAuditPurger(r.audit, retention, d.Now),
+		HTTP:        h,
 	}, nil
 }

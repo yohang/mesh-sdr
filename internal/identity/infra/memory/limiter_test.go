@@ -146,3 +146,28 @@ func TestRefusalGate(t *testing.T) {
 		t.Error("refusal of the next window not reported")
 	}
 }
+
+func TestDynamicIPLimiter(t *testing.T) {
+	every, burst := time.Minute, 1
+	l := NewDynamicIPLimiter(func() (time.Duration, int) { return every, burst }, 10)
+	ip := netip.MustParseAddr("192.0.2.7")
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+
+	if ok, _ := l.Allow(ip, now); !ok {
+		t.Fatal("first attempt refused")
+	}
+
+	if ok, _ := l.Allow(ip, now); ok {
+		t.Fatal("second attempt allowed with burst 1")
+	}
+
+	// The admin raises the limit: the next attempts refill at the new
+	// rate (one per second) instead of one per minute.
+	every, burst = time.Second, 5
+
+	_, _ = l.Allow(ip, now.Add(time.Second))
+
+	if ok, _ := l.Allow(ip, now.Add(3*time.Second)); !ok {
+		t.Error("attempt refused after the rate was raised")
+	}
+}

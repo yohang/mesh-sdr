@@ -160,6 +160,37 @@ func (s *Devices) NodeStatusChanged(ctx context.Context, id domain.NodeID, statu
 	}
 }
 
+// Forget deletes a device its node no longer reports (ADM-009) and audits
+// it. A device still reported, or whose node is only offline, cannot be
+// forgotten (domain.ErrDeviceStillReported): it is removed from the node
+// config first. Presets are device-independent and not affected; there are
+// no schedules yet to disable.
+func (s *Devices) Forget(ctx context.Context, actor, id string) error {
+	d, err := s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	since, missing := d.Missing()
+	if !missing {
+		return domain.ErrDeviceStillReported
+	}
+
+	deleted, err := s.repo.DeleteMissing(ctx, d.ID())
+	if err != nil {
+		return err
+	}
+
+	if !deleted {
+		return domain.ErrDeviceStillReported
+	}
+
+	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "device.forget", Target: d.ID().String(), Result: ResultOK,
+		Detail: map[string]string{"node_id": d.Node().String(), "missing_since": since.UTC().Format(time.RFC3339)}})
+
+	return nil
+}
+
 // List returns the registry.
 func (s *Devices) List(ctx context.Context) ([]*domain.Device, error) { return s.repo.List(ctx) }
 

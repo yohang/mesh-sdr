@@ -148,7 +148,7 @@ func (a *app) newNodeToggleCmd(verb string, disabled bool) *cobra.Command {
 }
 
 func (a *app) withNodes(ctx context.Context, fn func(context.Context, *gridapp.Nodes) error) error {
-	cfg, logger, err := a.loadHub(ctx)
+	cfg, _, logger, err := a.loadHub(ctx)
 	if err != nil {
 		return err
 	}

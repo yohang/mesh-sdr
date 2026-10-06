@@ -140,3 +140,14 @@ func deviceFromRow(row sqlc.Device) (*domain.Device, error) {
 		SortOrder: int(row.SortOrder), ReportedAt: fromMS(row.ReportedAt),
 	})
 }
+
+// DeleteMissing implements domain.DeviceRepository: the condition is in the
+// statement, so a device reported again meanwhile is kept.
+func (r *DeviceRepository) DeleteMissing(ctx context.Context, id domain.DeviceID) (bool, error) {
+	n, err := sqlc.New(r.db.Writer(ctx)).DeleteMissingDevice(ctx, id.String())
+	if err != nil {
+		return false, fmt.Errorf("delete device %s: %w", id, err)
+	}
+
+	return n > 0, nil
+}

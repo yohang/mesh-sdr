@@ -5,7 +5,6 @@ package shell
 import (
 	"log/slog"
 
-	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/shell/app"
 	shellhttp "github.com/yohang/mesh-sdr/internal/shell/http"
 	"github.com/yohang/mesh-sdr/internal/shell/infra"
@@ -15,8 +14,11 @@ import (
 
 // Deps are the shell module's dependencies.
 type Deps struct {
-	Settings config.Settings
-	Logger   *slog.Logger
+	// Settings reads the effective settings (the settings store).
+	Settings infra.Values
+	// Viewer tells what the visitor may open (nil: no navigation).
+	Viewer shellhttp.Viewer
+	Logger *slog.Logger
 }
 
 // Module is the wired shell module.
@@ -32,10 +34,10 @@ type Module struct {
 func Wire(d Deps) Module {
 	component := func(name string) *slog.Logger { return d.Logger.With(slog.String("component", name)) }
 
-	settings := infra.NewConfigSettings(d.Settings)
+	settings := infra.NewStoreSettings(d.Settings)
 	lookAndFeel := app.NewLookAndFeel(settings, component("shell.app.look_and_feel"))
 	policy := app.NewPolicy(settings, component("shell.app.policy"))
-	source := shellhttp.NewShellSource(lookAndFeel)
+	source := shellhttp.NewShellSource(lookAndFeel, d.Viewer)
 	rd := render.New(source, component("web.render"))
 
 	return Module{

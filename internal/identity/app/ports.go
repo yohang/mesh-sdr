@@ -114,3 +114,29 @@ func (p Policies) Password(ctx context.Context) domain.PasswordPolicy {
 
 	return domain.NewPasswordPolicy(minLength).WithCommonPasswords(p.common)
 }
+
+// SessionPolicies gives the current session lifetimes and per-account
+// login throttling. The hub reads them from the settings store on every use
+// (session.*, auth.lockout.*; ADR 0010), so a saved change applies to the
+// next login or request.
+type SessionPolicies interface {
+	SessionPolicy() domain.SessionPolicy
+	ThrottlePolicy() domain.ThrottlePolicy
+}
+
+// FixedSessionPolicies are constant policies (tests, defaults).
+type FixedSessionPolicies struct {
+	Session  domain.SessionPolicy
+	Throttle domain.ThrottlePolicy
+}
+
+// DefaultSessionPolicies returns the built-in policies.
+func DefaultSessionPolicies() FixedSessionPolicies {
+	return FixedSessionPolicies{Session: domain.DefaultSessionPolicy(), Throttle: domain.DefaultThrottlePolicy()}
+}
+
+// SessionPolicy implements SessionPolicies.
+func (p FixedSessionPolicies) SessionPolicy() domain.SessionPolicy { return p.Session }
+
+// ThrottlePolicy implements SessionPolicies.
+func (p FixedSessionPolicies) ThrottlePolicy() domain.ThrottlePolicy { return p.Throttle }

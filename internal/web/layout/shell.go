@@ -58,13 +58,21 @@ type Shell struct {
 	Theme Theme
 	// FooterLinks are the footer links, in order.
 	FooterLinks []Link
+	// Nav are the top bar sections the visitor may open, in order (UI-006
+	// adds the full navigation; for now only Admin, for admins).
+	Nav []Link
 }
 
-// Link is a navigation link.
+// Link is a navigation link. Section, for a top bar section, matches
+// Page.Section to mark the current one.
 type Link struct {
-	Label string
-	Href  string
+	Label   string
+	Href    string
+	Section string
 }
+
+// Admin section of the top bar.
+const SectionAdmin = "admin"
 
 // Page describes the page being rendered.
 type Page struct {

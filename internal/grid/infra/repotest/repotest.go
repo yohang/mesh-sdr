@@ -81,6 +81,30 @@ func testDevices(t *testing.T, r Repos) {
 		t.Error("device still online")
 	}
 
+	// Only a missing device is deleted.
+	if deleted, err := r.Devices.DeleteMissing(ctx, spec.ID); err != nil || deleted {
+		t.Errorf("delete a reported device = %v, %v", deleted, err)
+	}
+
+	missing := must(r.Devices.Get(ctx, spec.ID))
+	missing.MarkUnavailable(t0)
+
+	if err := r.Devices.Save(ctx, missing); err != nil {
+		t.Fatal(err)
+	}
+
+	if since, ok := must(r.Devices.Get(ctx, spec.ID)).Missing(); !ok || !since.Equal(t0) {
+		t.Errorf("missing = %v %v", since, ok)
+	}
+
+	if deleted, err := r.Devices.DeleteMissing(ctx, spec.ID); err != nil || !deleted {
+		t.Errorf("delete a missing device = %v, %v", deleted, err)
+	}
+
+	if err := r.Devices.Save(ctx, hf); err != nil {
+		t.Fatal(err)
+	}
+
 	if list := must(r.Devices.ListByNode(ctx, garden)); len(list) != 0 {
 		t.Errorf("garden devices = %d", len(list))
 	}

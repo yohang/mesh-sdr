@@ -204,15 +204,31 @@ func (d *Device) setState(s RuntimeState, reason string, now time.Time) {
 	d.online = s == StateRunning || s == StateRetuning
 }
 
+// ReasonNotReported is the runtime reason of a device that its node no
+// longer reports: the device was removed from the node config (ADM-009).
+const ReasonNotReported = "not_reported"
+
 // MarkUnavailable records a device no longer reported by its node.
 func (d *Device) MarkUnavailable(now time.Time) bool {
 	if d.state == StateUnavailable && !d.online {
 		return false
 	}
 
-	d.setState(StateUnavailable, "not_reported", now)
+	d.setState(StateUnavailable, ReasonNotReported, now)
 
 	return true
+}
+
+// Missing reports whether the device is no longer reported by its node
+// (its node reported its devices without it), and since when. Only a
+// missing device can be forgotten. A device of an offline node is not
+// missing.
+func (d *Device) Missing() (time.Time, bool) {
+	if d.state != StateUnavailable || d.reason != ReasonNotReported {
+		return time.Time{}, false
+	}
+
+	return d.stateAt, true
 }
 
 // ApplyState records a device.state event.
@@ -324,4 +340,7 @@ type DeviceRepository interface {
 	Save(ctx context.Context, d *Device) error
 	// SetNodeOffline marks every device of node offline.
 	SetNodeOffline(ctx context.Context, node NodeID) error
+	// DeleteMissing deletes the device only while it is missing (see
+	// Device.Missing) and reports whether it was deleted.
+	DeleteMissing(ctx context.Context, id DeviceID) (bool, error)
 }

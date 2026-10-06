@@ -1,0 +1,411 @@
+package http
+
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/settings/app"
+	"github.com/yohang/mesh-sdr/internal/settings/domain"
+)
+
+// formPageView is a page of form sections. extra is a page-specific block
+// (images, read-only access keys, the retention stores).
+templ formPageView(p formPage, views []sectionView, extra templ.Component) {
+	<h1 class="text-2xl font-semibold">{ p.Title }</h1>
+	if p.Intro != "" {
+		<p class="text-fg-muted">{ p.Intro }</p>
+	}
+	if extra != nil && p.Section == "retention" {
+		@extra
+	}
+	for _, v := range views {
+		@sectionForm(v)
+	}
+	if extra != nil && p.Section != "retention" {
+		@extra
+	}
+}
+
+// sectionForm is one form section, also returned alone (htmx fragment)
+// after a save. static/js/admin-form.js marks it dirty on edit.
+templ sectionForm(v sectionView) {
+	<form
+		id={ "section-" + v.Spec.ID }
+		class="flex flex-col gap-4 rounded border border-border bg-surface p-4"
+		method="post"
+		action={ templ.SafeURL(v.Action) }
+		hx-post={ v.Action }
+		hx-target="this"
+		hx-swap="outerHTML"
+		data-msdr-form
+		aria-labelledby={ "title-" + v.Spec.ID }
+		novalidate
+	>
+		<input type="hidden" name="section" value={ v.Spec.ID }/>
+		<div class="flex flex-wrap items-baseline justify-between gap-2">
+			<h2 id={ "title-" + v.Spec.ID } class="text-lg font-semibold">{ v.Spec.Title }</h2>
+			<span class="text-sm font-semibold text-warning" data-dirty-indicator hidden>Unsaved changes</span>
+		</div>
+		if v.Spec.Description != "" {
+			<p class="text-sm text-fg-muted">{ v.Spec.Description }</p>
+		}
+		if len(v.Problems) > 0 {
+			<div class="rounded border border-danger p-3" role="alert" tabindex="-1">
+				<p class="font-semibold text-danger">
+					if len(v.Problems) == 1 {
+						The settings were not saved: 1 problem.
+					} else {
+						The settings were not saved: { strconv.Itoa(len(v.Problems)) } problems.
+					}
+				</p>
+				<ul class="mt-1 list-disc pl-5">
+					for _, p := range v.Problems {
+						<li>
+							if p.FieldID != "" {
+								<a href={ templ.SafeURL("#" + p.FieldID) }>{ p.Text }</a>
+							} else {
+								{ p.Text }
+							}
+						</li>
+					}
+				</ul>
+			</div>
+		}
+		if v.Notice != "" {
+			<p class="font-semibold text-success" role="status">{ v.Notice }</p>
+		}
+		for _, f := range v.Fields {
+			@fieldView(f)
+		}
+		<div>
+			<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">Save { v.Spec.Title }</button>
+		</div>
+	</form>
+}
+
+templ fieldHelp(f field) {
+	<div id={ "help-" + f.ID } class="text-sm text-fg-muted">
+		if f.Help != "" {
+			<p>{ f.Help }</p>
+		}
+		<p>
+			{ sourceText(f.Source, f.Origin) }
+			if !f.Locked && f.Source != domain.SourceDefault && !f.Secret {
+				Default: { f.Default }.
+			}
+			if f.Kind == domain.InputDuration {
+				Units: m, h, d, w (for example 30d).
+				if f.MinText != "" {
+					At least { f.MinText }.
+				}
+			}
+		</p>
+	</div>
+	if f.Error != "" {
+		<p id={ "err-" + f.ID } class="text-sm font-semibold text-danger">{ f.Error }</p>
+	}
+}
+
+// invalid marks the control of a field with an error.
+func invalid(f field) templ.Attributes {
+	if f.Error == "" {
+		return nil
+	}
+
+	return templ.Attributes{"aria-invalid": "true"}
+}
+
+func describedBy(f field) string {
+	if f.Error != "" {
+		return "help-" + f.ID + " err-" + f.ID
+	}
+
+	return "help-" + f.ID
+}
+
+func inputType(k domain.InputKind) string {
+	switch k {
+	case domain.InputEmail:
+		return "email"
+	case domain.InputInteger, domain.InputNumber:
+		return "number"
+	default:
+		return "text"
+	}
+}
+
+func step(k domain.InputKind) string {
+	if k == domain.InputNumber {
+		return "any"
+	}
+
+	return "1"
+}
+
+// fieldView is the control of one setting. A locked setting is read-only
+// (focusable, not submitted) with its origin.
+templ fieldView(f field) {
+	<div class="flex flex-col gap-1">
+		if !f.Locked && !f.Secret {
+			<input type="hidden" name={ "version." + f.Key } value={ strconv.FormatInt(f.Version, 10) }/>
+		}
+		switch {
+			case f.Locked:
+				<label for={ f.ID } class="font-medium">{ f.Label } <span class="text-sm text-fg-muted">(locked)</span></label>
+				<input id={ f.ID } type="text" class="rounded border border-border bg-surface-raised px-2 py-1" readonly aria-readonly="true" value={ displayValue(f.Kind, lockedValue(f)) } aria-describedby={ describedBy(f) } { invalid(f)... }/>
+			case f.Kind == domain.InputBoolean:
+				<div class="flex items-center gap-2">
+					<input type="hidden" name={ f.Key } value="false"/>
+					<input id={ f.ID } type="checkbox" name={ f.Key } value="true" checked?={ f.Checked } aria-describedby={ describedBy(f) } { invalid(f)... }/>
+					<label for={ f.ID } class="font-medium">{ f.Label }</label>
+				</div>
+			case f.Kind == domain.InputGeo:
+				<fieldset class="flex flex-col gap-1" aria-describedby={ describedBy(f) }>
+					<legend class="font-medium">{ f.Label }</legend>
+					<div class="flex flex-wrap gap-4">
+						<label class="flex flex-col gap-1">
+							<span class="text-sm">Latitude (°)</span>
+							<input id={ f.ID } type="number" step="any" min="-90" max="90" inputmode="decimal" class="rounded border border-border px-2 py-1" name={ f.Key + ".lat" } value={ f.Lat } { invalid(f)... }/>
+						</label>
+						<label class="flex flex-col gap-1">
+							<span class="text-sm">Longitude (°)</span>
+							<input type="number" step="any" min="-180" max="180" inputmode="decimal" class="rounded border border-border px-2 py-1" name={ f.Key + ".lon" } value={ f.Lon } { invalid(f)... }/>
+						</label>
+					</div>
+				</fieldset>
+			case f.Kind == domain.InputEnum:
+				<label for={ f.ID } class="font-medium">{ f.Label }</label>
+				<select id={ f.ID } name={ f.Key } class="rounded border border-border px-2 py-1" aria-describedby={ describedBy(f) } { invalid(f)... }>
+					for _, o := range f.Options {
+						<option value={ o } selected?={ o == f.Value }>{ o }</option>
+					}
+				</select>
+			case f.Kind == domain.InputMarkdown || f.Kind == domain.InputTextarea || f.Kind == domain.InputList:
+				<label for={ f.ID } class="font-medium">{ f.Label }</label>
+				<textarea
+					id={ f.ID }
+					name={ f.Key }
+					rows={ textareaRows(f) }
+					class="rounded border border-border px-2 py-1 font-mono text-sm"
+					if f.MaxLen > 0 {
+						maxlength={ strconv.Itoa(f.MaxLen) }
+					}
+					aria-describedby={ describedBy(f) } { invalid(f)... }
+				>{ f.Value }</textarea>
+			default:
+				<label for={ f.ID } class="font-medium">{ f.Label }</label>
+				<input
+					id={ f.ID }
+					type={ inputType(f.Kind) }
+					name={ f.Key }
+					value={ f.Value }
+					class="rounded border border-border px-2 py-1"
+					if f.Kind == domain.InputInteger || f.Kind == domain.InputNumber {
+						step={ step(f.Kind) }
+						if f.Min != "" {
+							min={ f.Min }
+						}
+						if f.Max != "" {
+							max={ f.Max }
+						}
+					}
+					if f.Kind == domain.InputURL {
+						inputmode="url"
+					}
+					if f.MaxLen > 0 && f.Kind != domain.InputInteger && f.Kind != domain.InputNumber {
+						maxlength={ strconv.Itoa(f.MaxLen) }
+					}
+					autocomplete="off"
+					spellcheck="false"
+					aria-describedby={ describedBy(f) } { invalid(f)... }
+				/>
+		}
+		@fieldHelp(f)
+	</div>
+}
+
+func textareaRows(f field) string {
+	if f.Kind == domain.InputMarkdown && f.MaxLen > 5000 {
+		return "12"
+	}
+
+	return "4"
+}
+
+// lockedValue rebuilds the effective value of a locked field for display.
+func lockedValue(f field) domain.Value {
+	switch f.Kind {
+	case domain.InputBoolean:
+		if f.Checked {
+			return domain.MustValue("true")
+		}
+
+		return domain.MustValue("false")
+	case domain.InputGeo:
+		if f.Lat == "" {
+			return domain.MustValue("null")
+		}
+
+		v, err := domain.NewValue([]byte(`{"lat":` + f.Lat + `,"lon":` + f.Lon + `}`))
+		if err != nil {
+			return domain.MustValue("null")
+		}
+
+		return v
+	default:
+		v, err := domain.ValueOf(f.Value)
+		if err != nil {
+			return domain.MustValue("null")
+		}
+
+		return v
+	}
+}
+
+// adminNetworks shows admin.allowed_networks, a config-only key (ADM-005).
+templ adminNetworks(e app.ConfigEntry) {
+	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-admin-networks">
+		<h2 id="title-admin-networks" class="text-lg font-semibold">Admin networks</h2>
+		<p>
+			<span class="font-medium">Client networks allowed to use the admin area:</span>
+			{ entryValue(e) }
+		</p>
+		<p class="text-sm text-fg-muted">
+			if e.Locked {
+				{ lockText(e.Origin) }
+			} else {
+				Default value.
+			}
+			This key is set only in the hub configuration (admin.allowed_networks).
+		</p>
+	</section>
+}
+
+// storesView is the table of the retention stores, also returned alone
+// (htmx fragment) after "purge now".
+templ storesView(rows []RetentionRow, notice, failure string) {
+	<section id="retention-stores" class="flex flex-col gap-2" aria-labelledby="title-stores">
+		<h2 id="title-stores" class="text-lg font-semibold">Stores</h2>
+		if notice != "" {
+			<p class="font-semibold text-success" role="status">{ notice }</p>
+		}
+		if failure != "" {
+			<p class="font-semibold text-danger" role="alert">{ failure }</p>
+		}
+		<div class="overflow-x-auto">
+			<table class="w-full text-left">
+				<caption class="sr-only">Row count, size and last purge of each store</caption>
+				<thead>
+					<tr class="border-b border-border">
+						<th scope="col" class="py-1 pr-4">Store</th>
+						<th scope="col" class="py-1 pr-4">Retention</th>
+						<th scope="col" class="py-1 pr-4">Rows</th>
+						<th scope="col" class="py-1 pr-4">Size</th>
+						<th scope="col" class="py-1 pr-4">Last purge</th>
+						<th scope="col" class="py-1"><span class="sr-only">Actions</span></th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, r := range rows {
+						<tr class="border-b border-border">
+							<th scope="row" class="py-1 pr-4 font-medium">{ r.Label }</th>
+							<td class="py-1 pr-4">{ formatDuration(r.Retention) }</td>
+							<td class="py-1 pr-4">{ strconv.FormatInt(r.Rows, 10) }</td>
+							<td class="py-1 pr-4">
+								if r.Sized {
+									{ humanBytes(r.Bytes) }
+								} else {
+									unknown
+								}
+							</td>
+							<td class="py-1 pr-4">{ lastRun(r) }</td>
+							<td class="py-1">
+								<form method="post" action="/admin/retention/purge" hx-post="/admin/retention/purge" hx-target="#retention-stores" hx-swap="outerHTML" hx-confirm={ "Delete the " + r.Label + " rows older than " + formatDuration(r.Retention) + " now?" }>
+									<input type="hidden" name="store" value={ r.Store }/>
+									<button type="submit" class="rounded border border-border px-2 py-1">Purge now<span class="sr-only">: { r.Label }</span></button>
+								</form>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</section>
+}
+
+// overviewPage is the admin landing page (ADM-001).
+templ overviewPage(s overviewSummary) {
+	<h1 class="text-2xl font-semibold">Administration</h1>
+	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-health">
+		<h2 id="title-health" class="text-lg font-semibold">Health</h2>
+		<ul class="list-disc pl-5">
+			<li>
+				{ strconv.Itoa(s.Settings) } settings: { strconv.Itoa(s.Locked) } locked by the hub configuration, { strconv.Itoa(s.DB) } set by an admin.
+			</li>
+			<li>
+				switch {
+					case s.JobsUnavailable:
+						Retention jobs: status unavailable.
+					case len(s.FailedJobs) == 0:
+						Retention jobs: no failure.
+					default:
+						Retention jobs failing: { joinComma(s.FailedJobs) }. See <a href="/admin/retention">Data &amp; retention</a>.
+				}
+			</li>
+		</ul>
+	</section>
+	<section class="flex flex-col gap-2" aria-labelledby="title-sections">
+		<h2 id="title-sections" class="text-lg font-semibold">Sections</h2>
+		<ul class="flex flex-col gap-2">
+			<li><a href="/admin/site" class="font-medium">Site</a>: station name, location, contact, usage policy and images.</li>
+			<li><a href="/admin/access" class="font-medium">Access</a>: listen policy, sessions and sign-in throttling.</li>
+			<li><a href="/admin/look-and-feel" class="font-medium">Look &amp; feel</a>: theme and display defaults.</li>
+			<li><a href="/admin/devices" class="font-medium">Devices</a>: the device registry, read-only (devices are configured in their node config).</li>
+			<li><a href="/admin/retention" class="font-medium">Data &amp; retention</a>: retention policies and storage use.</li>
+			<li><a href="/admin/system" class="font-medium">System</a>: the effective configuration and where each value comes from.</li>
+		</ul>
+	</section>
+}
+
+// systemPage is the effective configuration view (ADM-010).
+templ systemPage(v app.ConfigView) {
+	<h1 class="text-2xl font-semibold">System</h1>
+	<section class="flex flex-col gap-2" aria-labelledby="title-config">
+		<div class="flex flex-wrap items-baseline justify-between gap-2">
+			<h2 id="title-config" class="text-lg font-semibold">Effective configuration</h2>
+			<a href="/api/v1/config/effective?download=true" download hx-boost="false" class="font-medium">Download as JSON</a>
+		</div>
+		<p class="text-sm text-fg-muted">
+			Every key with its effective value and where it comes from. Keys of class cfg are set only in the hub configuration; keys of class db are admin settings, locked when the configuration sets them. Secrets are never shown.
+		</p>
+		<div class="overflow-x-auto">
+			<table class="w-full text-left text-sm">
+				<caption class="sr-only">Effective configuration</caption>
+				<thead>
+					<tr class="border-b border-border">
+						<th scope="col" class="py-1 pr-4">Key</th>
+						<th scope="col" class="py-1 pr-4">Value</th>
+						<th scope="col" class="py-1 pr-4">Class</th>
+						<th scope="col" class="py-1 pr-4">Source</th>
+						<th scope="col" class="py-1">Origin</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, e := range v.Entries {
+						<tr class="border-b border-border align-top">
+							<th scope="row" class="py-1 pr-4 font-mono font-normal">{ e.Key }</th>
+							<td class="max-w-md break-words py-1 pr-4 font-mono">{ shorten(entryValue(e)) }</td>
+							<td class="py-1 pr-4">{ e.Class }</td>
+							<td class="py-1 pr-4">
+								{ string(e.Source) }
+								if e.Locked {
+									<span class="font-semibold">(locked)</span>
+								}
+							</td>
+							<td class="py-1 font-mono">{ e.Origin }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</section>
+}

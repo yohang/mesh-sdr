@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite/sqlc"
@@ -125,4 +126,14 @@ func (r *AuditLog) Recent(ctx context.Context, limit int) ([]domain.AuditEntry, 
 	}
 
 	return out, nil
+}
+
+// DeleteBefore implements domain.AuditPurge.
+func (r *AuditLog) DeleteBefore(ctx context.Context, cutoff time.Time, limit int) (int, error) {
+	n, err := sqlc.New(r.db.Writer(ctx)).DeleteAuditEntriesBefore(ctx, sqlc.DeleteAuditEntriesBeforeParams{Cutoff: ms(cutoff), Batch: int64(limit)})
+	if err != nil {
+		return 0, fmt.Errorf("delete audit entries: %w", err)
+	}
+
+	return int(n), nil
 }

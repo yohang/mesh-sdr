@@ -14,39 +14,39 @@ import (
 // Passwords runs the password change of a signed-in user: forced
 // (must_change_password, AUTH-006) or voluntary (AUTH-007).
 type Passwords struct {
-	users      domain.UserRepository
-	sessions   domain.SessionRepository
-	audit      domain.AuditLog
-	tx         Transactor
-	hasher     PasswordHasher
-	ids        IDGenerator
-	now        Clock
-	policies   Policies
-	throttle   domain.ThrottlePolicy
-	sessionPol domain.SessionPolicy
-	logger     *slog.Logger
+	users     domain.UserRepository
+	sessions  domain.SessionRepository
+	audit     domain.AuditLog
+	tx        Transactor
+	hasher    PasswordHasher
+	ids       IDGenerator
+	now       Clock
+	policies  Policies
+	lifetimes SessionPolicies
+	logger    *slog.Logger
 }
 
 // PasswordsDeps are the dependencies of Passwords.
 type PasswordsDeps struct {
-	Users         domain.UserRepository
-	Sessions      domain.SessionRepository
-	Audit         domain.AuditLog
-	Tx            Transactor
-	Hasher        PasswordHasher
-	IDs           IDGenerator
-	Now           Clock
-	Policies      Policies
-	Throttle      domain.ThrottlePolicy
-	SessionPolicy domain.SessionPolicy
-	Logger        *slog.Logger
+	Users    domain.UserRepository
+	Sessions domain.SessionRepository
+	Audit    domain.AuditLog
+	Tx       Transactor
+	Hasher   PasswordHasher
+	IDs      IDGenerator
+	Now      Clock
+	Policies Policies
+	// SessionPolicies gives the session and throttling policies, read on
+	// every use (DB settings, ADR 0010).
+	SessionPolicies SessionPolicies
+	Logger          *slog.Logger
 }
 
 // NewPasswords returns the service.
 func NewPasswords(d PasswordsDeps) *Passwords {
 	return &Passwords{
 		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, hasher: d.Hasher, ids: d.IDs, now: d.Now,
-		policies: d.Policies, throttle: d.Throttle, sessionPol: d.SessionPolicy, logger: d.Logger,
+		policies: d.Policies, lifetimes: d.SessionPolicies, logger: d.Logger,
 	}
 }
 
@@ -121,7 +121,7 @@ func (s *Passwords) Change(ctx context.Context, in ChangePasswordInput) (ChangeP
 		}
 
 		current = u.PasswordHash()
-		u.RecordLoginFailure(now, s.throttle)
+		u.RecordLoginFailure(now, s.lifetimes.ThrottlePolicy())
 
 		return s.users.Save(ctx, u)
 	})
@@ -227,11 +227,11 @@ func (s *Passwords) apply(ctx context.Context, in ChangePasswordInput, verified,
 			return err
 		}
 
-		res.Remember = in.Session.Persistent(s.sessionPol)
+		res.Remember = in.Session.Persistent(s.lifetimes.SessionPolicy())
 
 		sess, token, err := domain.StartSession(domain.StartSessionParams{
 			ID: id, UserID: u.ID(), Provider: in.Session.Provider(), Remember: res.Remember,
-			IP: in.Meta.IP, UserAgent: in.Meta.UserAgent, Policy: s.sessionPol, Now: now,
+			IP: in.Meta.IP, UserAgent: in.Meta.UserAgent, Policy: s.lifetimes.SessionPolicy(), Now: now,
 			NotAfter: in.Session.AbsoluteExpiresAt(),
 		})
 		if err != nil {

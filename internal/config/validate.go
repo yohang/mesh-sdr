@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -14,7 +15,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
-	shelldomain "github.com/yohang/mesh-sdr/internal/shell/domain"
 )
 
 type checker struct {
@@ -140,15 +140,7 @@ func (h *Hub) validate(o Origins) []Problem {
 	}
 
 	c.log(h.Log)
-	c.enum("settings.ui.theme_mode", h.Settings.UI.ThemeMode, "light", "dark", "auto")
-
-	// Empty means "use the built-in default"; any other value must be a
-	// valid policy, with the same rules as the shell's value object.
-	if text := h.Settings.Receiver.UsagePolicyText; strings.TrimSpace(text) != "" {
-		if _, err := shelldomain.NewPolicyText(text); err != nil {
-			c.domainError("settings.receiver.usage_policy_text", err)
-		}
-	}
+	c.settings(h)
 
 	if a := h.Auth.Argon2; a.MemoryKiB < Argon2MinMemoryKiB {
 		c.fail("auth.argon2.memory_kib", CodeInvalidValue, fmt.Sprintf("invalid value %d: want >= %d", a.MemoryKiB, Argon2MinMemoryKiB))
@@ -266,4 +258,45 @@ func validFingerprint(s string) bool {
 	}
 
 	return strings.Trim(strings.ToLower(s), "0123456789abcdef") == ""
+}
+
+// settings validates the [settings] keys set in a file or the env with the
+// settings validator (ADR 0010), then the checks across keys when every key
+// of a check is set in the config (combinations with DB values are checked
+// by the settings store).
+func (c *checker) settings(h *Hub) {
+	idx, err := loadSettingsIndex()
+	if err != nil {
+		c.fail("settings", CodeInvalidValue, err.Error())
+
+		return
+	}
+
+	values := map[string]any{}
+
+	for _, lf := range leaves(h) {
+		key, ok := strings.CutPrefix(lf.key, settingsPrefix)
+		if !ok || !c.origins.Of(lf.key).Locked() {
+			continue
+		}
+
+		v := lf.value.Interface()
+
+		raw, err := json.Marshal(v)
+		if err != nil {
+			c.fail(lf.key, CodeInvalidValue, err.Error())
+
+			continue
+		}
+
+		for _, vi := range checkSetting(idx.byKey[key], v, raw) {
+			c.fail(settingsPrefix+vi.Path(), string(vi.Code()), vi.Message())
+		}
+
+		values[key] = v
+	}
+
+	for _, vi := range CheckSettings(func(k string) (any, bool) { v, ok := values[k]; return v, ok }) {
+		c.fail(settingsPrefix+vi.Path(), string(vi.Code()), vi.Message())
+	}
 }
