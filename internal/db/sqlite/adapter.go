@@ -50,7 +50,7 @@ var _ db.Adapter = (*Adapter)(nil)
 // Open opens the database file, applies and verifies the connection pragmas
 // and returns the adapter. It does not migrate the schema.
 func Open(ctx context.Context, opts Options) (*Adapter, error) {
-	if opts.Path == "" || strings.ContainsAny(opts.Path, "?#") {
+	if opts.Path == "" || strings.ContainsRune(opts.Path, 0) {
 		return nil, fmt.Errorf("sqlite: invalid database path %q", opts.Path)
 	}
 
@@ -143,8 +143,12 @@ func dsn(path string, writer bool) string {
 		q.Add("_pragma", "query_only(ON)")
 	}
 
-	return "file:" + path + "?" + q.Encode()
+	return "file:" + uriPath.Replace(path) + "?" + q.Encode()
 }
+
+// uriPath escapes the characters that SQLite URI filenames decode or treat
+// as delimiters (%, ?, #), so any file path opens the file it names.
+var uriPath = strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23")
 
 // verify checks the pragmas the spec requires on both pools.
 func (a *Adapter) verify(ctx context.Context) error {

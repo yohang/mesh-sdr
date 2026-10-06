@@ -51,8 +51,44 @@ func TestOpenCreatesPrivateFile(t *testing.T) {
 	}
 }
 
+// URI-special characters in the path must name the file literally.
+func TestOpenEscapesPath(t *testing.T) {
+	ctx := context.Background()
+
+	for _, name := range []string{"a%20b.db", "a%2fb.db", "q?mode=memory.db", "h#x.db"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, name)
+
+			a := open(t, path, nil)
+			if _, err := a.Migrator().Up(ctx); err != nil {
+				t.Fatal(err)
+			}
+
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			found := false
+			for _, e := range entries {
+				found = found || e.Name() == name
+			}
+
+			if !found {
+				t.Fatalf("%q not created; dir has %v", name, entries)
+			}
+
+			info, err := os.Stat(path)
+			if err != nil || info.Size() == 0 {
+				t.Fatalf("database not written to %q: %v", path, err)
+			}
+		})
+	}
+}
+
 func TestOpenRejectsBadPath(t *testing.T) {
-	for _, p := range []string{"", "/tmp/x.db?mode=memory", filepath.Join(t.TempDir(), "missing", "hub.db")} {
+	for _, p := range []string{"", filepath.Join(t.TempDir(), "missing", "hub.db")} {
 		if _, err := sqlite.Open(context.Background(), sqlite.Options{Path: p}); err == nil {
 			t.Errorf("Open(%q) succeeded", p)
 		}
