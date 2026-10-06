@@ -248,6 +248,45 @@ func TestConcurrentMigrators(t *testing.T) {
 	}
 }
 
+func TestDownEditUp(t *testing.T) {
+	ctx := context.Background()
+	const down = "-- +goose Down\nDROP TABLE b;\n"
+	v2 := migrationFS("00001_a.sql", m1, "00002_b.sql", m2+down)
+	edited := migrationFS("00001_a.sql", m1, "00002_b.sql", m2+"CREATE INDEX b_id ON b (id);\n"+down)
+
+	for _, staleChecksum := range []bool{false, true} {
+		t.Run(map[bool]string{false: "clean", true: "stale checksum left by a crash"}[staleChecksum], func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "hub.db")
+
+			a := open(t, path, v2)
+			if _, err := a.Migrator().Up(ctx); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := a.Migrator().Down(ctx); err != nil {
+				t.Fatal(err)
+			}
+
+			if staleChecksum {
+				if _, err := a.Writer(ctx).ExecContext(ctx,
+					"INSERT INTO schema_migration_checksums (version, name, checksum, recorded_at) VALUES (2, '00002_b.sql', ?, 0)",
+					strings.Repeat("0", 64)); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			b := open(t, path, edited)
+			if r, err := b.Migrator().Up(ctx); err != nil || len(r) != 1 {
+				t.Fatalf("Up after edit = %v, %v", r, err)
+			}
+
+			if err := b.Migrator().Check(ctx); err != nil {
+				t.Fatalf("Check after down → edit → up: %v", err)
+			}
+		})
+	}
+}
+
 func TestPragmas(t *testing.T) {
 	ctx := context.Background()
 	a := open(t, filepath.Join(t.TempDir(), "hub.db"), nil)

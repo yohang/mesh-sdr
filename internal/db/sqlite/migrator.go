@@ -89,9 +89,18 @@ func (m *Migrator) up(ctx context.Context) ([]db.MigrationResult, error) {
 
 	results, upErr := m.provider.Up(ctx)
 
-	// Record checksums of everything applied, including migrations applied
-	// before an error and by older binaries without checksums.
-	if err := m.recordChecksums(ctx); err != nil {
+	// Record the checksums of the migrations applied by this run (replacing
+	// any stale value, e.g. after down → edit → up), and of applied
+	// migrations that have none (applied before an error or by an older
+	// binary).
+	applied := make([]int64, 0, len(results))
+	for _, r := range results {
+		if r.Error == nil {
+			applied = append(applied, r.Source.Version)
+		}
+	}
+
+	if err := m.recordChecksums(ctx, applied); err != nil {
 		return nil, errors.Join(upErr, err)
 	}
 
@@ -118,6 +127,10 @@ func (m *Migrator) Down(ctx context.Context) (out db.MigrationResult, err error)
 	return out, err
 }
 
+// down rolls back the latest migration, then deletes its checksum on the
+// single writer connection. goose runs the rollback in its own transaction,
+// so the two cannot share one; a checksum left behind by a crash in between
+// is replaced by the next Up, which upserts the checksums it applies.
 func (m *Migrator) down(ctx context.Context) (db.MigrationResult, error) {
 	r, err := m.provider.Down(ctx)
 	if errors.Is(err, goose.ErrNoNextVersion) {
@@ -339,8 +352,10 @@ func (m *Migrator) verifyChecksums(ctx context.Context, q *sql.DB, requireAll bo
 	return nil
 }
 
-// recordChecksums stores the checksum of every applied migration that has none.
-func (m *Migrator) recordChecksums(ctx context.Context) error {
+// recordChecksums stores the checksum of every applied migration: replaced
+// for the versions in fresh (applied by this run), kept when present for the
+// others.
+func (m *Migrator) recordChecksums(ctx context.Context, fresh []int64) error {
 	if exists, err := tableExists(ctx, m.writer, versionTable); err != nil || !exists {
 		return err
 	}
@@ -362,8 +377,13 @@ func (m *Migrator) recordChecksums(ctx context.Context) error {
 			return err
 		}
 
+		onConflict := "DO NOTHING"
+		if slices.Contains(fresh, src.Version) {
+			onConflict = "DO UPDATE SET name = excluded.name, checksum = excluded.checksum, recorded_at = excluded.recorded_at"
+		}
+
 		if _, err := m.writer.ExecContext(ctx,
-			"INSERT INTO "+checksumTable+" (version, name, checksum, recorded_at) VALUES (?, ?, ?, ?) ON CONFLICT (version) DO NOTHING",
+			"INSERT INTO "+checksumTable+" (version, name, checksum, recorded_at) VALUES (?, ?, ?, ?) ON CONFLICT (version) "+onConflict,
 			src.Version, path.Base(src.Path), sum, now); err != nil {
 			return fmt.Errorf("sqlite: record checksum of %s: %w", src.Path, err)
 		}
