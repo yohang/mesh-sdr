@@ -200,6 +200,23 @@ func (r *ConnectionRepository) DeleteClosedBefore(ctx context.Context, before ti
 	return n, nil
 }
 
+// EraseUser removes the personal data of a deleted user (SR-64): its
+// closed rows are deleted, its open rows lose the user, session, address
+// and user agent (presence keeps counting them until they close).
+func (r *ConnectionRepository) EraseUser(ctx context.Context, user shared.UUID) error {
+	q := sqlc.New(r.db.Writer(ctx))
+
+	if _, err := q.DeleteClosedUserConnections(ctx, user.Bytes()); err != nil {
+		return fmt.Errorf("delete connections of a user: %w", err)
+	}
+
+	if _, err := q.AnonymizeOpenUserConnections(ctx, user.Bytes()); err != nil {
+		return fmt.Errorf("anonymise connections of a user: %w", err)
+	}
+
+	return nil
+}
+
 func connectionFromRow(row sqlc.Connection) (*domain.Connection, error) {
 	id, err := shared.UUIDFromBytes(row.ID)
 	if err != nil {

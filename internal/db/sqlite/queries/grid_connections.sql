@@ -52,3 +52,10 @@ DELETE FROM connections WHERE closed_at IS NOT NULL AND closed_at < ?;
 
 -- name: CountOpenNodeConnections :one
 SELECT count(*) FROM connections WHERE closed_at IS NULL AND node_id = ?;
+
+-- name: DeleteClosedUserConnections :execrows
+DELETE FROM connections WHERE user_id = sqlc.arg(user_id) AND closed_at IS NOT NULL;
+
+-- name: AnonymizeOpenUserConnections :execrows
+UPDATE connections SET user_id = NULL, session_id = NULL, ip = '', user_agent = NULL
+WHERE user_id = sqlc.arg(user_id) AND closed_at IS NULL;

@@ -22,6 +22,7 @@ import (
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/http/api"
 	"github.com/yohang/mesh-sdr/internal/identity"
@@ -148,7 +149,25 @@ func (p *Process) Run(ctx context.Context) error {
 
 // identityDeps returns the dependencies of the identity module.
 func identityDeps(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) identity.Deps {
-	return identity.Deps{Config: cfg, Logger: logger, DB: adapter, IDs: shared.NewUUIDv7Generator(), Now: time.Now}
+	return identity.Deps{
+		Config: cfg, Logger: logger, DB: adapter, IDs: shared.NewUUIDv7Generator(), Now: time.Now,
+		Erasers: []identityapp.UserEraser{connectionEraser{gridsqlite.NewConnectionRepository(adapter)}},
+	}
+}
+
+// connectionEraser removes a deleted user from the grid presence registry
+// (SR-64).
+type connectionEraser struct {
+	repo *gridsqlite.ConnectionRepository
+}
+
+func (c connectionEraser) EraseUser(ctx context.Context, id identitydomain.UserID) error {
+	u, err := shared.UUIDFromBytes(id.Bytes())
+	if err != nil {
+		return err
+	}
+
+	return c.repo.EraseUser(ctx, u)
 }
 
 // mailQueue returns the outgoing mail queue, or nil when smtp.host is not

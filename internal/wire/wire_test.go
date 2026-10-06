@@ -16,6 +16,10 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
+	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/wire"
 )
 
@@ -312,5 +316,41 @@ func TestHubWithoutAccounts(t *testing.T) {
 		if status, _, _ := get(t, c, "http://"+addr+path); status != http.StatusSeeOther {
 			t.Errorf("GET %s = %d, want a redirect to sign in", path, status)
 		}
+	}
+}
+
+// SR-64: removing a user from the CLI also erases its presence rows.
+func TestRemoveErasesConnections(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.DefaultHub()
+	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
+	a := dbtest.NewSQLite(t)
+	admin := wire.UserAdmin(cfg, discard, a)
+
+	res, err := admin.Add(ctx, identityapp.AddUserInput{Username: "alice", Password: "a long passphrase here"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	uid, _ := shared.UUIDFromBytes(res.User.ID().Bytes())
+	cid, _ := shared.NewUUIDv7Generator().New(time.Now())
+
+	c, err := griddomain.NewConnection(griddomain.ConnectionInfo{ID: cid, Kind: griddomain.ConnectionEvents, UserID: uid, RoleID: 10, IP: "192.0.2.1"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conns := gridsqlite.NewConnectionRepository(a)
+	if _, err := conns.Open(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := admin.Remove(ctx, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := conns.Get(ctx, cid)
+	if err != nil || !got.Info().UserID.IsZero() || got.Info().IP != "" {
+		t.Errorf("connection after removal = %+v, %v", got, err)
 	}
 }
