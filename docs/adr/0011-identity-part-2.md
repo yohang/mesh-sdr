@@ -73,7 +73,7 @@ Two other parts move in parallel:
 - Identity reads its admin-editable settings through a consumer-side `app.Settings` port, with interim constant defaults (`identity/infra/settings.Defaults`):
   - `auth.password_min_length`;
   - later `invitations.ttl_hours` (default 7 days, maximum 30) and `password_reset.ttl_minutes` (default 30).
-- Whichever of adm-1 and acc-1 merges second wires these keys into the store, like adm-1's session and login-throttle keys.
+- Whichever of adm-1 and acc-1 merges second wires these keys into the store, like adm-1's session and login-throttle keys. Done in PR 2: `invitations.ttl_hours` (1–720 hours, default 168) and `password_reset.ttl_minutes` (5–1440 minutes, default 30) are store keys under Admin › Access › Invitation and reset links, read with `auth.password_min_length` and `listen_policy` through `identity/infra/settingsrc`. CLI commands, which run without the store, keep `settings.Defaults`.
 
 ### First admin setup (AUTH-018) — PR 1
 
@@ -133,7 +133,7 @@ Two other parts move in parallel:
   - The export is JSON: account and sessions.
 - **Audit view (ACC-010).**
   - Filters, keyset pagination and CSV/JSON export, with CSV formula-injection protection.
-  - The retention job is adm-1's ADM-011; #57 closes when both are merged.
+  - The retention job is adm-1's ADM-011 (`audit.purge`).
 - **Access tokens (ACC-007).**
   - **Format.** Ed25519 JWS (`golang-jwt/jwt/v5`). `kid` is the RFC 7638 thumbprint.
   - **Claims.**
@@ -148,7 +148,7 @@ Two other parts move in parallel:
     - like the node certificate, it is a documented exception to "the binary never writes files".
   - **Distribution.** Public keys go out over `ctl.keys.update`, and also as `/.well-known/jwks.json`.
   - **Revocation.** `ctl.revocations` gains `sessions` and `users`.
-- **Navigation.** The shell gets a user slot: Sign in, Account, Log out, and the admin sub-links under adm-1's Admin entry. Whichever lands second merges the two.
+- **Navigation.** The shell gets a user slot: Sign in, Account, Log out. Users, Invitations and Audit log are sections of adm-1's admin area (`layout.AdminSections`), rendered in its admin layout.
 - **REST additions.** `/me/sessions`, `/me/email`, `/me/export`, `DELETE /me`, `/users/{id}/sessions`, `/users/{id}/password`, `/users/{id}/export`.
   - Object-level checks apply (SR-18).
   - New bodies reject unknown fields (SR-20).
@@ -156,7 +156,7 @@ Two other parts move in parallel:
 ## Implementation notes (PR 2)
 
 - **Request bodies.** Every closed JSON body (`additionalProperties: false`) is checked for unknown fields once the route matches, only for callers the access policy accepts, so refusals keep their 401/403 (SR-20).
-- **Persistence.** One repository per aggregate: invitations, reset tokens and e-mail change tokens store only token hashes; issuing a reset or e-mail token invalidates the user's earlier ones; a stale invitation copy cannot be redeemed or revoked twice (conditional update). The session reaper also deletes ended invitations (30 days) and tokens (1 day).
+- **Persistence.** One repository per aggregate: invitations, reset tokens and e-mail change tokens store only token hashes; issuing a reset or e-mail token invalidates the user's earlier ones; a stale invitation copy cannot be redeemed or revoked twice (conditional update). Scheduler jobs (adm-1's `jobs/app.Scheduler`, hourly) delete ended invitations after 30 days (`invitations.purge`) and ended reset and e-mail change tokens after 1 day (`reset_tokens.purge`, `email_tokens.purge`).
 - **Sessions.** The public handle of a session (`Session.Ref`, a hash prefix of its id) identifies it to users, admins and access tokens (`sid`); the id itself never leaves the hub (§7.1).
 - **Mail.** `[smtp]` config (host, port 587, tls `starttls`, username, password secret, from, allow_insecure); `internal/mail` sends plain text with go-mail through a 256-message in-memory queue (3 retries); logs carry only the recipient domain. `internal/identity/infra/notify` renders the messages. Development: mailpit `v1.31.4` pinned by digest under the compose profile `mail`, settings in `.env.example`.
 - **Roles.** `PUT /users/{id}/roles` replaces the grants; the HTML editor sets a global role, or operator on listed devices. Any change revokes every session (owner decision); the last enabled admin cannot be demoted, disabled (web and CLI) or deleted.
@@ -167,7 +167,7 @@ Two other parts move in parallel:
   - Identity owns the keyring (`auth.token_key_dir`, default `/var/lib/meshsdr/keys`; `auth.token_ttl` 5m, 1m–10m; `auth.key_rotation_days` 30), the issuer, `GET /.well-known/jwks.json` (keys and `revoked_kids`), `POST /api/v1/auth/token` and `meshsdr hub keys list|rotate|revoke`.
   - The keyring is the grid's key source (`Published`, `OnChange`); identity publishes revocations through `app.RevocationPublisher` (`identity.Deps.Revocations`).
   - Grid-3 owns `ctl.keys.update`, the `ctl.revocations` transport, node-side verification and the gateway authz that binds connection ids (`app.ConnectionBinder`): until it is wired, signed-in callers get tokens bound by `sub` and `sid`, anonymous callers get 401.
-  - Scopes: listen and demod on each device the caller may listen to (device policy, else the global `listen_policy`, `anonymous` until the settings store); preset for an operator on the device; retune for an admin, or such an operator where `operator_can_retune`. `lim.max_demods` is 4 until a setting exists.
+  - Scopes: listen and demod on each device the caller may listen to (device policy, else the global `listen_policy`, from the settings store); preset for an operator on the device; retune for an admin, or such an operator where `operator_can_retune`. `lim.max_demods` is 4 until a setting exists.
 - **Security review fixes.**
   - Pending reset and e-mail change links die whenever access changes (password change or reset, generated password, disable, sign-out of other or all sessions, e-mail change), in the same transaction; a reset or confirmation of a disabled account is refused. A reset confirms only the address its link was e-mailed to (`password_reset_tokens.sent_to`, migration 00014).
   - Deleting a user also erases its grid presence rows (closed rows deleted, open rows stripped of user, session, address and user agent), from the web and the CLI.
