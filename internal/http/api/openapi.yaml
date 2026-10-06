@@ -318,6 +318,39 @@ paths:
                 $ref: "#/components/schemas/ConnectionList"
         default:
           $ref: "#/components/responses/Problem"
+  /auth/password:
+    post:
+      operationId: changePassword
+      x-meshsdr-access: listener
+      summary: Change the caller's password
+      description: |
+        Checks the current password and sets a new one that follows the
+        password policy and differs from the current one. Every session of
+        the user is revoked and the caller's session is replaced: the
+        response sets the new session cookie and returns its CSRF token.
+        A wrong current password counts as a failed login (429
+        `rate_limited` with `Retry-After` while throttled). Allowed while
+        the user must change the password.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed. The new session cookie is set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionInfo"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     NodeID:
@@ -679,6 +712,18 @@ components:
         remember_me:
           type: boolean
           description: Keep the session for 30 days instead of 24 hours.
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          maxLength: 1024
+        new_password:
+          type: string
+          description: At least `auth.password_min_length` (default 10) and at most 256 characters, not a common password.
+          maxLength: 1024
     Health:
       type: object
       required: [status]
