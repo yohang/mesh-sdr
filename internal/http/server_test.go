@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
@@ -55,6 +56,68 @@ func TestNewRouterModules(t *testing.T) {
 		}
 	}
 }
+
+func TestSecurityHeaders(t *testing.T) {
+	var nonces []string
+
+	page := func(w http.ResponseWriter, r *http.Request) {
+		nonce := templ.GetNonce(r.Context())
+		nonces = append(nonces, nonce)
+		_, _ = w.Write([]byte(nonce))
+	}
+
+	h := httpserver.NewRouter(slog.New(slog.DiscardHandler), http.HandlerFunc(page), routes(func(r chi.Router) { r.Get("/page", page) }))
+
+	for _, path := range []string{"/page", "/page", httpserver.APIPrefix + "/x"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+		hdr := rec.Header()
+		want := map[string]string{
+			"X-Content-Type-Options":     "nosniff",
+			"Referrer-Policy":            "same-origin",
+			"Cross-Origin-Opener-Policy": "same-origin",
+		}
+
+		for k, v := range want {
+			if got := hdr.Get(k); got != v {
+				t.Errorf("%s: %s = %q, want %q", path, k, got, v)
+			}
+		}
+
+		nonce := rec.Body.String()
+		if len(nonce) < 22 {
+			t.Fatalf("%s: nonce %q too short", path, nonce)
+		}
+
+		if got := hdr.Get("Content-Security-Policy"); got != httpserver.ContentSecurityPolicy(nonce) {
+			t.Errorf("%s: CSP = %q", path, got)
+		}
+	}
+
+	if nonces[0] == nonces[1] || nonces[1] == nonces[2] {
+		t.Errorf("nonce reused across requests: %v", nonces)
+	}
+
+	csp := httpserver.ContentSecurityPolicy("n")
+	for _, d := range []string{"script-src 'nonce-n';", "frame-ancestors 'none'", "style-src 'self';", "default-src 'none'"} {
+		if !strings.Contains(csp, d) {
+			t.Errorf("CSP lacks %q: %s", d, csp)
+		}
+	}
+
+	for _, banned := range []string{"unsafe-inline", "unsafe-eval", "script-src 'self'"} {
+		if strings.Contains(csp, banned) {
+			t.Errorf("CSP contains %q: %s", banned, csp)
+		}
+	}
+}
+
+// routes is a Module with routes only.
+type routes func(r chi.Router)
+
+func (routes) Middlewares() []func(http.Handler) http.Handler { return nil }
+func (f routes) Routes(r chi.Router)                          { f(r) }
 
 func TestNewServerTimeouts(t *testing.T) {
 	srv := httpserver.NewServer(":0", http.NotFoundHandler())

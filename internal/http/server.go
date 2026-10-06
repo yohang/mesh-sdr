@@ -40,6 +40,7 @@ func NewRouter(logger *slog.Logger, api http.Handler, modules ...Module) http.Ha
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
+	r.Use(securityHeaders)
 
 	for _, m := range modules {
 		r.Use(m.Middlewares()...)
