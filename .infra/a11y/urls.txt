@@ -6,6 +6,7 @@
 /decodes 200
 /files 200
 /policy 200
+/about 200
 /no-such-page 404
 /login 200
 /setup/not-a-valid-token 404

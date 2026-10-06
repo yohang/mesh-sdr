@@ -14,6 +14,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/shell/app"
 	"github.com/yohang/mesh-sdr/internal/shell/domain"
+	"github.com/yohang/mesh-sdr/internal/version"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 	"github.com/yohang/mesh-sdr/internal/web/render"
 )
@@ -65,7 +66,8 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 		User:        user,
 		SiteName:    v.SiteName,
 		Theme:       theme,
-		FooterLinks: []layout.Link{{Label: "Usage policy", Href: v.PolicyURL}},
+		FooterLinks: []layout.Link{{Label: "Usage policy", Href: v.PolicyURL}, {Label: "About", Href: AboutPath}},
+		Product:     product(),
 		Nav:         nav,
 		Now:         s.now(),
 	}
@@ -108,6 +110,7 @@ func (m *Module) Routes(r chi.Router) {
 	get(domain.SectionFiles.Path(), m.placeholder(domain.SectionFiles, "Received files are not available yet."))
 	get("/robots.txt", robots)
 	get("/policy", m.policyPage)
+	get(AboutPath, m.aboutPage)
 	get("/manifest.webmanifest", m.manifest)
 	get("/favicon.ico", favicon(m.static))
 }
@@ -166,4 +169,18 @@ func (m *Module) policyPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.render.Page(w, r, http.StatusOK, layout.Page{Title: "Usage policy"}, policyPage(html), nil)
+}
+
+// AboutPath is the About page (UI-010).
+const AboutPath = "/about"
+
+// product describes the running build.
+func product() layout.Product {
+	return layout.Product{Name: "MeshSDR", Version: version.String(), License: version.License, SourceURL: version.SourceURL()}
+}
+
+// aboutPage serves the About page: product, version, licence and the link
+// to the source code of this build (AGPL-3.0 section 13), public.
+func (m *Module) aboutPage(w http.ResponseWriter, r *http.Request) {
+	m.render.Page(w, r, http.StatusOK, layout.Page{Title: "About"}, aboutPage(product()), nil)
 }

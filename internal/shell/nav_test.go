@@ -167,6 +167,7 @@ func TestUserMenu(t *testing.T) {
 		`<span class="badge">Operator</span>`,
 		`<a href="/account/password" class="menu-item">Change password</a>`,
 		`<a href="/policy" class="menu-item">Usage policy</a>`,
+		`<a href="/about" class="menu-item">About</a>`,
 		`<form method="post" action="/logout"><button type="submit" class="menu-item">Sign out</button>`,
 	} {
 		if !strings.Contains(signed, want) {
@@ -176,5 +177,39 @@ func TestUserMenu(t *testing.T) {
 
 	if strings.Contains(signed, `href="/login"`) {
 		t.Error("signed-in page links to the login page")
+	}
+}
+
+// TestAbout covers the About page (UI-010) and the footer: version, licence
+// and a link to the source code (AGPL-3.0 section 13), on every page.
+func TestAbout(t *testing.T) {
+	h := router(values{})
+
+	res, body := do(t, h, http.MethodGet, "/about", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /about = %d", res.StatusCode)
+	}
+
+	for _, want := range []string{
+		"<title>About · MeshSDR</title>", "<h1>About</h1>", "<dd>AGPL-3.0-or-later</dd>",
+		`<a href="https://github.com/yohang/mesh-sdr" rel="noopener noreferrer" hx-boost="false">https://github.com/yohang/mesh-sdr</a>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("about page lacks %s", want)
+		}
+	}
+
+	_, home := do(t, h, http.MethodGet, "/map", nil)
+	for _, want := range []string{
+		`<li><a href="/about">About</a></li>`, "· AGPL-3.0-or-later</li>",
+		`<li><a href="https://github.com/yohang/mesh-sdr" rel="noopener noreferrer" hx-boost="false">Source code</a></li>`,
+	} {
+		if !strings.Contains(home, want) {
+			t.Errorf("footer lacks %s", want)
+		}
+	}
+
+	if res, _ := do(t, h, http.MethodHead, "/about", nil); res.StatusCode != http.StatusOK {
+		t.Errorf("HEAD /about = %d", res.StatusCode)
 	}
 }

@@ -57,13 +57,15 @@ templ Document(s Shell, p Page, content templ.Component) {
 			</header>
 			@Main(p, content)
 			<footer class="border-t border-border bg-surface px-4 py-3 text-sm text-fg-muted">
-				if len(s.FooterLinks) > 0 {
-					<ul class="mx-auto flex max-w-screen-2xl flex-wrap gap-x-4 gap-y-1">
-						for _, l := range s.FooterLinks {
-							<li><a href={ templ.URL(l.Href) }>{ l.Label }</a></li>
-						}
-					</ul>
-				}
+				<ul class="mx-auto flex max-w-screen-2xl flex-wrap gap-x-4 gap-y-1">
+					for _, l := range s.FooterLinks {
+						<li><a href={ templ.URL(l.Href) }>{ l.Label }</a></li>
+					}
+					if s.Product.Name != "" {
+						<li>{ s.Product.Name } { s.Product.Version } · { s.Product.License }</li>
+						<li><a href={ templ.URL(s.Product.SourceURL) } rel="noopener noreferrer" hx-boost="false">Source code</a></li>
+					}
+				</ul>
 			</footer>
 			<div id="msdr-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 		</body>

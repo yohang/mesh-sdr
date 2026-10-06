@@ -60,6 +60,9 @@ type Shell struct {
 	Theme Theme
 	// FooterLinks are the footer links, in order.
 	FooterLinks []Link
+	// Product is the version, licence and source code location shown in
+	// the footer (AGPL-3.0 section 13).
+	Product Product
 	// Nav are the top-level sections the visitor may open, in order
 	// (UI-006). Below 768 px the same nav is the bottom tab bar.
 	Nav []Link
@@ -69,6 +72,14 @@ type Shell struct {
 	// User is the signed-in visitor of the user menu (UI-010); nil for an
 	// anonymous visitor, who gets a "Sign in" link.
 	User *User
+}
+
+// Product describes the running software.
+type Product struct {
+	Name      string
+	Version   string
+	License   string
+	SourceURL string
 }
 
 // Link is a navigation link. Section, for a top-level section, matches
