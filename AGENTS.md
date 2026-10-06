@@ -164,5 +164,5 @@ Dev containers are rootless: the `dev` stage creates an `app` user with the host
 - Dependencies: stdlib and `golang.org/x/*` are fine; any other third-party dependency requires the owner's approval.
 - REST: every `/api/v1` endpoint is declared in `internal/http/api/openapi.yaml` first, then generated (oapi-codegen strict chi server); module handler structs are embedded in `api.Server`. One JSON error format: RFC 9457 `application/problem+json` with a stable `code` (`internal/http/problem`).
 - Git: one branch + PR per epic (`epic/<area>-<n>`), split into ordered parts when another epic needs a subset first; PR body lists `Closes #<n>` per ticket; spikes get `spike/<key>-<topic>` branches. No AI attribution in commits or PRs.
-- Dockerfile (`.infra/docker/Dockerfile`, built from the repository root) stages: `base` → `deps` → `dev` (Air) / `build` → `prod` (`gcr.io/distroless/static-debian13:nonroot`).
+- Dockerfile (`.infra/docker/Dockerfile`, built from the repository root) stages: `base` → `dev` (Air) / `build` → `prod` (`gcr.io/distroless/static-debian13:nonroot`).
 - `.infra/docker/Dockerfile.dockerignore` whitelists: ignore everything, then `!` what the build needs.
