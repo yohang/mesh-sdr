@@ -142,3 +142,56 @@ func TestChangePasswordRefusals(t *testing.T) {
 		t.Errorf("failed logins = %d", stored.FailedLogins())
 	}
 }
+
+func TestResetPasswordFromTheCLI(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, nil)
+	u := e.addUser(t, "alice", "", domain.RoleListener)
+
+	in, _ := e.login("alice", password)
+
+	for range 10 {
+		_, _ = e.login("alice", "wrong password")
+		e.clock.Advance(time.Hour)
+	}
+
+	res, err := e.admin.ResetPassword(ctx, "ALICE", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res.RevokedSessions != 1 || res.GeneratedPassword == "" || !res.User.MustChangePassword() {
+		t.Errorf("result = %+v", res)
+	}
+
+	if _, err := e.auth.Resolve(ctx, in.Token.Cookie()); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Errorf("session survived: %v", err)
+	}
+
+	got, err := e.login("alice", res.GeneratedPassword)
+	if err != nil || !got.Principal.MustChangePassword() {
+		t.Fatalf("login with the generated password: %v", err)
+	}
+
+	chosen, err := e.admin.ResetPassword(ctx, "alice", fresh)
+	if err != nil || chosen.GeneratedPassword != "" || chosen.User.MustChangePassword() {
+		t.Errorf("chosen password: %v %+v", err, chosen)
+	}
+
+	if _, err := e.admin.ResetPassword(ctx, "nobody", fresh); !errors.Is(err, domain.ErrUserNotFound) {
+		t.Errorf("unknown user: %v", err)
+	}
+
+	if _, err := e.admin.ResetPassword(ctx, "alice", "short"); !errors.Is(err, domain.ErrInvalidPassword) {
+		t.Errorf("short: %v", err)
+	}
+
+	if !slices.Contains(e.actions(t), domain.ActionUserPasswordReset+":") {
+		t.Errorf("audit = %v", e.actions(t))
+	}
+
+	stored, _ := e.users.ByID(ctx, u.ID())
+	if stored.FailedLogins() != 0 {
+		t.Errorf("failures = %d", stored.FailedLogins())
+	}
+}
