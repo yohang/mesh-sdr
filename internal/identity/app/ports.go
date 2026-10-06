@@ -84,3 +84,33 @@ type RequestMeta struct {
 	UserAgent string
 	RequestID string
 }
+
+// Settings are the identity settings that admins edit in the DB settings
+// store (FEATURE_SPEC §9). Until the store is wired, an adapter returns the
+// defaults.
+type Settings interface {
+	// PasswordMinLength is auth.password_min_length.
+	PasswordMinLength(ctx context.Context) int
+}
+
+// Policies builds the password policy in force: the minimum length from the
+// settings, the bundled common-password list.
+type Policies struct {
+	settings Settings
+	common   domain.CommonPasswords
+}
+
+// NewPolicies returns the policy source. common may be nil (no list).
+func NewPolicies(settings Settings, common domain.CommonPasswords) Policies {
+	return Policies{settings: settings, common: common}
+}
+
+// Password returns the password policy in force.
+func (p Policies) Password(ctx context.Context) domain.PasswordPolicy {
+	minLength := domain.DefaultPasswordMinLength
+	if p.settings != nil {
+		minLength = p.settings.PasswordMinLength(ctx)
+	}
+
+	return domain.NewPasswordPolicy(minLength).WithCommonPasswords(p.common)
+}

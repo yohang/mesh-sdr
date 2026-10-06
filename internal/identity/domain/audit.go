@@ -61,14 +61,16 @@ const (
 
 // Audited actions of the identity module (dotted verbs, TECHNICAL_SPEC §7.1).
 const (
-	ActionLoginSuccess   = "auth.login.success"
-	ActionLoginFailure   = "auth.login.failure"
-	ActionLoginLockout   = "auth.login.lockout"
-	ActionLogout         = "auth.logout"
-	ActionSessionsRevoke = "auth.session.revoke"
-	ActionUserCreate     = "user.create"
-	ActionUserDisable    = "user.disable"
-	ActionUserEnable     = "user.enable"
+	ActionLoginSuccess      = "auth.login.success"
+	ActionLoginFailure      = "auth.login.failure"
+	ActionLoginLockout      = "auth.login.lockout"
+	ActionLogout            = "auth.logout"
+	ActionSessionsRevoke    = "auth.session.revoke"
+	ActionPasswordChange    = "auth.password.change"
+	ActionUserCreate        = "user.create"
+	ActionUserPasswordReset = "user.password.reset"
+	ActionUserDisable       = "user.disable"
+	ActionUserEnable        = "user.enable"
 )
 
 var actionPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)

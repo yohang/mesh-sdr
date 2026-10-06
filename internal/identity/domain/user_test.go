@@ -241,3 +241,33 @@ func TestPrincipal(t *testing.T) {
 		t.Errorf("session ip not canonical: %s", s.IP())
 	}
 }
+
+func TestChangeAndResetPassword(t *testing.T) {
+	h, _ := domain.NewPasswordHash("$argon2id$v=19$m=19456,t=2,p=1$bmV3$bmV3")
+	p := domain.DefaultThrottlePolicy()
+
+	u := newUser(t)
+	for range 10 {
+		u.RecordLoginFailure(t0, p)
+	}
+
+	if err := u.ResetPassword(h, true, t0); err != nil {
+		t.Fatal(err)
+	}
+
+	if u.PasswordHash() != h || !u.MustChangePassword() || u.FailedLogins() != 0 || !u.LockedUntil().IsZero() {
+		t.Errorf("after reset: flag %v, failures %d, locked %v", u.MustChangePassword(), u.FailedLogins(), u.LockedUntil())
+	}
+
+	if err := u.ChangePassword(h, t0); err != nil || u.MustChangePassword() {
+		t.Errorf("change: %v, flag %v", err, u.MustChangePassword())
+	}
+
+	if err := u.ChangePassword(domain.PasswordHash{}, t0); !errors.Is(err, domain.ErrInvalidHash) {
+		t.Errorf("empty hash: %v", err)
+	}
+
+	if err := u.ResetPassword(domain.PasswordHash{}, false, t0); !errors.Is(err, domain.ErrInvalidHash) {
+		t.Errorf("empty hash: %v", err)
+	}
+}

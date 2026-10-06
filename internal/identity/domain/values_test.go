@@ -115,6 +115,46 @@ func TestPassword(t *testing.T) {
 	}
 }
 
+// commonList is a CommonPasswords stub (the real list ignores case too).
+type commonList map[string]bool
+
+func (c commonList) Contains(s string) bool { return c[strings.ToLower(s)] }
+
+func TestPasswordRefusalReasons(t *testing.T) {
+	p := domain.NewPasswordPolicy(12).WithCommonPasswords(commonList{"correcthorsebattery": true})
+
+	tests := []struct {
+		in     string
+		reason shared.Code
+	}{
+		{strings.Repeat("a", 11), domain.PasswordTooShort},
+		{strings.Repeat("a", 257), domain.PasswordTooLong},
+		{"\xff\xfe\xfd\xfc\xfb\xfa\xf9\xf8\xf7\xf6\xf5\xf4", domain.PasswordNotUTF8},
+		{"CorrectHorseBattery", domain.PasswordCommon},
+	}
+
+	for _, tt := range tests {
+		_, err := domain.NewPassword(tt.in, p)
+
+		var de *shared.Error
+		if !errors.Is(err, domain.ErrInvalidPassword) || !errors.As(err, &de) {
+			t.Fatalf("NewPassword(%.12q) err = %v", tt.in, err)
+		}
+
+		if v := de.Violations(); len(v) != 1 || v[0].Path() != "password" || v[0].Code() != tt.reason {
+			t.Errorf("NewPassword(%.12q) violations = %v, want %s", tt.in, v, tt.reason)
+		}
+	}
+
+	if _, err := domain.NewPassword("correct horse battery staple", p); err != nil {
+		t.Errorf("uncommon password refused: %v", err)
+	}
+
+	if p.MinLength() != 12 || p.MaxLength() != domain.PasswordMaxLength {
+		t.Errorf("bounds = %d..%d", p.MinLength(), p.MaxLength())
+	}
+}
+
 func TestPasswordHash(t *testing.T) {
 	if _, err := domain.NewPasswordHash("$argon2id$v=19$m=1,t=1,p=1$x$y"); err != nil {
 		t.Error(err)

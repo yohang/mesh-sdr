@@ -8,6 +8,7 @@
 // disconnectedCallback cleans up.
 
 import "./csrf.js";
+import "./token-url.js";
 import { installNavigation } from "./navigation.js";
 
 installNavigation();

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
@@ -15,7 +16,9 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/argon2"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/commonpw"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
+	"github.com/yohang/mesh-sdr/internal/identity/infra/settings"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -27,6 +30,9 @@ const (
 	loginIPBurst    = 5
 	loginIPEvery    = 12 * time.Second
 	hashQueuePerCPU = 4
+	// First-admin setup requests per client address: 10, then 1 per minute.
+	setupIPBurst = 10
+	setupIPEvery = time.Minute
 )
 
 // Deps are the dependencies of the identity module.
@@ -61,19 +67,37 @@ func newRepos(d Deps) repos {
 	}
 }
 
+// commonPasswords is the embedded common-password list, decoded once. A
+// decoding failure is a build defect (covered by the commonpw tests).
+var commonPasswords = sync.OnceValue(func() *commonpw.List {
+	l, err := commonpw.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	return l
+})
+
+// policies returns the password policy source: settings (defaults until the
+// settings store is wired) and the bundled common-password list.
+func policies() app.Policies {
+	return app.NewPolicies(settings.Defaults{}, commonPasswords())
+}
+
 // UserAdmin builds the user administration service used by the CLI.
 func UserAdmin(d Deps) *app.UserAdmin {
 	r := newRepos(d)
 
 	return app.NewUserAdmin(app.UserAdminDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
-		Now: d.Now, Policy: domain.DefaultPasswordPolicy(), Logger: component(d.Logger, "identity.app.users"),
+		Now: d.Now, Policy: policies(), Logger: component(d.Logger, "identity.app.users"),
 	})
 }
 
 // Module is the wired identity module of the hub.
 type Module struct {
 	Auth   *app.Auth
+	Setup  *app.Setup
 	Reaper *app.SessionReaper
 	HTTP   *identityhttp.Module
 }
@@ -97,7 +121,19 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Logger: component(d.Logger, "identity.app.auth"),
 	})
 
-	h, err := identityhttp.New(auth, pages, identityhttp.Config{
+	passwords := app.NewPasswords(app.PasswordsDeps{
+		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
+		Policies: policies(), Throttle: domain.DefaultThrottlePolicy(), SessionPolicy: domain.DefaultSessionPolicy(),
+		Logger: component(d.Logger, "identity.app.passwords"),
+	})
+
+	setup := app.NewSetup(app.SetupDeps{
+		Users: r.users, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now, Policies: policies(),
+		Auth: auth, Limiter: memory.NewIPLimiter(setupIPEvery, setupIPBurst, memory.DefaultCapacity),
+		HubURL: d.Config.Hub.URL, Logger: component(d.Logger, "identity.app.setup"),
+	})
+
+	h, err := identityhttp.New(auth, passwords, setup, pages, identityhttp.Config{
 		HubURL:         d.Config.Hub.URL,
 		TrustedProxies: config.Prefixes(d.Config.HTTP.TrustedProxies),
 		AdminNetworks:  config.Prefixes(d.Config.Admin.AllowedNetworks),
@@ -108,6 +144,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 
 	return &Module{
 		Auth:   auth,
+		Setup:  setup,
 		Reaper: app.NewSessionReaper(r.sessions, d.Now, component(d.Logger, "identity.app.reaper")),
 		HTTP:   h,
 	}, nil

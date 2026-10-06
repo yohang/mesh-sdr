@@ -202,6 +202,9 @@ type StartSessionParams struct {
 	UserAgent string     // optional, truncated to 512 bytes
 	Policy    SessionPolicy
 	Now       time.Time
+	// NotAfter, when set, caps the absolute expiry: a session that replaces
+	// another (rotation) keeps the replaced session's absolute lifetime.
+	NotAfter time.Time
 }
 
 // StartSession opens a session and returns it with its secret token, to be
@@ -219,6 +222,13 @@ func StartSession(p StartSessionParams) (*Session, SessionToken, error) {
 	now := p.Now.UTC().Truncate(time.Millisecond)
 	token := NewSessionToken()
 	abs := now.Add(pol.Lifetime(p.Remember))
+	if !p.NotAfter.IsZero() && p.NotAfter.Before(abs) {
+		abs = p.NotAfter.UTC().Truncate(time.Millisecond)
+	}
+
+	if !abs.After(now) {
+		return nil, SessionToken{}, ErrInvalidSession.WithDetail("the session would already be expired")
+	}
 
 	return &Session{
 		id:                p.ID,
@@ -325,6 +335,12 @@ func (s *Session) RevokedAt() time.Time { return s.revokedAt }
 
 // RevokeReason returns why the session was revoked.
 func (s *Session) RevokeReason() RevokeReason { return s.revokeReason }
+
+// Persistent reports whether the session was opened with "remember me": its
+// absolute lifetime exceeds the policy's plain lifetime.
+func (s *Session) Persistent(p SessionPolicy) bool {
+	return s.absoluteExpiresAt.Sub(s.createdAt) > p.Lifetime(false)
+}
 
 // ActiveAt reports whether the session is valid at now: not revoked and
 // neither idle nor absolute expiry reached.

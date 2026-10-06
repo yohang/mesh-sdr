@@ -13,3 +13,4 @@ ADRs are written with Status `Proposed` (spikes) and switch to `Accepted` once t
 | [0007](0007-ui-shell-implementation.md) | UI shell implementation | Accepted |
 | [0008](0008-grid-enrollment-and-control-channel.md) | Grid enrollment, internal CA and control channel | Accepted |
 | [0009](0009-identity-core.md) | Identity core (users, sessions, CSRF, authorisation) | Accepted |
+| [0011](0011-identity-part-2.md) | Identity part 2 (passwords, bootstrap, accounts and access) | Accepted |

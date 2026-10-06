@@ -1,11 +1,14 @@
 package domain
 
 import (
+	"fmt"
 	"net/mail"
 	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{2,64}$`)
@@ -109,10 +112,20 @@ func (l Login) IsEmail() bool { return strings.Contains(l.v, "@") }
 // (SR-05: identifier as typed, normalised).
 func (l Login) Key() string { return strings.ToLower(l.v) }
 
-// PasswordPolicy is the local password policy (ACC-011, SR-04).
+// CommonPasswords is a list of common and breached passwords that new
+// passwords must not match (ACC-011, SR-04). The match ignores case.
+type CommonPasswords interface {
+	Contains(password string) bool
+}
+
+// PasswordPolicy is the local password policy (ACC-011, SR-04): a minimum
+// and a maximum length in characters, no composition rules, and no common
+// password. It applies to every new password: CLI, password change, reset,
+// invitation acceptance and setup.
 type PasswordPolicy struct {
 	minLength int
 	maxLength int
+	common    CommonPasswords
 }
 
 // Password length bounds.
@@ -122,8 +135,19 @@ const (
 	PasswordMaxLength        = 256
 )
 
+// Reasons a new password is refused: the code of the "password" violation
+// of ErrInvalidPassword.
+const (
+	PasswordTooShort      shared.Code = "too_short"
+	PasswordTooLong       shared.Code = "too_long"
+	PasswordNotUTF8       shared.Code = "invalid_utf8"
+	PasswordCommon        shared.Code = "common"
+	PasswordSameAsCurrent shared.Code = "same_as_current"
+)
+
 // NewPasswordPolicy returns a policy with the given minimum length (never
-// below PasswordMinLengthFloor) and a maximum of PasswordMaxLength.
+// below PasswordMinLengthFloor) and a maximum of PasswordMaxLength, without
+// a common-password list.
 func NewPasswordPolicy(minLength int) PasswordPolicy {
 	return PasswordPolicy{minLength: max(minLength, PasswordMinLengthFloor), maxLength: PasswordMaxLength}
 }
@@ -131,29 +155,50 @@ func NewPasswordPolicy(minLength int) PasswordPolicy {
 // DefaultPasswordPolicy returns the policy with the default minimum length.
 func DefaultPasswordPolicy() PasswordPolicy { return NewPasswordPolicy(DefaultPasswordMinLength) }
 
+// WithCommonPasswords returns a copy of p that also refuses the passwords of
+// list.
+func (p PasswordPolicy) WithCommonPasswords(list CommonPasswords) PasswordPolicy {
+	p.common = list
+
+	return p
+}
+
 // MinLength returns the minimum length in characters.
 func (p PasswordPolicy) MinLength() int { return p.minLength }
+
+// MaxLength returns the maximum length in characters.
+func (p PasswordPolicy) MaxLength() int { return p.maxLength }
 
 // Password is a new cleartext password that follows the policy. It never
 // prints its value.
 type Password struct{ v string }
 
+// PasswordRefused returns ErrInvalidPassword with the reason as the code of
+// its "password" violation.
+func PasswordRefused(reason shared.Code, message string) error {
+	return ErrInvalidPassword.WithDetail(message).WithViolations(shared.NewViolation("password", reason, message))
+}
+
 // NewPassword checks a new password against the policy. Any Unicode
 // character is accepted; length is counted in characters.
 func NewPassword(s string, p PasswordPolicy) (Password, error) {
 	if p.minLength == 0 {
-		p = DefaultPasswordPolicy()
+		p = DefaultPasswordPolicy().WithCommonPasswords(p.common)
 	}
 
 	if !utf8.ValidString(s) {
-		return Password{}, ErrInvalidPassword.WithDetail("the password is not valid UTF-8")
+		return Password{}, PasswordRefused(PasswordNotUTF8, "the password is not valid UTF-8")
 	}
 
 	switch n := utf8.RuneCountInString(s); {
 	case n < p.minLength:
-		return Password{}, ErrInvalidPassword.WithDetail("the password is too short")
+		return Password{}, PasswordRefused(PasswordTooShort, fmt.Sprintf("the password must have at least %d characters", p.minLength))
 	case n > p.maxLength:
-		return Password{}, ErrInvalidPassword.WithDetail("the password is too long")
+		return Password{}, PasswordRefused(PasswordTooLong, fmt.Sprintf("the password must have at most %d characters", p.maxLength))
+	}
+
+	if p.common != nil && p.common.Contains(s) {
+		return Password{}, PasswordRefused(PasswordCommon, "this password is too common, choose another one")
 	}
 
 	return Password{v: s}, nil

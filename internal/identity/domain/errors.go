@@ -31,6 +31,9 @@ var (
 	// ErrInvalidCredentials is the one generic login error (SR-06): unknown
 	// identifier, wrong password, disabled account or no local identity.
 	ErrInvalidCredentials = shared.NewError(shared.KindUnauthenticated, "invalid_credentials", "incorrect username, e-mail or password")
+	// ErrInvalidCurrentPassword means the current password given to change
+	// it is wrong.
+	ErrInvalidCurrentPassword = shared.NewError(shared.KindInvalid, "invalid_current_password", "the current password is incorrect")
 	// ErrUnauthenticated means the request needs a valid session.
 	ErrUnauthenticated = shared.NewError(shared.KindUnauthenticated, "unauthenticated", "sign in required")
 	// ErrForbidden means the principal lacks the required role.
@@ -38,10 +41,17 @@ var (
 	// ErrAdminNetworkDenied means an admin request came from a client address
 	// outside admin.allowed_networks (AUTH-016).
 	ErrAdminNetworkDenied = shared.NewError(shared.KindForbidden, "admin_network_denied", "admin access is not allowed from this network")
+	// ErrPasswordChangeRequired means the user must set a new password
+	// before doing anything else (AUTH-006).
+	ErrPasswordChangeRequired = shared.NewError(shared.KindForbidden, "password_change_required", "set a new password first")
 	// ErrCSRF means a state-changing request failed the CSRF check (AUTH-019).
 	ErrCSRF = shared.NewError(shared.KindForbidden, "csrf_failed", "missing or invalid CSRF token")
 	// ErrRateLimited means too many attempts; see RateLimitError.
 	ErrRateLimited = shared.NewError(shared.KindRateLimited, "rate_limited", "too many attempts")
+
+	// ErrSetupTokenInvalid means the first-admin setup link is unknown,
+	// expired, used, or useless because an admin exists (AUTH-018).
+	ErrSetupTokenInvalid = shared.NewError(shared.KindNotFound, "setup_token_invalid", "the setup link is not valid")
 
 	ErrUserNotFound    = shared.NewError(shared.KindNotFound, "user_not_found", "user not found")
 	ErrSessionNotFound = shared.NewError(shared.KindNotFound, "session_not_found", "session not found")

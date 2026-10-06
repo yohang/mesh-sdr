@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,6 +199,49 @@ func RunUsers(t *testing.T, open Factory) {
 		}
 	})
 
+	t.Run("list", func(t *testing.T) {
+		r := open(t).Users
+
+		for _, u := range []*domain.User{NewUser(t, "zoe", ""), NewUser(t, "Bob", "", admin), NewUser(t, "carl", "")} {
+			if err := r.Add(ctx, u); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		carl, _ := r.ByUsername(ctx, mustUsername(t, "carl"))
+		carl.Disable(t0)
+
+		if err := r.Save(ctx, carl); err != nil {
+			t.Fatal(err)
+		}
+
+		names := func(us []*domain.User, err error) string {
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var b strings.Builder
+			for _, u := range us {
+				b.WriteString(u.Username().String() + " ")
+			}
+
+			return b.String()
+		}
+
+		if got := names(r.List(ctx, false)); got != "Bob zoe " {
+			t.Errorf("enabled = %q", got)
+		}
+
+		if n, err := r.CountEnabledAdmins(ctx); err != nil || n != 1 {
+			t.Errorf("admins = %d, %v", n, err)
+		}
+
+		all, _ := r.List(ctx, true)
+		if got := names(all, nil); got != "Bob carl zoe " || all[0].Role() != domain.RoleAdmin || len(all[0].Identities()) != 1 {
+			t.Errorf("all = %q", got)
+		}
+	})
+
 	t.Run("save with optimistic concurrency", func(t *testing.T) {
 		r := open(t).Users
 		u := NewUser(t, "erin", "")
@@ -231,6 +275,17 @@ func RunUsers(t *testing.T, open Factory) {
 			t.Errorf("stale save: %v", err)
 		}
 	})
+}
+
+func mustUsername(t *testing.T, s string) domain.Username {
+	t.Helper()
+
+	u, err := domain.NewUsername(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return u
 }
 
 func second[T any](_ T, err error) error { return err }

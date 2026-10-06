@@ -19,6 +19,9 @@ type Sessions interface {
 	CSRFToken(ctx context.Context) (string, *http.Cookie)
 	Login(ctx context.Context, login, password string, remember bool) (domain.Principal, string, []*http.Cookie, error)
 	Logout(ctx context.Context) (*http.Cookie, error)
+	// ChangePassword changes the caller's password and replaces its
+	// session: it returns the new CSRF token and the cookie to set.
+	ChangePassword(ctx context.Context, current, newPassword string) (domain.Principal, string, *http.Cookie, bool, error)
 }
 
 // AuthHandlers serve /auth/session, /auth/login and /auth/logout.
@@ -57,6 +60,22 @@ func (h AuthHandlers) Login(ctx context.Context, req LoginRequestObject) (LoginR
 	}
 
 	return sessionResponse{info: sessionInfo(p, token), cookies: cookies}, nil
+}
+
+// ChangePassword implements StrictServerInterface.
+func (h AuthHandlers) ChangePassword(ctx context.Context, req ChangePasswordRequestObject) (ChangePasswordResponseObject, error) {
+	p, token, cookie, _, err := h.sessions.ChangePassword(ctx, req.Body.CurrentPassword, req.Body.NewPassword)
+
+	var rl *domain.RateLimitError
+	if errors.As(err, &rl) {
+		return rateLimited{err: rl}, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return sessionResponse{info: sessionInfo(p, token), cookies: []*http.Cookie{cookie}}, nil
 }
 
 // Logout implements StrictServerInterface.
@@ -117,11 +136,18 @@ func (s sessionResponse) write(w http.ResponseWriter) error {
 
 func (s sessionResponse) VisitGetSessionResponse(w http.ResponseWriter) error { return s.write(w) }
 func (s sessionResponse) VisitLoginResponse(w http.ResponseWriter) error      { return s.write(w) }
+func (s sessionResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+	return s.write(w)
+}
 
 // rateLimited is a 429 problem with Retry-After.
 type rateLimited struct{ err *domain.RateLimitError }
 
-func (r rateLimited) VisitLoginResponse(w http.ResponseWriter) error {
+func (r rateLimited) VisitLoginResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (r rateLimited) VisitChangePasswordResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (r rateLimited) write(w http.ResponseWriter) error {
 	w.Header().Set("Retry-After", strconv.Itoa(int(r.err.RetryAfter().Seconds())))
 	problem.Write(w, problem.FromError(r.err))
 

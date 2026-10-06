@@ -38,6 +38,14 @@ SELECT u.* FROM users u
 JOIN user_identities i ON i.user_id = u.id
 WHERE i.provider = sqlc.arg(provider) AND i.subject = sqlc.arg(subject);
 
+-- name: ListUsers :many
+SELECT * FROM users WHERE enabled >= sqlc.arg(min_enabled) ORDER BY lower(username);
+
+-- name: CountEnabledAdmins :one
+SELECT count(*) FROM users u
+WHERE u.enabled = 1
+  AND EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role_id = 30 AND r.device_id IS NULL);
+
 -- name: InsertUserIdentity :exec
 INSERT INTO user_identities (user_id, provider, subject, created_at)
 VALUES (sqlc.arg(user_id), sqlc.arg(provider), sqlc.arg(subject), sqlc.arg(created_at));

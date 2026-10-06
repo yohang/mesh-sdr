@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"strings"
+	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -52,13 +54,36 @@ func (a *app) newUserCmd() *cobra.Command {
 	addCmd.Flags().StringVar(&add.displayName, "display-name", "", "display name")
 	addCmd.Flags().StringVar(&add.role, "role", "listener", "role: listener, operator or admin")
 
+	var listAll bool
+
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List users: name, e-mail, roles, enabled state and last sign-in",
+		Long: "List the enabled users by username, or every user with --all. --json prints\n" +
+			"an array of objects.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error { return a.userList(cmd.Context(), listAll) },
+	}
+	listCmd.Flags().BoolVar(&listAll, "all", false, "include disabled users")
+
 	cmd.AddCommand(
 		addCmd,
+		listCmd,
 		&cobra.Command{
 			Use:   "exists <username>",
 			Short: "Exit with status 0 when the user exists, 1 otherwise",
 			Args:  cobra.ExactArgs(1),
 			RunE:  func(cmd *cobra.Command, args []string) error { return a.userExists(cmd.Context(), args[0]) },
+		},
+		&cobra.Command{
+			Use:   "reset-password <username>",
+			Short: "Set a new password and revoke all the user's sessions",
+			Long: "Set a new password, like `user add`: asked twice interactively, read from\n" +
+				"$" + config.EnvPassword + " with --noninteractive, or generated, printed once and to be\n" +
+				"changed at the next sign-in. Every session of the user is revoked and the\n" +
+				"login lock-out is cleared.",
+			Args: cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error { return a.userResetPassword(cmd.Context(), args[0]) },
 		},
 		&cobra.Command{
 			Use:   "disable <username>",
@@ -137,6 +162,46 @@ func (a *app) userAdd(ctx context.Context, name, email, displayName, roleName st
 		// only once.
 		if res.GeneratedPassword != "" {
 			_, err := fmt.Fprintf(a.stdout, "password: %s\nIt must be changed at the first sign-in.\n", res.GeneratedPassword)
+
+			return err
+		}
+
+		return nil
+	})
+}
+
+func (a *app) userResetPassword(ctx context.Context, name string) error {
+	password, err := a.newPassword()
+	if err != nil {
+		return err
+	}
+
+	return a.withUserAdmin(ctx, func(s *identityapp.UserAdmin) error {
+		res, err := s.ResetPassword(ctx, name, password)
+		if err != nil {
+			return err
+		}
+
+		u := res.User
+
+		if a.json {
+			out := map[string]any{
+				"username": u.Username().String(), "must_change_password": u.MustChangePassword(),
+				"revoked_sessions": res.RevokedSessions,
+			}
+			if res.GeneratedPassword != "" {
+				out["password"] = res.GeneratedPassword
+			}
+
+			return a.printJSON(out)
+		}
+
+		a.print("password of %s reset, %d session(s) revoked", u.Username(), res.RevokedSessions)
+
+		// Like `user add`, a generated password is printed even with
+		// --silent: it is shown only once.
+		if res.GeneratedPassword != "" {
+			_, err := fmt.Fprintf(a.stdout, "password: %s\nIt must be changed at the next sign-in.\n", res.GeneratedPassword)
 
 			return err
 		}
@@ -233,6 +298,74 @@ func (a *app) userExists(ctx context.Context, name string) error {
 		}
 
 		return nil
+	})
+}
+
+// roleNames lists the roles of a user: listener (implicit), then each
+// grant, with its device scope after '@'.
+func roleNames(u *domain.User) []string {
+	names := []string{domain.RoleListener.String()}
+
+	for _, g := range u.Grants() {
+		n := g.Role().String()
+		if !g.Global() {
+			n += "@" + g.Device().String()
+		}
+
+		names = append(names, n)
+	}
+
+	return names
+}
+
+func (a *app) userList(ctx context.Context, all bool) error {
+	return a.withUserAdmin(ctx, func(s *identityapp.UserAdmin) error {
+		users, err := s.List(ctx, all)
+		if err != nil {
+			return err
+		}
+
+		if a.json {
+			out := make([]map[string]any, 0, len(users))
+
+			for _, u := range users {
+				var email, lastLogin any
+				if !u.Email().IsZero() {
+					email = u.Email().String()
+				}
+
+				if t := u.LastLoginAt(); !t.IsZero() {
+					lastLogin = t.UTC().Format(time.RFC3339)
+				}
+
+				out = append(out, map[string]any{
+					"id": u.ID().String(), "username": u.Username().String(), "email": email,
+					"roles": roleNames(u), "enabled": u.Enabled(), "must_change_password": u.MustChangePassword(),
+					"last_login_at": lastLogin,
+				})
+			}
+
+			return a.printJSON(out)
+		}
+
+		tw := tabwriter.NewWriter(a.stdout, 0, 0, 2, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "USERNAME\tE-MAIL\tROLES\tENABLED\tLAST SIGN-IN")
+
+		for _, u := range users {
+			email, lastLogin := "-", "never"
+			if !u.Email().IsZero() {
+				email = u.Email().String()
+			}
+
+			if t := u.LastLoginAt(); !t.IsZero() {
+				lastLogin = t.UTC().Format(time.RFC3339)
+			}
+
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", u.Username(), email, strings.Join(roleNames(u), ","),
+				map[bool]string{true: "yes", false: "no"}[u.Enabled()], lastLogin)
+		}
+
+		return tw.Flush()
 	})
 }
 

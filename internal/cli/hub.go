@@ -13,6 +13,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
+	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/wire"
 )
 
@@ -73,6 +74,13 @@ func (a *app) runHub(ctx context.Context) error {
 	hub, err := wire.Hub(ctx, cfg, logger, adapter)
 	if err != nil {
 		return err
+	}
+
+	if u := hub.SetupURL(); u != "" {
+		// Not through the logger: the URL carries a secret token.
+		_, _ = fmt.Fprintf(a.stderr, "\nNo admin account exists. Open this one-time URL within %d minutes to create the first admin:\n\n    %s\n\n"+
+			"Or create one on this host with `meshsdr hub user add <name> --role admin`. A restart issues a new URL.\n\n",
+			int(identityapp.SetupTTL.Minutes()), u)
 	}
 
 	if err := hub.Run(ctx); err != nil {

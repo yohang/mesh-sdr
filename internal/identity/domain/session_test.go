@@ -193,3 +193,28 @@ func TestAuditEntry(t *testing.T) {
 		t.Error("bad result accepted")
 	}
 }
+
+func TestSessionPersistentAndNotAfter(t *testing.T) {
+	p := domain.DefaultSessionPolicy()
+
+	plain, _ := startSession(t, false)
+	remembered, _ := startSession(t, true)
+
+	if plain.Persistent(p) || !remembered.Persistent(p) {
+		t.Errorf("persistent: plain %v, remembered %v", plain.Persistent(p), remembered.Persistent(p))
+	}
+
+	capped, _, err := domain.StartSession(domain.StartSessionParams{
+		ID: mustSessionID(t), UserID: plain.UserID(), Provider: domain.ProviderLocal, Remember: true,
+		Policy: p, Now: t0.Add(time.Hour), NotAfter: remembered.AbsoluteExpiresAt(),
+	})
+	if err != nil || !capped.AbsoluteExpiresAt().Equal(remembered.AbsoluteExpiresAt()) {
+		t.Fatalf("capped session: %v, expires %v", err, capped.AbsoluteExpiresAt())
+	}
+
+	if _, _, err := domain.StartSession(domain.StartSessionParams{
+		ID: mustSessionID(t), UserID: plain.UserID(), Provider: domain.ProviderLocal, Policy: p, Now: t0, NotAfter: t0,
+	}); !errors.Is(err, domain.ErrInvalidSession) {
+		t.Errorf("already expired session: %v", err)
+	}
+}

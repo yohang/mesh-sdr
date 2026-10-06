@@ -21,7 +21,7 @@ type UserAdmin struct {
 	hasher   PasswordHasher
 	ids      IDGenerator
 	now      Clock
-	policy   domain.PasswordPolicy
+	policy   Policies
 	logger   *slog.Logger
 }
 
@@ -34,7 +34,7 @@ type UserAdminDeps struct {
 	Hasher   PasswordHasher
 	IDs      IDGenerator
 	Now      Clock
-	Policy   domain.PasswordPolicy
+	Policy   Policies
 	Logger   *slog.Logger
 }
 
@@ -107,7 +107,7 @@ func (s *UserAdmin) Add(ctx context.Context, in AddUserInput) (AddUserResult, er
 		plain = generated
 	}
 
-	pw, err := domain.NewPassword(plain, s.policy)
+	pw, err := newPassword(plain, s.policy.Password(ctx))
 	if err != nil {
 		return AddUserResult{}, err
 	}
@@ -156,6 +156,67 @@ func (s *UserAdmin) Add(ctx context.Context, in AddUserInput) (AddUserResult, er
 	return AddUserResult{User: u, GeneratedPassword: generated}, nil
 }
 
+// ResetPasswordResult tells what ResetPassword changed.
+type ResetPasswordResult struct {
+	User              *domain.User
+	GeneratedPassword string
+	RevokedSessions   int
+}
+
+// ResetPassword sets a new password for a user and revokes all its sessions
+// (AUTH-010), with the rules of Add: an empty password generates one,
+// returned once, that must be changed at the next sign-in. It clears the
+// login lock-out.
+func (s *UserAdmin) ResetPassword(ctx context.Context, username, password string) (ResetPasswordResult, error) {
+	generated := ""
+	if password == "" {
+		generated = GeneratePassword()
+		password = generated
+	}
+
+	pw, err := newPassword(password, s.policy.Password(ctx))
+	if err != nil {
+		return ResetPasswordResult{}, err
+	}
+
+	hash, err := s.hasher.Hash(ctx, pw.Reveal())
+	if err != nil {
+		return ResetPasswordResult{}, fmt.Errorf("hash password: %w", err)
+	}
+
+	res := ResetPasswordResult{GeneratedPassword: generated}
+
+	err = s.withUser(ctx, username, func(ctx context.Context, u *domain.User) error {
+		now := s.now()
+
+		if err := u.ResetPassword(hash, generated != "", now); err != nil {
+			return err
+		}
+
+		if err := s.users.Save(ctx, u); err != nil {
+			return err
+		}
+
+		n, err := s.sessions.RevokeAllForUser(ctx, u.ID(), domain.RevokePasswordReset, now)
+		if err != nil {
+			return err
+		}
+
+		res.User, res.RevokedSessions = u, n
+
+		return s.appendAudit(ctx, domain.ActionUserPasswordReset, u, nil, map[string]string{
+			"must_change_password": strconv.FormatBool(u.MustChangePassword()), "revoked_sessions": strconv.Itoa(n),
+		})
+	})
+	if err != nil {
+		return ResetPasswordResult{}, err
+	}
+
+	s.logger.InfoContext(ctx, "password reset", slog.String("user_id", res.User.ID().String()), slog.Int("revoked_sessions", res.RevokedSessions))
+
+	return res, nil
+}
+
 // GeneratePassword returns a random password (26 characters from the
 // CSPRNG, about 130 bits).
 func GeneratePassword() string { return rand.Text() }
@@ -177,6 +238,17 @@ func (s *UserAdmin) Exists(ctx context.Context, username string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// List returns the enabled users, or every user with includeDisabled, by
+// username (AUTH-011).
+func (s *UserAdmin) List(ctx context.Context, includeDisabled bool) ([]*domain.User, error) {
+	users, err := s.users.List(ctx, includeDisabled)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+
+	return users, nil
 }
 
 // DisableResult tells what Disable changed.

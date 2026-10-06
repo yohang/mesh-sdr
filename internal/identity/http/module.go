@@ -25,6 +25,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/http/clientip"
 	"github.com/yohang/mesh-sdr/internal/http/problem"
+	"github.com/yohang/mesh-sdr/internal/http/redact"
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -45,6 +46,22 @@ type Authenticator interface {
 	Resolve(ctx context.Context, cookie string) (app.Resolution, error)
 	Logout(ctx context.Context, cookie string, meta app.RequestMeta) error
 	SessionPolicy() domain.SessionPolicy
+}
+
+// PasswordChanger changes the password of the signed-in user.
+type PasswordChanger interface {
+	Change(ctx context.Context, in app.ChangePasswordInput) (app.ChangePasswordResult, error)
+	// MinLength returns the minimum password length in force, shown on the
+	// forms.
+	MinLength(ctx context.Context) int
+}
+
+// Bootstrapper creates the first admin through the one-time setup link
+// (AUTH-018).
+type Bootstrapper interface {
+	Check(token string, meta app.RequestMeta) error
+	Complete(ctx context.Context, in app.SetupInput) (app.LoginResult, error)
+	MinLength(ctx context.Context) int
 }
 
 // Pages renders HTML pages in the app shell.
@@ -70,19 +87,21 @@ type Config struct {
 
 // Module is the identity router module (internal/http.Module).
 type Module struct {
-	auth     Authenticator
-	pages    Pages
-	logger   *slog.Logger
-	resolver *clientip.Resolver
-	cop      *http.CrossOriginProtection
-	admin    []netip.Prefix
-	secure   bool
-	preKey   []byte
-	routes   chi.Routes
+	auth      Authenticator
+	passwords PasswordChanger
+	setup     Bootstrapper
+	pages     Pages
+	logger    *slog.Logger
+	resolver  *clientip.Resolver
+	cop       *http.CrossOriginProtection
+	admin     []netip.Prefix
+	secure    bool
+	preKey    []byte
+	routes    chi.Routes
 }
 
 // New returns the module.
-func New(auth Authenticator, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
+func New(auth Authenticator, passwords PasswordChanger, setup Bootstrapper, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
 	u, err := url.Parse(cfg.HubURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("hub.url %q: not an absolute URL", cfg.HubURL)
@@ -100,21 +119,23 @@ func New(auth Authenticator, pages Pages, cfg Config, logger *slog.Logger) (*Mod
 	}
 
 	return &Module{
-		auth:     auth,
-		pages:    pages,
-		logger:   logger,
-		resolver: clientip.NewResolver(cfg.TrustedProxies),
-		cop:      cop,
-		admin:    cfg.AdminNetworks,
-		secure:   secure,
-		preKey:   []byte(rand.Text()),
+		auth:      auth,
+		passwords: passwords,
+		setup:     setup,
+		pages:     pages,
+		logger:    logger,
+		resolver:  clientip.NewResolver(cfg.TrustedProxies),
+		cop:       cop,
+		admin:     cfg.AdminNetworks,
+		secure:    secure,
+		preKey:    []byte(rand.Text()),
 	}, nil
 }
 
 // Middlewares implements internal/http.Module: client address, session,
-// CSRF protection, JSON-only API bodies.
+// CSRF protection, JSON-only API bodies, then the forced password change.
 func (m *Module) Middlewares() []func(http.Handler) http.Handler {
-	return []func(http.Handler) http.Handler{m.resolver.Middleware, limitAuthBodies, m.session, m.csrf, m.requireJSON}
+	return []func(http.Handler) http.Handler{m.resolver.Middleware, limitAuthBodies, m.session, m.csrf, m.requireJSON, m.passwordGate}
 }
 
 // Routes implements internal/http.Module.
@@ -126,6 +147,16 @@ func (m *Module) Routes(r chi.Router) {
 	r.Head("/login", m.loginPage)
 	r.Post("/login", m.loginAction)
 	r.Post("/logout", m.logoutAction)
+
+	r.Get(app.SetupPath+"/{token}", m.setupPage)
+	r.Head(app.SetupPath+"/{token}", m.setupPage)
+	r.Get(app.SetupPath, m.setupLanding)
+	r.Head(app.SetupPath, m.setupLanding)
+	r.Post(app.SetupPath, m.setupAction)
+
+	r.With(m.Require(domain.RoleListener)).Get(PasswordChangePath, m.passwordPage)
+	r.With(m.Require(domain.RoleListener)).Head(PasswordChangePath, m.passwordPage)
+	r.With(m.Require(domain.RoleListener)).Post(PasswordChangePath, m.passwordAction)
 }
 
 // Cookie names (TECHNICAL_SPEC §5.6). Without TLS (http hub.url, LAN or
@@ -276,7 +307,7 @@ func isAPI(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/api/")
 func limitAuthBodies(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/login" || p == "/logout" || strings.HasPrefix(p, "/api/v1/auth/") {
+		if p == "/login" || p == "/logout" || p == PasswordChangePath || p == app.SetupPath || strings.HasPrefix(p, "/api/v1/auth/") {
 			r.Body = http.MaxBytesReader(w, r.Body, AuthBodyLimit)
 		}
 
@@ -311,7 +342,7 @@ func (m *Module) csrf(next http.Handler) http.Handler {
 		}
 
 		m.logger.LogAttrs(r.Context(), slog.LevelWarn, "csrf check failed",
-			slog.String("reason", reason), slog.String("method", r.Method), slog.String("path", r.URL.Path),
+			slog.String("reason", reason), slog.String("method", r.Method), slog.String("path", redact.Path(r.URL.Path)),
 			slog.String("origin", r.Header.Get("Origin")), slog.String("sec_fetch_site", r.Header.Get("Sec-Fetch-Site")),
 			slog.String("request_id", middleware.GetReqID(r.Context())))
 
@@ -375,7 +406,7 @@ func (m *Module) Require(role domain.Role) func(http.Handler) http.Handler {
 			case errors.Is(err, domain.ErrUnauthenticated):
 				m.redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()))
 			default:
-				m.logger.WarnContext(r.Context(), "access denied", slog.String("path", r.URL.Path), slog.Any("error", err))
+				m.logger.WarnContext(r.Context(), "access denied", slog.String("path", redact.Path(r.URL.Path)), slog.Any("error", err))
 				m.pages.Error(w, r, http.StatusForbidden)
 			}
 		})
@@ -431,17 +462,44 @@ func (m *Module) Login(ctx context.Context, login, password string, remember boo
 		return domain.Principal{}, "", nil, err
 	}
 
+	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.sessionCookies(res), nil
+}
+
+// sessionCookies are the cookies of a new session: the session cookie
+// (persistent with "remember me") and the cleared pre-session cookie.
+func (m *Module) sessionCookies(res app.LoginResult) []*http.Cookie {
 	maxAge := 0
-	if remember {
+	if res.Remember {
 		maxAge = int(res.Session.AbsoluteExpiresAt().Sub(res.Session.CreatedAt()).Seconds())
 	}
 
-	cookies := []*http.Cookie{
+	return []*http.Cookie{
 		m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge),
 		m.cookie(m.presessionCookieName(), "", -1),
 	}
+}
 
-	return res.Principal, res.Session.CSRFSecret().Token(res.Token), cookies, nil
+// ChangePassword changes the password of the request's user, and returns
+// the principal, the CSRF token of the new session (the request's session
+// is replaced) and the cookie to set. forced tells whether the change was
+// required.
+func (m *Module) ChangePassword(ctx context.Context, current, newPassword string) (p domain.Principal, csrf string, cookie *http.Cookie, forced bool, err error) {
+	st := FromContext(ctx)
+	if st.session == nil {
+		return domain.Principal{}, "", nil, false, domain.ErrUnauthenticated
+	}
+
+	res, err := m.passwords.Change(ctx, app.ChangePasswordInput{Session: st.session, Current: current, New: newPassword, Meta: m.meta(ctx)})
+	if err != nil {
+		return domain.Principal{}, "", nil, false, err
+	}
+
+	maxAge := 0
+	if res.Remember {
+		maxAge = max(1, int(res.Session.AbsoluteExpiresAt().Sub(res.Session.CreatedAt()).Seconds()))
+	}
+
+	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge), res.Forced, nil
 }
 
 // Logout ends the request's session and returns the cookie to clear it.

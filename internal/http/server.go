@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/yohang/mesh-sdr/internal/http/redact"
 	"github.com/yohang/mesh-sdr/internal/web"
 )
 
@@ -75,6 +76,10 @@ func NewServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
+// loggedPath is the request path as logged: a single-use token in it is
+// redacted (SR-07), whether or not a route matched.
+func loggedPath(r *http.Request) string { return redact.Path(r.URL.Path) }
+
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +90,7 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 
 			logger.LogAttrs(r.Context(), slog.LevelInfo, "http request",
 				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
+				slog.String("path", loggedPath(r)),
 				slog.Int("status", ww.Status()),
 				slog.Int("bytes", ww.BytesWritten()),
 				slog.Duration("duration", time.Since(start)),

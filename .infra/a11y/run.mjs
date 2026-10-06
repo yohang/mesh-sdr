@@ -34,9 +34,27 @@ const pages = (await readFile(new URL("urls.txt", import.meta.url), "utf8"))
   .map((l) => l.trim())
   .filter((l) => l && !l.startsWith("#"))
   .map((l) => {
-    const [path, status] = l.split(/\s+/);
-    return { path, status: Number(status) };
+    const [path, status, access] = l.split(/\s+/);
+    return { path, status: Number(status), signedIn: access === "signed-in" };
   });
+
+// Account seeded by the compose file (service seed), used for the pages
+// marked "signed-in".
+const account = { login: process.env.A11Y_USER ?? "a11y", password: process.env.A11Y_PASSWORD ?? "" };
+
+// signIn signs the browser context in through the login page.
+async function signIn(context, where) {
+  const page = await context.newPage();
+  watch(page, where);
+  await page.goto("/login", { waitUntil: "networkidle" });
+  await page.getByLabel("Username or e-mail").fill(account.login);
+  await page.getByLabel("Password", { exact: true }).fill(account.password);
+  await Promise.all([
+    page.waitForURL((u) => !u.pathname.startsWith("/login")),
+    page.getByRole("button", { name: "Sign in" }).click(),
+  ]);
+  await page.close();
+}
 
 let failures = 0;
 const fail = (where, msg) => {
@@ -103,8 +121,16 @@ for (const { mode, url } of hubs) {
     for (const [name, viewport] of Object.entries(viewports)) {
       const context = await browser.newContext({ baseURL: url, colorScheme: scheme, viewport });
 
-      for (const { path, status } of pages) {
+      let signedIn = false;
+
+      // Anonymous pages first, then the signed-in ones in the same context.
+      for (const { path, status, signedIn: needsSession } of [...pages].sort((a, b) => a.signedIn - b.signedIn)) {
         const where = `${path} [mode ${mode}, os ${scheme}, ${name}]`;
+        if (needsSession && !signedIn) {
+          await signIn(context, `sign-in [mode ${mode}, os ${scheme}, ${name}]`);
+          signedIn = true;
+        }
+
         const page = await context.newPage();
         watch(page, where);
 
@@ -117,9 +143,12 @@ for (const { mode, url } of hubs) {
       }
 
       // Boosted navigation keeps the shell, moves focus to #main and
-      // announces the new page; the swapped page must pass axe too.
+      // announces the new page; the swapped page must pass axe too. It runs
+      // in a fresh anonymous context.
+      await context.close();
+      const navContext = await browser.newContext({ baseURL: url, colorScheme: scheme, viewport });
       const where = `/ → /policy boosted [mode ${mode}, os ${scheme}, ${name}]`;
-      const page = await context.newPage();
+      const page = await navContext.newPage();
       watch(page, where);
       await page.goto("/", { waitUntil: "networkidle" });
       await page.evaluate(() => {
@@ -140,7 +169,7 @@ for (const { mode, url } of hubs) {
 
       await audit(page, where);
       await page.close();
-      await context.close();
+      await navContext.close();
     }
   }
 }

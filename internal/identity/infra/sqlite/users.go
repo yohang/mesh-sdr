@@ -164,6 +164,46 @@ func (r *Users) ByIdentity(ctx context.Context, i domain.Identity) (*domain.User
 	})
 }
 
+// List returns the enabled users (every user with includeDisabled), by
+// case-insensitive username.
+func (r *Users) List(ctx context.Context, includeDisabled bool) ([]*domain.User, error) {
+	q := sqlc.New(r.db.Reader(ctx))
+
+	minEnabled := int64(1)
+	if includeDisabled {
+		minEnabled = 0
+	}
+
+	rows, err := q.ListUsers(ctx, minEnabled)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+
+	out := make([]*domain.User, 0, len(rows))
+
+	for _, row := range rows {
+		u, err := r.load(ctx, q, func() (sqlc.User, error) { return row, nil })
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, u)
+	}
+
+	return out, nil
+}
+
+// CountEnabledAdmins returns the number of enabled global admins. Inside a
+// write transaction it reads the transaction's view.
+func (r *Users) CountEnabledAdmins(ctx context.Context) (int, error) {
+	n, err := sqlc.New(r.db.Reader(ctx)).CountEnabledAdmins(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count admins: %w", err)
+	}
+
+	return int(n), nil
+}
+
 func (r *Users) load(ctx context.Context, q *sqlc.Queries, get func() (sqlc.User, error)) (*domain.User, error) {
 	row, err := get()
 	if errors.Is(err, sql.ErrNoRows) {

@@ -102,8 +102,57 @@ func TestUserCommands(t *testing.T) {
 		t.Errorf("enable again = %+v", r)
 	}
 
-	for _, cmd := range []string{"disable", "enable"} {
-		r := run(t, ctx, env, "--json", "hub", "user", cmd, "nobody")
+	if r := runIn(t, ctx, env, "a new long password\na new long password\n", "hub", "user", "reset-password", "alice"); r.code != ExitOK ||
+		!strings.Contains(r.stdout, "password of alice reset, 0 session(s) revoked") || strings.Contains(r.stdout, "password:") {
+		t.Errorf("reset-password (interactive) = %+v", r)
+	}
+
+	r = run(t, ctx, env, "--noninteractive", "--json", "hub", "user", "reset-password", "alice")
+
+	var reset struct {
+		MustChangePassword bool   `json:"must_change_password"`
+		Password           string `json:"password"`
+	}
+	if r.code != ExitOK || json.Unmarshal([]byte(r.stdout), &reset) != nil || !reset.MustChangePassword || len(reset.Password) < 20 {
+		t.Errorf("reset-password (generated) = %+v", r)
+	}
+
+	if r := run(t, ctx, withPw, "--noninteractive", "hub", "user", "reset-password", "alice"); r.code != ExitOK || strings.Contains(r.stdout, "password:") {
+		t.Errorf("reset-password with MESHSDR_PASSWORD = %+v", r)
+	}
+
+	if r := runIn(t, ctx, env, "password123\npassword123\n", "hub", "user", "reset-password", "alice"); r.code != ExitFailure || !strings.Contains(r.stderr, "invalid_password") {
+		t.Errorf("reset-password with a common password = %+v", r)
+	}
+
+	if r := run(t, ctx, env, "hub", "user", "disable", "dave"); r.code != ExitOK {
+		t.Fatalf("disable dave = %+v", r)
+	}
+
+	r = run(t, ctx, env, "hub", "user", "list")
+	if lines := strings.Split(strings.TrimSpace(r.stdout), "\n"); r.code != ExitOK || len(lines) != 4 ||
+		!strings.HasPrefix(lines[0], "USERNAME") || !strings.Contains(lines[1], "alice@example.org") ||
+		!strings.Contains(lines[1], "listener,admin") || !strings.Contains(lines[1], "never") ||
+		strings.Contains(r.stdout, "dave") || !strings.Contains(r.stdout, "listener,operator") {
+		t.Errorf("list = %+v", r)
+	}
+
+	r = run(t, ctx, env, "--json", "hub", "user", "list", "--all")
+
+	var listed []struct {
+		Username string   `json:"username"`
+		Email    *string  `json:"email"`
+		Roles    []string `json:"roles"`
+		Enabled  bool     `json:"enabled"`
+	}
+	if r.code != ExitOK || json.Unmarshal([]byte(r.stdout), &listed) != nil || len(listed) != 4 ||
+		listed[0].Username != "alice" || listed[0].Email == nil || listed[1].Username != "dave" || listed[1].Enabled ||
+		listed[1].Email != nil || len(listed[0].Roles) != 2 {
+		t.Errorf("list --all --json = %+v (%+v)", r, listed)
+	}
+
+	for _, cmd := range []string{"disable", "enable", "reset-password"} {
+		r := run(t, ctx, env, "--json", "--noninteractive", "hub", "user", cmd, "nobody")
 		if r.code != ExitFailure || !strings.Contains(r.stderr, `"code":"user_not_found"`) {
 			t.Errorf("%s nobody = %+v", cmd, r)
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/a-h/templ"
 
+	"github.com/yohang/mesh-sdr/internal/http/redact"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
@@ -115,7 +116,7 @@ func (rd *Renderer) write(w http.ResponseWriter, r *http.Request, status int, c 
 
 	if err := c.Render(r.Context(), &buf); err != nil {
 		rd.logger.ErrorContext(r.Context(), "render page",
-			slog.String("path", r.URL.Path), slog.Int("status", status), slog.Any("error", err))
+			slog.String("path", redact.Path(r.URL.Path)), slog.Int("status", status), slog.Any("error", err))
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
 		return
@@ -125,6 +126,6 @@ func (rd *Renderer) write(w http.ResponseWriter, r *http.Request, status int, c 
 	w.WriteHeader(status)
 
 	if _, err := buf.WriteTo(w); err != nil {
-		rd.logger.DebugContext(r.Context(), "write page", slog.String("path", r.URL.Path), slog.Any("error", err))
+		rd.logger.DebugContext(r.Context(), "write page", slog.String("path", redact.Path(r.URL.Path)), slog.Any("error", err))
 	}
 }
