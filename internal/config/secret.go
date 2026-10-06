@@ -3,7 +3,9 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/invopop/jsonschema"
@@ -23,8 +25,8 @@ const (
 // { env = "VAR" }; an inline string is accepted only when the same file sets
 // allow_inline_secrets = true. Through a MESHSDR_* env var it is a literal.
 //
-// The value is resolved at load and never printed: String and LogValue
-// return a redacted placeholder.
+// The value is resolved at load and never printed: String, GoString,
+// LogValue and MarshalText return a redacted placeholder.
 type Secret struct {
 	source secretSource
 	ref    string // file path or env var name
@@ -45,6 +47,12 @@ func (s Secret) String() string {
 
 	return "[redacted]"
 }
+
+// GoString implements fmt.GoStringer (%#v) with a redacted placeholder.
+func (s Secret) GoString() string { return "config.Secret(" + strconv.Quote(s.String()) + ")" }
+
+// LogValue implements slog.LogValuer with a redacted placeholder.
+func (s Secret) LogValue() slog.Value { return slog.StringValue(s.String()) }
 
 // MarshalText implements encoding.TextMarshaler with a redacted placeholder.
 func (s Secret) MarshalText() ([]byte, error) { return []byte(s.String()), nil }
