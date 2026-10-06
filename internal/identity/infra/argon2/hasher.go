@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 
@@ -36,19 +38,40 @@ type Params struct {
 }
 
 // Hasher hashes and verifies passwords. Concurrent computations are limited
-// so that a login flood cannot exhaust memory (MemoryKiB per hash).
+// so that a login flood cannot exhaust memory (MemoryKiB per hash), and so
+// is the queue of requests waiting for a slot.
 type Hasher struct {
-	p   Params
-	sem chan struct{}
+	p        Params
+	sem      chan struct{}
+	maxQueue int64
+	waiting  atomic.Int64
 }
 
+// busyRetry is the Retry-After of a request refused by a full queue.
+const busyRetry = time.Second
+
 // New returns a hasher for p, computing at most maxConcurrent hashes at a
-// time (at least one).
-func New(p Params, maxConcurrent int) *Hasher {
-	return &Hasher{p: p, sem: make(chan struct{}, max(maxConcurrent, 1))}
+// time (at least one) with at most maxQueue requests waiting. A request
+// beyond the queue fails with a domain rate-limit error.
+func New(p Params, maxConcurrent, maxQueue int) *Hasher {
+	return &Hasher{p: p, sem: make(chan struct{}, max(maxConcurrent, 1)), maxQueue: int64(max(maxQueue, 0))}
 }
 
 func (h *Hasher) acquire(ctx context.Context) error {
+	select {
+	case h.sem <- struct{}{}:
+		return nil
+	default:
+	}
+
+	if h.waiting.Add(1) > h.maxQueue {
+		h.waiting.Add(-1)
+
+		return domain.NewRateLimitError(busyRetry)
+	}
+
+	defer h.waiting.Add(-1)
+
 	select {
 	case h.sem <- struct{}{}:
 		return nil

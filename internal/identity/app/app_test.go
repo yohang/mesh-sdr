@@ -93,7 +93,7 @@ func newEnv(t *testing.T, ipLimiter app.IPLimiter) *env {
 	ids := shared.NewUUIDv7Generator()
 	logger := slog.New(slog.DiscardHandler)
 	e := &env{
-		db: a, clock: c, hasher: &spyHasher{Hasher: argon2.New(cheap, 4)},
+		db: a, clock: c, hasher: &spyHasher{Hasher: argon2.New(cheap, 4, 64)},
 		users: sqlite.NewUsers(a, ids), sessions: sqlite.NewSessions(a), audit: sqlite.NewAuditLog(a),
 		unknown: memory.NewThrottle(100),
 	}
@@ -303,6 +303,60 @@ func TestLoginThrottling(t *testing.T) {
 	}
 }
 
+// Parallel guesses cannot exceed the throttle: each attempt is reserved
+// atomically before the password is verified.
+func TestConcurrentGuessesAreBounded(t *testing.T) {
+	for _, login := range []string{"alice", "nobody"} {
+		t.Run(login, func(t *testing.T) {
+			e := newEnv(t, nil)
+			e.addUser(t, "alice", "", domain.RoleListener)
+
+			const n = 20
+
+			errs := make(chan error, n)
+			start := make(chan struct{})
+
+			var wg sync.WaitGroup
+
+			for range n {
+				wg.Go(func() {
+					<-start
+
+					_, err := e.login(login, "wrong password!")
+					errs <- err
+				})
+			}
+
+			close(start)
+			wg.Wait()
+			close(errs)
+
+			invalid, limited := 0, 0
+
+			for err := range errs {
+				switch {
+				case errors.Is(err, domain.ErrInvalidCredentials):
+					invalid++
+				case errors.Is(err, domain.ErrRateLimited):
+					limited++
+				default:
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+
+			// The clock does not move: the 5th failure delays every later
+			// attempt.
+			if invalid != 5 || limited != n-5 {
+				t.Errorf("%d invalid, %d rate limited; want 5 and %d", invalid, limited, n-5)
+			}
+
+			if v := e.hasher.count(); v != 5 {
+				t.Errorf("%d password verifications, want 5", v)
+			}
+		})
+	}
+}
+
 func TestLoginLockoutIsPersistedAndAudited(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t, nil)
@@ -348,7 +402,7 @@ func TestLoginRehashesOutdatedHashes(t *testing.T) {
 	e := newEnv(t, nil)
 	u := e.addUser(t, "alice", "", domain.RoleListener)
 
-	old, err := argon2.New(argon2.Params{MemoryKiB: 32, Iterations: 2, Parallelism: 1}, 1).Hash(ctx, password)
+	old, err := argon2.New(argon2.Params{MemoryKiB: 32, Iterations: 2, Parallelism: 1}, 1, 1).Hash(ctx, password)
 	if err != nil {
 		t.Fatal(err)
 	}

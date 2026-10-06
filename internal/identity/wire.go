@@ -21,9 +21,12 @@ import (
 )
 
 // Login rate limit per client address (TECHNICAL_SPEC §5.12): 5 per minute.
+// Password hashing runs one hash per CPU, with at most hashQueuePerCPU
+// requests per CPU waiting; beyond, logins answer 429.
 const (
-	loginIPBurst = 5
-	loginIPEvery = 12 * time.Second
+	loginIPBurst    = 5
+	loginIPEvery    = 12 * time.Second
+	hashQueuePerCPU = 4
 )
 
 // Deps are the dependencies of the identity module.
@@ -54,7 +57,7 @@ func newRepos(d Deps) repos {
 		sessions: sqlite.NewSessions(d.DB),
 		audit:    sqlite.NewAuditLog(d.DB),
 		hasher: argon2.New(argon2.Params{MemoryKiB: a.MemoryKiB, Iterations: a.Iterations, Parallelism: a.Parallelism},
-			runtime.GOMAXPROCS(0)),
+			runtime.GOMAXPROCS(0), hashQueuePerCPU*runtime.GOMAXPROCS(0)),
 	}
 }
 

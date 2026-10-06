@@ -144,31 +144,22 @@ func NewThrottle(capacity int) *Throttle {
 	return &Throttle{cache: newLRU[string, throttleState](capacity)}
 }
 
-// BlockedUntil returns when the next attempt for key is allowed (zero: now).
-func (t *Throttle) BlockedUntil(key string, now time.Time) time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	s, ok := t.cache.get(key)
-	if !ok || !s.until.After(now) {
-		return time.Time{}
-	}
-
-	return s.until
-}
-
-// RecordFailure counts a failure for key and returns whether it is now
-// locked out.
-func (t *Throttle) RecordFailure(key string, now time.Time, p domain.ThrottlePolicy) bool {
+// Reserve refuses an attempt for key while it is delayed or locked, or
+// counts it as a failure; Reset clears the count after a success.
+func (t *Throttle) Reserve(key string, now time.Time, p domain.ThrottlePolicy) (bool, time.Time, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	s, _ := t.cache.get(key)
+	if s.until.After(now) {
+		return true, s.until, false
+	}
+
 	s.failures++
 	s.until = p.BlockedUntil(s.failures, now)
 	t.cache.put(key, s)
 
-	return p.Locks(s.failures)
+	return false, time.Time{}, p.Locks(s.failures)
 }
 
 // Reset forgets key.

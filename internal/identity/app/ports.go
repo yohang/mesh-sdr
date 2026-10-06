@@ -17,7 +17,8 @@ import (
 type PasswordHasher interface {
 	Hash(ctx context.Context, password string) (domain.PasswordHash, error)
 	// Verify reports whether password matches hash; it returns an error for
-	// a malformed hash.
+	// a malformed hash, and an error matching domain.ErrRateLimited when
+	// too many hashes are queued.
 	Verify(ctx context.Context, password string, hash domain.PasswordHash) (bool, error)
 	// NeedsRehash reports whether hash uses other parameters than the
 	// configured ones.
@@ -44,8 +45,10 @@ type IPLimiter interface {
 
 // LoginThrottle throttles login identifiers that match no account.
 type LoginThrottle interface {
-	BlockedUntil(key string, now time.Time) time.Time
-	RecordFailure(key string, now time.Time, p domain.ThrottlePolicy) bool
+	// Reserve atomically refuses an attempt for key while it is delayed or
+	// locked (blocked, until when), or counts it as a failure (locked: this
+	// failure locks the key).
+	Reserve(key string, now time.Time, p domain.ThrottlePolicy) (blocked bool, until time.Time, locked bool)
 	Reset(key string)
 }
 

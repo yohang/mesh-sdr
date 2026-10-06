@@ -88,28 +88,31 @@ func TestThrottle(t *testing.T) {
 	p := domain.DefaultThrottlePolicy()
 
 	for i := 1; i <= 10; i++ {
-		locked := th.RecordFailure("nobody", t0, p)
-		if locked != (i == 10) {
-			t.Errorf("failure %d locked = %v", i, locked)
+		blocked, _, locked := th.Reserve("nobody", t0.Add(time.Duration(i)*time.Minute), p)
+		if blocked || locked != (i == 10) {
+			t.Errorf("attempt %d: blocked %v locked %v", i, blocked, locked)
 		}
 	}
 
-	if until := th.BlockedUntil("nobody", t0); until.Sub(t0) != 15*time.Minute {
-		t.Errorf("blocked for %v", until.Sub(t0))
+	at := t0.Add(10 * time.Minute)
+
+	blocked, until, _ := th.Reserve("nobody", at, p)
+	if !blocked || until.Sub(at) != 15*time.Minute {
+		t.Errorf("after 10 failures: blocked %v for %v", blocked, until.Sub(at))
 	}
 
-	if !th.BlockedUntil("nobody", t0.Add(16*time.Minute)).IsZero() {
+	if blocked, _, _ := th.Reserve("nobody", at.Add(16*time.Minute), p); blocked {
 		t.Error("still blocked after the lock")
 	}
 
 	th.Reset("nobody")
 
-	if !th.BlockedUntil("nobody", t0).IsZero() {
+	if blocked, _, _ := th.Reserve("nobody", at, p); blocked {
 		t.Error("reset kept the lock")
 	}
 
 	for i := range 20 {
-		th.RecordFailure(fmt.Sprint(i), t0, p)
+		th.Reserve(fmt.Sprint(i), t0, p)
 	}
 
 	if th.cache.len() != 10 {

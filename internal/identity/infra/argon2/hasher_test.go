@@ -16,7 +16,7 @@ var cheap = argon2.Params{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
 
 func TestHashAndVerify(t *testing.T) {
 	ctx := context.Background()
-	h := argon2.New(cheap, 2)
+	h := argon2.New(cheap, 2, 8)
 
 	hash, err := h.Hash(ctx, "correct horse battery staple")
 	if err != nil {
@@ -47,8 +47,8 @@ func TestHashAndVerify(t *testing.T) {
 
 func TestVerifyUsesTheStoredParameters(t *testing.T) {
 	ctx := context.Background()
-	old := argon2.New(argon2.Params{MemoryKiB: 32, Iterations: 2, Parallelism: 1}, 1)
-	cur := argon2.New(cheap, 1)
+	old := argon2.New(argon2.Params{MemoryKiB: 32, Iterations: 2, Parallelism: 1}, 1, 8)
+	cur := argon2.New(cheap, 1, 8)
 
 	hash, err := old.Hash(ctx, "secret password")
 	if err != nil {
@@ -66,7 +66,7 @@ func TestVerifyUsesTheStoredParameters(t *testing.T) {
 
 func TestMalformedHashes(t *testing.T) {
 	ctx := context.Background()
-	h := argon2.New(cheap, 1)
+	h := argon2.New(cheap, 1, 8)
 
 	for _, s := range []string{
 		"$argon2i$v=19$m=64,t=1,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA",
@@ -94,7 +94,7 @@ func TestMalformedHashes(t *testing.T) {
 }
 
 func TestConcurrencyLimitHonoursContext(t *testing.T) {
-	h := argon2.New(argon2.Params{MemoryKiB: 8 * 1024, Iterations: 3, Parallelism: 1}, 1)
+	h := argon2.New(argon2.Params{MemoryKiB: 8 * 1024, Iterations: 3, Parallelism: 1}, 1, 8)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer cancel()

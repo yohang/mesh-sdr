@@ -54,6 +54,10 @@ func (p *LocalProvider) Authenticate(ctx context.Context, c Credentials) (domain
 
 	ok, err := p.hasher.Verify(ctx, c.Password, hash)
 	if err != nil {
+		if errors.Is(err, domain.ErrRateLimited) {
+			return domain.Identity{}, err
+		}
+
 		if ctx.Err() != nil {
 			return domain.Identity{}, fmt.Errorf("verify password: %w", err)
 		}

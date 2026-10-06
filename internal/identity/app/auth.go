@@ -98,15 +98,33 @@ func (a *Auth) Login(ctx context.Context, in LoginInput) (LoginResult, error) {
 		return LoginResult{}, fmt.Errorf("load user: %w", err)
 	}
 
-	if blocked, until := a.blocked(known, login, now); blocked {
+	// Reserve the attempt before verifying the password: the failure is
+	// counted first and reset on success, so parallel guesses cannot exceed
+	// the throttle thresholds.
+	r, err := a.reserve(ctx, known, login, now)
+	if err != nil {
+		return LoginResult{}, err
+	}
+
+	if r.blocked {
 		a.auditFailure(ctx, in.Meta, known, "throttled")
 
-		return LoginResult{}, domain.NewRateLimitError(until.Sub(now))
+		return LoginResult{}, domain.NewRateLimitError(r.until.Sub(now))
 	}
 
 	ident, err := a.provider.Authenticate(ctx, Credentials{Login: login, Password: in.Password})
 	if errors.Is(err, domain.ErrInvalidCredentials) {
-		return LoginResult{}, a.fail(ctx, in.Meta, known, login, now)
+		a.auditFailure(ctx, in.Meta, known, "invalid_credentials")
+
+		if r.locked {
+			a.record(ctx, in.Meta, known, domain.ActionLoginLockout, domain.ResultDenied, nil)
+		}
+
+		return LoginResult{}, domain.ErrInvalidCredentials
+	}
+
+	if errors.Is(err, domain.ErrRateLimited) {
+		return LoginResult{}, err // password hashing saturated
 	}
 
 	if err != nil {
@@ -134,31 +152,24 @@ func (a *Auth) Login(ctx context.Context, in LoginInput) (LoginResult, error) {
 	return a.open(ctx, u.ID(), login, in, now)
 }
 
-func (a *Auth) blocked(u *domain.User, login domain.Login, now time.Time) (bool, time.Time) {
-	if u != nil {
-		return u.BlockedAt(now)
-	}
-
-	until := a.unknown.BlockedUntil(login.Key(), now)
-
-	return !until.IsZero(), until
+// reservation is the outcome of reserving a login attempt.
+type reservation struct {
+	blocked bool      // refused: delayed or locked out
+	until   time.Time // when the next attempt is allowed, if blocked
+	locked  bool      // this attempt, if it fails, locks the account
 }
 
-// fail counts a failed password for the account (persisted) or the unknown
-// identifier (in memory).
-func (a *Auth) fail(ctx context.Context, meta RequestMeta, known *domain.User, login domain.Login, now time.Time) error {
+// reserve atomically checks the throttle of the account (persisted) or of
+// the unknown identifier (in memory) and counts the attempt as a failure;
+// a successful login resets the count.
+func (a *Auth) reserve(ctx context.Context, known *domain.User, login domain.Login, now time.Time) (reservation, error) {
 	if known == nil {
-		locked := a.unknown.RecordFailure(login.Key(), now, a.throttle)
-		a.auditFailure(ctx, meta, nil, "invalid_credentials")
+		blocked, until, locked := a.unknown.Reserve(login.Key(), now, a.throttle)
 
-		if locked {
-			a.auditFailure(ctx, meta, nil, "locked")
-		}
-
-		return domain.ErrInvalidCredentials
+		return reservation{blocked: blocked, until: until, locked: locked}, nil
 	}
 
-	var locked bool
+	var r reservation
 
 	err := a.tx.WithinTx(ctx, func(ctx context.Context) error {
 		u, err := a.users.ByID(ctx, known.ID())
@@ -166,21 +177,21 @@ func (a *Auth) fail(ctx context.Context, meta RequestMeta, known *domain.User, l
 			return err
 		}
 
-		locked = u.RecordLoginFailure(now, a.throttle)
+		if blocked, until := u.BlockedAt(now); blocked {
+			r = reservation{blocked: true, until: until}
+
+			return nil
+		}
+
+		r.locked = u.RecordLoginFailure(now, a.throttle)
 
 		return a.users.Save(ctx, u)
 	})
 	if err != nil {
-		return fmt.Errorf("record failed login: %w", err)
+		return reservation{}, fmt.Errorf("reserve login attempt: %w", err)
 	}
 
-	a.auditFailure(ctx, meta, known, "invalid_credentials")
-
-	if locked {
-		a.record(ctx, meta, known, domain.ActionLoginLockout, domain.ResultDenied, nil)
-	}
-
-	return domain.ErrInvalidCredentials
+	return r, nil
 }
 
 func (a *Auth) open(ctx context.Context, id domain.UserID, login domain.Login, in LoginInput, now time.Time) (LoginResult, error) {
