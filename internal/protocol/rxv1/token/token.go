@@ -15,6 +15,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,6 +53,15 @@ var (
 // Audience returns the audience of the tokens of node nodeID: rx-node:<id>.
 func Audience(nodeID string) string { return "rx-node:" + nodeID }
 
+// SessionRef returns the sid claim of a session: the first 128 bits of the
+// SHA-256 of its id (canonical text form), in hex. Nodes never see session
+// ids; ctl.revocations names sessions by this reference.
+func SessionRef(sessionID string) string {
+	sum := sha256.Sum256([]byte(sessionID))
+
+	return hex.EncodeToString(sum[:16])
+}
+
 // Scope is one device entry of the scp claim.
 type Scope struct {
 	Device string   `json:"dev"`
@@ -71,7 +81,7 @@ type Claims struct {
 	Issuer       string // iss: hub.url
 	Audience     string // aud: Audience(nodeID)
 	Subject      string // sub: user id or AnonymousSubject
-	SessionID    string // sid: session id hash prefix, empty for anonymous
+	SessionID    string // sid: SessionRef(session id), empty for anonymous
 	ConnectionID string // cid: one per media WebSocket, issued by the hub
 	Roles        []string
 	Scopes       []Scope
@@ -80,6 +90,9 @@ type Claims struct {
 	NotBefore    time.Time
 	ExpiresAt    time.Time
 	ID           string // jti
+	// KeyID is the kid of the verified token's header, set by Verify only
+	// (Sign derives it from the key).
+	KeyID string
 }
 
 // Scope returns the scope of device, if any.
@@ -191,8 +204,10 @@ func Verify(raw string, keys *KeySet, expect Expect) (Claims, error) {
 		jwt.WithTimeFunc(func() time.Time { return expect.Now }),
 	)
 
+	var kid string
+
 	_, err := parser.ParseWithClaims(raw, &w, func(t *jwt.Token) (any, error) {
-		kid, _ := t.Header["kid"].(string)
+		kid, _ = t.Header["kid"].(string)
 
 		pub, ok := keys.Key(kid)
 		if !ok {
@@ -224,7 +239,7 @@ func Verify(raw string, keys *KeySet, expect Expect) (Claims, error) {
 	return Claims{
 		Issuer: w.Issuer, Audience: aud, Subject: w.Subject, SessionID: w.SessionID, ConnectionID: w.ConnectionID,
 		Roles: w.Roles, Scopes: w.Scopes, Limits: w.Limits,
-		IssuedAt: timeOf(w.IssuedAt), NotBefore: timeOf(w.NotBefore), ExpiresAt: timeOf(w.ExpiresAt), ID: w.ID,
+		IssuedAt: timeOf(w.IssuedAt), NotBefore: timeOf(w.NotBefore), ExpiresAt: timeOf(w.ExpiresAt), ID: w.ID, KeyID: kid,
 	}, nil
 }
 
