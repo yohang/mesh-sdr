@@ -64,6 +64,7 @@ func (m *Module) Routes(r chi.Router) {
 	r.MethodNotAllowed(m.render.MethodNotAllowed)
 
 	r.Get("/", m.home)
+	r.Get("/robots.txt", robots)
 }
 
 // home is a placeholder home page until the Receiver section (UI-006) takes

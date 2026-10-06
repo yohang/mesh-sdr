@@ -78,6 +78,26 @@ func TestThemeMode(t *testing.T) {
 	}
 }
 
+// TestRobots covers UI-005.
+func TestRobots(t *testing.T) {
+	res, body := do(t, router(config.DefaultHub().Settings), http.MethodGet, "/robots.txt", nil)
+
+	if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Fatalf("got %d %q", res.StatusCode, res.Header.Get("Content-Type"))
+	}
+
+	lines := map[string]bool{}
+	for line := range strings.SplitSeq(body, "\n") {
+		lines[line] = true
+	}
+
+	for _, want := range []string{"User-agent: *", "Disallow: /login", "Disallow: /logout", "Disallow: /admin", "Disallow: /api/", "Disallow: /nodes/"} {
+		if !lines[want] {
+			t.Errorf("robots.txt lacks %q:\n%s", want, body)
+		}
+	}
+}
+
 func TestErrorPages(t *testing.T) {
 	h := router(config.DefaultHub().Settings)
 
