@@ -49,3 +49,6 @@ SELECT DISTINCT node_id FROM connections WHERE closed_at IS NULL AND node_id IS 
 
 -- name: DeleteClosedConnections :execrows
 DELETE FROM connections WHERE closed_at IS NOT NULL AND closed_at < ?;
+
+-- name: CountOpenNodeConnections :one
+SELECT count(*) FROM connections WHERE closed_at IS NULL AND node_id = ?;

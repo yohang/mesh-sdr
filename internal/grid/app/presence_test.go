@@ -21,13 +21,30 @@ func TestPresenceFromNodeEvents(t *testing.T) {
 	n := enrolledNode(t, e)
 	c, tr := newControl(e, "1.0.0")
 	repo := sqlite.NewConnectionRepository(e.db)
-	p := app.NewPresence(repo, tr, app.DefaultTimings(), e.clock.now, discard)
+	p := app.NewPresence(repo, sqlite.NewDeviceRepository(e.db), tr, app.DefaultTimings(), e.clock.now, discard)
 
 	for _, typ := range []rxv1.MessageType{rxv1.TypeConnectionOpened, rxv1.TypeConnectionHeart, rxv1.TypeConnectionClosed} {
 		c.Handle(typ, p.Handler())
 	}
 
 	c.OnBoot(p.NodeRestarted)
+
+	// hf belongs to the node; vhf to another node.
+	devices := app.NewDevices(sqlite.NewDeviceRepository(e.db), e.audit, discard)
+	other := domain.NewNode(domain.MustNodeID("garden"), domain.MustNodeName("g"), domain.MustNodeURL("https://g:1"), e.clock.now())
+
+	if err := e.nodes.Create(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, reg := range []struct {
+		n *domain.Node
+		d string
+	}{{n, "hf"}, {other, "vhf"}} {
+		if err := devices.Sync(ctx, reg.n, ctl.Capabilities{Devices: []ctl.Device{device(reg.d, "rtl_sdr")}}, e.clock.now()); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	boot := welcome(t, c, n.ID(), "1.0.0")
 	cid1, _ := shared.NewUUIDv7(e.clock.now())
@@ -57,10 +74,22 @@ func TestPresenceFromNodeEvents(t *testing.T) {
 		t.Errorf("connection = %+v", i)
 	}
 
+	// A node cannot attach a listener to another node's device.
+	stolen := event(4, rxv1.TypeConnectionOpened, cid2, "")
+	stolen.Payload, _ = json.Marshal(ctl.Connection{Seq: 4, CID: shared.MustParseUUID("0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b").String(), DeviceID: "vhf"})
+
+	if _, err := c.Apply(ctx, n.ID(), boot, false, []app.Event{stolen}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := repo.Get(ctx, shared.MustParseUUID("0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b")); got == nil || got.Info().DeviceID != "" {
+		t.Errorf("connection on another node's device = %+v", got)
+	}
+
 	// Liveness: a connection.heartbeat keeps the row alive; silence closes it.
 	e.clock.advance(40 * time.Second)
 
-	if _, err := c.Apply(ctx, n.ID(), boot, false, []app.Event{event(4, rxv1.TypeConnectionHeart, cid1, "")}); err != nil {
+	if _, err := c.Apply(ctx, n.ID(), boot, false, []app.Event{event(5, rxv1.TypeConnectionHeart, cid1, "")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,7 +97,7 @@ func TestPresenceFromNodeEvents(t *testing.T) {
 	p.Reap(ctx)
 
 	if count, _ := p.Count(ctx); count != 1 {
-		t.Fatalf("open after a heartbeat = %d, want 1", count)
+		t.Fatalf("open after a heartbeat = %d, want 1 (the silent stolen row was reaped)", count)
 	}
 
 	e.clock.advance(10 * time.Second)
@@ -80,13 +109,42 @@ func TestPresenceFromNodeEvents(t *testing.T) {
 	}
 }
 
+func TestPresenceCapsOpenRowsPerNode(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	n := enrolledNode(t, e)
+	c, tr := newControl(e, "1.0.0")
+	repo := sqlite.NewConnectionRepository(e.db)
+	p := app.NewPresence(repo, sqlite.NewDeviceRepository(e.db), tr, app.DefaultTimings(), e.clock.now, discard)
+	c.Handle(rxv1.TypeConnectionOpened, p.Handler())
+
+	boot := welcome(t, c, n.ID(), "1.0.0")
+	gen := shared.NewUUIDv7Generator()
+
+	events := make([]app.Event, 0, app.MaxOpenConnectionsPerNode+1)
+
+	for i := range app.MaxOpenConnectionsPerNode + 1 {
+		id, _ := gen.New(e.clock.now())
+		raw, _ := json.Marshal(ctl.Connection{Seq: int64(i + 1), CID: id.String()})
+		events = append(events, app.Event{Seq: int64(i + 1), Type: rxv1.TypeConnectionOpened, Payload: raw})
+	}
+
+	if _, err := c.Apply(ctx, n.ID(), boot, false, events); err != nil {
+		t.Fatal(err)
+	}
+
+	if count, _ := p.Count(ctx); count != app.MaxOpenConnectionsPerNode {
+		t.Errorf("open = %d, want the cap %d", count, app.MaxOpenConnectionsPerNode)
+	}
+}
+
 func TestPresenceLifecycleClosures(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	n := enrolledNode(t, e)
 	c, tr := newControl(e, "1.0.0")
 	repo := sqlite.NewConnectionRepository(e.db)
-	p := app.NewPresence(repo, tr, app.DefaultTimings(), e.clock.now, discard)
+	p := app.NewPresence(repo, sqlite.NewDeviceRepository(e.db), tr, app.DefaultTimings(), e.clock.now, discard)
 	c.OnBoot(p.NodeRestarted)
 
 	open := func(node string) shared.UUID {

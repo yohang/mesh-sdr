@@ -57,7 +57,7 @@ func newServer(t *testing.T, auth api.Authorizer) *httptest.Server {
 	srv := httptest.NewServer(api.NewHandler(api.Server{
 		GridHandlers: api.NewGridHandlers(auth, nodes, gridapp.NewHistory(), caps,
 			gridapp.NewDevices(sqlite.NewDeviceRepository(a), gridinfra.NewLogAuditor(discard), discard),
-			gridapp.NewPresence(sqlite.NewConnectionRepository(a), nil, gridapp.DefaultTimings(), time.Now, discard)),
+			gridapp.NewPresence(sqlite.NewConnectionRepository(a), sqlite.NewDeviceRepository(a), nil, gridapp.DefaultTimings(), time.Now, discard)),
 	}, auth, discard))
 	t.Cleanup(srv.Close)
 

@@ -12,9 +12,14 @@ import (
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
+// MaxOpenConnectionsPerNode bounds the open presence rows a node can
+// create through its control channel (ADR 0008).
+const MaxOpenConnectionsPerNode = 1000
+
 // Presence is the heartbeat-based connection registry (§7.3, GRID-017).
 type Presence struct {
 	repo    domain.ConnectionRepository
+	devices domain.DeviceRepository
 	tracker *Tracker
 	timings Timings
 	now     Clock
@@ -23,8 +28,8 @@ type Presence struct {
 
 // NewPresence returns the service. tracker may be nil when the grid is
 // disabled.
-func NewPresence(repo domain.ConnectionRepository, tracker *Tracker, timings Timings, now Clock, logger *slog.Logger) *Presence {
-	return &Presence{repo: repo, tracker: tracker, timings: timings, now: now, logger: logger}
+func NewPresence(repo domain.ConnectionRepository, devices domain.DeviceRepository, tracker *Tracker, timings Timings, now Clock, logger *slog.Logger) *Presence {
+	return &Presence{repo: repo, devices: devices, tracker: tracker, timings: timings, now: now, logger: logger}
 }
 
 // Open records a new connection (hub events WS, gateway authz).
@@ -149,12 +154,33 @@ func (s *Presence) Handler() EventHandler {
 
 		switch {
 		case errors.Is(err, domain.ErrConnectionNotFound):
+			if ev.Type == rxv1.TypeConnectionClosed {
+				return nil
+			}
+
+			open, err := s.repo.CountOpenNode(ctx, n.ID())
+			if err != nil {
+				return err
+			}
+
+			if open >= MaxOpenConnectionsPerNode {
+				s.logger.WarnContext(ctx, "connection event refused: too many open connections for the node",
+					slog.String("node_id", n.ID().String()), slog.Int("open", open))
+
+				return nil
+			}
+
+			device, err := s.ownedDevice(ctx, n.ID(), p.DeviceID)
+			if err != nil {
+				return err
+			}
+
 			user, _ := shared.ParseUUID(p.UserID)
 			session, _ := shared.ParseUUID(p.SID)
 
 			c, err = domain.NewConnection(domain.ConnectionInfo{
 				ID: id, Kind: domain.ConnectionMedia, UserID: user, SessionID: session,
-				NodeID: n.ID().String(), DeviceID: validDevice(p.DeviceID), Mode: p.Demod,
+				NodeID: n.ID().String(), DeviceID: device, Mode: p.Demod,
 			}, now)
 			if err != nil {
 				s.logger.WarnContext(ctx, "invalid connection event skipped", slog.Any("error", err))
@@ -179,19 +205,43 @@ func (s *Presence) Handler() EventHandler {
 		case rxv1.TypeConnectionClosed:
 			c.Close(domain.ParseCloseReason(p.Reason), now)
 		default:
-			c.Attach(validDevice(p.DeviceID), p.Demod, now)
+			device, err := s.ownedDevice(ctx, n.ID(), p.DeviceID)
+			if err != nil {
+				return err
+			}
+
+			c.Attach(device, p.Demod, now)
 		}
 
 		return s.repo.Save(ctx, c)
 	}
 }
 
-func validDevice(id string) string {
-	if _, err := domain.NewDeviceID(id); err != nil {
-		return ""
+// ownedDevice returns id when it is a device of node, "" otherwise: a node
+// cannot attach its listeners to another node's device.
+func (s *Presence) ownedDevice(ctx context.Context, node domain.NodeID, id string) (string, error) {
+	did, err := domain.NewDeviceID(id)
+	if err != nil {
+		return "", nil //nolint:nilerr // absent or malformed: no device
 	}
 
-	return id
+	d, err := s.devices.Get(ctx, did)
+	if errors.Is(err, domain.ErrDeviceNotFound) {
+		return "", nil
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	if d.Node() != node {
+		s.logger.WarnContext(ctx, "connection event names another node's device", slog.String("node_id", node.String()),
+			slog.String("device_id", id))
+
+		return "", nil
+	}
+
+	return id, nil
 }
 
 // Count returns the number of open connections.

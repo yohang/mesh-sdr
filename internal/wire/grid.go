@@ -159,7 +159,8 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 	gridLogger := component(logger, "grid.wire")
 	capRepo := gridsqlite.NewCapabilityRepository(adapter)
 	connRepo := gridsqlite.NewConnectionRepository(adapter)
-	g.devices = app.NewDevices(gridsqlite.NewDeviceRepository(adapter), audit, component(logger, "grid.app.devices"))
+	deviceRepo := gridsqlite.NewDeviceRepository(adapter)
+	g.devices = app.NewDevices(deviceRepo, audit, component(logger, "grid.app.devices"))
 
 	if ca != nil {
 		g.tracker = app.NewTracker()
@@ -183,7 +184,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		g.control.Handle(rxv1.TypeDeviceState, g.devices.StateHandler())
 		g.status.Listen(g.devices.NodeStatusChanged)
 
-		g.presence = app.NewPresence(connRepo, g.tracker, timings, now, component(logger, "grid.app.presence"))
+		g.presence = app.NewPresence(connRepo, deviceRepo, g.tracker, timings, now, component(logger, "grid.app.presence"))
 		for _, t := range []rxv1.MessageType{rxv1.TypeConnectionOpened, rxv1.TypeConnectionHeart, rxv1.TypeConnectionClosed} {
 			g.control.Handle(t, g.presence.Handler())
 		}
@@ -197,7 +198,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		g.workers = append(g.workers, enrollment.Run, g.manager.Run)
 	} else {
 		g.caps = app.NewCapabilities(capRepo, nodeRepo, nil, component(logger, "grid.app.capabilities"))
-		g.presence = app.NewPresence(connRepo, nil, timings, now, component(logger, "grid.app.presence"))
+		g.presence = app.NewPresence(connRepo, deviceRepo, nil, timings, now, component(logger, "grid.app.presence"))
 	}
 
 	g.workers = append(g.workers, g.presence.Run)

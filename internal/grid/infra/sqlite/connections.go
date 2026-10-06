@@ -162,6 +162,16 @@ func (r *ConnectionRepository) CountOpen(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
+// CountOpenNode implements domain.ConnectionRepository.
+func (r *ConnectionRepository) CountOpenNode(ctx context.Context, node domain.NodeID) (int, error) {
+	n, err := sqlc.New(r.db.Reader(ctx)).CountOpenNodeConnections(ctx, nullString(node.String()))
+	if err != nil {
+		return 0, fmt.Errorf("count connections of %s: %w", node, err)
+	}
+
+	return int(n), nil
+}
+
 // OpenNodes implements domain.ConnectionRepository.
 func (r *ConnectionRepository) OpenNodes(ctx context.Context) ([]domain.NodeID, error) {
 	rows, err := sqlc.New(r.db.Reader(ctx)).OpenMediaNodes(ctx)
