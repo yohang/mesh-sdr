@@ -1,17 +1,82 @@
 package templates
 
-templ Layout(title string) {
+// Layout is the app shell: persistent top bar, main navigation and the #main region
+// that boosted navigation swaps. Everything outside #main (top bar, islands such as
+// the audio engine, the clock and notifications) survives client-side navigation.
+//
+// Boosted links and forms inherit the boost config from <body>: GET the full page,
+// keep only its #main (hx-select) and replace the current #main (outerHTML). #main
+// carries data-section; shell.js moves aria-current in the nav from it (this also
+// covers history restoration, which only swaps the [hx-history-elt] element).
+templ Layout(s Shell) {
 	<!DOCTYPE html>
-	<html lang="en">
+	<html lang="en" data-theme={ string(s.Theme) }>
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>{ title }</title>
+			<meta name="color-scheme" content={ s.Theme.ColorScheme() }/>
+			<meta name="csrf-token" content={ s.CSRFToken }/>
+			<title>{ s.DocumentTitle() }</title>
 			<link rel="stylesheet" href="/static/css/app.css"/>
-			<script src="/static/vendor/htmx.min.js" defer></script>
+			<script src="/static/vendor/htmx.min.js" nonce={ templ.GetNonce(ctx) } defer></script>
+			<script src="/static/js/shell.js" type="module" nonce={ templ.GetNonce(ctx) }></script>
 		</head>
-		<body>
-			{ children... }
+		<body
+			class="min-h-dvh bg-bg text-fg font-sans antialiased flex flex-col"
+			hx-boost:inherited='target:"#main" select:"#main" swap:"outerHTML"'
+		>
+			<a href="#main" class="skip-link">Skip to main content</a>
+			<header class="sticky top-0 z-10 border-b border-border bg-surface">
+				<div class="mx-auto flex h-14 max-w-screen-2xl items-center gap-4 px-4">
+					<a href="/" class="font-semibold tracking-tight text-fg no-underline">MeshSDR</a>
+					@PrimaryNav(s)
+					<div class="ml-auto flex items-center gap-3">
+						<msdr-audio-probe class="hidden md:inline-flex"></msdr-audio-probe>
+						<msdr-utc-clock class="font-mono text-sm text-fg-muted tabular-nums">
+							<time>--:--:-- UTC</time>
+						</msdr-utc-clock>
+						<div id="notifications" role="region" aria-label="Notifications" class="text-sm text-fg-muted">
+							// SPIKE: notifications area placeholder (UI-011).
+							<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="size-5 fill-none stroke-current stroke-2">
+								<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>
+							</svg>
+							<span class="sr-only">No notifications</span>
+						</div>
+						// SPIKE: user menu placeholder (UI-010). Real menu depends on the session role.
+						<a href="/login" class="text-sm">Sign in</a>
+					</div>
+				</div>
+			</header>
+			<main id="main" tabindex="-1" hx-history-elt data-section={ string(s.Active) } class="mx-auto w-full max-w-screen-2xl flex-1 px-4 py-6 pb-24 md:pb-6 focus:outline-none">
+				{ children... }
+			</main>
+			<footer class="border-t border-border px-4 py-3 text-sm text-fg-muted mb-16 md:mb-0">
+				// SPIKE: usage policy link placeholder (UI-003).
+				<a href="/policy">Usage policy</a>
+			</footer>
+			<div id="msdr-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 		</body>
 	</html>
+}
+
+// PrimaryNav is the main navigation. It is a top-bar menu from md up and a bottom tab
+// bar below 768 px (UI-006). It is not swapped on navigation: role-gated entries only
+// change on login/logout, which reload the whole page.
+templ PrimaryNav(s Shell) {
+	<nav id="primary-nav" aria-label="Main" class="primary-nav">
+		<ul class="flex h-full items-stretch md:gap-1">
+			for _, item := range s.Nav {
+				<li class="flex flex-1 md:flex-none">
+					<a
+						href={ templ.SafeURL(item.Href) }
+						class="nav-link"
+						data-section={ string(item.Section) }
+						if item.Section == s.Active {
+							aria-current="page"
+						}
+					>{ item.Label }</a>
+				</li>
+			}
+		</ul>
+	</nav>
 }

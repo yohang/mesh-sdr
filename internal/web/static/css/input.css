@@ -1,3 +1,169 @@
 @import "tailwindcss" source(none);
 
 @source "../../templates";
+@source "../js";
+
+/*
+ * Design tokens (UI-008).
+ *
+ * One definition per token with light-dark(): the value is picked by the element's
+ * used color-scheme, which the server sets from the admin theme mode through
+ * <html data-theme="light|dark|auto">. `auto` keeps `color-scheme: light dark`, so the
+ * browser follows prefers-color-scheme with no JS and no flash.
+ *
+ * Color tokens are registered with @property (<color>) so that getComputedStyle()
+ * returns a resolved color: canvases (scale, envelope, bandplan, S-meter) read the
+ * same tokens. Re-read them when prefers-color-scheme changes in auto mode.
+ */
+@property --msdr-color-bg { syntax: "<color>"; inherits: true; initial-value: #f7f8fa; }
+@property --msdr-color-surface { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+@property --msdr-color-surface-2 { syntax: "<color>"; inherits: true; initial-value: #eef1f4; }
+@property --msdr-color-fg { syntax: "<color>"; inherits: true; initial-value: #1b1f24; }
+@property --msdr-color-fg-muted { syntax: "<color>"; inherits: true; initial-value: #4b5563; }
+@property --msdr-color-border { syntax: "<color>"; inherits: true; initial-value: #8c959f; }
+@property --msdr-color-accent { syntax: "<color>"; inherits: true; initial-value: #0b5cad; }
+@property --msdr-color-on-accent { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+@property --msdr-color-focus { syntax: "<color>"; inherits: true; initial-value: #9a3412; }
+
+:root {
+  color-scheme: light dark;
+
+  /* Colors: text pairs meet 4.5:1, UI parts (border, focus) 3:1 against bg/surface. */
+  --msdr-color-bg: light-dark(#f7f8fa, #0d1117);
+  --msdr-color-surface: light-dark(#ffffff, #161b22);
+  --msdr-color-surface-2: light-dark(#eef1f4, #1f2630);
+  --msdr-color-fg: light-dark(#1b1f24, #e6edf3);
+  --msdr-color-fg-muted: light-dark(#4b5563, #9da7b3);
+  --msdr-color-border: light-dark(#8c959f, #6e7681);
+  --msdr-color-accent: light-dark(#0b5cad, #58a6ff);
+  --msdr-color-on-accent: light-dark(#ffffff, #0d1117);
+  --msdr-color-focus: light-dark(#9a3412, #f0b429);
+
+  /* Typography and spacing. */
+  --msdr-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --msdr-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --msdr-spacing: 0.25rem;
+  --msdr-radius: 0.375rem;
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* Map the tokens onto Tailwind's theme so utilities (bg-surface, text-fg-muted…) use them. */
+@theme inline {
+  --color-bg: var(--msdr-color-bg);
+  --color-surface: var(--msdr-color-surface);
+  --color-surface-2: var(--msdr-color-surface-2);
+  --color-fg: var(--msdr-color-fg);
+  --color-fg-muted: var(--msdr-color-fg-muted);
+  --color-border: var(--msdr-color-border);
+  --color-accent: var(--msdr-color-accent);
+  --color-on-accent: var(--msdr-color-on-accent);
+  --color-focus: var(--msdr-color-focus);
+  --font-sans: var(--msdr-font-sans);
+  --font-mono: var(--msdr-font-mono);
+  --spacing: var(--msdr-spacing);
+  --radius: var(--msdr-radius);
+}
+
+/* Breakpoints (UI-007): mobile < 768 px, tablet 768–1199 px, desktop ≥ 1200 px. */
+@theme {
+  --breakpoint-md: 48rem;
+  --breakpoint-xl: 75rem;
+}
+
+@layer base {
+  a {
+    color: var(--msdr-color-accent);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+
+  /* Visible focus for keyboard users on every focusable element (UI-009). */
+  :focus-visible {
+    outline: 3px solid var(--msdr-color-focus);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .skip-link {
+    position: absolute;
+    left: 0.5rem;
+    top: -10rem;
+    z-index: 50;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--msdr-radius);
+    background: var(--msdr-color-surface);
+    color: var(--msdr-color-fg);
+  }
+
+  .skip-link:focus {
+    top: 0.5rem;
+  }
+
+  /* Bottom tab bar below md, inline top-bar menu from md up (UI-006). */
+  .primary-nav {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 20;
+    height: 3.5rem;
+    border-top: 1px solid var(--msdr-color-border);
+    background: var(--msdr-color-surface);
+
+    @variant md {
+      position: static;
+      height: 100%;
+      border-top: 0;
+      background: transparent;
+    }
+  }
+
+  .nav-link {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    padding-inline: 0.75rem;
+    color: var(--msdr-color-fg-muted);
+    text-decoration: none;
+    border-top: 3px solid transparent;
+
+    @variant md {
+      border-top: 0;
+      border-bottom: 3px solid transparent;
+    }
+
+    &:hover {
+      color: var(--msdr-color-fg);
+    }
+
+    /* Current section: color plus a bar, so color is never the only cue. */
+    &[aria-current="page"] {
+      color: var(--msdr-color-fg);
+      font-weight: 600;
+      border-color: var(--msdr-color-accent);
+    }
+  }
+
+  .btn-primary {
+    border-radius: var(--msdr-radius);
+    padding: 0.375rem 0.75rem;
+    background: var(--msdr-color-accent);
+    color: var(--msdr-color-on-accent);
+    font-weight: 600;
+  }
+}
+
+/* Disable non-essential animation and smooth scrolling (UI-008, UI-009). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

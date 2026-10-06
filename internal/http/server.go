@@ -7,12 +7,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/yohang/mesh-sdr/internal/web"
-	"github.com/yohang/mesh-sdr/internal/web/templates"
 )
 
 // NewRouter builds the application router.
@@ -22,6 +20,7 @@ func NewRouter(logger *slog.Logger, db *sql.DB) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
+	r.Use(securityHeaders)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := db.PingContext(r.Context()); err != nil {
@@ -36,7 +35,27 @@ func NewRouter(logger *slog.Logger, db *sql.DB) http.Handler {
 
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServerFS(web.Static())))
 
-	r.Get("/", templ.Handler(templates.Home()).ServeHTTP)
+	// App shell pages and their actions: session + CSRF.
+	p := &pages{logger: logger.With(slog.String("component", "http.handler.pages"))}
+	sessions := newFakeSessions() // SPIKE: replaced by the DB session store (AUTH-003).
+
+	shell := chi.Chain(
+		sessions.middleware,
+		csrfProtection(logger.With(slog.String("component", "http.middleware.csrf"))),
+	)
+
+	r.NotFound(shell.HandlerFunc(p.notFound).ServeHTTP)
+
+	r.Group(func(r chi.Router) {
+		r.Use(shell...)
+
+		r.Get("/", p.receiver)
+		r.Get("/map", p.mapPage)
+		r.Get("/decodes", p.decodes)
+		r.Get("/files", p.files)
+		r.Get("/admin", p.admin)
+		r.With(requireJSON).Post("/admin/demo", p.adminDemo)
+	})
 
 	return r
 }

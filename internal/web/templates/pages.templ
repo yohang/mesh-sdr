@@ -1,0 +1,89 @@
+package templates
+
+import "time"
+
+// SPIKE: the section pages below are skeletons. Each real page belongs to its module
+// (internal/<module>/http) once the UI epics start; only the shell stays here.
+
+templ pageHeading(title string) {
+	<h1 class="mb-4 text-2xl font-semibold">{ title }</h1>
+}
+
+// ReceiverPage is the Receiver section skeleton. It hands server data to a JS island
+// through templ.JSONScript (inert application/json, read by the island on connect).
+templ ReceiverPage(s Shell, data ReceiverBootstrap) {
+	@Layout(s) {
+		@pageHeading("Receiver")
+		<div class="grid gap-4 xl:grid-cols-[1fr_20rem]">
+			<section aria-labelledby="waterfall-heading" class="rounded border border-border bg-surface p-4">
+				<h2 id="waterfall-heading" class="mb-2 font-semibold">Waterfall</h2>
+				<div class="flex h-48 items-center justify-center rounded bg-surface-2 text-fg-muted">
+					// SPIKE: waterfall canvas placeholder (RX/UI-017).
+					Waterfall placeholder
+				</div>
+			</section>
+			<section aria-labelledby="devices-heading" class="rounded border border-border bg-surface p-4">
+				<h2 id="devices-heading" class="mb-2 font-semibold">Devices</h2>
+				@templ.JSONScript(ReceiverBootstrapID, data)
+				<msdr-receiver-island data-bootstrap={ ReceiverBootstrapID }>
+					<p class="text-fg-muted">Loading devices…</p>
+				</msdr-receiver-island>
+			</section>
+		</div>
+	}
+}
+
+// MapPage is the Map section skeleton.
+templ MapPage(s Shell) {
+	@Layout(s) {
+		@pageHeading("Map")
+		<p class="text-fg-muted">Map skeleton.</p>
+	}
+}
+
+// DecodesPage is the Decodes section skeleton.
+templ DecodesPage(s Shell) {
+	@Layout(s) {
+		@pageHeading("Decodes")
+		<p class="text-fg-muted">Decodes skeleton.</p>
+	}
+}
+
+// FilesPage is the Files section skeleton.
+templ FilesPage(s Shell) {
+	@Layout(s) {
+		@pageHeading("Files")
+		<p class="text-fg-muted">Files skeleton.</p>
+	}
+}
+
+// AdminPage is the Admin section skeleton, with a state-changing htmx request that
+// exercises the CSRF header and the JSON-only body rule.
+templ AdminPage(s Shell) {
+	@Layout(s) {
+		@pageHeading("Admin")
+		<section aria-labelledby="csrf-demo-heading" class="max-w-md rounded border border-border bg-surface p-4">
+			<h2 id="csrf-demo-heading" class="mb-2 font-semibold">CSRF demo</h2>
+			// SPIKE: demo form; hx-boost="false" because it is a plain htmx request, not navigation.
+			<form hx-post="/admin/demo" hx-target="#demo-result" hx-boost="false" class="flex flex-col gap-2">
+				<label for="demo-note">Note</label>
+				<input id="demo-note" name="note" type="text" required maxlength="80" class="rounded border border-border bg-bg px-2 py-1"/>
+				<button type="submit" class="btn-primary self-start">Save</button>
+			</form>
+			<p id="demo-result" role="status" class="mt-2 text-sm"></p>
+		</section>
+	}
+}
+
+// AdminDemoResult is the fragment returned by the CSRF demo endpoint.
+templ AdminDemoResult(note string, at time.Time) {
+	Saved “{ note }” at <time datetime={ at.Format(time.RFC3339) }>{ at.Format("15:04:05") } UTC</time>.
+}
+
+// NotFoundPage is rendered for unknown routes, inside the shell.
+templ NotFoundPage(s Shell) {
+	@Layout(s) {
+		@pageHeading("Page not found")
+		<p><a href="/">Back to the receiver</a></p>
+	}
+}
