@@ -304,10 +304,10 @@ func TestAPIContract(t *testing.T) {
 	}
 }
 
-// checkRights calls every operation as each role (bodies are empty
-// objects, ids placeholders): below the required level the policy refuses
-// it (401 unauthenticated, 403 forbidden or admin_network_denied), at or
-// above it never does.
+// checkRights calls every operation as each role (bodies carry a
+// placeholder for each required field, ids are placeholders): below the
+// required level the policy refuses it (401 unauthenticated, 403 forbidden
+// or admin_network_denied), at or above it never does.
 func checkRights(t *testing.T, h *contractHub, v *apitest.Validator) {
 	type caller struct {
 		name    string
@@ -318,13 +318,17 @@ func checkRights(t *testing.T, h *contractHub, v *apitest.Validator) {
 
 	callers := []caller{
 		{"anonymous", identitydomain.RoleAnonymous, "", 10},
+		{"anonymous outside admin networks", identitydomain.RoleAnonymous, "", 192},
 		{"listener", identitydomain.RoleListener, "listener", 10},
 		{"operator", identitydomain.RoleOperator, "operator", 10},
 		{"admin", identitydomain.RoleAdmin, "admin", 10},
 		{"admin outside admin networks", identitydomain.RoleAdmin, "admin", 192},
 	}
 
-	refusal := map[string]bool{"unauthenticated": true, "forbidden": true, "admin_network_denied": true, "csrf_failed": true}
+	// denial are the policy's refusals. An allowed call must get none of
+	// them, nor a CSRF failure (which would hide the policy's answer); a
+	// refused call must get one of them, not a CSRF failure.
+	denial := map[string]bool{"unauthenticated": true, "forbidden": true, "admin_network_denied": true}
 
 	// The first-admin setup is anonymous but creates an admin: it is
 	// restricted to admin.allowed_networks too (AUTH-018).
@@ -343,6 +347,9 @@ func checkRights(t *testing.T, h *contractHub, v *apitest.Validator) {
 		var body any
 		if op.HasBody {
 			body = map[string]any{}
+			if op.MinimalBody != nil {
+				body = op.MinimalBody
+			}
 		}
 
 		for _, c := range callers {
@@ -358,15 +365,15 @@ func checkRights(t *testing.T, h *contractHub, v *apitest.Validator) {
 			allowed := c.role.Includes(need) && ((need != identitydomain.RoleAdmin && !adminNetworkOnly[op.ID]) || c.network == 10)
 
 			switch {
-			case allowed && refusal[code]:
+			case allowed && (denial[code] || code == "csrf_failed"):
 				t.Errorf("%s %s as %s: refused %d %s", op.Method, op.Path, c.name, status, code)
-			case !allowed && c.role == identitydomain.RoleAnonymous && (status != http.StatusUnauthorized || code != "unauthenticated"):
-				t.Errorf("%s %s as %s: %d %s, want 401 unauthenticated", op.Method, op.Path, c.name, status, code)
 			case !allowed && adminNetworkOnly[op.ID]:
 				if status != http.StatusForbidden || code != "admin_network_denied" {
 					t.Errorf("%s %s as %s: %d %s, want 403 admin_network_denied", op.Method, op.Path, c.name, status, code)
 				}
-			case !allowed && c.role != identitydomain.RoleAnonymous && (status != http.StatusForbidden || !refusal[code]):
+			case !allowed && c.role == identitydomain.RoleAnonymous && (status != http.StatusUnauthorized || code != "unauthenticated"):
+				t.Errorf("%s %s as %s: %d %s, want 401 unauthenticated", op.Method, op.Path, c.name, status, code)
+			case !allowed && c.role != identitydomain.RoleAnonymous && (status != http.StatusForbidden || !denial[code]):
 				t.Errorf("%s %s as %s: %d %s, want 403", op.Method, op.Path, c.name, status, code)
 			}
 		}

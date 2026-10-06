@@ -42,6 +42,9 @@ type Operation struct {
 	Access string
 	// HasBody tells whether the operation declares a request body.
 	HasBody bool
+	// MinimalBody is a JSON body with a placeholder for each required
+	// property of the JSON request body schema (nil without a JSON body).
+	MinimalBody map[string]any
 }
 
 // Reporter receives contract violations (testing.TB satisfies it).
@@ -85,7 +88,14 @@ func New(spec []byte) (*Validator, error) {
 	for path, item := range doc.Paths.Map() {
 		for method, op := range item.Operations() {
 			access, _ := op.Extensions["x-meshsdr-access"].(string)
-			v.ops = append(v.ops, Operation{ID: op.OperationID, Method: method, Path: path, Access: access, HasBody: op.RequestBody != nil})
+			o := Operation{ID: op.OperationID, Method: method, Path: path, Access: access, HasBody: op.RequestBody != nil}
+			if op.RequestBody != nil && op.RequestBody.Value != nil {
+				if media := op.RequestBody.Value.Content.Get("application/json"); media != nil && media.Schema != nil {
+					o.MinimalBody = minimal(media.Schema.Value)
+				}
+			}
+
+			v.ops = append(v.ops, o)
 		}
 	}
 
@@ -213,4 +223,44 @@ func isProblem(rec *httptest.ResponseRecorder) bool {
 	}
 
 	return json.Unmarshal(rec.Body.Bytes(), &p) == nil && p.Status == rec.Code && p.Code != ""
+}
+
+// minimal returns an object with a placeholder for each required property.
+func minimal(s *openapi3.Schema) map[string]any {
+	out := map[string]any{}
+	if s == nil {
+		return out
+	}
+
+	for _, name := range s.Required {
+		var prop *openapi3.Schema
+		if ref := s.Properties[name]; ref != nil {
+			prop = ref.Value
+		}
+
+		out[name] = placeholder(prop)
+	}
+
+	return out
+}
+
+func placeholder(s *openapi3.Schema) any {
+	switch {
+	case s == nil || s.Type == nil:
+		return "x"
+	case s.Type.Is("integer"), s.Type.Is("number"):
+		return 0
+	case s.Type.Is("boolean"):
+		return false
+	case s.Type.Is("array"):
+		return []any{}
+	case s.Type.Is("object"):
+		return minimal(s)
+	default:
+		if len(s.Enum) > 0 {
+			return s.Enum[0]
+		}
+
+		return "x"
+	}
 }
