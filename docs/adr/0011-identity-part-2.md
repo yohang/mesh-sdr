@@ -30,7 +30,7 @@ Two other parts move in parallel:
 - **PR 1, `epic/auth-2`** (first). Commits in order: the `must_change_password` gate, the password policy, the forced change page, the change API, `user reset-password`, `user list`, the setup link, this ADR. It closes #33 #34 #37 #38 #45 #58. It needs no migration.
 - **PR 2, `epic/acc-1`**, rebased on main after PR 1. Commits in order: migrations 00011+ (`invitations`, `password_reset_tokens`, `email_change_tokens`), mail, roles, sessions, account page, invitations, reset, admin users, deletion and export with `user remove`, audit view, optional accounts, access tokens last.
   - grid-2 merged first, so ACC-007 is in PR 2, split with the gateway epic (grid-3, see "Access tokens").
-  - Migrations 00011–00013; the range 00011–00019 is reserved for identity. A development database that applied them before the settings migrations (00008–00010) needs goose's allow-missing once, or a reset.
+  - Migrations 00011–00014; the range 00011–00019 is reserved for identity. A development database that applied them before the settings migrations (00008–00010) needs goose's allow-missing once, or a reset.
   - PR 2 closes #48 #49 #50 #51 #52 #53 #55 #56 #36, references #57 (closed with ADM-011 retention) and #54 (closed by grid-3 once the keys and revocations reach the nodes).
 
 ### Forced password change (AUTH-006) — PR 1
@@ -168,6 +168,16 @@ Two other parts move in parallel:
   - The keyring is the grid's key source (`Published`, `OnChange`); identity publishes revocations through `app.RevocationPublisher` (`identity.Deps.Revocations`).
   - Grid-3 owns `ctl.keys.update`, the `ctl.revocations` transport, node-side verification and the gateway authz that binds connection ids (`app.ConnectionBinder`): until it is wired, signed-in callers get tokens bound by `sub` and `sid`, anonymous callers get 401.
   - Scopes: listen and demod on each device the caller may listen to (device policy, else the global `listen_policy`, `anonymous` until the settings store); preset for an operator on the device; retune for an admin, or such an operator where `operator_can_retune`. `lim.max_demods` is 4 until a setting exists.
+- **Security review fixes.**
+  - Pending reset and e-mail change links die whenever access changes (password change or reset, generated password, disable, sign-out of other or all sessions, e-mail change), in the same transaction; a reset or confirmation of a disabled account is refused. A reset confirms only the address its link was e-mailed to (`password_reset_tokens.sent_to`, migration 00014).
+  - Deleting a user also erases its grid presence rows (closed rows deleted, open rows stripped of user, session, address and user agent), from the web and the CLI.
+  - An invitation is refused once its creator is no longer an enabled admin; its address is confirmed only when the invitation was e-mailed.
+  - The key directory is locked (advisory `flock`) around every read-modify-write, so the hub and `meshsdr hub keys` never lose each other's changes. The hub signs with the state it loaded last: a CLI revocation applies within a minute, together with the push of `revoked_kids`.
+  - Account flows never answer `email_taken`: an address another account uses is "cannot be used" (or a dead link on confirmation). Without mail, an e-mail change applies at once, so its outcome still differs for a taken address; with mail nothing is told before the link is opened.
+  - Exports (account, user, audit log) are POST requests with the CSRF header (`static/js/download.js` saves the file); the JWKS is cached 30 s, less than the key publish lead.
+  - The CLI (`hub user disable|reset-password|remove`, another process) does not publish revocations to nodes: their tokens stop at the next refresh, within one token lifetime.
+  - Nodes authorise media actions from `scp` only; `roles` in the token is informational.
+  - Audit rows written before usernames were dropped from audit details keep them (pre-release, owner decision Q6a).
 - **Dependencies.** `wneessen/go-mail`, `golang-jwt/jwt/v5` (approved), `github.com/oapi-codegen/runtime` (path parameters, as grid-2).
 
 ## Spec inconsistencies
