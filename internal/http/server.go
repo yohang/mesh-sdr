@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/yohang/mesh-sdr/internal/http/problem"
 	"github.com/yohang/mesh-sdr/internal/http/redact"
 	"github.com/yohang/mesh-sdr/internal/web"
 )
@@ -31,8 +32,8 @@ type Module interface {
 
 // NewRouter builds the hub router: the router middlewares, then each
 // module's middlewares, then the REST API handler under APIPrefix (which
-// serves its own problem+json errors), the static assets and each module's
-// routes.
+// serves its own problem+json errors, like any other path under /api), the
+// static assets and each module's routes.
 func NewRouter(logger *slog.Logger, api http.Handler, modules ...Module) http.Handler {
 	r := chi.NewRouter()
 
@@ -46,6 +47,11 @@ func NewRouter(logger *slog.Logger, api http.Handler, modules ...Module) http.Ha
 	}
 
 	r.Mount(APIPrefix, api)
+	// Every other path under /api (an unversioned or unknown version, a
+	// typo) answers the API's problem+json 404, never the HTML shell page
+	// (API-002: one error format).
+	r.Handle("/api", http.HandlerFunc(problem.NotFound))
+	r.Handle("/api/*", http.HandlerFunc(problem.NotFound))
 
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServerFS(web.Static())))
 

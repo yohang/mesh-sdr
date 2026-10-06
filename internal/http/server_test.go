@@ -174,3 +174,37 @@ func TestRequestLogHidesTokens(t *testing.T) {
 		t.Errorf("logs = %s", out)
 	}
 }
+
+// TestAPIPathsAnswerProblems covers API-002's single error format: any path
+// under /api outside the versioned API answers a problem+json 404, whatever
+// the method, never the HTML 404 of a module.
+func TestAPIPathsAnswerProblems(t *testing.T) {
+	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("api")) })
+	html := routes(func(r chi.Router) {
+		r.NotFound(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "html 404", http.StatusNotFound) })
+	})
+	h := httpserver.NewRouter(slog.New(slog.DiscardHandler), api, html)
+
+	for _, tt := range []struct{ method, path string }{
+		{http.MethodGet, "/api"},
+		{http.MethodGet, "/api/"},
+		{http.MethodGet, "/api/v2/nodes"},
+		{http.MethodPost, "/api/v0"},
+		{http.MethodDelete, "/api/nope/deeper"},
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
+
+		if rec.Code != http.StatusNotFound || rec.Header().Get("Content-Type") != "application/problem+json" ||
+			!strings.Contains(rec.Body.String(), `"code":"not_found"`) {
+			t.Errorf("%s %s = %d %q %s", tt.method, tt.path, rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/apis", nil))
+
+	if rec.Body.String() != "html 404\n" {
+		t.Errorf("GET /apis = %q, want the module's 404", rec.Body.String())
+	}
+}
