@@ -29,9 +29,9 @@ Two other parts move in parallel:
 
 - **PR 1, `epic/auth-2`** (first). Commits in order: the `must_change_password` gate, the password policy, the forced change page, the change API, `user reset-password`, `user list`, the setup link, this ADR. It closes #33 #34 #37 #38 #45 #58. It needs no migration.
 - **PR 2, `epic/acc-1`**, rebased on main after PR 1. Commits in order: migrations 00011+ (`invitations`, `password_reset_tokens`, `email_change_tokens`), mail, roles, sessions, account page, invitations, reset, admin users, deletion and export with `user remove`, audit view, optional accounts, access tokens last.
-  - If grid-2 is not merged by then, ACC-007 becomes PR 3 (`epic/acc-2`) after it.
-  - After grid-2 merges, identity's `Authorize` replaces grid's deny-all `Authorizer`.
-  - Goose runs with allow-missing in development while migration numbers land out of order.
+  - grid-2 merged first, so ACC-007 is in PR 2, split with the gateway epic (grid-3, see "Access tokens").
+  - Migrations 00011–00013; the range 00011–00019 is reserved for identity. A development database that applied them before the settings migrations (00008–00010) needs goose's allow-missing once, or a reset.
+  - PR 2 closes #48 #49 #50 #51 #52 #53 #55 #56 #36, references #57 (closed with ADM-011 retention) and #54 (closed by grid-3 once the keys and revocations reach the nodes).
 
 ### Forced password change (AUTH-006) — PR 1
 
@@ -152,6 +152,23 @@ Two other parts move in parallel:
 - **REST additions.** `/me/sessions`, `/me/email`, `/me/export`, `DELETE /me`, `/users/{id}/sessions`, `/users/{id}/password`, `/users/{id}/export`.
   - Object-level checks apply (SR-18).
   - New bodies reject unknown fields (SR-20).
+
+## Implementation notes (PR 2)
+
+- **Request bodies.** Every closed JSON body (`additionalProperties: false`) is checked for unknown fields once the route matches, only for callers the access policy accepts, so refusals keep their 401/403 (SR-20).
+- **Persistence.** One repository per aggregate: invitations, reset tokens and e-mail change tokens store only token hashes; issuing a reset or e-mail token invalidates the user's earlier ones; a stale invitation copy cannot be redeemed or revoked twice (conditional update). The session reaper also deletes ended invitations (30 days) and tokens (1 day).
+- **Sessions.** The public handle of a session (`Session.Ref`, a hash prefix of its id) identifies it to users, admins and access tokens (`sid`); the id itself never leaves the hub (§7.1).
+- **Mail.** `[smtp]` config (host, port 587, tls `starttls`, username, password secret, from, allow_insecure); `internal/mail` sends plain text with go-mail through a 256-message in-memory queue (3 retries); logs carry only the recipient domain. `internal/identity/infra/notify` renders the messages. Development: mailpit `v1.31.4` pinned by digest under the compose profile `mail`, settings in `.env.example`.
+- **Roles.** `PUT /users/{id}/roles` replaces the grants; the HTML editor sets a global role, or operator on listed devices. Any change revokes every session (owner decision); the last enabled admin cannot be demoted, disabled (web and CLI) or deleted.
+- **Pages.** `/account` (profile, e-mail, password link, sessions, your data), `/account/email/verify/{token}` (GET shows, POST applies), `/admin/users[/{id}]`, `/admin/invitations`, `/admin/audit` (+ `/export?format=csv|json`, CSV formula cells prefixed with `'`), `/invite/{token}`, `/password/forgot`, `/password/reset/{token}`. Token pages send `Referrer-Policy: no-referrer` and hide the token (`token-url.js`). The top bar shows a discreet "Sign in" link, or the user's name, Account, the admin links and "Sign out"; the settings epic adds its Admin entry next to them.
+- **Rate limits.** Reset requests 3/h per client address (429) and per account (silent); reset links, invitation checks and acceptances 10 then 1 per 6 minutes per address (§5.12's 3/h would block a retry after a taken username); token mints 30/min per session.
+- **Deletion.** One transaction: the `users` row (identities, grants, sessions, tokens cascade), the address of the invitations it redeemed, and the `UserEraser`s of other modules (none yet: the grid `connections` cleanup is to add). New audit entries no longer carry usernames.
+- **Access tokens (ACC-007).** The token contract (claims, `Sign`, `Verify`, JWK/JWKS, thumbprint `kid`) is the shared package `internal/protocol/rxv1/token`, also used by node verification (grid-3).
+  - Identity owns the keyring (`auth.token_key_dir`, default `/var/lib/meshsdr/keys`; `auth.token_ttl` 5m, 1m–10m; `auth.key_rotation_days` 30), the issuer, `GET /.well-known/jwks.json` (keys and `revoked_kids`), `POST /api/v1/auth/token` and `meshsdr hub keys list|rotate|revoke`.
+  - The keyring is the grid's key source (`Published`, `OnChange`); identity publishes revocations through `app.RevocationPublisher` (`identity.Deps.Revocations`).
+  - Grid-3 owns `ctl.keys.update`, the `ctl.revocations` transport, node-side verification and the gateway authz that binds connection ids (`app.ConnectionBinder`): until it is wired, signed-in callers get tokens bound by `sub` and `sid`, anonymous callers get 401.
+  - Scopes: listen and demod on each device the caller may listen to (device policy, else the global `listen_policy`, `anonymous` until the settings store); preset for an operator on the device; retune for an admin, or such an operator where `operator_can_retune`. `lim.max_demods` is 4 until a setting exists.
+- **Dependencies.** `wneessen/go-mail`, `golang-jwt/jwt/v5` (approved), `github.com/oapi-codegen/runtime` (path parameters, as grid-2).
 
 ## Spec inconsistencies
 
