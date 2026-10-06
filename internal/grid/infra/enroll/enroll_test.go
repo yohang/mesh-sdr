@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -148,5 +149,27 @@ func TestEnrollmentRejections(t *testing.T) {
 			default:
 			}
 		})
+	}
+}
+
+func TestEnrollmentDoesNotFollowRedirects(t *testing.T) {
+	ca := newCA(t)
+	tok, _ := domain.NewEnrollmentToken()
+	n := startNode(t, "attic", tok, ca.Fingerprint())
+
+	redirector := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, n.url.String()+"/enroll", http.StatusTemporaryRedirect)
+	}))
+	defer redirector.Close()
+
+	hub := enroll.NewHubClient(ca, time.Now)
+	if _, err := hub.Enroll(context.Background(), app.EnrollmentTarget{ID: domain.MustNodeID("attic"), URL: domain.MustNodeURL(redirector.URL), Key: tok.Key()}); err == nil {
+		t.Fatal("enrollment through a redirect succeeded")
+	}
+
+	select {
+	case <-n.enroller.Done():
+		t.Fatal("the redirect target was enrolled")
+	default:
 	}
 }

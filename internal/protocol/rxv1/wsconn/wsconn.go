@@ -75,9 +75,18 @@ func offers(r *http.Request, subprotocol string) bool {
 
 // Dial opens a WebSocket to url with subprotocol through client and checks
 // that the server selected it. Compression is disabled.
+//
+// Redirects are never followed: the peer is the one at url.
 func Dial(ctx context.Context, url string, client *http.Client, subprotocol string) (*websocket.Conn, error) {
+	c := http.Client{}
+	if client != nil {
+		c = *client
+	}
+
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
 	ws, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{
-		HTTPClient:      client,
+		HTTPClient:      &c,
 		Subprotocols:    []string{subprotocol},
 		CompressionMode: websocket.CompressionDisabled,
 	})

@@ -184,3 +184,22 @@ func TestBinaryFrameCloses1003(t *testing.T) {
 		t.Fatalf("close = %v (%v), want 1003", got, err)
 	}
 }
+
+func TestDialDoesNotFollowRedirects(t *testing.T) {
+	reached := false
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
+	defer target.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	if _, err := wsconn.Dial(context.Background(), wsURL(srv), nil, rxv1.ControlSubprotocol); err == nil {
+		t.Fatal("dial through a redirect succeeded")
+	}
+
+	if reached {
+		t.Error("the redirect target was contacted")
+	}
+}

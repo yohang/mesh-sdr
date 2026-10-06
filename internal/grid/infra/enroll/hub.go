@@ -84,7 +84,7 @@ func (c *HubClient) Enroll(ctx context.Context, t app.EnrollmentTarget) (domain.
 	}
 	defer tr.CloseIdleConnections()
 
-	client := &http.Client{Transport: tr, Timeout: 15 * time.Second}
+	client := &http.Client{Transport: tr, Timeout: 15 * time.Second, CheckRedirect: noRedirect}
 	endpoint := t.URL.Endpoint("https", "/enroll")
 
 	nonce := make([]byte, domain.EnrollmentNonceSize)
@@ -146,6 +146,9 @@ func (c *HubClient) Enroll(ctx context.Context, t app.EnrollmentTarget) (domain.
 
 	return CertInfoOf(leafDER)
 }
+
+// noRedirect refuses redirects: the exchange talks to the node URL only.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // CertInfoOf returns the identity of a DER certificate.
 func CertInfoOf(der []byte) (domain.CertInfo, error) {
