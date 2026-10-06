@@ -2,6 +2,23 @@ version: "2"
 
 linters:
   default: standard
+  enable:
+    - depguard
+  settings:
+    depguard:
+      rules:
+        # kin-openapi validates openapi.yaml at go generate time (specgen)
+        # and API exchanges in tests (apitest); it is never linked into
+        # meshsdr (ADR 0013).
+        openapi-tooling:
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/internal/http/api/specgen/**"
+            - "!**/internal/http/api/apitest/**"
+          deny:
+            - pkg: github.com/getkin/kin-openapi
+              desc: build- and test-time only (specgen, apitest and tests)
 
 formatters:
   enable:
