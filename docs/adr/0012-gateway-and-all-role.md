@@ -21,6 +21,8 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
    - A non-2xx answer goes to the browser as is, with its body, and no upgrade happens.
    - A 2xx answer sets `X-Rx-Access-Token` and `X-Rx-Cid` on the proxied request and gives the node address in `X-Rx-Upstream`, which never leaves the hub.
    - The route first deletes every client `X-Rx-*` header (§4.6 rule 5). The gateway answers 404 on `/internal/*` and on any other `/nodes/*` path.
+   - **Nodes never see browser credentials (§5.8).** The proxied request keeps an allow-list of headers: the WebSocket handshake headers, `Origin` and `User-Agent`, plus the token and cid set by the authz. `Cookie`, `Authorization` and every other header are dropped.
+   - **Node answers stay off the hub origin.** A successful upgrade keeps only its handshake headers. Any other node answer is replaced by a hub `problem+json` with the same status (`node_refused`), `nosniff` and a `sandbox` CSP, so a node can set no cookie and serve no content on the hub origin. Gateway answers carry no `Server` header.
 3. **Node transport (Q3).** A `meshsdr_node` reverse-proxy transport dials the node with `pki.HubDialConfig`:
    - TLS 1.3 and the `<id>.nodes.rx.internal` server name;
    - the in-memory gateway client certificate `urn:rx:gateway:<hub-id>`, re-minted at 2/3 of its life without a Caddy reload;
@@ -37,12 +39,13 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
    - `gateway.https_listen` (`:443`) and `gateway.http_listen` (none). With TLS, `http_listen` redirects to `hub.url` with 308.
 
    Handshakes run per connection, so the accept loop never blocks. ACME is validated by the configuration and contract tests only; it has no public run in CI.
-6. **Body limit (Q7).** `gateway.max_body` (1 MiB) caps `/api/v1` request bodies through a chi middleware.
+6. **Body limit (Q7).** `gateway.max_body` (1 MiB) caps every request body of the hub router, API and forms, through a chi middleware.
 7. **Caddy settings.**
    - Admin API disabled, `persist: false`, `file_system` storage at `gateway.storage_dir` (`/var/lib/meshsdr/caddy`).
    - Protocols `h1`/`h2` (only `h1` without TLS), a grace period of 10 s, and `stream_close_delay`/`stream_timeout` from the configuration.
    - Caddy is loaded once at start and stopped at shutdown.
    - Its logs go to the injected logger at `log.level` (`caddy.logging.writers.slog`, component `gateway.caddy.<logger>`).
+   - The slog bridge redacts `X-Rx-Access-Token`, `Cookie`, `Set-Cookie`, `Authorization` and `Proxy-Authorization` wherever they appear in an entry, so even debug-level upstream logs never carry a token or a credential.
 8. **Modules and dependencies.** `github.com/caddyserver/caddy/v2` v2.11.7 with `caddyhttp`, `caddyhttp/headers`, `caddyhttp/reverseproxy`, `caddyhttp/rewrite`, `caddytls`, `caddypki`, `filestorage` and `logging` (not `modules/standard`). The custom modules, the binding table and the module registration stay in `internal/grid/infra/gateway` (ADR 0002 decision 5). One gateway runs per process. `gateway_test.go` is the contract test to run on every Caddy upgrade.
 
 ### Media access (GRID-011, GRID-012, ACC-007 coordination)
@@ -68,13 +71,14 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
     - clear `connections.user_id` on account deletion.
 11. **Distribution.**
     - `ctl.keys.update {issuer, keys, revoked_kids}` is pushed on every control connect and on key changes.
-    - `ctl.revocations` now carries `sessions` and `users`, pushed to every channel and re-pushed for 15 minutes to channels that reconnect.
+    - `ctl.revocations` now carries `sessions` and `users` as `{id, at}` entries, where `at` is the hub time of the revocation in Unix milliseconds. They are pushed to every channel and re-pushed for 15 minutes to channels that reconnect. The node refuses the tokens issued at or before `at` (`iat` uses the same hub clock), so a re-push never refuses a later sign-in and node clock skew does not matter. Neither side ever moves an entry to a later time.
+    - A node removed, revoked or disabled by another process (the CLI while the hub runs) is dropped by the next reconcile like an admin action in the hub: revocation list first, then 4403.
     - A dropped channel flushes its queue and finishes the close handshake before its context is cancelled.
 12. **Node media WebSocket (GRID-012).** `GET /ws` on the node does the following:
     - It accepts only the gateway certificate (with the hub id of `hub_trust.hub_identity` when set) and checks the Origin against the issuer of the keys.
-    - It verifies the token offline: signature, `iss`, `aud=rx-node:<id>`, `nbf`/`exp` with leeway, and the cid equal to `X-Rx-Cid` and unique (409 otherwise).
+    - It verifies the token offline: signature, `iss`, `aud=rx-node:<id>`, `nbf`/`exp` with leeway, and the cid equal to `X-Rx-Cid` and unique (409 otherwise). A cid is remembered until its last token can no longer be valid (`exp` plus the leeway, extended by refreshes), so a token opens one connection only.
     - Refusals: 503 `hub_unavailable` without keys since boot; 401 `token_invalid`/`token_expired`; 403 for a revoked session or user.
-    - It runs `session.hello`/`session.welcome`, then `auth.refresh` (same cid and audience, new scopes) and closes with 4401 at `exp` + 30 s.
+    - It runs `session.hello`/`session.welcome`, then `auth.refresh` (same cid, audience, subject and session, new scopes; only an anonymous connection may take the token of a visitor who signed in) and closes with 4401 at `exp` + 30 s.
     - Device-scoped messages (`device.attach`, `preset.select`, `device.retune`) are checked against the scope. They are answered `unsupported_type` until the device epics land.
     - These close the matching sessions with 4403: revoked sessions or users, the node's own certificate serial, and a control channel closed by the hub with 4403 (removed, disabled, re-enrolled). A signing key dropped from the key set closes its sessions with 4401.
     - The node reports media connections with `connection.opened` and `connection.closed`.
@@ -96,7 +100,7 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
     - **Revoked local node.** It is not re-enrolled until an admin issues a new token, and the hub then runs alone.
     - **Same path as remote nodes.** The local node uses the same control channel over loopback mTLS, the same gateway route and the same token checks. `meshsdr all config check` validates both files.
 19. **Docker (Q15, Q16).**
-    - The image runs `all` by default and exposes 443.
+    - The image runs `all` by default and exposes 443. The image runs as a non-root user, so binding :443 relies on Docker's default `net.ipv4.ip_unprivileged_port_start=0`. Elsewhere (Podman with defaults, Kubernetes with that sysctl unset, bare metal without `CAP_NET_BIND_SERVICE`), set `gateway.https_listen = ":8443"` (and `gateway.http_listen = ":8080"`) and map 443 → 8443 (80 → 8080) outside the container.
     - `/etc/meshsdr/tls` is a link to `/var/lib/meshsdr/tls`, so the CA and node certificates stay on the data volume without any change to the configuration.
     - `meshsdr hub migrate` keeps working before the first start, because the hub role does not default its CA files.
 20. **Node-only artifact (Q17).** `-tags nogateway` leaves Caddy out (16 MiB instead of 55 MiB, stripped). `hub` and `all` then fail fast after loading the configuration, before opening the database.

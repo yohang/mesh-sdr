@@ -37,7 +37,10 @@ mode = "embedded"
 # proxy or for development).
 tls_mode = "acme"
 # HTTPS listen address (unused with tls_mode = off). Binding :443 as a
-# non-root user needs CAP_NET_BIND_SERVICE (Docker allows it by default).
+# non-root user needs CAP_NET_BIND_SERVICE, or
+# net.ipv4.ip_unprivileged_port_start=0 (Docker's default for containers).
+# Otherwise listen on ":8443" (and http_listen on ":8080") and map
+# 443 -> 8443 (80 -> 8080) in front of the hub.
 https_listen = ":443"
 # Plain HTTP listen address. With TLS it redirects to hub.url and answers
 # ACME HTTP-01 challenges; with tls_mode = off it serves the hub. Empty: no

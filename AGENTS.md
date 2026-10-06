@@ -120,7 +120,7 @@ Spec TECHNICAL_SPEC §7.4 is authoritative:
 - Environment-specific values come from config files or `MESHSDR_*` env vars (see Configuration); never hard-coded.
 - Logs as event streams to stderr; no log files, no rotation.
 - Stateless processes; persistent state only in backing services (hub SQLite file at `db.dsn`, `/var/lib/meshsdr` volume in Docker); nodes hold no persistent state.
-- Port binding: the hub's embedded Caddy gateway owns every public port (`gateway.https_listen`, default `:443`, and `gateway.http_listen`; TLS from `gateway.tls_mode`: acme, files, internal or off), nodes listen on `node.listen` (default `0.0.0.0:8074`); app is self-contained (embedded assets/migrations/OpenAPI document). See docs/adr/0002 and docs/adr/0012.
+- Port binding: the hub's embedded Caddy gateway owns every public port (`gateway.https_listen`, default `:443`, and `gateway.http_listen`; TLS from `gateway.tls_mode`: acme, files, internal or off; the nonroot image binds :443 thanks to Docker's default `ip_unprivileged_port_start=0`, elsewhere use `:8443` plus a port mapping), nodes listen on `node.listen` (default `0.0.0.0:8074`); app is self-contained (embedded assets/migrations/OpenAPI document). See docs/adr/0002 and docs/adr/0012.
 - Disposability: fast start, graceful shutdown on SIGTERM/SIGINT.
 - Admin tasks as one-off subcommands of the same binary (`meshsdr hub migrate`, `meshsdr hub user …`).
 - Build/release/run separated: immutable image, config injected at runtime. Dev/prod parity through the same Dockerfile.
