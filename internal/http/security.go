@@ -33,6 +33,29 @@ func ContentSecurityPolicy(nonce string) string {
 		"object-src 'none'"
 }
 
+// PermissionsPolicy denies every powerful browser feature by default
+// (TECHNICAL_SPEC SR-28). The receiver only plays audio, which needs none of
+// them; a feature that needs one adds it here explicitly. Only features
+// Chromium recognizes are listed, so the header logs no parse warnings.
+const PermissionsPolicy = "accelerometer=(), " +
+	"bluetooth=(), " +
+	"camera=(), " +
+	"display-capture=(), " +
+	"encrypted-media=(), " +
+	"geolocation=(), " +
+	"gyroscope=(), " +
+	"hid=(), " +
+	"idle-detection=(), " +
+	"magnetometer=(), " +
+	"microphone=(), " +
+	"midi=(), " +
+	"payment=(), " +
+	"publickey-credentials-get=(), " +
+	"screen-wake-lock=(), " +
+	"serial=(), " +
+	"usb=(), " +
+	"xr-spatial-tracking=()"
+
 // securityHeaders sets the baseline security headers on every response and a
 // fresh CSP nonce per request. The nonce is stored in the request context
 // with templ.WithNonce: templates read it with templ.GetNonce(ctx), and
@@ -47,6 +70,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Permissions-Policy", PermissionsPolicy)
 
 		next.ServeHTTP(w, r.WithContext(templ.WithNonce(r.Context(), nonce)))
 	})

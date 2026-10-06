@@ -77,6 +77,7 @@ func TestSecurityHeaders(t *testing.T) {
 			"X-Content-Type-Options":     "nosniff",
 			"Referrer-Policy":            "same-origin",
 			"Cross-Origin-Opener-Policy": "same-origin",
+			"Permissions-Policy":         httpserver.PermissionsPolicy,
 		}
 
 		for k, v := range want {
@@ -109,6 +110,25 @@ func TestSecurityHeaders(t *testing.T) {
 	for _, banned := range []string{"unsafe-inline", "unsafe-eval", "script-src 'self'"} {
 		if strings.Contains(csp, banned) {
 			t.Errorf("CSP contains %q: %s", banned, csp)
+		}
+	}
+}
+
+func TestPermissionsPolicy(t *testing.T) {
+	directives := map[string]bool{}
+
+	for d := range strings.SplitSeq(httpserver.PermissionsPolicy, ", ") {
+		feature, allow, ok := strings.Cut(d, "=")
+		if !ok || allow != "()" {
+			t.Errorf("directive %q does not deny the feature", d)
+		}
+
+		directives[feature] = true
+	}
+
+	for _, f := range []string{"camera", "microphone", "geolocation", "usb", "serial", "bluetooth", "hid", "payment", "display-capture", "midi"} {
+		if !directives[f] {
+			t.Errorf("Permissions-Policy does not deny %s", f)
 		}
 	}
 }
