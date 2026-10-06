@@ -302,7 +302,8 @@ func parseSection(view sectionView, snap *app.Snapshot, form url.Values) (sectio
 		}
 
 		switch {
-		case v == nil && e.Source() == domain.SourceDB:
+		case v == nil && (e.Source() == domain.SourceDB || e.Version() > 0):
+			// A DB value, or an ignored (invalid) DB row: reset it.
 			changes = append(changes, domain.ResetTo(key, f.Version))
 		case v == nil:
 			// Empty and not set in the DB: nothing to reset.

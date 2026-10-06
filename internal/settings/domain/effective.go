@@ -57,6 +57,19 @@ func Resolve(def Definition, cfg *Configured, stored *Setting) Effective {
 	return e
 }
 
+// ResolveIgnoring resolves a key whose DB row is ignored (its value is
+// invalid): the value comes from the config or the default, but the
+// version is the row's, so a write or a reset from the UI can replace the
+// row (the writer sends back the version it read).
+func ResolveIgnoring(def Definition, cfg *Configured, ignored *Setting) Effective {
+	e := Resolve(def, cfg, nil)
+	if ignored != nil {
+		e.version = ignored.Version()
+	}
+
+	return e
+}
+
 // Definition returns the key definition.
 func (e Effective) Definition() Definition { return e.def }
 

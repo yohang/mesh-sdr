@@ -412,3 +412,45 @@ func TestStoreLoadIgnoresInvalidRows(t *testing.T) {
 func writeHub(dir string) error {
 	return os.WriteFile(filepath.Join(dir, "hub.toml"), []byte("schema_version = 1\n[hub]\nurl = \"https://sdr.example.org\"\n"), 0o600)
 }
+
+// An ignored (invalid) DB row keeps its version, so the UI can replace or
+// reset it.
+func TestStoreFixesAnIgnoredRow(t *testing.T) {
+	f := newFixture(t, nil)
+	ctx := context.Background()
+
+	row, _ := domain.NewSetting(domain.MustKey("ui.shortcut_set"), domain.MustValue(`"vim"`), 4, shared.UUID{}, t0)
+	_ = f.repo.Save(ctx, row)
+	f.repo.rev = 4
+
+	if err := f.store.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	e := effective(t, f.store.Snapshot(), "ui.shortcut_set")
+	if e.Source() != domain.SourceDefault || e.Version() != 4 {
+		t.Fatalf("ignored row = %s v%d", e.Source(), e.Version())
+	}
+
+	snap, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "ui.shortcut_set", `"off"`, int(e.Version())))
+	if err != nil {
+		t.Fatalf("fix the ignored row: %v", err)
+	}
+
+	if e := effective(t, snap, "ui.shortcut_set"); e.Source() != domain.SourceDB || e.Value().String() != `"off"` {
+		t.Errorf("after the fix = %s %s", e.Value(), e.Source())
+	}
+
+	row, _ = domain.NewSetting(domain.MustKey("ui.theme_mode"), domain.MustValue(`"sepia"`), 6, shared.UUID{}, t0)
+	_ = f.repo.Save(ctx, row)
+	f.repo.rev = 6
+	_ = f.store.Load(ctx)
+
+	if _, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "ui.theme_mode", nil, 6)); err != nil {
+		t.Errorf("reset the ignored row: %v", err)
+	}
+
+	if _, ok := f.repo.rows["ui.theme_mode"]; ok {
+		t.Error("ignored row not deleted by the reset")
+	}
+}

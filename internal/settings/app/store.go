@@ -50,7 +50,7 @@ type StoreDeps struct {
 // defaults until Load reads the DB.
 func NewStore(d StoreDeps) *Store {
 	s := &Store{repo: d.Repo, catalog: d.Catalog, tx: d.Tx, audit: d.Audit, now: d.Now, logger: d.Logger}
-	s.snap.Store(s.resolve(0, nil))
+	s.snap.Store(s.resolve(0, nil, nil))
 
 	return s
 }
@@ -136,7 +136,16 @@ func (s *Store) read(ctx context.Context) (*Snapshot, []ignoredRow, error) {
 		valid[r.Key().String()] = r
 	}
 
-	snap := s.resolve(rev, valid)
+	invalid := func() map[string]*domain.Setting {
+		m := map[string]*domain.Setting{}
+		for _, ig := range ignored {
+			m[ig.row.Key().String()] = ig.row
+		}
+
+		return m
+	}
+
+	snap := s.resolve(rev, valid, invalid())
 
 	// A DB value that breaks a check across keys (with the config values
 	// or other DB values) is ignored too.
@@ -152,14 +161,15 @@ func (s *Store) read(ctx context.Context) (*Snapshot, []ignoredRow, error) {
 	}
 
 	if dropped {
-		snap = s.resolve(rev, valid)
+		snap = s.resolve(rev, valid, invalid())
 	}
 
 	return snap, ignored, nil
 }
 
-// resolve builds the snapshot of the definitions over the valid DB rows.
-func (s *Store) resolve(rev int64, rows map[string]*domain.Setting) *Snapshot {
+// resolve builds the snapshot of the definitions over the valid DB rows;
+// ignored rows keep only their version.
+func (s *Store) resolve(rev int64, rows, ignored map[string]*domain.Setting) *Snapshot {
 	defs := s.catalog.Definitions()
 	entries := make([]domain.Effective, 0, len(defs))
 	typed := make(map[string]any, len(defs))
@@ -171,6 +181,9 @@ func (s *Store) resolve(rev int64, rows map[string]*domain.Setting) *Snapshot {
 		}
 
 		e := domain.Resolve(d, cfg, rows[d.Key().String()])
+		if ig, ok := ignored[d.Key().String()]; ok && rows[d.Key().String()] == nil {
+			e = domain.ResolveIgnoring(d, cfg, ig)
+		}
 		entries = append(entries, e)
 
 		if !e.Value().IsNull() {
