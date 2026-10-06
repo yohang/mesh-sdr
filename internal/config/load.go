@@ -408,7 +408,7 @@ func (l *loader) resolveSecrets() {
 			continue
 		}
 
-		if err := s.resolve(lookup); err != nil {
+		if err := s.resolve(l.dir, lookup); err != nil {
 			code := CodeSecretUnresolved
 			if errors.Is(err, errInsecureSecretFile) {
 				code = CodeInsecureSecretFile

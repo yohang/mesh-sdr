@@ -3,8 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -99,11 +101,17 @@ func (s *Secret) UnmarshalTOML(data any) error {
 	}
 }
 
-// resolve reads the referenced value. lookupEnv reads the process environment.
-func (s *Secret) resolve(lookupEnv func(string) (string, bool)) error {
+// resolve reads the referenced value. A relative file path is resolved
+// against configDir; lookupEnv reads the process environment.
+func (s *Secret) resolve(configDir string, lookupEnv func(string) (string, bool)) error {
 	switch s.source {
 	case secretFile:
-		v, err := readSecretFile(s.ref)
+		path := s.ref
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(configDir, path)
+		}
+
+		v, err := readSecretFile(path)
 		if err != nil {
 			return err
 		}
@@ -130,8 +138,21 @@ func (s *Secret) resolve(lookupEnv func(string) (string, bool)) error {
 // or readable by others.
 var errInsecureSecretFile = errors.New("insecure_secret_file")
 
-func readSecretFile(path string) (string, error) {
-	info, err := os.Stat(path)
+// readSecretFile opens path once, checks the opened file's mode and reads
+// from the same handle, so the checked file is the read file.
+func readSecretFile(path string) (_ string, err error) {
+	f, err := os.Open(path) //nolint:gosec // path comes from the operator's config
+	if err != nil {
+		return "", fmt.Errorf("secret file: %w", err)
+	}
+
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("secret file: %w", cerr)
+		}
+	}()
+
+	info, err := f.Stat()
 	if err != nil {
 		return "", fmt.Errorf("secret file: %w", err)
 	}
@@ -144,7 +165,7 @@ func readSecretFile(path string) (string, error) {
 		return "", fmt.Errorf("%w: %s has mode %04o, must not be group/world-writable nor world-readable", errInsecureSecretFile, path, perm)
 	}
 
-	b, err := os.ReadFile(path) //nolint:gosec // path comes from the operator's config
+	b, err := io.ReadAll(f)
 	if err != nil {
 		return "", fmt.Errorf("secret file: %w", err)
 	}

@@ -31,6 +31,7 @@ TECHNICAL_SPEC §7.4 defines the hub and node configuration: TOML v1.0 files wit
 ### Secrets
 
 - `config.Secret` accepts `{ file = "…" }`, `{ env = "VAR" }`, or an inline string only when the same file sets `allow_inline_secrets = true`. An inline secret then produces a startup warning.
+- A relative `file` path is resolved against the config dir. The file is opened once, and its mode is checked on that handle before reading.
 - Secret files that are group- or world-writable, or world-readable, fail with `insecure_secret_file`. Missing or empty values fail with `secret_unresolved`.
 - A `MESHSDR_*` env override of a secret key is a literal value: env is not a world-readable file.
 - `String()` and `MarshalText()` redact the value; `Reveal()` returns it.
