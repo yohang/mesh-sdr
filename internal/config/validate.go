@@ -89,6 +89,7 @@ func (h *Hub) validate(o Origins) []Problem {
 	}
 
 	c.log(h.Log)
+	c.enum("settings.ui.theme_mode", h.Settings.UI.ThemeMode, "light", "dark", "auto")
 
 	return c.problems
 }

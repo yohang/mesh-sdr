@@ -11,10 +11,12 @@ func TestSchema(t *testing.T) {
 		required []string
 		leaf     []string // path to a leaf property
 		def      any
+		lockable bool
 	}{
-		{RoleHub, []string{"schema_version"}, []string{"hub", "listen"}, "0.0.0.0:8073"},
-		{RoleHub, []string{"schema_version"}, []string{"db", "dsn"}, "sqlite:///var/lib/meshsdr/hub.db"},
-		{RoleNode, []string{"schema_version"}, []string{"node", "listen"}, "0.0.0.0:8074"},
+		{RoleHub, []string{"schema_version"}, []string{"hub", "listen"}, "0.0.0.0:8073", false},
+		{RoleHub, []string{"schema_version"}, []string{"db", "dsn"}, "sqlite:///var/lib/meshsdr/hub.db", false},
+		{RoleHub, []string{"schema_version"}, []string{"settings", "ui", "theme_mode"}, "auto", true},
+		{RoleNode, []string{"schema_version"}, []string{"node", "listen"}, "0.0.0.0:8074", false},
 	}
 
 	for _, tt := range tests {
@@ -58,7 +60,7 @@ func TestSchema(t *testing.T) {
 				}
 			}
 
-			if node["x-scope"] != "global" || node["lockable"] != false {
+			if node["x-scope"] != "global" || node["lockable"] != tt.lockable {
 				t.Errorf("annotations = x-scope %v, lockable %v", node["x-scope"], node["lockable"])
 			}
 
