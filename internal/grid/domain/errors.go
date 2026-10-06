@@ -24,6 +24,7 @@ var (
 	ErrInvalidDevice           = shared.NewError(shared.KindInvalid, "invalid_device", "invalid device report")
 	ErrInvalidVersion          = shared.NewError(shared.KindInvalid, "invalid_version", "invalid product version")
 	ErrInvalidCapabilityReport = shared.NewError(shared.KindInvalid, "invalid_capability_report", "invalid capability report")
+	ErrCapabilitiesNotReported = shared.NewError(shared.KindNotFound, "capabilities_not_reported", "the node has not reported its capabilities yet")
 	ErrInvalidConnection       = shared.NewError(shared.KindInvalid, "invalid_connection", "invalid connection")
 	ErrConnectionNotFound      = shared.NewError(shared.KindNotFound, "connection_not_found", "connection not found")
 )

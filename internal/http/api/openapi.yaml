@@ -236,6 +236,36 @@ paths:
                 $ref: "#/components/schemas/NodeEnrollment"
         default:
           $ref: "#/components/responses/Problem"
+  /nodes/{id}/capabilities:
+    parameters:
+      - $ref: "#/components/parameters/NodeID"
+    get:
+      operationId: getNodeCapabilities
+      x-meshsdr-access: admin
+      summary: Last capability report of a node (admin)
+      tags: [grid]
+      responses:
+        "200":
+          description: Capability report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeCapabilities"
+        default:
+          $ref: "#/components/responses/Problem"
+  /nodes/{id}/capabilities/probe:
+    parameters:
+      - $ref: "#/components/parameters/NodeID"
+    post:
+      operationId: probeNodeCapabilities
+      x-meshsdr-access: admin
+      summary: Ask a connected node to re-probe its capabilities (admin; 503 node_unavailable when not connected)
+      tags: [grid]
+      responses:
+        "202":
+          description: Probe requested; the new report arrives on the control channel
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     NodeID:
@@ -246,6 +276,53 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
   schemas:
+    NodeCapabilities:
+      type: object
+      required: [node_id, reported_at, capabilities_hash, product_version, protocols, platform, document, capabilities]
+      properties:
+        node_id:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+        capabilities_hash:
+          type: string
+        product_version:
+          type: string
+        protocols:
+          type: array
+          items:
+            type: string
+        platform:
+          type: object
+          additionalProperties: true
+        document:
+          type: object
+          description: The full node.capabilities report as received.
+          additionalProperties: true
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeCapability"
+    NodeCapability:
+      type: object
+      required: [capability, available, status, detail]
+      properties:
+        capability:
+          type: string
+          example: tool:jt9
+        available:
+          type: boolean
+        status:
+          type: string
+          enum: [ok, missing, too_old, untested, error]
+        version:
+          type: string
+        detail:
+          type: object
+          additionalProperties: true
+        error:
+          type: string
     NodeCreate:
       type: object
       additionalProperties: false

@@ -52,8 +52,10 @@ func newServer(t *testing.T, auth api.Authorizer) *httptest.Server {
 	nodes := gridapp.NewNodes(sqlite.NewNodeRepository(a), sqlite.NewRevocationRepository(a), a,
 		gridinfra.NewLogAuditor(discard), ca{}, gridapp.DefaultTimings(), time.Now, discard)
 
+	caps := gridapp.NewCapabilities(sqlite.NewCapabilityRepository(a), sqlite.NewNodeRepository(a), nil, discard)
+
 	srv := httptest.NewServer(api.NewHandler(api.Server{
-		GridHandlers: api.NewGridHandlers(nodes, gridapp.NewHistory()),
+		GridHandlers: api.NewGridHandlers(nodes, gridapp.NewHistory(), caps),
 	}, auth, discard))
 	t.Cleanup(srv.Close)
 
@@ -105,6 +107,8 @@ func testNodesDenied(t *testing.T, srv *httptest.Server, wantStatus int, wantCod
 		{http.MethodPatch, "/nodes/attic"},
 		{http.MethodDelete, "/nodes/attic"},
 		{http.MethodPost, "/nodes/attic/enrollment-token"},
+		{http.MethodGet, "/nodes/attic/capabilities"},
+		{http.MethodPost, "/nodes/attic/capabilities/probe"},
 	} {
 		body := map[string]any{"id": "attic", "url": "https://x:1", "version": 1}
 
@@ -148,6 +152,14 @@ func TestNodesCRUD(t *testing.T) {
 	status, out = call(t, srv, http.MethodGet, "/nodes/attic", nil)
 	if status != http.StatusOK || out["load_history"] == nil {
 		t.Errorf("get = %d %v", status, out)
+	}
+
+	if status, out := call(t, srv, http.MethodGet, "/nodes/attic/capabilities", nil); status != http.StatusNotFound || out["code"] != "capabilities_not_reported" {
+		t.Errorf("capabilities before report = %d %v", status, out)
+	}
+
+	if status, out := call(t, srv, http.MethodPost, "/nodes/attic/capabilities/probe", nil); status != http.StatusServiceUnavailable || out["code"] != "node_unavailable" {
+		t.Errorf("probe of an offline node = %d %v", status, out)
 	}
 
 	status, out = call(t, srv, http.MethodPost, "/nodes/attic/enrollment-token", nil)

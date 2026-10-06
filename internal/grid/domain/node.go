@@ -367,6 +367,19 @@ func (n *Node) RecordHeartbeat(at time.Time, clockOffsetMS int64, hostname strin
 	}
 }
 
+// RecordPlatform records the host reported in a capability report.
+func (n *Node) RecordPlatform(hostname string, cpuCores int) {
+	if len(hostname) > 255 {
+		hostname = hostname[:255]
+	}
+
+	n.runtime.Hostname = hostname
+
+	if cpuCores >= 0 && cpuCores <= 32767 {
+		n.runtime.CPUCores = cpuCores
+	}
+}
+
 // SetStatus changes the runtime status; it reports a transition.
 func (n *Node) SetStatus(s Status, hint string) bool {
 	if n.runtime.Status == s && n.runtime.StatusHint == hint {

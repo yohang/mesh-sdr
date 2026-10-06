@@ -299,6 +299,21 @@ func TestGridEndToEnd(t *testing.T) {
 		return err == nil && seq >= 2 // capabilities + heartbeats
 	})
 
+	// The capability report is stored, with the platform in the node row.
+	eventually(t, "capabilities", 5*time.Second, func() bool {
+		rep, err := e.g.caps.Get(ctx, "attic")
+
+		return err == nil && rep.ProductVersion() == "dev" && len(rep.Protocols()) == 2
+	})
+
+	if rt := e.node(t).Runtime(); rt.CPUCores != 4 {
+		t.Errorf("cpu cores = %d", rt.CPUCores)
+	}
+
+	if err := e.g.caps.Probe(ctx, "attic"); err != nil {
+		t.Errorf("probe: %v", err)
+	}
+
 	// The node API accepts only certificates of the hub CA, and /control
 	// only the hub identity.
 	gateway := pki.NewClientSource(e.ca, pki.KindGateway, "hub.example.org", time.Now)

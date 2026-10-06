@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
@@ -18,6 +19,12 @@ type NodeAdmin interface {
 	IssueToken(ctx context.Context, actor, id string) (gridapp.Issued, error)
 }
 
+// CapabilityReports reads and refreshes capability reports.
+type CapabilityReports interface {
+	Get(ctx context.Context, id string) (domain.CapabilityReport, error)
+	Probe(ctx context.Context, id string) error
+}
+
 // LoadHistory returns the recent heartbeats of a node.
 type LoadHistory interface {
 	Samples(id domain.NodeID) []gridapp.LoadSample
@@ -28,11 +35,12 @@ type LoadHistory interface {
 type GridHandlers struct {
 	nodes   NodeAdmin
 	history LoadHistory
+	caps    CapabilityReports
 }
 
 // NewGridHandlers returns the handlers.
-func NewGridHandlers(nodes NodeAdmin, history LoadHistory) GridHandlers {
-	return GridHandlers{nodes: nodes, history: history}
+func NewGridHandlers(nodes NodeAdmin, history LoadHistory, caps CapabilityReports) GridHandlers {
+	return GridHandlers{nodes: nodes, history: history, caps: caps}
 }
 
 func optString(s string) *string {
@@ -176,4 +184,42 @@ func (h GridHandlers) IssueNodeEnrollmentToken(ctx context.Context, req IssueNod
 	}
 
 	return IssueNodeEnrollmentToken200JSONResponse(issuedDTO(issued)), nil
+}
+
+func object(raw json.RawMessage) map[string]any {
+	out := map[string]any{}
+	_ = json.Unmarshal(raw, &out)
+
+	return out
+}
+
+// GetNodeCapabilities implements StrictServerInterface.
+func (h GridHandlers) GetNodeCapabilities(ctx context.Context, req GetNodeCapabilitiesRequestObject) (GetNodeCapabilitiesResponseObject, error) {
+	rep, err := h.caps.Get(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	out := GetNodeCapabilities200JSONResponse{
+		NodeId: rep.Node().String(), ReportedAt: rep.ReportedAt(), CapabilitiesHash: rep.Hash(), ProductVersion: rep.ProductVersion(),
+		Protocols: rep.Protocols(), Platform: object(rep.Platform()), Document: object(rep.Document()), Capabilities: []NodeCapability{},
+	}
+
+	for _, c := range rep.Capabilities() {
+		out.Capabilities = append(out.Capabilities, NodeCapability{
+			Capability: c.Key(), Available: c.Available(), Status: NodeCapabilityStatus(c.Status()),
+			Version: optString(c.Version()), Detail: object(c.Detail()), Error: optString(c.Error()),
+		})
+	}
+
+	return out, nil
+}
+
+// ProbeNodeCapabilities implements StrictServerInterface.
+func (h GridHandlers) ProbeNodeCapabilities(ctx context.Context, req ProbeNodeCapabilitiesRequestObject) (ProbeNodeCapabilitiesResponseObject, error) {
+	if err := h.caps.Probe(ctx, req.Id); err != nil {
+		return nil, err
+	}
+
+	return ProbeNodeCapabilities202Response{}, nil
 }

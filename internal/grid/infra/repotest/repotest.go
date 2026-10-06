@@ -5,6 +5,7 @@ package repotest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ type Repos struct {
 	Nodes       domain.NodeRepository
 	Revocations domain.RevocationRepository
 	Cursors     domain.EventCursorRepository
+	Caps        domain.CapabilityRepository
 }
 
 // Factory returns the repositories on a fresh, migrated database.
@@ -30,6 +32,63 @@ func Run(t *testing.T, newRepos Factory) {
 	t.Run("nodes", func(t *testing.T) { testNodes(t, newRepos(t)) })
 	t.Run("revocations", func(t *testing.T) { testRevocations(t, newRepos(t)) })
 	t.Run("cursors", func(t *testing.T) { testCursors(t, newRepos(t)) })
+	t.Run("capabilities", func(t *testing.T) { testCapabilities(t, newRepos(t)) })
+}
+
+func testCapabilities(t *testing.T, r Repos) {
+	ctx := context.Background()
+	id := domain.MustNodeID("attic")
+
+	if err := r.Nodes.Create(ctx, domain.NewNode(id, domain.MustNodeName("a"), domain.MustNodeURL("https://x:1"), t0)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.Caps.Get(ctx, id); !errors.Is(err, domain.ErrCapabilitiesNotReported) {
+		t.Fatalf("get before report = %v", err)
+	}
+
+	jt9 := must(domain.NewCapability("tool:jt9", true, domain.CapabilityOK, "2.6.1", json.RawMessage(`{"path":"/usr/bin/jt9"}`), ""))
+	ft8 := must(domain.NewCapability("mode:ft8", true, domain.CapabilityOK, "", nil, ""))
+	dream := must(domain.NewCapability("tool:dream", false, domain.CapabilityMissing, "", nil, "not found"))
+
+	first := must(domain.NewCapabilityReport(id, "h1", "1.0.0", []string{"rx-ctl.v1"}, json.RawMessage(`{"os":"linux"}`),
+		json.RawMessage(`{"product_version":"1.0.0"}`), t0, []domain.Capability{jt9, ft8, dream}))
+
+	if err := r.Caps.Replace(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := r.Caps.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	caps := got.Capabilities()
+	if got.Hash() != "h1" || len(caps) != 3 || caps[0].Key() != "mode:ft8" || caps[2].Key() != "tool:jt9" ||
+		caps[2].Version() != "2.6.1" || caps[1].Error() != "not found" || caps[1].Available() || !got.ReportedAt().Equal(t0) {
+		t.Errorf("report = %+v %+v", got, caps)
+	}
+
+	// A new report replaces every row.
+	second := must(domain.NewCapabilityReport(id, "h2", "1.1.0", []string{"rx-ctl.v1"}, json.RawMessage(`{}`),
+		json.RawMessage(`{}`), t0.Add(time.Minute), []domain.Capability{jt9}))
+
+	if err := r.Caps.Replace(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := r.Caps.Get(ctx, id); got.Hash() != "h2" || len(got.Capabilities()) != 1 || got.ProductVersion() != "1.1.0" {
+		t.Errorf("replaced report = %+v", got)
+	}
+
+	// Rows go away with their node.
+	if err := r.Nodes.Delete(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.Caps.Get(ctx, id); !errors.Is(err, domain.ErrCapabilitiesNotReported) {
+		t.Errorf("report survived its node: %v", err)
+	}
 }
 
 func testCursors(t *testing.T, r Repos) {
