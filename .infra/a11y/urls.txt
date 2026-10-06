@@ -3,3 +3,4 @@
 / 200
 /policy 200
 /no-such-page 404
+/login 200

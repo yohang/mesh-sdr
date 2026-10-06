@@ -121,7 +121,9 @@ func (m *Module) Middlewares() []func(http.Handler) http.Handler {
 func (m *Module) Routes(r chi.Router) {
 	m.routes = r
 
+	// Read-only pages answer GET and HEAD, like the shell's.
 	r.Get("/login", m.loginPage)
+	r.Head("/login", m.loginPage)
 	r.Post("/login", m.loginAction)
 	r.Post("/logout", m.logoutAction)
 }
