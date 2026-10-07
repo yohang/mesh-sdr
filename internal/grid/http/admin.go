@@ -272,12 +272,14 @@ func yesNo(b bool) string {
 	return "no"
 }
 
+// listenPolicy shows a device's listen policy override and its origin:
+// devices are configured only in their node config (ACC-013).
 func listenPolicy(p string) string {
 	if p == "" {
 		return "global listen policy"
 	}
 
-	return p
+	return p + " (node.toml)"
 }
 
 func utc(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") }
