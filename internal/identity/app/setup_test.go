@@ -8,16 +8,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
+
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
-	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 func (e *env) setup() *app.Setup {
 	return app.NewSetup(app.SetupDeps{
 		Users: e.users, Audit: e.audit, Tx: e.db, Hasher: e.hasher, IDs: shared.NewUUIDv7Generator(), Now: e.clock.Now,
-		Policies: app.NewPolicies(nil, nil), Auth: e.auth, Limiter: memory.NewIPLimiter(time.Minute, 100, 10),
+		Policies: app.NewPolicies(nil, nil), Auth: e.auth, Limiter: ratelimit.NewIP(time.Minute, 100, 10),
 		HubURL: "https://hub.example/", Logger: slog.New(slog.DiscardHandler),
 	})
 }

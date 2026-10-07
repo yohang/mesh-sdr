@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
+
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/keyring"
-	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
 )
 
@@ -41,7 +42,7 @@ func (e *env) tokens(t *testing.T, b app.ConnectionBinder) (*app.Tokens, *keyrin
 	}}
 
 	return app.NewTokens(app.TokensDeps{
-		Signer: k, Devices: d, Binder: b, Settings: app.DefaultSettings{}, Limiter: memory.NewKeyLimiter(time.Minute, 3, 10),
+		Signer: k, Devices: d, Binder: b, Settings: app.DefaultSettings{}, Limiter: ratelimit.New[string](time.Minute, 3, 10),
 		Issuer: "https://hub.example", TTL: 5 * time.Minute, Now: e.clock.Now, Logger: slog.New(slog.DiscardHandler),
 	}), k
 }

@@ -1,14 +1,12 @@
 package app
 
 import (
-	"container/list"
 	"net/netip"
 	"sync"
 	"time"
 
-	"golang.org/x/time/rate"
-
 	"github.com/yohang/mesh-sdr/internal/events/domain"
+	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
 )
 
 // Limits are the caps of the hub events WebSocket (ADR 0016 decision 14,
@@ -27,10 +25,6 @@ func DefaultLimits() Limits {
 	return Limits{PerSession: 16, PerAddress: 64, Total: 4000, UpgradesPerMinute: 30}
 }
 
-// rateKeys bounds the client addresses whose upgrade rate is tracked
-// (least recently seen evicted).
-const rateKeys = 100_000
-
 // Admission admits event sockets within the Limits. Safe for concurrent
 // use.
 type Admission struct {
@@ -41,21 +35,20 @@ type Admission struct {
 	sessions  map[string]int
 	addresses map[string]int
 
-	rates *list.List // front = most recent
-	keys  map[string]*list.Element
-}
-
-type rateItem struct {
-	key string
-	lim *rate.Limiter
+	upgrades *ratelimit.Limiter[string] // nil: upgrades not limited
 }
 
 // NewAdmission returns the admission of limits.
 func NewAdmission(limits Limits) *Admission {
-	return &Admission{
-		limits: limits, sessions: map[string]int{}, addresses: map[string]int{},
-		rates: list.New(), keys: map[string]*list.Element{},
+	a := &Admission{limits: limits, sessions: map[string]int{}, addresses: map[string]int{}}
+
+	if n := limits.UpgradesPerMinute; n > 0 {
+		// Client addresses whose upgrade rate is tracked: the least
+		// recently seen are evicted.
+		a.upgrades = ratelimit.New[string](time.Minute/time.Duration(n), n, ratelimit.DefaultCapacity)
 	}
+
+	return a
 }
 
 // Admit admits a socket of session (its public handle, "" when anonymous)
@@ -141,34 +134,13 @@ func (a *Admission) Open() int {
 }
 
 // takeUpgrade takes one upgrade token of address; it returns the wait
-// before the next one when none is left. Called with mu held.
+// before the next one when none is left.
 func (a *Admission) takeUpgrade(address string, now time.Time) time.Duration {
-	if a.limits.UpgradesPerMinute <= 0 {
+	if a.upgrades == nil {
 		return 0
 	}
 
-	var lim *rate.Limiter
+	_, wait := a.upgrades.Allow(address, now)
 
-	if el, ok := a.keys[address]; ok {
-		a.rates.MoveToFront(el)
-		lim = el.Value.(*rateItem).lim //nolint:forcetypeassert // only *rateItem is stored
-	} else {
-		lim = rate.NewLimiter(rate.Every(time.Minute/time.Duration(a.limits.UpgradesPerMinute)), a.limits.UpgradesPerMinute)
-		a.keys[address] = a.rates.PushFront(&rateItem{key: address, lim: lim})
-
-		if a.rates.Len() > rateKeys {
-			last := a.rates.Back()
-			a.rates.Remove(last)
-			delete(a.keys, last.Value.(*rateItem).key) //nolint:forcetypeassert // only *rateItem is stored
-		}
-	}
-
-	r := lim.ReserveN(now, 1)
-	if d := r.DelayFrom(now); d > 0 {
-		r.CancelAt(now)
-
-		return d
-	}
-
-	return 0
+	return wait
 }
