@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-06
+- Amended by: ADR 0022 (origins are file names, no "did you mean" for env vars)
 
 ## Context
 

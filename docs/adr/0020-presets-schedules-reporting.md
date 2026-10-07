@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-07
+- Amended by: ADR 0022 (reporting engine and outbox removed)
 - Deciders: project owner
 - Scope: epic part `epic/sched-1` of epic #446 (grid). It closes GRID-001 (#9) and GRID-016 (#24) in M0 and completes the schedule parts of ADM-009 (#67) and GRID-015 (#23).
 
