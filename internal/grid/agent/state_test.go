@@ -1,6 +1,7 @@
 package agent_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/yohang/mesh-sdr/internal/grid/agent"
@@ -115,5 +116,30 @@ func TestDesiredStateListenPolicy(t *testing.T) {
 				t.Errorf("global %s: %s = %q, want %q", global, d, got, p)
 			}
 		}
+	}
+}
+
+// TestDesiredStateOlderHub: a hub that predates wfm_deemphasis sends a
+// policy without it; the node accepts the state with the default, and each
+// policy field is checked on its own.
+func TestDesiredStateOlderHub(t *testing.T) {
+	s := agent.NewDesiredState(nil)
+
+	var old ctl.StateApply
+	if err := json.Unmarshal([]byte(`{"revision":7,"presets":{},"devices":{},"policy":{"listen_policy":"registered"}}`), &old); err != nil {
+		t.Fatal(err)
+	}
+
+	if out := s.Apply(old); len(out.Errors) != 0 || s.Revision() != 7 || s.Policy().WFMDeemphasis != agent.DefaultWFMDeemphasis {
+		t.Fatalf("older hub: %+v, revision %d, policy %+v", out, s.Revision(), s.Policy())
+	}
+
+	s.Apply(ctl.StateApply{Revision: 8, Policy: ctl.StatePolicy{ListenPolicy: "registered", WFMDeemphasis: 75}})
+
+	// An invalid de-emphasis keeps the previous one, the listen policy
+	// still applies.
+	out := s.Apply(ctl.StateApply{Revision: 9, Policy: ctl.StatePolicy{ListenPolicy: "anonymous", WFMDeemphasis: 60}})
+	if len(out.Errors) != 1 || s.Policy() != (ctl.StatePolicy{ListenPolicy: "anonymous", WFMDeemphasis: 75}) || s.Revision() != 8 {
+		t.Fatalf("mixed: %+v, policy %+v, revision %d", out, s.Policy(), s.Revision())
 	}
 }
