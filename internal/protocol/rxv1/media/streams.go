@@ -36,5 +36,8 @@ type Streams interface {
 // connection's read loop; Close releases everything at the end.
 type StreamSession interface {
 	Handle(ctx context.Context, req rxv1.Envelope)
+	// Reauthorize applies the claims of a refreshed token: what they no
+	// longer allow is detached or removed.
+	Reauthorize()
 	Close()
 }
