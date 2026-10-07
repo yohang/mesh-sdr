@@ -69,15 +69,14 @@ type Window struct {
 }
 
 // NewStaticWindow validates a UTC slot [start, end) in minutes of the day.
-// end < start wraps over midnight; start = end is refused.
+// end < start wraps over midnight; start = end is the whole day, from
+// start to the same minute of the next day.
 func NewStaticWindow(start, end int) (Window, error) {
 	switch {
 	case start < 0 || start >= MinutesPerDay:
 		return Window{}, ErrInvalidSchedule.WithViolations(shared.NewViolation("start_minute", "out_of_range", "a minute of the day, 0 to 1439 (UTC)"))
 	case end < 0 || end >= MinutesPerDay:
 		return Window{}, ErrInvalidSchedule.WithViolations(shared.NewViolation("end_minute", "out_of_range", "a minute of the day, 0 to 1439 (UTC)"))
-	case start == end:
-		return Window{}, ErrInvalidSchedule.WithViolations(shared.NewViolation("end_minute", "empty_window", "the window must not be empty"))
 	}
 
 	return Window{kind: KindStatic, start: start, end: end}, nil
@@ -102,8 +101,12 @@ func (w Window) Minutes() (int, int) { return w.start, w.end }
 // Phase returns the daylight phase.
 func (w Window) Phase() Phase { return w.phase }
 
-// Wraps reports whether a static slot wraps over midnight.
-func (w Window) Wraps() bool { return w.kind == KindStatic && w.end < w.start }
+// Wraps reports whether a static slot wraps over midnight (a whole-day
+// slot included).
+func (w Window) Wraps() bool { return w.kind == KindStatic && w.end <= w.start }
+
+// WholeDay reports whether a static slot lasts 24 h (start = end).
+func (w Window) WholeDay() bool { return w.kind == KindStatic && w.end == w.start }
 
 // String formats a static slot as HHMM-HHMM, or the daylight phase.
 func (w Window) String() string {
@@ -118,6 +121,10 @@ func (w Window) String() string {
 		}
 
 		return s
+	}
+
+	if w.WholeDay() {
+		return "24 h from " + hhmm(w.start) + " UTC"
 	}
 
 	return hhmm(w.start) + "-" + hhmm(w.end) + " UTC"

@@ -42,7 +42,7 @@ func TestNewSpec(t *testing.T) {
 		t.Errorf("daylight: %v", err)
 	}
 
-	_, err := domain.NewSpec(domain.Draft{DeviceID: "HF!", PresetID: "x", StartMinute: new(10), EndMinute: new(10), DaysOfWeek: new(0)})
+	_, err := domain.NewSpec(domain.Draft{DeviceID: "HF!", PresetID: "x", StartMinute: new(10), EndMinute: new(1440), DaysOfWeek: new(0)})
 
 	var de *shared.Error
 	if !errors.As(err, &de) || !errors.Is(err, domain.ErrInvalidSchedule) {
@@ -174,6 +174,16 @@ func TestEvaluate(t *testing.T) {
 
 		if got := domain.Evaluate(nil, monday, monday).Slots(); len(got) != 0 {
 			t.Errorf("empty horizon = %v", got)
+		}
+	})
+
+	t.Run("start = end is the whole day", func(t *testing.T) {
+		// Mondays and Tuesdays from 06:00 for 24 h each: one slot.
+		s := static(t, 1, presetA, 6*60, 6*60, 3, 0)
+		check(t, domain.Evaluate([]*domain.Schedule{s}, monday, monday.Add(72*h)), []slot{{6 * h, 54 * h, presetA}})
+
+		if got := s.Window().String(); got != "24 h from 0600 UTC" {
+			t.Errorf("window = %q", got)
 		}
 	})
 

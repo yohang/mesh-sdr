@@ -49,7 +49,7 @@ type occurrence struct {
 // Evaluate computes the timeline of the enabled static schedules of one
 // device over [from, until) (§8.5). Windows are UTC; days_of_week applies
 // to the day a window starts, so an overnight window belongs to its start
-// day. Overlaps go to the highest priority, then the earliest start, then
+// day; start = end lasts 24 h. Overlaps go to the highest priority, then the earliest start, then
 // the lowest schedule id. Daylight entries are not evaluated yet (SVC-011).
 func Evaluate(schedules []*Schedule, from, until time.Time) Timeline {
 	from, until = from.UTC(), until.UTC()
@@ -78,7 +78,7 @@ func Evaluate(schedules []*Schedule, from, until time.Time) Timeline {
 			a := day.Add(time.Duration(start) * time.Minute)
 
 			b := day.Add(time.Duration(end) * time.Minute)
-			if end < start {
+			if end <= start {
 				b = b.Add(24 * time.Hour)
 			}
 
