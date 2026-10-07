@@ -1,0 +1,51 @@
+package schedules
+
+import "strconv"
+
+// listPage is Admin › Schedules, read-only.
+templ listPage(rows []scheduleRow) {
+	<h1 class="text-2xl font-semibold">Schedules</h1>
+	<p class="text-fg-muted">A schedule applies a preset to a device during a daily UTC window. This list is read-only.</p>
+	if len(rows) == 0 {
+		<p>No schedules.</p>
+	} else {
+		<div class="overflow-x-auto">
+			<table class="w-full text-left">
+				<caption class="sr-only">Schedules</caption>
+				<thead>
+					<tr class="border-b border-border">
+						<th scope="col" class="py-1 pr-4">Device</th>
+						<th scope="col" class="py-1 pr-4">Preset</th>
+						<th scope="col" class="py-1 pr-4">Window</th>
+						<th scope="col" class="py-1 pr-4">Days</th>
+						<th scope="col" class="py-1 pr-4">Priority</th>
+						<th scope="col" class="py-1">State</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, s := range rows {
+						<tr class="border-b border-border">
+							<th scope="row" class="py-1 pr-4 font-medium">
+								<a href={ templ.URL("/admin/devices/" + s.Device) }>{ s.Device }</a>
+							</th>
+							<td class="py-1 pr-4">{ s.Preset }</td>
+							<td class="py-1 pr-4">{ s.Window }</td>
+							<td class="py-1 pr-4">{ s.Days }</td>
+							<td class="py-1 pr-4">{ strconv.Itoa(s.Priority) }</td>
+							<td class="py-1">
+								switch {
+									case s.Disabled != "":
+										<span class="font-semibold text-danger">{ s.Disabled }</span>
+									case s.Enabled:
+										enabled
+									default:
+										disabled
+								}
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
@@ -389,7 +388,7 @@ func (a deviceSchedules) ForDevice(ctx context.Context, device string) ([]gridht
 
 	for _, s := range list {
 		row := gridhttp.ScheduleRow{
-			ID: s.ID().String(), Preset: s.Preset().String(), Window: s.Window().String(), Days: days(s.Days()),
+			ID: s.ID().String(), Preset: s.Preset().String(), Window: s.Window().String(), Days: s.Days().String(),
 			Priority: s.Priority().Int(), Enabled: s.Enabled(),
 		}
 
@@ -407,23 +406,14 @@ func (a deviceSchedules) ForDevice(ctx context.Context, device string) ([]gridht
 	return out, nil
 }
 
-// days formats a week-day mask for people.
-func days(d schedules.DaysOfWeek) string {
-	if d.Mask() == schedules.EveryDay {
-		return "Every day"
+// presetName names a preset for the schedules page ("" when unknown).
+func (s *scheduling) presetName(ctx context.Context, id shared.UUID) string {
+	p, err := s.presets.Get(ctx, id.String())
+	if err != nil {
+		return ""
 	}
 
-	names := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
-
-	var out []string
-
-	for i, n := range names {
-		if d.Mask()&(1<<i) != 0 {
-			out = append(out, n)
-		}
-	}
-
-	return strings.Join(out, ", ")
+	return p.Name()
 }
 
 // NeedingAttention counts the schedules the hub disabled (Admin › Overview).

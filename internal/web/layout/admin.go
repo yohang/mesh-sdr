@@ -18,6 +18,8 @@ var AdminSections = []AdminSection{
 	{ID: "look-and-feel", Label: "Look & feel", Href: "/admin/look-and-feel"},
 	{ID: "nodes", Label: "Nodes", Href: "/admin/nodes"},
 	{ID: "devices", Label: "Devices", Href: "/admin/devices"},
+	{ID: "presets", Label: "Presets", Href: "/admin/presets"},
+	{ID: "schedules", Label: "Schedules", Href: "/admin/schedules"},
 	{ID: "connections", Label: "Connections", Href: "/admin/connections"},
 	{ID: "retention", Label: "Data & retention", Href: "/admin/retention"},
 	{ID: "audit", Label: "Audit log", Href: "/admin/audit"},

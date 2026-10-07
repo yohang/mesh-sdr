@@ -2,6 +2,7 @@ package schedules
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -117,6 +118,25 @@ func NewDaysOfWeek(mask int) (DaysOfWeek, error) {
 
 // Mask returns the bitmask.
 func (d DaysOfWeek) Mask() int { return d.mask }
+
+// String formats the days for people ("Every day", "Mon, Tue").
+func (d DaysOfWeek) String() string {
+	if d.mask == EveryDay {
+		return "Every day"
+	}
+
+	names := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+
+	var out []string
+
+	for i, n := range names {
+		if d.mask&(1<<i) != 0 {
+			out = append(out, n)
+		}
+	}
+
+	return strings.Join(out, ", ")
+}
 
 // Has reports whether day is set.
 func (d DaysOfWeek) Has(day time.Weekday) bool {
