@@ -22,6 +22,7 @@ import (
 type Prober struct {
 	version string
 	devices func() []ctl.Device
+	modes   []string
 	started time.Time
 	root    string // filesystem root, "/" except in tests
 
@@ -30,9 +31,15 @@ type Prober struct {
 	lastAll  uint64
 }
 
-// New returns a prober. devices lists the devices of the node config.
-func New(version string, devices func() []ctl.Device, started time.Time) *Prober {
-	return &Prober{version: version, devices: devices, started: started, root: "/"}
+// AnalogCap is the decoder capability of the node's own analog
+// demodulators.
+const AnalogCap = "cap:analog"
+
+// New returns a prober. devices lists the devices of the node config,
+// modes the analog modes of the node DSP (reported as the AnalogCap
+// decoder, so the hub derives their mode:* capabilities).
+func New(version string, devices func() []ctl.Device, modes []string, started time.Time) *Prober {
+	return &Prober{version: version, devices: devices, modes: modes, started: started, root: "/"}
 }
 
 func (p *Prober) read(path string) []byte {
@@ -54,6 +61,11 @@ func (p *Prober) Capabilities(context.Context) ctl.Capabilities {
 		devices = p.devices()
 	}
 
+	decoders := []ctl.Decoder{}
+	if len(p.modes) > 0 {
+		decoders = append(decoders, ctl.Decoder{Cap: AnalogCap, Tools: []ctl.Tool{}, Modes: p.modes})
+	}
+
 	return ctl.Capabilities{
 		ProductVersion: p.version,
 		Protocols:      []string{rxv1.Subprotocol, rxv1.ControlSubprotocol},
@@ -64,7 +76,7 @@ func (p *Prober) Capabilities(context.Context) ctl.Capabilities {
 		SDRDrivers:      []ctl.SDRDriver{},
 		Devices:         devices,
 		DevicesDetected: []any{},
-		Decoders:        []ctl.Decoder{},
+		Decoders:        decoders,
 		AudioCodecs:     []string{},
 		FFTCodecs:       []string{},
 	}

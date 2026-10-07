@@ -27,6 +27,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
+	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
 
@@ -95,7 +96,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	}
 
 	if o.prober == nil {
-		o.prober = probe.New(version.String(), o.devices, time.Now())
+		o.prober = probe.New(version.String(), o.devices, engine.Modes(), time.Now())
 	}
 
 	ag, err := agent.New(agent.Options{
