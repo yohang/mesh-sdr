@@ -12,8 +12,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -640,6 +642,12 @@ func (ss *session) setDemod(req rxv1.Envelope) {
 		return
 	}
 
+	if !ss.peer.Claims().Allows(d.device, token.PermDemod) {
+		ss.peer.Fail(req, rxv1.CodeForbidden, "the access token does not grant demod on this device")
+
+		return
+	}
+
 	params := d.demod.Params()
 
 	if p.Mode != nil {
@@ -720,6 +728,68 @@ func (ss *session) retune(req rxv1.Envelope) {
 	}
 
 	ss.peer.Ack(req, media.DeviceRetune{CenterHz: snap.CenterHz})
+}
+
+// Reauthorize implements media.StreamSession: after auth.refresh, devices
+// the new token no longer lets the connection listen to are detached, and
+// demodulators it no longer allows (scope, or beyond lim.max_demods,
+// newest first) are removed.
+func (ss *session) Reauthorize() {
+	c := ss.peer.Claims()
+
+	maxDemods := c.Limits.MaxDemods
+	if maxDemods <= 0 {
+		maxDemods = defaultMaxDemods
+	}
+
+	ss.mu.Lock()
+
+	var (
+		lost    []*attached
+		removed []*demodState
+	)
+
+	for id, a := range ss.devices {
+		if !c.Allows(id, token.PermListen) {
+			lost = append(lost, a)
+			delete(ss.devices, id)
+		}
+	}
+
+	ids := slices.Sorted(maps.Keys(ss.demods))
+	slices.SortFunc(ids, func(a, b string) int { return demodSeq(a) - demodSeq(b) })
+
+	kept := 0
+
+	for _, id := range ids {
+		d := ss.demods[id]
+		_, attachedOK := ss.devices[d.device]
+
+		if !attachedOK || !c.Allows(d.device, token.PermDemod) || kept >= maxDemods {
+			removed = append(removed, d)
+			delete(ss.demods, id)
+
+			continue
+		}
+
+		kept++
+	}
+	ss.mu.Unlock()
+
+	for _, d := range removed {
+		ss.closeDemod(d)
+	}
+
+	for _, a := range lost {
+		ss.release(a)
+	}
+}
+
+// demodSeq is the creation order of a demodulator id ("d<n>").
+func demodSeq(id string) int {
+	n, _ := strconv.Atoi(strings.TrimPrefix(id, "d"))
+
+	return n
 }
 
 // Close implements media.StreamSession.

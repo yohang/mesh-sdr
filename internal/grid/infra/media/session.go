@@ -355,6 +355,10 @@ func (ss *session) refresh(ctx context.Context, env rxv1.Envelope, expire *time.
 
 	ss.s.extendUsed(c.ConnectionID, c.ExpiresAt)
 
+	if ss.streams != nil {
+		ss.streams.Reauthorize()
+	}
+
 	expire.Reset(ss.expiry())
 	ss.logger.DebugContext(ctx, "access token refreshed", slog.Time("exp", c.ExpiresAt))
 	ss.ack(env)

@@ -49,8 +49,34 @@ type peer struct {
 	claims  token.Claims
 }
 
-func (p *peer) Claims() token.Claims { return p.claims }
-func (p *peer) Hello() media.Hello   { return media.Hello{} }
+func (p *peer) Claims() token.Claims {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.claims
+}
+
+func (p *peer) setClaims(c token.Claims) {
+	p.mu.Lock()
+	p.claims = c
+	p.mu.Unlock()
+}
+
+func (p *peer) count(typ rxv1.MessageType) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	n := 0
+
+	for _, s := range p.sent {
+		if s == typ {
+			n++
+		}
+	}
+
+	return n
+}
+func (p *peer) Hello() media.Hello { return media.Hello{} }
 func (p *peer) Send(typ rxv1.MessageType, _ any) {
 	p.mu.Lock()
 	p.sent = append(p.sent, typ)
@@ -91,7 +117,14 @@ func env(t *testing.T, typ rxv1.MessageType, payload any) rxv1.Envelope {
 	return e
 }
 
-func TestStreamSessionErrors(t *testing.T) {
+func scoped(maxDemods int, perms ...string) token.Claims {
+	return token.Claims{Limits: token.Limits{MaxDemods: maxDemods}, Scopes: []token.Scope{{Device: "vhf", Perms: perms}}}
+}
+
+// runManager runs a manager with one vhf device on an idle source.
+func runManager(t *testing.T) *app.Manager {
+	t.Helper()
+
 	typ, _ := domain.NewDeviceType(domain.TypeRTLSDR)
 	drv, _ := domain.NewDriver(typ, "0", 0, domain.AutoGain(), false)
 	r, _ := domain.NewFreqRange(domain.MustFrequency(144_000_000), domain.MustFrequency(146_000_000))
@@ -116,12 +149,19 @@ func TestStreamSessionErrors(t *testing.T) {
 		close(done)
 	}()
 
-	defer func() {
+	t.Cleanup(func() {
 		cancel()
 		<-done
-	}()
+	})
 
-	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: token.Claims{Limits: token.Limits{MaxDemods: 1}}}
+	return m
+}
+
+func TestStreamSessionErrors(t *testing.T) {
+	m := runManager(t)
+	ctx := context.Background()
+
+	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen, token.PermDemod)}
 	ss := radiohttp.NewStreams(m, slog.New(slog.DiscardHandler)).Open(p)
 
 	defer ss.Close()
@@ -177,5 +217,64 @@ func TestStreamSessionErrors(t *testing.T) {
 
 	if len(p.sent) == 0 || p.sent[0] != rxv1.TypeDeviceConfig {
 		t.Fatalf("sent %v", p.sent)
+	}
+}
+
+func TestReauthorizeAfterRefresh(t *testing.T) {
+	m := runManager(t)
+	ctx := context.Background()
+
+	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(2, token.PermListen, token.PermDemod)}
+	ss := radiohttp.NewStreams(m, slog.New(slog.DiscardHandler)).Open(p)
+
+	defer ss.Close()
+
+	ss.Handle(ctx, env(t, rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}))
+	ss.Handle(ctx, env(t, rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm"}))
+	ss.Handle(ctx, env(t, rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm", "offset_hz": 5000}))
+
+	if got := p.last(); got.typ != rxv1.TypeAck {
+		t.Fatalf("setup: %+v", got)
+	}
+
+	// A lower demodulator limit removes the newest one.
+	p.setClaims(scoped(1, token.PermListen, token.PermDemod))
+	ss.Reauthorize()
+
+	if n := p.count(rxv1.TypeStreamClose); n != 1 {
+		t.Fatalf("%d streams closed, want 1", n)
+	}
+
+	ss.Handle(ctx, env(t, rxv1.TypeDemodSet, map[string]any{"demod_id": "d2", "offset_hz": 1000}))
+
+	if got := p.last(); got.code != rxv1.CodeNotFound {
+		t.Fatalf("removed demod still set: %+v", got)
+	}
+
+	// Losing demod removes the other one; losing listen detaches.
+	p.setClaims(scoped(1, token.PermListen))
+	ss.Handle(ctx, env(t, rxv1.TypeDemodSet, map[string]any{"demod_id": "d1", "offset_hz": 1000}))
+
+	if got := p.last(); got.code != rxv1.CodeForbidden {
+		t.Fatalf("demod.set without scope: %+v", got)
+	}
+
+	ss.Reauthorize()
+
+	if n := p.count(rxv1.TypeStreamClose); n != 2 {
+		t.Fatalf("%d streams closed, want 2", n)
+	}
+
+	p.setClaims(token.Claims{})
+	ss.Reauthorize()
+
+	if n := p.count(rxv1.TypeStreamClose); n != 3 {
+		t.Fatalf("%d streams closed, want 3 (FFT)", n)
+	}
+
+	ss.Handle(ctx, env(t, rxv1.TypeDeviceDetach, map[string]any{"device_id": "vhf"}))
+
+	if got := p.last(); got.code != rxv1.CodeNotFound {
+		t.Fatalf("device still attached: %+v", got)
 	}
 }
