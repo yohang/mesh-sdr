@@ -84,12 +84,22 @@ const (
 type DemodParams struct {
 	Mode     string
 	OffsetHz int64
-	// LowHz and HighHz are the pass band relative to the offset.
+	// LowHz and HighHz are the pass band relative to the offset; both zero
+	// select the default pass band of the mode. The engine clamps them to
+	// the mode limits.
 	LowHz, HighHz float64
 	// SquelchDB is the squelch level; nil: open.
 	SquelchDB  *float64
+	NR         NR
 	OutputRate int
 	Codec      AudioCodec
+}
+
+// NR is the noise reduction of a demodulator (DEM-011).
+type NR struct {
+	Enabled bool
+	// ThresholdDB is the noise gate, −20..20 dB.
+	ThresholdDB float64
 }
 
 // AudioOut is one encoded audio frame of a demodulator.

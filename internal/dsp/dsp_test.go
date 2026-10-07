@@ -169,28 +169,43 @@ func TestSpectrumConfigValidation(t *testing.T) {
 
 func TestChannelPlan(t *testing.T) {
 	for _, fs := range []int{250_000, 1_024_000, 2_048_000, 2_400_000, 10_000_000} {
-		p, err := NewChannelPlan(fs, NFMChannelRate)
+		p, err := NewChannelPlan(fs, NarrowChannelRate)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if p.N != p.D*p.M || p.V%p.D != 0 || p.L%p.D != 0 || p.ChannelRate() < NFMChannelRate || p.MaxTaps() < int(blackmanTransition*float64(fs)/Transition) {
+		if p.N != p.D*p.M || p.V%p.D != 0 || p.L%p.D != 0 || p.ChannelRate() < NarrowChannelRate || p.MaxTaps() < int(blackmanTransition*float64(fs)/Transition) {
 			t.Fatalf("fs %d: bad plan %+v", fs, p)
+		}
+
+		// Wide channels: a divisor of D, as low a rate as possible.
+		d, err := p.Decimation(WideChannelRate)
+		if err != nil || p.D%d != 0 || float64(fs)/float64(d) < WideChannelRate {
+			t.Fatalf("fs %d: wide decimation %d (%v)", fs, d, err)
+		}
+
+		if d, _ := p.Decimation(NarrowChannelRate); d != p.D {
+			t.Fatalf("fs %d: narrow decimation %d, want %d", fs, d, p.D)
 		}
 	}
 
-	if _, err := NewChannelPlan(12000, NFMChannelRate); !errors.Is(err, ErrChannelizer) {
+	p, _ := NewChannelPlan(100_000, NarrowChannelRate)
+	if _, err := p.Decimation(WideChannelRate); !errors.Is(err, ErrChannelizer) {
+		t.Fatal(err)
+	}
+
+	if _, err := NewChannelPlan(12000, NarrowChannelRate); !errors.Is(err, ErrChannelizer) {
 		t.Fatal(err)
 	}
 }
 
 // channelOut runs iq through a channelizer and one channel.
-func channelOut(t *testing.T, p ChannelPlan, iq []complex64, offset, low, high float64) ([]complex64, *Channel) {
+func channelOut(t *testing.T, p ChannelPlan, iq []complex64, minRate, offset, low, high float64) ([]complex64, *Channel) {
 	t.Helper()
 
 	c := NewChannelizer(p)
 
-	ch, err := p.NewChannel(offset, low, high)
+	ch, err := p.NewChannel(minRate, offset, low, high)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +224,7 @@ func channelOut(t *testing.T, p ChannelPlan, iq []complex64, offset, low, high f
 func TestChannelizerSelectsAndFilters(t *testing.T) {
 	const fs = 2_400_000
 
-	p, err := NewChannelPlan(fs, NFMChannelRate)
+	p, err := NewChannelPlan(fs, NarrowChannelRate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +241,7 @@ func TestChannelizerSelectsAndFilters(t *testing.T) {
 		iq[i] += jam[i]
 	}
 
-	out, ch := channelOut(t, p, iq, offset, -5000, 5000)
+	out, ch := channelOut(t, p, iq, NarrowChannelRate, offset, -5000, 5000)
 
 	if want := (n/p.L - 1) * p.L / p.D; len(out) < want {
 		t.Fatalf("got %d samples, want ≥ %d", len(out), want)
@@ -255,17 +270,17 @@ func TestChannelizerSelectsAndFilters(t *testing.T) {
 }
 
 func TestChannelRejectsBadBand(t *testing.T) {
-	p, _ := NewChannelPlan(2_400_000, NFMChannelRate)
+	p, _ := NewChannelPlan(2_400_000, NarrowChannelRate)
 
-	if _, err := p.NewChannel(0, 5000, -5000); !errors.Is(err, ErrChannelizer) {
+	if _, err := p.NewChannel(NarrowChannelRate, 0, 5000, -5000); !errors.Is(err, ErrChannelizer) {
 		t.Fatal(err)
 	}
 
-	if _, err := p.NewChannel(0, -15000, 15000); !errors.Is(err, ErrChannelizer) {
+	if _, err := p.NewChannel(NarrowChannelRate, 0, -15000, 15000); !errors.Is(err, ErrChannelizer) {
 		t.Fatal(err)
 	}
 
-	if _, err := p.NewChannel(1_300_000, -5000, 5000); !errors.Is(err, ErrChannelizer) {
+	if _, err := p.NewChannel(NarrowChannelRate, 1_300_000, -5000, 5000); !errors.Is(err, ErrChannelizer) {
 		t.Fatal(err)
 	}
 }
@@ -301,83 +316,6 @@ func toneEnergy(audio []float32, rate, freq float64) float64 {
 	}
 
 	return p / (total * float64(len(audio)) / 2)
-}
-
-func TestNFMDemodulatesTone(t *testing.T) {
-	const fs = 2_400_000
-
-	p, _ := NewChannelPlan(fs, NFMChannelRate)
-
-	const offset = -150_000.0
-
-	iq := fmSignal(fs/2, fs, offset, 1000, 2500)
-	chIQ, ch := channelOut(t, p, iq, offset, -6000, 6000)
-
-	sq := -60.0
-
-	c, err := NewNFM(NFMConfig{ChannelRate: p.ChannelRate(), OutputRate: DefaultOutputRate, ResidualHz: ch.Residual(), Squelch: &sq})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-
-	var audio []float32
-
-	var res Result
-	for off := 0; off < len(chIQ); off += 480 {
-		res, err = c.Process(chIQ[off:min(off+480, len(chIQ))])
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		audio = append(audio, res.Audio...)
-	}
-
-	if !res.Open || res.LevelDB < -15 || res.LevelDB > -5 {
-		t.Fatalf("level %g dB open %v", res.LevelDB, res.Open)
-	}
-
-	// ~0.5 s at 12 kHz, minus the chain delays.
-	if len(audio) < 5000 || len(audio) > 6100 {
-		t.Fatalf("got %d audio samples", len(audio))
-	}
-
-	tail := audio[len(audio)/2:]
-	if e := toneEnergy(tail, DefaultOutputRate, 1000); e < 0.5 {
-		t.Fatalf("1 kHz holds %.2f of the audio energy", e)
-	}
-
-	// Squelch above the level: silence.
-	high := -1.0
-	if err := c.SetSquelch(&high); err != nil {
-		t.Fatal(err)
-	}
-
-	res, err = c.Process(chIQ[:480])
-	if err != nil || res.Open {
-		t.Fatalf("squelch: %v open %v", err, res.Open)
-	}
-
-	for _, v := range res.Audio {
-		if v != 0 {
-			t.Fatal("squelched audio is not silence")
-		}
-	}
-}
-
-func TestNFMConfigValidation(t *testing.T) {
-	bad := 5.0
-
-	for _, c := range []NFMConfig{
-		{ChannelRate: 24000, OutputRate: 9000},
-		{ChannelRate: 1000, OutputRate: 12000},
-		{ChannelRate: 24000, OutputRate: 12000, Squelch: &bad},
-		{ChannelRate: 24000, OutputRate: 12000, AGC: "medium"},
-	} {
-		if _, err := NewNFM(c); !errors.Is(err, ErrChain) {
-			t.Fatalf("%+v: %v", c, err)
-		}
-	}
 }
 
 func TestADPCMRoundTrip(t *testing.T) {

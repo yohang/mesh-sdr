@@ -130,6 +130,9 @@ func (c *Channelizer) Push(index uint64, iq []complex64, emit func(first uint64,
 // Channel extracts one listener channel from the channelizer blocks.
 type Channel struct {
 	plan ChannelPlan
+	// d is the decimation of this channel (a divisor of plan.D), m = N/d
+	// its inverse FFT size.
+	d, m int
 	k0   int
 	h    []complex128
 	sel  []complex128
@@ -141,26 +144,61 @@ type Channel struct {
 	residual   float64
 }
 
-// NewChannel returns the channel centred offsetHz from the device centre
-// with the pass band [lowHz, highHz] relative to offsetHz. The band must
-// fit in the channel rate minus the transition.
-func (p ChannelPlan) NewChannel(offsetHz, lowHz, highHz float64) (*Channel, error) {
-	half := p.ChannelRate()/2 - Transition/2
-	if lowHz >= highHz || lowHz < -half || highHz > half || math.Abs(offsetHz) > float64(p.SampleRate)/2 {
-		return nil, fmt.Errorf("%w: offset %g band [%g, %g] at channel rate %g", ErrChannelizer, offsetHz, lowHz, highHz, p.ChannelRate())
+// Decimation returns the decimation of a channel running at no less than
+// minRate: the largest divisor of D that keeps fs/d ≥ minRate, so that the
+// channel shares the block geometry of the plan (wide channels, such as
+// broadcast FM, run at a higher rate than the plan's).
+func (p ChannelPlan) Decimation(minRate float64) (int, error) {
+	if minRate <= 0 || float64(p.SampleRate) < minRate {
+		return 0, fmt.Errorf("%w: channel rate %g above the device rate %d", ErrChannelizer, minRate, p.SampleRate)
 	}
 
+	for d := p.D; d > 1; d-- {
+		if p.D%d == 0 && float64(p.SampleRate)/float64(d) >= minRate {
+			return d, nil
+		}
+	}
+
+	return 1, nil
+}
+
+// NewChannel returns the channel running at no less than minRate, centred
+// offsetHz from the device centre, with the pass band [lowHz, highHz]
+// relative to offsetHz. The band must fit in the channel rate minus the
+// transition.
+func (p ChannelPlan) NewChannel(minRate, offsetHz, lowHz, highHz float64) (*Channel, error) {
+	d, err := p.Decimation(minRate)
+	if err != nil {
+		return nil, err
+	}
+
+	rate := float64(p.SampleRate) / float64(d)
+	half := rate/2 - Transition/2
+
+	if lowHz >= highHz || lowHz < -half || highHz > half || math.Abs(offsetHz) > float64(p.SampleRate)/2 {
+		return nil, fmt.Errorf("%w: offset %g band [%g, %g] at channel rate %g", ErrChannelizer, offsetHz, lowHz, highHz, rate)
+	}
+
+	m := p.N / d
 	ch := &Channel{
 		plan:  p,
-		sel:   make([]complex128, p.M),
-		seq:   make([]complex128, p.M),
-		ifft:  fourier.NewCmplxFFT(p.M),
+		d:     d,
+		m:     m,
+		sel:   make([]complex128, m),
+		seq:   make([]complex128, m),
+		ifft:  fourier.NewCmplxFFT(m),
 		phase: 1,
 	}
 	ch.tune(offsetHz, lowHz, highHz)
 
 	return ch, nil
 }
+
+// Rate returns the channel sample rate fs/d.
+func (ch *Channel) Rate() float64 { return float64(ch.plan.SampleRate) / float64(ch.d) }
+
+// BlockLen returns the number of samples per channelizer block (L/d).
+func (ch *Channel) BlockLen() int { return ch.plan.L / ch.d }
 
 // Residual is the part of the offset below one forward bin, which the
 // chain removes after the channelizer (Hz, at the channel rate).
@@ -196,7 +234,7 @@ func (ch *Channel) tune(offsetHz, lowHz, highHz float64) {
 	}
 
 	full := fourier.NewCmplxFFT(p.N).Coefficients(nil, h)
-	ch.h = make([]complex128, p.M)
+	ch.h = make([]complex128, ch.m)
 	ch.selectBins(ch.h, full)
 	// Inverse FFT scaling of the decimated output (1/N).
 	for i := range ch.h {
@@ -204,9 +242,9 @@ func (ch *Channel) tune(offsetHz, lowHz, highHz float64) {
 	}
 }
 
-// selectBins copies the M bins around k0 into dst, in FFT order.
+// selectBins copies the m bins around k0 into dst, in FFT order.
 func (ch *Channel) selectBins(dst, bins []complex128) {
-	n, m := ch.plan.N, ch.plan.M
+	n, m := ch.plan.N, ch.m
 	for j := range m {
 		k := j
 		if j >= m/2 {
@@ -217,7 +255,7 @@ func (ch *Channel) selectBins(dst, bins []complex128) {
 	}
 }
 
-// Process turns one channelizer block into L/D channel samples appended to
+// Process turns one channelizer block into L/d channel samples appended to
 // dst.
 func (ch *Channel) Process(bins []complex128, dst []complex64) []complex64 {
 	ch.selectBins(ch.sel, bins)
@@ -228,7 +266,7 @@ func (ch *Channel) Process(bins []complex128, dst []complex64) []complex64 {
 
 	ch.ifft.Sequence(ch.seq, ch.sel)
 
-	for _, v := range ch.seq[ch.plan.V/ch.plan.D:] {
+	for _, v := range ch.seq[ch.plan.V/ch.d:] {
 		dst = append(dst, complex64(v*ch.phase))
 	}
 

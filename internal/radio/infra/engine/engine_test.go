@@ -52,7 +52,7 @@ func eventually(t *testing.T, f func() bool) {
 }
 
 func params() app.DemodParams {
-	return app.DemodParams{Mode: ModeNFM, OffsetHz: 30_000, LowHz: -5000, HighHz: 5000, OutputRate: 12000, Codec: app.CodecADPCM}
+	return app.DemodParams{Mode: "nfm", OffsetHz: 30_000, LowHz: -5000, HighHz: 5000, OutputRate: 12000, Codec: app.CodecADPCM}
 }
 
 func TestSpectrumAndDemodLifecycle(t *testing.T) {
@@ -100,8 +100,14 @@ func TestSpectrumAndDemodLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p.Mode = "wfm"
+	p.Mode = "dmr"
 	if err := d.Set(p); !errors.Is(err, domain.ErrUnsupportedMode) {
+		t.Fatal(err)
+	}
+
+	// Broadcast FM needs the HD audio path.
+	p.Mode, p.OffsetHz = "wfm", -20_000
+	if err := d.Set(p); !errors.Is(err, domain.ErrOutOfRange) {
 		t.Fatal(err)
 	}
 
@@ -135,11 +141,15 @@ func TestDemodValidation(t *testing.T) {
 	nom := func(app.Meter) {}
 
 	bad := []func(*app.DemodParams){
-		func(p *app.DemodParams) { p.Mode = "am" },
+		func(p *app.DemodParams) { p.Mode = "dmr" },
 		func(p *app.DemodParams) { p.OutputRate = 9000 },
 		func(p *app.DemodParams) { p.Codec = "opus" },
 		func(p *app.DemodParams) { p.LowHz, p.HighHz = 5000, -5000 },
 		func(p *app.DemodParams) { v := 10.0; p.SquelchDB = &v },
+		func(p *app.DemodParams) { p.NR = app.NR{Enabled: true, ThresholdDB: 25} },
+		func(p *app.DemodParams) { p.LowHz, p.HighHz = 9950, 10_050 },
+		func(p *app.DemodParams) { p.HighHz = math.NaN() },
+		func(p *app.DemodParams) { p.Mode = "wfm" },
 	}
 
 	for i, mutate := range bad {
@@ -159,12 +169,20 @@ func TestDemodValidation(t *testing.T) {
 		t.Fatalf("spectrum before start %+v", info)
 	}
 
+	// Pass band edges are clamped to the mode limits.
 	wide := params()
 	wide.LowHz, wide.HighHz = -20_000, 20_000
 
-	if _, err := e.NewDemod(wide, nop, nom); !errors.Is(err, domain.ErrOutOfRange) {
-		t.Fatalf("band wider than the channel before start: %v", err)
+	dw, err := e.NewDemod(wide, nop, nom)
+	if err != nil {
+		t.Fatal(err)
 	}
+
+	if got := dw.Params(); got.LowHz != -10_000 || got.HighHz != 10_000 {
+		t.Fatalf("clamped band %g..%g", got.LowHz, got.HighHz)
+	}
+
+	dw.Close()
 
 	d, err := e.NewDemod(params(), nop, nom)
 	if err != nil {
@@ -187,5 +205,64 @@ func TestDemodValidation(t *testing.T) {
 
 	if _, err := e.NewDemod(p, nop, nom); !errors.Is(err, domain.ErrOutOfRange) {
 		t.Fatal(err)
+	}
+}
+
+// TestModeSwitch changes the mode of a running demodulator: default pass
+// bands, the wide channel of broadcast FM on the HD path, NR.
+func TestModeSwitch(t *testing.T) {
+	e := New(slog.New(slog.DiscardHandler))
+	defer e.Close()
+
+	var audio atomic.Int64
+
+	e.Start(tuning())
+
+	p := params()
+	p.LowHz, p.HighHz = 0, 0
+
+	d, err := e.NewDemod(p, func(app.AudioOut) { audio.Add(1) }, func(app.Meter) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	if got := d.Params(); got.LowHz != -4000 || got.HighHz != 4000 {
+		t.Fatalf("nfm default band %g..%g", got.LowHz, got.HighHz)
+	}
+
+	next := feed(e, 0, 200*time.Millisecond, 30_000)
+	eventually(t, func() bool { return audio.Load() > 3 })
+
+	for _, mode := range []struct {
+		name      string
+		rate      int
+		low, high float64
+	}{
+		{"usb", 12000, 300, 2700},
+		{"cw", 12000, 650, 950},
+		{"wfm", 48000, -75_000, 75_000},
+		{"sam", 12000, -4000, 4000},
+	} {
+		p := d.Params()
+		p.Mode, p.LowHz, p.HighHz, p.OutputRate = mode.name, 0, 0, mode.rate
+		p.NR = app.NR{Enabled: true, ThresholdDB: 6}
+
+		if err := d.Set(p); err != nil {
+			t.Fatalf("%s: %v", mode.name, err)
+		}
+
+		if got := d.Params(); got.LowHz != mode.low || got.HighHz != mode.high || !got.NR.Enabled {
+			t.Fatalf("%s: applied %+v", mode.name, got)
+		}
+
+		before := audio.Load()
+		next = feed(e, next, 200*time.Millisecond, 30_000)
+
+		eventually(t, func() bool { return audio.Load() > before+3 })
+	}
+
+	if got := Modes(); len(got) != 7 || got[0] != "am" {
+		t.Fatalf("modes %v", got)
 	}
 }
