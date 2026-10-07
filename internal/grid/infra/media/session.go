@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -457,8 +458,22 @@ func (ss *session) timeSync(env rxv1.Envelope) {
 	ss.send(rxv1.TypeTimeSyncReply, id, media.TimeSyncReply{T0: p.T0, T1: t1, T2: ss.s.o.Now().UnixMilli()})
 }
 
-// Claims implements media.Peer.
-func (ss *session) Claims() token.Claims { return ss.claims() }
+// Claims implements media.Peer: the token claims, without the scopes of
+// the devices an anonymous token may no longer use under their effective
+// listen policy (SRC-023). The stream handler checks them at every
+// message and drops what they no longer allow at the next auth.refresh
+// (Reauthorize), so an anonymous listener leaves a device that became
+// registered within one token lifetime.
+func (ss *session) Claims() token.Claims {
+	c := ss.claims()
+	if c.Subject != token.AnonymousSubject || ss.s.o.Policy == nil {
+		return c
+	}
+
+	c.Scopes = slices.DeleteFunc(slices.Clone(c.Scopes), func(s token.Scope) bool { return !ss.s.anonymousAllowed(s.Device) })
+
+	return c
+}
 
 // Hello implements media.Peer.
 func (ss *session) Hello() media.Hello {
