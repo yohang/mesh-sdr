@@ -495,6 +495,17 @@ type settingRule struct {
 }
 
 var settingRules = []settingRule{
+	{[]string{"grid.heartbeat_interval_s", "grid.offline_after_s"}, func(get func(string) any) []shared.Violation {
+		hb, _ := get("grid.heartbeat_interval_s").(int)
+		off, _ := get("grid.offline_after_s").(int)
+
+		if off <= 2*hb {
+			return []shared.Violation{shared.NewViolation("grid.offline_after_s", CodeInvalidValue,
+				fmt.Sprintf("must be more than twice grid.heartbeat_interval_s (%d)", hb))}
+		}
+
+		return nil
+	}},
 	{[]string{"auth.lockout.delay_after", "auth.lockout.lock_after"}, func(get func(string) any) []shared.Violation {
 		delay, _ := get("auth.lockout.delay_after").(int)
 		lock, _ := get("auth.lockout.lock_after").(int)

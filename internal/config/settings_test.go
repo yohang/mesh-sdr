@@ -153,6 +153,8 @@ func TestSettingsChecksAcrossKeys(t *testing.T) {
 		{"only one key set", "[settings.auth.lockout]\nlock_after = 3\n", false},
 		{"max lock shorter", "[settings.auth.lockout]\nlock_for = \"1h\"\nmax_lock = \"30m\"\n", true},
 		{"valid", "[settings.auth.lockout]\ndelay_after = 3\nlock_after = 6\n", false},
+		{"offline within two heartbeats", "[settings.grid]\nheartbeat_interval_s = 10\noffline_after_s = 20\n", true},
+		{"offline after two heartbeats", "[settings.grid]\nheartbeat_interval_s = 10\noffline_after_s = 21\n", false},
 	}
 
 	for _, tt := range tests {

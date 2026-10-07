@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/db"
+	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
@@ -32,6 +34,10 @@ func jobs(adapter db.Adapter, idm *identity.Module, sch *scheduling, values jobs
 	sched.Register(sch.publish, SchedulesPublishEvery)
 	sched.Register(sch.outbox, reportingapp.OutboxPurgeEvery)
 
+	connectionsPurge := gridapp.NewConnectionsPurge(gridsqlite.NewConnectionRepository(adapter),
+		func() time.Duration { return values.Duration("retention.connections") }, time.Now)
+	sched.Register(connectionsPurge, gridapp.ConnectionsPurgeEvery)
+
 	for _, j := range idm.Purges {
 		sched.Register(j, identityapp.LinkPurgeEvery)
 	}
@@ -51,6 +57,11 @@ func jobs(adapter db.Adapter, idm *identity.Module, sch *scheduling, values jobs
 		return nil, nil, err
 	}
 
+	connections, err := jobssqlite.NewTableStats(adapter, "connections")
+	if err != nil {
+		return nil, nil, err
+	}
+
 	stores := []jobsapp.Store{
 		{Name: "sessions", Label: "Ended sessions", SettingKey: "retention.sessions", Job: identityapp.JobSessionsReap, Stats: sessions},
 		{Name: "audit_log", Label: "Audit log", SettingKey: "retention.audit_log", Job: identityapp.JobAuditPurge, Stats: auditLog},
@@ -58,6 +69,7 @@ func jobs(adapter db.Adapter, idm *identity.Module, sch *scheduling, values jobs
 			Name: "reporting_outbox", Label: "Reporting outbox (delivered reports)", SettingKey: reportingapp.KeySentRetention,
 			Job: reportingapp.JobOutboxPurge, Stats: outbox,
 		},
+		{Name: "connections", Label: "Connections", SettingKey: "retention.connections", Job: gridapp.JobConnectionsPurge, Stats: connections},
 	}
 
 	return sched, jobsapp.NewRetention(stores, sched, values, purgeAuditor{log: audit}, time.Now), nil

@@ -21,6 +21,7 @@ import (
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	settingsdomain "github.com/yohang/mesh-sdr/internal/settings/domain"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
 
@@ -279,4 +280,35 @@ func HubNodes(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) (*app.Nod
 // newGridAuditor writes grid audit records to the identity audit_log.
 func newGridAuditor(adapter db.Adapter, now func() time.Time, logger *slog.Logger) gridAuditor {
 	return gridAuditor{log: identitysqlite.NewAuditLog(adapter), now: now, logger: component(logger, "grid.audit")}
+}
+
+// gridSettings reads the grid DB settings.
+type gridSettings interface {
+	Get(key string) (settingsdomain.Effective, bool)
+	Int(key string) int
+}
+
+// applySettings applies the grid timings of the settings snapshot: a value
+// set in the DB or the config replaces the base timing, a default keeps it
+// (the defaults are the FEATURE_SPEC ones; tests run with faster bases).
+func (g *hubGrid) applySettings(base app.Timings, s gridSettings) {
+	t := base
+
+	if e, ok := s.Get("grid.heartbeat_interval_s"); ok && e.Source() != settingsdomain.SourceDefault {
+		t.HeartbeatInterval = time.Duration(s.Int("grid.heartbeat_interval_s")) * time.Second
+	}
+
+	if e, ok := s.Get("grid.offline_after_s"); ok && e.Source() != settingsdomain.SourceDefault {
+		t.OfflineAfter = time.Duration(s.Int("grid.offline_after_s")) * time.Second
+	}
+
+	if g.status != nil {
+		g.status.SetTimings(t)
+	}
+
+	if g.manager != nil {
+		g.manager.SetHeartbeatInterval(t.HeartbeatInterval)
+	}
+
+	g.presence.SetTimings(t)
 }

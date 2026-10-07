@@ -21,7 +21,7 @@ type Presence struct {
 	repo    domain.ConnectionRepository
 	devices domain.DeviceRepository
 	tracker *Tracker
-	timings Timings
+	timings *timingsCell
 	now     Clock
 	logger  *slog.Logger
 }
@@ -29,8 +29,11 @@ type Presence struct {
 // NewPresence returns the service. tracker may be nil when the grid is
 // disabled.
 func NewPresence(repo domain.ConnectionRepository, devices domain.DeviceRepository, tracker *Tracker, timings Timings, now Clock, logger *slog.Logger) *Presence {
-	return &Presence{repo: repo, devices: devices, tracker: tracker, timings: timings, now: now, logger: logger}
+	return &Presence{repo: repo, devices: devices, tracker: tracker, timings: newTimingsCell(timings), now: now, logger: logger}
 }
+
+// SetTimings replaces the timings (settings change).
+func (s *Presence) SetTimings(t Timings) { s.timings.set(t) }
 
 // Open records a new connection (hub events WS, gateway authz).
 func (s *Presence) Open(ctx context.Context, info domain.ConnectionInfo) error {
@@ -80,12 +83,12 @@ func (s *Presence) CloseAtStart(ctx context.Context) error {
 	return nil
 }
 
-// Reap closes stale rows, the rows of nodes lost for longer than the stale
-// delay, and deletes closed rows past the retention.
+// Reap closes stale rows and the rows of nodes lost for longer than the
+// stale delay. Closed rows are deleted by the connections.purge job.
 func (s *Presence) Reap(ctx context.Context) {
 	now := s.now()
 
-	if n, err := s.repo.CloseStale(ctx, now.Add(-s.timings.PresenceStale)); err != nil {
+	if n, err := s.repo.CloseStale(ctx, now.Add(-s.timings.get().PresenceStale)); err != nil {
 		s.logger.ErrorContext(ctx, "close stale connections", slog.Any("error", err))
 	} else if n > 0 {
 		s.logger.DebugContext(ctx, "stale connections closed", slog.Int64("count", n))
@@ -99,22 +102,18 @@ func (s *Presence) Reap(ctx context.Context) {
 
 		for _, id := range nodes {
 			st, ok := s.tracker.State(id)
-			if ok && !st.Connected && !st.DisconnectedAt.IsZero() && now.Sub(st.DisconnectedAt) > s.timings.PresenceStale {
+			if ok && !st.Connected && !st.DisconnectedAt.IsZero() && now.Sub(st.DisconnectedAt) > s.timings.get().PresenceStale {
 				if _, err := s.repo.CloseNode(ctx, id, domain.CloseNodeLost, now); err != nil {
 					s.logger.ErrorContext(ctx, "close connections of a lost node", slog.String("node_id", id.String()), slog.Any("error", err))
 				}
 			}
 		}
 	}
-
-	if _, err := s.repo.DeleteClosedBefore(ctx, now.Add(-s.timings.ConnectionsKeep)); err != nil {
-		s.logger.ErrorContext(ctx, "delete old connections", slog.Any("error", err))
-	}
 }
 
 // Run reaps every 15 s (or every stale/3 when shorter) until ctx is done.
 func (s *Presence) Run(ctx context.Context) {
-	t := time.NewTicker(min(15*time.Second, s.timings.PresenceStale/3))
+	t := time.NewTicker(min(15*time.Second, s.timings.get().PresenceStale/3))
 	defer t.Stop()
 
 	for {
@@ -250,4 +249,32 @@ func (s *Presence) Count(ctx context.Context) (int, error) { return s.repo.Count
 // List returns the open connections.
 func (s *Presence) List(ctx context.Context) ([]*domain.Connection, error) {
 	return s.repo.ListOpen(ctx)
+}
+
+// Connections retention job (TECHNICAL_SPEC §7.3 "Retention jobs",
+// retention.connections).
+const (
+	JobConnectionsPurge   = "connections.purge"
+	ConnectionsPurgeEvery = time.Hour
+)
+
+// ConnectionsPurge deletes closed presence rows past their retention.
+type ConnectionsPurge struct {
+	repo      domain.ConnectionRepository
+	retention func() time.Duration
+	now       Clock
+}
+
+// NewConnectionsPurge returns the job; retention gives the current
+// retention.connections.
+func NewConnectionsPurge(repo domain.ConnectionRepository, retention func() time.Duration, now Clock) *ConnectionsPurge {
+	return &ConnectionsPurge{repo: repo, retention: retention, now: now}
+}
+
+// Name implements the jobs scheduler's Job.
+func (j *ConnectionsPurge) Name() string { return JobConnectionsPurge }
+
+// Run implements the jobs scheduler's Job: it returns the rows deleted.
+func (j *ConnectionsPurge) Run(ctx context.Context) (int64, error) {
+	return j.repo.DeleteClosedBefore(ctx, j.now().Add(-j.retention()))
 }

@@ -386,7 +386,7 @@ func TestRetentionAPI(t *testing.T) {
 	status, v, _ := b.json(http.MethodGet, "/api/v1/retention", "")
 	stores, _ := v["stores"].([]any)
 
-	if status != 200 || len(stores) != 3 {
+	if status != 200 || len(stores) != 4 {
 		t.Fatalf("GET = %d %v", status, v)
 	}
 

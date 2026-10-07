@@ -793,6 +793,7 @@ var htmlActions = map[string]string{
 	"POST /admin/look-and-feel":       "patchSettings",
 	"POST /admin/retention":           "patchSettings",
 	"POST /admin/retention/purge":     "purgeStore",
+	"POST /admin/grid":                "patchSettings",
 	"POST /admin/site/images":         "putReceiverImage",
 	"POST /admin/site/images/remove":  "deleteReceiverImage",
 	"POST /admin/devices/{id}/forget": "forgetDevice",

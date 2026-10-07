@@ -204,6 +204,11 @@ trusted_proxies = []
 [settings.retention]
 # sessions = "30d"                       # ended sessions (at least 1d)
 # audit_log = "365d"                     # audit log (at least 30d)
+# connections = "30d"                    # closed presence rows (at least 1d)
+
+[settings.grid]
+# heartbeat_interval_s = 10              # node heartbeat period (1..300 s)
+# offline_after_s = 60                   # offline without heartbeat (5..3600 s, > 2 heartbeats)
 
 [settings.retention.reporting_outbox]
 # sent = "7d"                            # reports delivered to external networks

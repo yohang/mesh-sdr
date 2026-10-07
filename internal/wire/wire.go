@@ -301,6 +301,10 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, fmt.Errorf("settings: %w", err)
 	}
 
+	// grid.heartbeat_interval_s and grid.offline_after_s apply live.
+	g.applySettings(timings, settingsModule.Store.Snapshot())
+	settingsModule.Store.Subscribe(func(s *settingsapp.Snapshot) { g.applySettings(timings, s) })
+
 	adminGate := &roleGate{role: identitydomain.RoleAdmin}
 	shellModule := shell.Wire(shell.Deps{
 		Settings: settingsModule.Store, AdminGate: adminGate, User: userOf, Logger: logger,

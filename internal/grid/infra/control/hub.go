@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/grid/app"
@@ -65,7 +66,15 @@ type Manager struct {
 	revMu       sync.Mutex
 	revSessions map[string]time.Time
 	revUsers    map[string]time.Time
+
+	// heartbeat is the interval sent in ctl.hello (ns); it follows the
+	// grid.heartbeat_interval_s setting.
+	heartbeat atomic.Int64
 }
+
+// SetHeartbeatInterval changes the heartbeat interval sent to nodes in
+// ctl.hello: a node takes it when its control channel (re)connects.
+func (m *Manager) SetHeartbeatInterval(d time.Duration) { m.heartbeat.Store(int64(d)) }
 
 // RevocationMemory is how long revoked sessions and users are re-pushed to
 // nodes that (re)connect: longer than any access token lives (TTL ≤ 600 s
@@ -126,10 +135,13 @@ func NewManager(o HubOptions) *Manager {
 		o.RenewalDue = pki.RenewalDue
 	}
 
-	return &Manager{
+	m := &Manager{
 		o: o, links: map[domain.NodeID]*link{}, wake: make(chan struct{}, 1),
 		revSessions: map[string]time.Time{}, revUsers: map[string]time.Time{},
 	}
+	m.heartbeat.Store(int64(o.HeartbeatInterval))
+
+	return m
 }
 
 var _ app.Links = (*Manager)(nil)
@@ -576,7 +588,7 @@ func (s *hubSession) run(ctx context.Context, l *link) error {
 
 	hello := ctl.Hello{
 		HubID: o.HubID, HubVersion: o.Control.HubVersion(), Protocols: []string{rxv1.ControlSubprotocol},
-		ServerTime: o.Now().UnixMilli(), HeartbeatIntervalMS: o.HeartbeatInterval.Milliseconds(),
+		ServerTime: o.Now().UnixMilli(), HeartbeatIntervalMS: time.Duration(s.m.heartbeat.Load()).Milliseconds(),
 	}
 	if err := send(s.conn, rxv1.TypeCtlHello, rxv1.CorrelationID{}, hello); err != nil {
 		return err

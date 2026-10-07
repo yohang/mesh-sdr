@@ -212,9 +212,18 @@ func TestPresenceLifecycleClosures(t *testing.T) {
 		t.Errorf("after hub start = %q", r)
 	}
 
-	// Retention deletes old closed rows.
+	// The retention job deletes old closed rows.
+	job := app.NewConnectionsPurge(repo, func() time.Duration { return 30 * 24 * time.Hour }, e.clock.now)
+
+	if n, err := job.Run(ctx); err != nil || n != 0 {
+		t.Fatalf("purge of fresh rows = %d, %v", n, err)
+	}
+
 	e.clock.advance(31 * 24 * time.Hour)
-	p.Reap(ctx)
+
+	if n, err := job.Run(ctx); err != nil || n == 0 {
+		t.Fatalf("purge of old rows = %d, %v", n, err)
+	}
 
 	if _, err := repo.Get(ctx, d); !errors.Is(err, domain.ErrConnectionNotFound) {
 		t.Errorf("retention kept the row: %v", err)
