@@ -27,3 +27,8 @@
 /password/reset/not-a-valid-token 404
 /admin/users 200 signed-in
 /admin/audit 200 signed-in
+/admin/nodes 200 signed-in
+/admin/nodes/new 200 signed-in
+/admin/nodes/attic 200 signed-in
+/admin/connections 200 signed-in
+/admin/grid 200 signed-in

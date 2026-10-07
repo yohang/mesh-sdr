@@ -1,0 +1,12 @@
+# Accessibility job: a hub CA (created by the ca-init service on the data
+# volume) and one node declared in the config, pending enrollment, so the
+# Admin › Nodes pages have a node to show.
+schema_version = 1
+
+[tls]
+ca_cert = "tls/ca.pem"
+ca_key = { file = "tls/ca.key" }
+
+[nodes.attic]
+name = "Attic"
+url = "https://attic.invalid:8074"
