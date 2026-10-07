@@ -31,6 +31,7 @@ require (
 	golang.org/x/term v0.46.0
 	golang.org/x/text v0.42.0
 	golang.org/x/time v0.16.0
+	gonum.org/v1/gonum v0.17.0
 	modernc.org/sqlite v1.60.1
 )
 
