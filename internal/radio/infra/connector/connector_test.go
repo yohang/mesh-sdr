@@ -19,6 +19,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/radio/infra/connector"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 var toolDir string
@@ -72,7 +73,7 @@ func device(t *testing.T, id, driverDevice string, alwaysOn bool) *domain.Device
 	r, _ := domain.NewFreqRange(domain.MustFrequency(24_000_000), domain.MustFrequency(1_766_000_000))
 
 	d, err := domain.NewDevice(domain.DeviceParams{
-		ID: domain.MustDeviceID(id), Name: id, Type: typ, Enabled: true, Range: r,
+		ID: shared.MustDeviceID(id), Name: id, Type: typ, Enabled: true, Range: r,
 		Rates: []domain.SampleRate{domain.MustSampleRate(testRate)}, AlwaysOn: alwaysOn, AutoRecover: true, Driver: drv,
 	})
 	if err != nil {
@@ -334,7 +335,7 @@ func TestStartTimeoutAndMissingTool(t *testing.T) {
 	drv, _ := domain.NewDriver(typ, "127.0.0.1:1234", 0, domain.AutoGain(), false)
 	r, _ := domain.NewFreqRange(domain.MustFrequency(24_000_000), domain.MustFrequency(1_766_000_000))
 	tcp, _ := domain.NewDevice(domain.DeviceParams{
-		ID: domain.MustDeviceID("tcp"), Name: "tcp", Type: typ, Enabled: true, Range: r,
+		ID: shared.MustDeviceID("tcp"), Name: "tcp", Type: typ, Enabled: true, Range: r,
 		Rates: []domain.SampleRate{domain.MustSampleRate(testRate)}, AlwaysOn: true, Driver: drv,
 	})
 

@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
+
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/identity/app"
@@ -188,22 +190,22 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		retention app.Retention       = app.FixedRetention{Sessions: app.DefaultSessionRetention, Audit: 365 * 24 * time.Hour}
 		passwords                     = policies(nil)
 		values    app.Settings        = app.DefaultSettings{}
-		limiter   *memory.IPLimiter
+		limiter   *ratelimit.IPLimiter
 	)
 
 	if d.Settings != nil {
 		p := settingsrc.New(d.Settings, component(d.Logger, "identity.infra.settings"))
 		lifetimes, retention, passwords, values = p, p, policies(p), p
-		limiter = memory.NewDynamicIPLimiter(p.LoginRate, memory.DefaultCapacity)
+		limiter = ratelimit.NewDynamicIP(p.LoginRate, ratelimit.DefaultCapacity)
 	} else {
-		limiter = memory.NewIPLimiter(loginIPEvery, loginIPBurst, memory.DefaultCapacity)
+		limiter = ratelimit.NewIP(loginIPEvery, loginIPBurst, ratelimit.DefaultCapacity)
 	}
 
 	auth := app.NewAuth(app.AuthDeps{
 		Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, IDs: d.IDs, Now: d.Now, Provider: local,
 		IPLimiter:       limiter,
-		Unknown:         memory.NewThrottle(memory.DefaultCapacity),
-		Refusals:        memory.NewRefusalGate(memory.DefaultCapacity),
+		Unknown:         memory.NewThrottle(ratelimit.DefaultCapacity),
+		Refusals:        memory.NewRefusalGate(ratelimit.DefaultCapacity),
 		SessionPolicies: lifetimes,
 		Revocations:     d.Revocations,
 		Logger:          component(d.Logger, "identity.app.auth"),
@@ -220,7 +222,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 
 	setup := app.NewSetup(app.SetupDeps{
 		Users: r.users, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now, Policies: passwords,
-		Auth: auth, Limiter: memory.NewIPLimiter(setupIPEvery, setupIPBurst, memory.DefaultCapacity),
+		Auth: auth, Limiter: ratelimit.NewIP(setupIPEvery, setupIPBurst, ratelimit.DefaultCapacity),
 		HubURL: d.Config.Hub.URL, Logger: component(d.Logger, "identity.app.setup"),
 	})
 
@@ -241,7 +243,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	invitations := app.NewInvitations(app.InvitationsDeps{
 		Invitations: r.invitations, Users: r.users, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs, Now: d.Now,
 		Settings: values, Policies: passwords, Auth: auth, Notifier: notifier, Links: app.NewLinks(d.Config.Hub.URL),
-		Limiter: memory.NewIPLimiter(inviteIPEvery, inviteIPBurst, memory.DefaultCapacity),
+		Limiter: ratelimit.NewIP(inviteIPEvery, inviteIPBurst, ratelimit.DefaultCapacity),
 		Logger:  component(d.Logger, "identity.app.invitations"),
 	})
 
@@ -249,9 +251,9 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Pending: app.PendingLinks{Resets: r.resets, Emails: r.emailChanges},
 		Tokens:  r.resets, Users: r.users, Sessions: r.sessions, Audit: r.audit, Tx: d.DB, Hasher: r.hasher, IDs: d.IDs,
 		Now: d.Now, Settings: values, Policies: passwords, Notifier: notifier, Links: app.NewLinks(d.Config.Hub.URL),
-		Requests: memory.NewIPLimiter(resetIPEvery, resetIPBurst, memory.DefaultCapacity),
-		Accounts: memory.NewKeyLimiter(resetIPEvery, resetIPBurst, memory.DefaultCapacity),
-		Confirms: memory.NewIPLimiter(inviteIPEvery, inviteIPBurst, memory.DefaultCapacity), Revocations: d.Revocations,
+		Requests: ratelimit.NewIP(resetIPEvery, resetIPBurst, ratelimit.DefaultCapacity),
+		Accounts: ratelimit.New[string](resetIPEvery, resetIPBurst, ratelimit.DefaultCapacity),
+		Confirms: ratelimit.NewIP(inviteIPEvery, inviteIPBurst, ratelimit.DefaultCapacity), Revocations: d.Revocations,
 		Logger: component(d.Logger, "identity.app.resets"),
 	})
 
@@ -269,7 +271,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 
 	tokens := app.NewTokens(app.TokensDeps{
 		Signer: keys, Devices: devices, Binder: d.Binder, Settings: values,
-		Limiter: memory.NewKeyLimiter(tokenEvery, tokenBurst, memory.DefaultCapacity),
+		Limiter: ratelimit.New[string](tokenEvery, tokenBurst, ratelimit.DefaultCapacity),
 		Issuer:  d.Config.Hub.URL, TTL: d.Config.Auth.TokenTTL.Duration(), Now: d.Now,
 		Logger: component(d.Logger, "identity.app.tokens"),
 	})

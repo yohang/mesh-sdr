@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
+
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	"github.com/yohang/mesh-sdr/internal/identity/app"
@@ -107,7 +109,7 @@ func newEnv(t *testing.T, ipLimiter app.IPLimiter) *env {
 	}
 
 	if ipLimiter == nil {
-		ipLimiter = memory.NewIPLimiter(time.Millisecond, 1000, 100)
+		ipLimiter = ratelimit.NewIP(time.Millisecond, 1000, 100)
 	}
 
 	e.auth = app.NewAuth(app.AuthDeps{
@@ -405,7 +407,7 @@ func TestLoginLockoutIsPersistedAndAudited(t *testing.T) {
 }
 
 func TestLoginIPRateLimit(t *testing.T) {
-	e := newEnv(t, memory.NewIPLimiter(12*time.Second, 5, 100))
+	e := newEnv(t, ratelimit.NewIP(12*time.Second, 5, 100))
 	e.addUser(t, "alice", "", domain.RoleListener)
 
 	for range 5 {
@@ -433,7 +435,7 @@ func TestRefusedLoginsAreAuditedOncePerWindow(t *testing.T) {
 	}
 
 	t.Run("address", func(t *testing.T) {
-		e := newEnv(t, memory.NewIPLimiter(time.Minute, 1, 100))
+		e := newEnv(t, ratelimit.NewIP(time.Minute, 1, 100))
 		e.addUser(t, "alice", "", domain.RoleListener)
 
 		for range 20 {

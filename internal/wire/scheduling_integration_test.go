@@ -7,10 +7,9 @@ import (
 
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
-	presetsdomain "github.com/yohang/mesh-sdr/internal/presets/domain"
-	presetssqlite "github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
-	schedulesdomain "github.com/yohang/mesh-sdr/internal/schedules/domain"
-	schedulessqlite "github.com/yohang/mesh-sdr/internal/schedules/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/presets"
+	"github.com/yohang/mesh-sdr/internal/schedules"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -51,29 +50,29 @@ func TestDesiredStateEndToEnd(t *testing.T) {
 	ids := shared.NewUUIDv7Generator()
 	pid, _ := ids.New(now)
 
-	spec, err := presetsdomain.NewSpec(presetsdomain.Draft{Name: "20 m", CenterFreq: 14_074_000, SampRate: 2_048_000})
+	spec, err := presets.NewSpec(presets.Draft{Name: "20 m", CenterFreq: 14_074_000, SampRate: 2_048_000})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	p, _ := presetsdomain.NewPreset(pid, spec, 0, now)
-	if err := presetssqlite.NewPresets(e.adapter).Create(ctx, p); err != nil {
+	p, _ := presets.NewPreset(pid, spec, 0, now)
+	if err := presets.NewPresets(e.adapter).Create(ctx, p); err != nil {
 		t.Fatal(err)
 	}
 
 	sid, _ := ids.New(now)
 
-	sspec, err := schedulesdomain.NewSpec(schedulesdomain.Draft{
+	sspec, err := schedules.NewSpec(schedules.Draft{
 		DeviceID: "hf", PresetID: pid.String(), StartMinute: new(0), EndMinute: new(720),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	sc, _ := schedulesdomain.NewSchedule(sid, sspec, now)
-	schedules := schedulessqlite.NewSchedules(e.adapter)
+	sc, _ := schedules.NewSchedule(sid, sspec, now)
+	repo := schedules.NewSchedules(e.adapter)
 
-	if err := schedules.Create(ctx, sc); err != nil {
+	if err := repo.Create(ctx, sc); err != nil {
 		t.Fatal(err)
 	}
 
@@ -88,16 +87,16 @@ func TestDesiredStateEndToEnd(t *testing.T) {
 	})
 
 	// Removing the node removes hf: its schedule is disabled, not deleted.
-	if err := e.g.nodes.Delete(ctx, gridapp.ActorCLI, "attic"); err != nil {
+	if err := e.g.nodes.Delete(ctx, audit.CLI, "attic"); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := schedules.Get(ctx, sid)
+	got, err := repo.Get(ctx, sid)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if reason, _ := got.DisabledReason(); got.Enabled() || reason != schedulesdomain.ReasonDeviceRemoved {
+	if reason, _ := got.DisabledReason(); got.Enabled() || reason != schedules.ReasonDeviceRemoved {
 		t.Errorf("schedule after the node removal = %+v", got.Snapshot())
 	}
 }

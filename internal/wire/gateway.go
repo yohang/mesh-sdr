@@ -13,11 +13,11 @@ import (
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/gateway"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
-	"github.com/yohang/mesh-sdr/internal/grid/infra/ratelimit"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
 )
 
 // Gateway authz rate limits (TECHNICAL_SPEC §5.12): WebSocket upgrades 10
@@ -75,8 +75,9 @@ func (g *hubGrid) mediaAccess(cfg config.Hub, policy gridapp.ListenPolicySource,
 	return gridapp.NewMediaAccess(gridapp.MediaAccessOptions{
 		Nodes: g.nodeRepo, Devices: g.deviceRepo, Tracker: g.tracker, Presence: g.presence, Issuer: g.keys,
 		Policy: policy, HubURL: cfg.Hub.URL,
-		Upgrades: ratelimit.New(upgradeEvery, upgradeBurst), Mints: ratelimit.New(mintEvery, mintBurst),
-		Now: time.Now, Logger: component(logger, "grid.app.authz"),
+		Upgrades: ratelimit.New[string](upgradeEvery, upgradeBurst, ratelimit.DefaultCapacity),
+		Mints:    ratelimit.New[string](mintEvery, mintBurst, ratelimit.DefaultCapacity),
+		Now:      time.Now, Logger: component(logger, "grid.app.authz"),
 	})
 }
 
@@ -148,7 +149,7 @@ func (s subject) HasOnDevice(role, device string) bool {
 		return false
 	}
 
-	d, err := identitydomain.NewDeviceID(device)
+	d, err := shared.NewDeviceID(device)
 	if err != nil {
 		return false
 	}

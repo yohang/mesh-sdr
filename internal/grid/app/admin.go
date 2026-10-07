@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -76,7 +78,7 @@ func (s *Nodes) linksOrNone() Links {
 }
 
 // Add declares a node (GRID-005) and issues its enrollment token.
-func (s *Nodes) Add(ctx context.Context, actor string, in NewNodeInput) (Issued, error) {
+func (s *Nodes) Add(ctx context.Context, actor audit.Actor, in NewNodeInput) (Issued, error) {
 	fp, err := s.ca.Fingerprint()
 	if err != nil {
 		return Issued{}, ErrGridDisabled
@@ -116,7 +118,7 @@ func (s *Nodes) Add(ctx context.Context, actor string, in NewNodeInput) (Issued,
 		return Issued{}, err
 	}
 
-	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.add", Target: id.String(), Result: ResultOK})
+	s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.add", TargetType: "node", TargetID: id.String(), Result: audit.ResultOK})
 	s.logger.InfoContext(ctx, "node added", slog.String("node_id", id.String()), slog.String("url", u.String()))
 	s.notify(ctx, id)
 
@@ -137,7 +139,7 @@ func (s *Nodes) Get(ctx context.Context, id string) (*domain.Node, error) {
 }
 
 // Update applies an admin change at expectedVersion.
-func (s *Nodes) Update(ctx context.Context, actor, id string, name, url *string, disabled *bool, expectedVersion int) (*domain.Node, error) {
+func (s *Nodes) Update(ctx context.Context, actor audit.Actor, id string, name, url *string, disabled *bool, expectedVersion int) (*domain.Node, error) {
 	var p domain.NodePatch
 
 	if name != nil {
@@ -174,12 +176,12 @@ func (s *Nodes) Update(ctx context.Context, actor, id string, name, url *string,
 		return s.repo.Save(ctx, n, v)
 	})
 	if err != nil {
-		s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.update", Target: id, Result: ResultDenied, Detail: map[string]string{"reason": err.Error()}})
+		s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.update", TargetType: "node", TargetID: id, Result: audit.ResultDenied, After: map[string]string{"reason": err.Error()}})
 
 		return nil, err
 	}
 
-	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.update", Target: id, Result: ResultOK})
+	s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.update", TargetType: "node", TargetID: id, Result: audit.ResultOK})
 
 	if n.Disabled() {
 		s.linksOrNone().Drop(ctx, n.ID())
@@ -198,14 +200,14 @@ func (s *Nodes) OnDelete(h func(ctx context.Context, id domain.NodeID) error) {
 }
 
 // Delete removes an admin-managed node and revokes its certificate.
-func (s *Nodes) Delete(ctx context.Context, actor, id string) error {
+func (s *Nodes) Delete(ctx context.Context, actor audit.Actor, id string) error {
 	n, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 
 	if err := n.CheckDeletable(); err != nil {
-		s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.delete", Target: id, Result: ResultDenied, Detail: map[string]string{"reason": err.Error()}})
+		s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.delete", TargetType: "node", TargetID: id, Result: audit.ResultDenied, After: map[string]string{"reason": err.Error()}})
 
 		return err
 	}
@@ -240,7 +242,7 @@ func (s *Nodes) Delete(ctx context.Context, actor, id string) error {
 		return fmt.Errorf("delete node %s: %w", id, err)
 	}
 
-	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.delete", Target: id, Result: ResultOK})
+	s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.delete", TargetType: "node", TargetID: id, Result: audit.ResultOK})
 	s.logger.InfoContext(ctx, "node deleted", slog.String("node_id", id))
 	s.linksOrNone().Drop(ctx, n.ID())
 	s.notify(ctx, n.ID())
@@ -254,7 +256,7 @@ func (s *Nodes) Delete(ctx context.Context, actor, id string) error {
 // channel is closed after the revocation list is pushed, so the node closes
 // its media connections. Config-declared nodes can be revoked too: it is
 // not a deletion.
-func (s *Nodes) Revoke(ctx context.Context, actor, id string) (*domain.Node, error) {
+func (s *Nodes) Revoke(ctx context.Context, actor audit.Actor, id string) (*domain.Node, error) {
 	n, err := s.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -282,12 +284,12 @@ func (s *Nodes) Revoke(ctx context.Context, actor, id string) (*domain.Node, err
 		return s.repo.Save(ctx, n, v)
 	})
 	if err != nil {
-		s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.revoke", Target: id, Result: ResultDenied, Detail: map[string]string{"reason": err.Error()}})
+		s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.revoke", TargetType: "node", TargetID: id, Result: audit.ResultDenied, After: map[string]string{"reason": err.Error()}})
 
 		return nil, fmt.Errorf("revoke node %s: %w", id, err)
 	}
 
-	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.revoke", Target: id, Result: ResultOK})
+	s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.revoke", TargetType: "node", TargetID: id, Result: audit.ResultOK})
 	s.logger.InfoContext(ctx, "node revoked", slog.String("node_id", id))
 	s.linksOrNone().Drop(ctx, n.ID())
 	s.notify(ctx, n.ID())
@@ -340,8 +342,8 @@ func (s *Nodes) EnrollLocal(ctx context.Context, id string, cert domain.CertInfo
 		return fmt.Errorf("enroll local node %s: %w", id, err)
 	}
 
-	s.audit.Record(ctx, AuditRecord{ActorKind: ActorSystem, Action: "node.enroll", Target: id, Result: ResultOK,
-		Detail: map[string]string{"via": "local", "cert_serial": cert.Serial()}})
+	s.audit.Record(ctx, audit.Record{Actor: audit.System, Action: "node.enroll", TargetType: "node", TargetID: id, Result: audit.ResultOK,
+		After: map[string]string{"via": "local", "cert_serial": cert.Serial()}})
 	s.linksOrNone().Wake()
 	s.notify(ctx, n.ID())
 
@@ -350,7 +352,7 @@ func (s *Nodes) EnrollLocal(ctx context.Context, id string, cert domain.CertInfo
 
 // IssueToken issues a new enrollment token (re-enrollment). The current
 // certificate, if any, is revoked.
-func (s *Nodes) IssueToken(ctx context.Context, actor, id string) (Issued, error) {
+func (s *Nodes) IssueToken(ctx context.Context, actor audit.Actor, id string) (Issued, error) {
 	fp, err := s.ca.Fingerprint()
 	if err != nil {
 		return Issued{}, ErrGridDisabled
@@ -397,7 +399,7 @@ func (s *Nodes) IssueToken(ctx context.Context, actor, id string) (Issued, error
 		return Issued{}, fmt.Errorf("issue token for node %s: %w", id, err)
 	}
 
-	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.enrollment_token.issue", Target: id, Result: ResultOK})
+	s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.enrollment_token.issue", TargetType: "node", TargetID: id, Result: audit.ResultOK})
 	s.linksOrNone().Drop(ctx, n.ID())
 	s.notify(ctx, n.ID())
 

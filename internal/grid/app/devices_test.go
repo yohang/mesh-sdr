@@ -11,6 +11,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 )
 
 func device(id, typ string) ctl.Device {
@@ -106,11 +107,11 @@ func TestDeviceRegistrySync(t *testing.T) {
 		t.Error("hf of an offline node reported missing")
 	}
 
-	if err := s.Forget(ctx, app.ActorUser, "hf"); !errors.Is(err, domain.ErrDeviceStillReported) {
+	if err := s.Forget(ctx, audit.Caller, "hf"); !errors.Is(err, domain.ErrDeviceStillReported) {
 		t.Errorf("forget a reported device = %v", err)
 	}
 
-	if err := s.Forget(ctx, app.ActorUser, "vhf"); err != nil {
+	if err := s.Forget(ctx, audit.Caller, "vhf"); err != nil {
 		t.Fatalf("forget vhf: %v", err)
 	}
 
@@ -118,7 +119,7 @@ func TestDeviceRegistrySync(t *testing.T) {
 		t.Errorf("vhf after forget = %v", err)
 	}
 
-	if err := s.Forget(ctx, app.ActorUser, "nope"); !errors.Is(err, domain.ErrDeviceNotFound) {
+	if err := s.Forget(ctx, audit.Caller, "nope"); !errors.Is(err, domain.ErrDeviceNotFound) {
 		t.Errorf("forget an unknown device = %v", err)
 	}
 

@@ -12,6 +12,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/http/api"
 	idomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 var discard = slog.New(slog.DiscardHandler)
@@ -44,8 +45,8 @@ func (s summary) Summary(context.Context) ([]gridapp.DeviceFeatures, error) { re
 // registered-only devices hidden from anonymous callers.
 func TestFeatures(t *testing.T) {
 	s := summary{
-		{ID: domain.MustDeviceID("hf"), Node: domain.MustNodeID("attic"), Name: "HF", Online: true, Modes: []string{"ft8"}, ListenPolicy: "anonymous"},
-		{ID: domain.MustDeviceID("vhf"), Node: domain.MustNodeID("attic"), Name: "VHF", Modes: []string{}, ListenPolicy: "registered"},
+		{ID: shared.MustDeviceID("hf"), Node: domain.MustNodeID("attic"), Name: "HF", Online: true, Modes: []string{"ft8"}, ListenPolicy: "anonymous"},
+		{ID: shared.MustDeviceID("vhf"), Node: domain.MustNodeID("attic"), Name: "VHF", Modes: []string{}, ListenPolicy: "registered"},
 	}
 
 	for _, tt := range []struct {

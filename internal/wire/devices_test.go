@@ -9,6 +9,7 @@ import (
 
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // seedDevices registers node attic with a reported device (hf) and a device
@@ -28,7 +29,7 @@ func seedDevices(t *testing.T, h *adminHub) {
 	repo := gridsqlite.NewDeviceRepository(h.db)
 
 	for i, id := range []string{"hf", "vhf"} {
-		spec := griddomain.DeviceSpec{ID: griddomain.MustDeviceID(id), Name: strings.ToUpper(id) + " receiver", Type: "rtl_sdr",
+		spec := griddomain.DeviceSpec{ID: shared.MustDeviceID(id), Name: strings.ToUpper(id) + " receiver", Type: "rtl_sdr",
 			Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000, SampleRates: []int64{2_048_000}, OperatorCanRetune: true}
 
 		d, err := griddomain.NewReportedDevice(node, spec, i, now)

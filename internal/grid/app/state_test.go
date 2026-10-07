@@ -11,6 +11,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 type fakeDesired struct{ st ctl.StateApply }
@@ -167,7 +169,7 @@ func (l *listenerSpy) DeviceReported(_ context.Context, d *domain.Device) error 
 	return nil
 }
 
-func (l *listenerSpy) DevicesStale(_ context.Context, ids []domain.DeviceID) error {
+func (l *listenerSpy) DevicesStale(_ context.Context, ids []shared.DeviceID) error {
 	for _, id := range ids {
 		l.stale = append(l.stale, id.String())
 	}
@@ -175,7 +177,7 @@ func (l *listenerSpy) DevicesStale(_ context.Context, ids []domain.DeviceID) err
 	return nil
 }
 
-func (l *listenerSpy) DevicesRemoved(_ context.Context, ids []domain.DeviceID) error {
+func (l *listenerSpy) DevicesRemoved(_ context.Context, ids []shared.DeviceID) error {
 	for _, id := range ids {
 		l.removed = append(l.removed, id.String())
 	}
@@ -209,7 +211,7 @@ func TestDeviceListener(t *testing.T) {
 		t.Errorf("reported %v, stale %v", spy.reported, spy.stale)
 	}
 
-	if err := s.Forget(ctx, app.ActorUser, "vhf"); err != nil {
+	if err := s.Forget(ctx, audit.Caller, "vhf"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -231,7 +233,7 @@ func TestDeviceListener(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := e.svc.Delete(ctx, app.ActorUser, "garden"); err != nil {
+	if err := e.svc.Delete(ctx, audit.Caller, "garden"); err != nil {
 		t.Fatal(err)
 	}
 

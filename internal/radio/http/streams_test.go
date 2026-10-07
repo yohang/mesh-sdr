@@ -16,6 +16,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
 	radiohttp "github.com/yohang/mesh-sdr/internal/radio/http"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 type idleSource struct{}
@@ -129,7 +130,7 @@ func runManager(t *testing.T) *app.Manager {
 	drv, _ := domain.NewDriver(typ, "0", 0, domain.AutoGain(), false)
 	r, _ := domain.NewFreqRange(domain.MustFrequency(144_000_000), domain.MustFrequency(146_000_000))
 	dev, _ := domain.NewDevice(domain.DeviceParams{
-		ID: domain.MustDeviceID("vhf"), Name: "VHF", Type: typ, Enabled: true, Range: r,
+		ID: shared.MustDeviceID("vhf"), Name: "VHF", Type: typ, Enabled: true, Range: r,
 		Rates: []domain.SampleRate{domain.MustSampleRate(250_000)}, Driver: drv,
 	})
 

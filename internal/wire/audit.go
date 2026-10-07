@@ -2,67 +2,85 @@ package wire
 
 import (
 	"context"
-	"log/slog"
-	"strings"
+	"fmt"
 	"time"
 
-	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
+	"github.com/yohang/mesh-sdr/internal/db"
+	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+
+	"github.com/go-chi/chi/v5/middleware"
+
 	"github.com/yohang/mesh-sdr/internal/http/clientip"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 )
 
-// auditAppender is the audit_log repository of the identity module.
-type auditAppender interface {
-	Append(ctx context.Context, e identitydomain.AuditEntry) error
+// auditAppender implements audit.Appender over identity's audit_log, for every
+// module but identity (which writes its own entries).
+type auditAppender struct {
+	log interface {
+		Append(ctx context.Context, e identitydomain.AuditEntry) error
+	}
+	now func() time.Time
 }
 
-// gridAuditor writes the grid audit records to the identity audit_log (the
-// Auditor port of ADR 0008 Q3). A record that cannot be written is logged.
-type gridAuditor struct {
-	log    auditAppender
-	now    func() time.Time
-	logger *slog.Logger
-}
+// Append resolves the actor (audit.Caller: the signed-in user of the
+// request in ctx, or an anonymous client, at the client address resolved by
+// the HTTP front) and appends the entry.
+func (a auditAppender) Append(ctx context.Context, r audit.Record) error {
+	var actor identitydomain.Actor
 
-func (a gridAuditor) actor(ctx context.Context, kind string) identitydomain.Actor {
-	switch kind {
-	case gridapp.ActorUser:
-		// REST calls: the client address resolved by the HTTP front
-		// (trusted proxies applied), invalid outside a request.
+	switch r.Actor {
+	case audit.System:
+		actor = identitydomain.SystemActor()
+	case audit.CLI:
+		actor = identitydomain.CLIActor()
+	default:
 		ip := clientip.From(ctx)
+		actor = identitydomain.AnonymousActor(ip)
 
 		if p := identityhttp.FromContext(ctx).Principal(); !p.IsAnonymous() {
-			return identitydomain.UserActor(p.UserID(), ip)
+			actor = identitydomain.UserActor(p.UserID(), ip)
 		}
-
-		return identitydomain.AnonymousActor(ip)
-	case gridapp.ActorCLI:
-		return identitydomain.CLIActor()
-	default: // system, and node events (the node id is in the target or details)
-		return identitydomain.SystemActor()
 	}
+
+	result := identitydomain.AuditResult(r.Result)
+	if result == "" {
+		result = identitydomain.ResultOK
+	}
+
+	e, err := identitydomain.NewAuditEntry(a.now(), actor, r.Action, result)
+	if err != nil {
+		return fmt.Errorf("audit entry %s: %w", r.Action, err)
+	}
+
+	e = e.WithTarget(r.TargetType, r.TargetID).WithRequestID(middleware.GetReqID(ctx))
+
+	if len(r.Before) > 0 {
+		e = e.WithBefore(r.Before)
+	}
+
+	if len(r.After) > 0 {
+		e = e.WithAfter(r.After)
+	}
+
+	return a.log.Append(ctx, e)
 }
 
-// Record implements gridapp.Auditor.
-func (a gridAuditor) Record(ctx context.Context, r gridapp.AuditRecord) {
-	e, err := identitydomain.NewAuditEntry(a.now(), a.actor(ctx, r.ActorKind), r.Action, identitydomain.AuditResult(r.Result))
-	if err == nil {
-		target := "node"
-		if strings.HasPrefix(r.Action, "device.") {
-			target = "device"
-		}
+// newAuditAppender returns the audit appender over the audit_log of adapter.
+func newAuditAppender(adapter *db.DB, now func() time.Time) auditAppender {
+	return auditAppender{log: identitysqlite.NewAuditLog(adapter), now: now}
+}
 
-		e = e.WithTarget(target, r.Target)
-		if len(r.Detail) > 0 {
-			e = e.WithAfter(r.Detail)
+// currentUser returns the signed-in user of a request (zero when anonymous).
+func currentUser(ctx context.Context) shared.UUID {
+	if p := identityhttp.FromContext(ctx).Principal(); !p.IsAnonymous() {
+		if u, err := shared.UUIDFromBytes(p.UserID().Bytes()); err == nil {
+			return u
 		}
-
-		err = a.log.Append(ctx, e)
 	}
 
-	if err != nil {
-		a.logger.ErrorContext(ctx, "write grid audit record", slog.String("action", r.Action), slog.String("target", r.Target),
-			slog.String("result", r.Result), slog.Any("error", err))
-	}
+	return shared.UUID{}
 }

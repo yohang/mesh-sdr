@@ -3,62 +3,36 @@ package wire
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"time"
 
-	"github.com/go-chi/chi/v5/middleware"
-
-	"github.com/yohang/mesh-sdr/internal/http/clientip"
-	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
-	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
-	settingsapp "github.com/yohang/mesh-sdr/internal/settings/app"
-	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/config"
+	"github.com/yohang/mesh-sdr/internal/db"
+	"github.com/yohang/mesh-sdr/internal/settings"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 )
 
-// settingsAuditor writes the settings audit records to identity's audit_log
-// (in the caller's transaction).
-type settingsAuditor struct{ log identitydomain.AuditLog }
-
-// Record implements settingsapp.Auditor.
-func (a settingsAuditor) Record(ctx context.Context, r settingsapp.AuditRecord) error {
-	actor := identitydomain.SystemActor()
-
-	if !r.Actor.IsSystem() {
-		id, err := identitydomain.NewUserID(r.Actor.User)
-		if err != nil {
-			return fmt.Errorf("audit actor: %w", err)
-		}
-
-		actor = identitydomain.UserActor(id, r.Actor.IP)
-	}
-
-	e, err := identitydomain.NewAuditEntry(r.At, actor, r.Action, identitydomain.AuditResult(r.Result))
+// newSettings builds the settings store (ADR 0010: DB settings, config
+// locking and precedence) and loads the DB settings, and the effective
+// configuration view of Admin › System.
+func newSettings(ctx context.Context, cfg config.Hub, origins config.Origins, adapter *db.DB, audit audit.Appender,
+	now func() time.Time, logger *slog.Logger,
+) (*settings.Store, *settings.EffectiveConfig, error) {
+	catalog, err := config.NewSettingsCatalog(cfg, origins)
 	if err != nil {
-		return fmt.Errorf("audit entry: %w", err)
+		return nil, nil, fmt.Errorf("settings catalog: %w", err)
 	}
 
-	e = e.WithTarget("setting", r.Key).WithRequestID(r.Actor.RequestID)
+	store := settings.NewStore(settings.StoreDeps{
+		Repo: settings.NewSettings(adapter, config.SchemaVersion), Catalog: catalog, Tx: adapter, Audit: audit, Now: now,
+		Logger: component(logger, "settings.app.store"),
+	})
 
-	if r.Before != "" {
-		e = e.WithBefore(map[string]string{"value": r.Before})
+	if err := store.Load(ctx); err != nil {
+		return nil, nil, fmt.Errorf("load settings: %w", err)
 	}
 
-	if r.After != "" {
-		e = e.WithAfter(map[string]string{"value": r.After})
-	}
-
-	return a.log.Append(ctx, e)
-}
-
-// settingsActor returns the signed-in user of a request as a settings actor.
-func settingsActor(ctx context.Context) settingsapp.Actor {
-	a := settingsapp.Actor{IP: clientip.From(ctx), RequestID: middleware.GetReqID(ctx)}
-
-	if p := identityhttp.FromContext(ctx).Principal(); !p.IsAnonymous() {
-		if u, err := shared.UUIDFromBytes(p.UserID().Bytes()); err == nil {
-			a.User = u
-		}
-	}
-
-	return a
+	return store, settings.NewEffectiveConfig(configBootstrap{cfg: cfg, origins: origins}, store, now), nil
 }
 
 // storeListenPolicy reads the global listen policy (listen_policy) from the
@@ -70,4 +44,25 @@ type storeListenPolicy struct {
 // ListenPolicy implements grid/app.GlobalListenPolicy.
 func (p storeListenPolicy) ListenPolicy(context.Context) (string, error) {
 	return p.store.String("listen_policy"), nil
+}
+
+// configBootstrap lists the config-only keys of the loaded hub config for
+// the effective configuration view.
+type configBootstrap struct {
+	cfg     config.Hub
+	origins config.Origins
+}
+
+func (b configBootstrap) BootstrapEntries() []settings.BootstrapEntry {
+	entries := config.BootstrapEntries(b.cfg, b.origins)
+	out := make([]settings.BootstrapEntry, 0, len(entries))
+
+	for _, e := range entries {
+		out = append(out, settings.BootstrapEntry{
+			Key: e.Key, Value: e.Value, Set: e.Secret && string(e.Value) == "true",
+			Origin: e.Origin.String(), Locked: e.Origin.Locked(), Secret: e.Secret,
+		})
+	}
+
+	return out
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // recRevocations records published revocations.
@@ -42,9 +43,9 @@ func (e *env) actor(t *testing.T, name string) app.Actor {
 func grant(t *testing.T, r domain.Role, device string) domain.RoleGrant {
 	t.Helper()
 
-	var dev domain.DeviceID
+	var dev shared.DeviceID
 	if device != "" {
-		dev, _ = domain.NewDeviceID(device)
+		dev, _ = shared.NewDeviceID(device)
 	}
 
 	g, err := domain.NewRoleGrant(r, dev)

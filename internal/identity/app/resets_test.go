@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
+
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
-	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -22,8 +23,8 @@ func (e *env) resets(n app.Notifier, rv app.RevocationPublisher) *app.Resets {
 		Tokens:  sqlite.NewPasswordResets(e.db), Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: e.db, Hasher: e.hasher,
 		IDs: shared.NewUUIDv7Generator(), Now: e.clock.Now, Settings: app.DefaultSettings{}, Policies: app.NewPolicies(nil, nil),
 		Notifier: n, Links: app.NewLinks("https://hub.example"),
-		Requests: memory.NewIPLimiter(time.Hour, 3, 10), Accounts: memory.NewKeyLimiter(time.Hour, 2, 10),
-		Confirms: memory.NewIPLimiter(time.Millisecond, 1000, 10), Revocations: rv,
+		Requests: ratelimit.NewIP(time.Hour, 3, 10), Accounts: ratelimit.New[string](time.Hour, 2, 10),
+		Confirms: ratelimit.NewIP(time.Millisecond, 1000, 10), Revocations: rv,
 		Async: func(f func()) { f() }, Logger: slog.New(slog.DiscardHandler),
 	})
 }

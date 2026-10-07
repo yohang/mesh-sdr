@@ -20,7 +20,6 @@ var (
 	ErrInvalidPassword    = shared.NewError(shared.KindInvalid, "invalid_password", "the password does not follow the password policy")
 	ErrInvalidLogin       = shared.NewError(shared.KindInvalid, "invalid_login", "invalid username or e-mail")
 	ErrInvalidRole        = shared.NewError(shared.KindInvalid, "invalid_role", "unknown role")
-	ErrInvalidDevice      = shared.NewError(shared.KindInvalid, "invalid_device_id", "invalid device id")
 	ErrInvalidIdentity    = shared.NewError(shared.KindInvalid, "invalid_identity", "invalid login identity")
 	ErrInvalidHash        = shared.NewError(shared.KindInvalid, "invalid_password_hash", "invalid password hash")
 	ErrInvalidToken       = shared.NewError(shared.KindInvalid, "invalid_token", "invalid token")

@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
-	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 )
 
 // TestStationImages: an image that is not set is simply absent; an image
@@ -18,7 +18,7 @@ func TestStationImages(t *testing.T) {
 
 	var logs bytes.Buffer
 
-	s := stationImages{b: branding(adapter, identitysqlite.NewAuditLog(adapter)), logger: slog.New(slog.NewTextHandler(&logs, nil))}
+	s := stationImages{b: branding(adapter, newAuditAppender(adapter, time.Now)), logger: slog.New(slog.NewTextHandler(&logs, nil))}
 	ctx := context.Background()
 
 	if s.HasImage(ctx, "avatar") || logs.Len() != 0 {

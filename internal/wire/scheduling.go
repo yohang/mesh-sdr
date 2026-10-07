@@ -3,26 +3,22 @@ package wire
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/db"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
-	"github.com/yohang/mesh-sdr/internal/http/clientip"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
-	presetsapp "github.com/yohang/mesh-sdr/internal/presets/app"
-	presetsdomain "github.com/yohang/mesh-sdr/internal/presets/domain"
-	presetssqlite "github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
-	schedulesapp "github.com/yohang/mesh-sdr/internal/schedules/app"
-	schedulesdomain "github.com/yohang/mesh-sdr/internal/schedules/domain"
-	schedulessqlite "github.com/yohang/mesh-sdr/internal/schedules/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/schedules"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -30,10 +26,10 @@ import (
 // (ADR 0020), wired to the grid: the schedule guard listens to the device
 // registry, the planner feeds the desired state pushed to the nodes.
 type scheduling struct {
-	presets   *presetsapp.Service
-	schedules *schedulesapp.Service
-	guard     *schedulesapp.Guard
-	planner   *schedulesapp.Planner
+	presets   *presets.Service
+	schedules *schedules.Service
+	guard     *schedules.Guard
+	planner   *schedules.Planner
 	publish   *schedulesPublishJob
 }
 
@@ -45,13 +41,13 @@ type settingsReader interface {
 
 // newScheduling builds the modules. g.states may be nil (grid disabled):
 // nothing is pushed then.
-func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit auditAppender, now func() time.Time,
+func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audit.Appender, now func() time.Time,
 	logger *slog.Logger,
 ) *scheduling {
 	ids := shared.NewUUIDv7Generator()
 	devices := scheduleDevices{repo: g.deviceRepo}
-	schedRepo := schedulessqlite.NewSchedules(adapter)
-	presetRepo := presetssqlite.NewPresets(adapter)
+	schedRepo := schedules.NewSchedules(adapter)
+	presetRepo := presets.NewPresets(adapter)
 
 	changed := func(ctx context.Context) {
 		if g.states != nil {
@@ -61,8 +57,8 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 
 	s := &scheduling{}
 
-	sdeps := schedulesapp.Deps{
-		Repo: schedRepo, Tx: adapter, Devices: devices, Audit: scheduleAuditor{log: audit, now: now}, IDs: ids, Now: now,
+	sdeps := schedules.Deps{
+		Repo: schedRepo, Tx: adapter, Devices: devices, Audit: audit, IDs: ids, Now: now,
 		Changed: changed, Logger: component(logger, "schedules.app"),
 	}
 
@@ -70,11 +66,11 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 	// the preset service exists.
 	catalog := &presetCatalog{}
 	sdeps.Presets = catalog
-	s.schedules = schedulesapp.NewService(sdeps)
-	s.guard = schedulesapp.NewGuard(sdeps)
-	s.planner = schedulesapp.NewPlanner(sdeps)
-	s.presets = presetsapp.NewService(presetsapp.Deps{
-		Repo: presetRepo, Tx: adapter, Audit: presetAuditor{log: audit, now: now}, IDs: ids, Now: now,
+	s.schedules = schedules.NewService(sdeps)
+	s.guard = schedules.NewGuard(sdeps)
+	s.planner = schedules.NewPlanner(sdeps)
+	s.presets = presets.NewService(presets.Deps{
+		Repo: presetRepo, Tx: adapter, Audit: audit, IDs: ids, Now: now,
 		Usage: s.schedules, Listener: s.guard, Changed: changed, Logger: component(logger, "presets.app"),
 	})
 	catalog.presets = s.presets
@@ -83,7 +79,7 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 
 	// Grid hooks (GRID-016, ADM-009): the guard joins the registry's
 	// transactions; the desired state reads the planner.
-	listener := deviceListener{guard: s.guard}
+	listener := deviceListener{s.guard}
 	g.devices.SetListener(listener, adapter)
 	g.nodes.OnDelete(func(ctx context.Context, id griddomain.NodeID) error {
 		list, err := g.deviceRepo.ListByNode(ctx, id)
@@ -91,7 +87,7 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 			return err
 		}
 
-		ids := make([]griddomain.DeviceID, len(list))
+		ids := make([]shared.DeviceID, len(list))
 		for i, d := range list {
 			ids[i] = d.ID()
 		}
@@ -110,7 +106,7 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 // guard's safety net, then the desired state of every connected node
 // (the timeline slides hourly).
 type schedulesPublishJob struct {
-	guard *schedulesapp.Guard
+	guard *schedules.Guard
 	grid  *hubGrid
 }
 
@@ -138,35 +134,35 @@ func (j *schedulesPublishJob) Run(ctx context.Context) (int64, error) {
 // scheduleDevices adapts the grid device registry to schedules/app.Devices.
 type scheduleDevices struct{ repo griddomain.DeviceRepository }
 
-func scheduleDevice(d *griddomain.Device) schedulesapp.Device {
+func scheduleDevice(d *griddomain.Device) schedules.Device {
 	lo, hi := d.FreqRange()
 	_, stale := d.Missing()
 
-	return schedulesapp.Device{
+	return schedules.Device{
 		ID: d.ID().String(), Node: d.Node().String(), Name: d.Name(), FreqMin: lo, FreqMax: hi, SampleRates: d.SampleRates(),
 		SchedulerEnabled: d.Flags().SchedulerEnabled, Stale: stale, ActivePreset: d.ActivePreset(),
 	}
 }
 
-func (a scheduleDevices) Device(ctx context.Context, id string) (schedulesapp.Device, bool, error) {
-	did, err := griddomain.NewDeviceID(id)
+func (a scheduleDevices) Device(ctx context.Context, id string) (schedules.Device, bool, error) {
+	did, err := shared.NewDeviceID(id)
 	if err != nil {
-		return schedulesapp.Device{}, false, nil //nolint:nilerr // an invalid id is not in the registry
+		return schedules.Device{}, false, nil //nolint:nilerr // an invalid id is not in the registry
 	}
 
 	d, err := a.repo.Get(ctx, did)
 
 	switch {
 	case errors.Is(err, griddomain.ErrDeviceNotFound):
-		return schedulesapp.Device{}, false, nil
+		return schedules.Device{}, false, nil
 	case err != nil:
-		return schedulesapp.Device{}, false, err
+		return schedules.Device{}, false, err
 	}
 
 	return scheduleDevice(d), true, nil
 }
 
-func (a scheduleDevices) NodeDevices(ctx context.Context, node string) ([]schedulesapp.Device, error) {
+func (a scheduleDevices) NodeDevices(ctx context.Context, node string) ([]schedules.Device, error) {
 	id, err := griddomain.NewNodeID(node)
 	if err != nil {
 		return nil, err
@@ -177,7 +173,7 @@ func (a scheduleDevices) NodeDevices(ctx context.Context, node string) ([]schedu
 		return nil, err
 	}
 
-	out := make([]schedulesapp.Device, len(list))
+	out := make([]schedules.Device, len(list))
 	for i, d := range list {
 		out[i] = scheduleDevice(d)
 	}
@@ -185,13 +181,13 @@ func (a scheduleDevices) NodeDevices(ctx context.Context, node string) ([]schedu
 	return out, nil
 }
 
-func (a scheduleDevices) All(ctx context.Context) ([]schedulesapp.Device, error) {
+func (a scheduleDevices) All(ctx context.Context) ([]schedules.Device, error) {
 	list, err := a.repo.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]schedulesapp.Device, len(list))
+	out := make([]schedules.Device, len(list))
 	for i, d := range list {
 		out[i] = scheduleDevice(d)
 	}
@@ -200,37 +196,37 @@ func (a scheduleDevices) All(ctx context.Context) ([]schedulesapp.Device, error)
 }
 
 // Limits implements api.DeviceLimits.
-func (a scheduleDevices) Limits(ctx context.Context, id string) (presetsdomain.DeviceLimits, bool, error) {
+func (a scheduleDevices) Limits(ctx context.Context, id string) (presets.DeviceLimits, bool, error) {
 	d, ok, err := a.Device(ctx, id)
 
 	return limitsOf(d), ok, err
 }
 
-func limitsOf(d schedulesapp.Device) presetsdomain.DeviceLimits {
-	return presetsdomain.DeviceLimits{FreqMin: d.FreqMin, FreqMax: d.FreqMax, SampleRates: d.SampleRates}
+func limitsOf(d schedules.Device) presets.DeviceLimits {
+	return presets.DeviceLimits{FreqMin: d.FreqMin, FreqMax: d.FreqMax, SampleRates: d.SampleRates}
 }
 
 // presetCatalog adapts the preset service to schedules/app.Presets.
-type presetCatalog struct{ presets *presetsapp.Service }
+type presetCatalog struct{ presets *presets.Service }
 
-func (c *presetCatalog) Fit(ctx context.Context, id shared.UUID, d schedulesapp.Device) (schedulesapp.Fit, error) {
+func (c *presetCatalog) Fit(ctx context.Context, id shared.UUID, d schedules.Device) (schedules.Fit, error) {
 	err := c.presets.Check(ctx, id, limitsOf(d))
 
 	var de *shared.Error
 
 	switch {
 	case err == nil:
-		return schedulesapp.Fit{Exists: true}, nil
-	case errors.Is(err, presetsdomain.ErrPresetNotFound):
-		return schedulesapp.Fit{}, nil
-	case errors.Is(err, presetsdomain.ErrPresetIncompatible) && errors.As(err, &de):
-		return schedulesapp.Fit{Exists: true, Reason: de.Message()}, nil
+		return schedules.Fit{Exists: true}, nil
+	case errors.Is(err, presets.ErrPresetNotFound):
+		return schedules.Fit{}, nil
+	case errors.Is(err, presets.ErrPresetIncompatible) && errors.As(err, &de):
+		return schedules.Fit{Exists: true, Reason: de.Message()}, nil
 	}
 
-	return schedulesapp.Fit{}, err
+	return schedules.Fit{}, err
 }
 
-func (c *presetCatalog) Compatible(ctx context.Context, d schedulesapp.Device) ([]shared.UUID, error) {
+func (c *presetCatalog) Compatible(ctx context.Context, d schedules.Device) ([]shared.UUID, error) {
 	list, err := c.presets.Compatible(ctx, limitsOf(d))
 	if err != nil {
 		return nil, err
@@ -244,28 +240,12 @@ func (c *presetCatalog) Compatible(ctx context.Context, d schedulesapp.Device) (
 	return out, nil
 }
 
-// deviceListener adapts the schedule guard to grid/app.DeviceListener.
-type deviceListener struct{ guard *schedulesapp.Guard }
-
-func deviceIDs(ids []griddomain.DeviceID) []string {
-	out := make([]string, len(ids))
-	for i, id := range ids {
-		out[i] = id.String()
-	}
-
-	return out
-}
+// deviceListener adapts the schedule guard to grid/app.DeviceListener
+// (DevicesStale and DevicesRemoved are the guard's).
+type deviceListener struct{ *schedules.Guard }
 
 func (l deviceListener) DeviceReported(ctx context.Context, d *griddomain.Device) error {
-	return l.guard.DeviceReported(ctx, scheduleDevice(d))
-}
-
-func (l deviceListener) DevicesStale(ctx context.Context, ids []griddomain.DeviceID) error {
-	return l.guard.DevicesStale(ctx, deviceIDs(ids))
-}
-
-func (l deviceListener) DevicesRemoved(ctx context.Context, ids []griddomain.DeviceID) error {
-	return l.guard.DevicesRemoved(ctx, deviceIDs(ids))
+	return l.Guard.DeviceReported(ctx, scheduleDevice(d))
 }
 
 // lazyDesired is the grid's desired-state source, filled in once the
@@ -282,8 +262,8 @@ func (l *lazyDesired) Desired(ctx context.Context, node griddomain.NodeID) (ctl.
 
 // desiredStates builds ctl.state.apply from the planner (§4.4).
 type desiredStates struct {
-	planner  *schedulesapp.Planner
-	presets  *presetsapp.Service
+	planner  *schedules.Planner
+	presets  *presets.Service
 	settings settingsReader
 	now      func() time.Time
 }
@@ -299,7 +279,7 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 		return ctl.StateApply{}, err
 	}
 
-	byID := make(map[shared.UUID]*presetsdomain.Preset, len(all))
+	byID := make(map[shared.UUID]*presets.Preset, len(all))
 	for _, p := range all {
 		byID[p.ID()] = p
 	}
@@ -351,10 +331,10 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 	return st, nil
 }
 
-func ctlPreset(p *presetsdomain.Preset) ctl.Preset {
+func ctlPreset(p *presets.Preset) ctl.Preset {
 	out := ctl.Preset{
-		Name: p.Name().String(), CenterFreq: p.CenterFreq(), SampRate: p.SampRate(), StartFreq: p.StartFreq(),
-		StartMod: p.StartMod().String(), TuningStep: p.TuningStep(),
+		Name: p.Name(), CenterFreq: p.CenterFreq(), SampRate: p.SampRate(), StartFreq: p.StartFreq(),
+		StartMod: p.StartMod(), TuningStep: p.TuningStep(),
 	}
 
 	if v, ok := p.InitialSquelchLevel(); ok {
@@ -378,7 +358,7 @@ func ctlPreset(p *presetsdomain.Preset) ctl.Preset {
 type deviceScope struct{}
 
 func (deviceScope) CanOperate(ctx context.Context, device string) bool {
-	id, err := identitydomain.NewDeviceID(device)
+	id, err := shared.NewDeviceID(device)
 	if err != nil {
 		return false
 	}
@@ -386,64 +366,10 @@ func (deviceScope) CanOperate(ctx context.Context, device string) bool {
 	return identityhttp.FromContext(ctx).Principal().HasOnDevice(identitydomain.RoleOperator, id)
 }
 
-// presetAuditor writes preset changes to identity's audit_log.
-type presetAuditor struct {
-	log auditAppender
-	now func() time.Time
-}
-
-func (a presetAuditor) Record(ctx context.Context, r presetsapp.AuditRecord) error {
-	return appendAudit(ctx, a.log, a.now(), false, r.Action, "preset", r.Target.String(), r.Before, r.After)
-}
-
-// scheduleAuditor writes schedule changes to identity's audit_log.
-type scheduleAuditor struct {
-	log auditAppender
-	now func() time.Time
-}
-
-func (a scheduleAuditor) Record(ctx context.Context, r schedulesapp.AuditRecord) error {
-	return appendAudit(ctx, a.log, a.now(), r.System, r.Action, "schedule", r.Target.String(), r.Before, r.After)
-}
-
-// appendAudit appends one record: the caller of the request in ctx, or the
-// system actor.
-func appendAudit(ctx context.Context, log auditAppender, at time.Time, system bool, action, kind, target string,
-	before, after map[string]string,
-) error {
-	actor := identitydomain.SystemActor()
-
-	if !system {
-		ip := clientip.From(ctx)
-		actor = identitydomain.AnonymousActor(ip)
-
-		if p := identityhttp.FromContext(ctx).Principal(); !p.IsAnonymous() {
-			actor = identitydomain.UserActor(p.UserID(), ip)
-		}
-	}
-
-	e, err := identitydomain.NewAuditEntry(at, actor, action, identitydomain.ResultOK)
-	if err != nil {
-		return fmt.Errorf("audit entry: %w", err)
-	}
-
-	e = e.WithTarget(kind, target)
-
-	if len(before) > 0 {
-		e = e.WithBefore(before)
-	}
-
-	if len(after) > 0 {
-		e = e.WithAfter(after)
-	}
-
-	return log.Append(ctx, e)
-}
-
 // deviceSchedules adapts the schedules to the device page (grid/http).
 type deviceSchedules struct {
-	schedules *schedulesapp.Service
-	presets   *presetsapp.Service
+	schedules *schedules.Service
+	presets   *presets.Service
 }
 
 func (a deviceSchedules) ForDevice(ctx context.Context, device string) ([]gridhttp.ScheduleRow, error) {
@@ -461,10 +387,10 @@ func (a deviceSchedules) ForDevice(ctx context.Context, device string) ([]gridht
 		}
 
 		if p, err := a.presets.Get(ctx, s.Preset().String()); err == nil {
-			row.Preset = p.Name().String()
+			row.Preset = p.Name()
 		}
 
-		if reason, at := s.DisabledReason(); reason != schedulesdomain.ReasonNone {
+		if reason, at := s.DisabledReason(); reason != schedules.ReasonNone {
 			row.DisabledReason, row.DisabledAt = string(reason), at
 		}
 
@@ -475,8 +401,8 @@ func (a deviceSchedules) ForDevice(ctx context.Context, device string) ([]gridht
 }
 
 // days formats a week-day mask for people.
-func days(d schedulesdomain.DaysOfWeek) string {
-	if d.Mask() == schedulesdomain.EveryDay {
+func days(d schedules.DaysOfWeek) string {
+	if d.Mask() == schedules.EveryDay {
 		return "Every day"
 	}
 
@@ -503,7 +429,7 @@ func (a deviceSchedules) NeedingAttention(ctx context.Context) (int, error) {
 	n := 0
 
 	for _, s := range list {
-		if reason, _ := s.DisabledReason(); reason != schedulesdomain.ReasonNone {
+		if reason, _ := s.DisabledReason(); reason != schedules.ReasonNone {
 			n++
 		}
 	}

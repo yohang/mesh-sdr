@@ -107,7 +107,7 @@ func NewConnection(info ConnectionInfo, now time.Time) (*Connection, error) {
 	}
 
 	if info.DeviceID != "" {
-		if _, err := NewDeviceID(info.DeviceID); err != nil {
+		if _, err := shared.NewDeviceID(info.DeviceID); err != nil {
 			return nil, err
 		}
 	}
@@ -141,7 +141,7 @@ func (c *Connection) Heartbeat(now time.Time) {
 // Attach records the current device and mode of a media connection.
 func (c *Connection) Attach(deviceID, mode string, now time.Time) {
 	if deviceID != "" {
-		if _, err := NewDeviceID(deviceID); err == nil {
+		if _, err := shared.NewDeviceID(deviceID); err == nil {
 			c.info.DeviceID = deviceID
 		}
 	}

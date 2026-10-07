@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strconv"
 	"unicode/utf8"
+
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // State is the runtime state of a device (§8.2 "Lifecycle"; the wire and DB
@@ -41,7 +43,7 @@ var transitions = map[State][]State{
 // DeviceParams are the configured properties of a device (node.toml
 // [devices.<id>], §7.4).
 type DeviceParams struct {
-	ID                DeviceID
+	ID                shared.DeviceID
 	Name              string
 	Type              DeviceType
 	Enabled           bool
@@ -79,7 +81,7 @@ func NewDevice(p DeviceParams) (*Device, error) {
 		return nil, ErrInvalidDevice.WithDetail("device " + p.ID.String() + ": name must be 1 to 128 characters")
 	case len(p.Rates) == 0:
 		return nil, ErrInvalidDevice.WithDetail("device " + p.ID.String() + ": at least one sample rate")
-	case p.ID == DeviceID{} || p.Type == DeviceType{}:
+	case p.ID == shared.DeviceID{} || p.Type == DeviceType{}:
 		return nil, ErrInvalidDevice.WithDetail("device id and type are required")
 	}
 
@@ -102,7 +104,7 @@ func NewDevice(p DeviceParams) (*Device, error) {
 }
 
 // ID returns the device id.
-func (d *Device) ID() DeviceID { return d.p.ID }
+func (d *Device) ID() shared.DeviceID { return d.p.ID }
 
 // Params returns the configuration.
 func (d *Device) Params() DeviceParams {

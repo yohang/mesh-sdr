@@ -5,24 +5,23 @@ import (
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
-	presetsapp "github.com/yohang/mesh-sdr/internal/presets/app"
-	presetsdomain "github.com/yohang/mesh-sdr/internal/presets/domain"
+	"github.com/yohang/mesh-sdr/internal/presets"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // PresetService is the preset use cases (ADR 0020).
 type PresetService interface {
-	List(ctx context.Context) ([]*presetsdomain.Preset, error)
-	Get(ctx context.Context, id string) (*presetsdomain.Preset, error)
-	Create(ctx context.Context, d presetsdomain.Draft) (*presetsdomain.Preset, error)
-	Replace(ctx context.Context, id string, expectedVersion int, d presetsdomain.Draft) (presetsapp.Replaced, error)
+	List(ctx context.Context) ([]*presets.Preset, error)
+	Get(ctx context.Context, id string) (*presets.Preset, error)
+	Create(ctx context.Context, d presets.Draft) (*presets.Preset, error)
+	Replace(ctx context.Context, id string, expectedVersion int, d presets.Draft) (presets.Replaced, error)
 	Delete(ctx context.Context, id string) error
-	Compatible(ctx context.Context, limits presetsdomain.DeviceLimits) ([]*presetsdomain.Preset, error)
+	Compatible(ctx context.Context, limits presets.DeviceLimits) ([]*presets.Preset, error)
 }
 
 // DeviceLimits reads the reported limits of a device of the registry.
 type DeviceLimits interface {
-	Limits(ctx context.Context, device string) (presetsdomain.DeviceLimits, bool, error)
+	Limits(ctx context.Context, device string) (presets.DeviceLimits, bool, error)
 }
 
 // PresetHandlers serve /presets.
@@ -43,11 +42,11 @@ func apiUUID(u shared.UUID) openapi_types.UUID {
 	return out
 }
 
-func presetDTO(p *presetsdomain.Preset) Preset {
+func presetDTO(p *presets.Preset) Preset {
 	out := Preset{
-		Id: apiUUID(p.ID()), Slug: p.Slug().String(), Name: p.Name().String(), Description: optString(p.Description()),
-		Tags: p.Tags().Values(), CenterFreq: p.CenterFreq(), SampRate: p.SampRate(), StartFreq: p.StartFreq(),
-		StartMod: p.StartMod().String(), TuningStep: p.TuningStep(), SortOrder: p.SortOrder(), CreatedAt: p.CreatedAt(),
+		Id: apiUUID(p.ID()), Slug: p.Slug(), Name: p.Name(), Description: optString(p.Description()),
+		Tags: p.Tags(), CenterFreq: p.CenterFreq(), SampRate: p.SampRate(), StartFreq: p.StartFreq(),
+		StartMod: p.StartMod(), TuningStep: p.TuningStep(), SortOrder: p.SortOrder(), CreatedAt: p.CreatedAt(),
 		UpdatedAt: p.UpdatedAt(), Version: p.Version(),
 	}
 
@@ -69,8 +68,8 @@ func presetDTO(p *presetsdomain.Preset) Preset {
 // presetDraft converts the fields shared by PresetInput and PresetReplace.
 func presetDraft(slug *string, name string, desc *string, tags *[]string, center, rate int64, start *int64, mod *string,
 	step *int64, squelch, nr *int, waterfall *WaterfallLevels,
-) presetsdomain.Draft {
-	d := presetsdomain.Draft{
+) presets.Draft {
+	d := presets.Draft{
 		Name: name, CenterFreq: center, SampRate: rate, StartFreq: start, TuningStep: step,
 		InitialSquelchLevel: squelch, InitialNRLevel: nr,
 	}
@@ -101,7 +100,7 @@ func presetDraft(slug *string, name string, desc *string, tags *[]string, center
 // ListPresets implements StrictServerInterface.
 func (h PresetHandlers) ListPresets(ctx context.Context, req ListPresetsRequestObject) (ListPresetsResponseObject, error) {
 	var (
-		list []*presetsdomain.Preset
+		list []*presets.Preset
 		err  error
 	)
 
@@ -112,7 +111,7 @@ func (h PresetHandlers) ListPresets(ctx context.Context, req ListPresetsRequestO
 		case lerr != nil:
 			return nil, lerr
 		case !ok:
-			return nil, presetsdomain.ErrUnknownDevice
+			return nil, presets.ErrUnknownDevice
 		}
 
 		list, err = h.presets.Compatible(ctx, limits)

@@ -16,9 +16,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	settingsdomain "github.com/yohang/mesh-sdr/internal/settings/domain"
+	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
-	shelldomain "github.com/yohang/mesh-sdr/internal/shell/domain"
+	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 // Violation codes of setting values. Semantic checks keep the code of the
@@ -66,7 +66,7 @@ var settingHooks = map[string]func(v any) error{
 			return nil // empty: the built-in default policy
 		}
 
-		_, err := shelldomain.NewPolicyText(s)
+		_, err := shell.NewPolicyText(s)
 
 		return err
 	},
@@ -128,7 +128,7 @@ func child(node map[string]any, name string) map[string]any {
 // ValidateSetting checks a setting value given as JSON, whatever its source
 // (DB row, API write): decode into the key's Go type, semantic check of the
 // key, then the schema keywords. It returns the decoded Go value, or an
-// error: settingsdomain.ErrUnknownSetting, or settingsdomain.ErrInvalidSetting
+// error: settings.ErrUnknownSetting, or settings.ErrInvalidSetting
 // with one violation per problem (path = the key).
 func ValidateSetting(key string, raw []byte) (any, error) {
 	idx, err := loadSettingsIndex()
@@ -138,7 +138,7 @@ func ValidateSetting(key string, raw []byte) (any, error) {
 
 	leaf, ok := idx.byKey[key]
 	if !ok {
-		return nil, settingsdomain.ErrUnknownSetting.WithDetail("unknown setting " + key)
+		return nil, settings.ErrUnknownSetting.WithDetail("unknown setting " + key)
 	}
 
 	ptr := reflect.New(leaf.typ)
@@ -146,12 +146,12 @@ func ValidateSetting(key string, raw []byte) (any, error) {
 	dec.DisallowUnknownFields()
 
 	if err := dec.Decode(ptr.Interface()); err != nil || dec.More() {
-		return nil, settingsdomain.ErrInvalidSetting.WithViolations(decodeViolation(key, leaf.typ, err))
+		return nil, settings.ErrInvalidSetting.WithViolations(decodeViolation(key, leaf.typ, err))
 	}
 
 	v := ptr.Elem().Interface()
 	if vs := checkSetting(leaf, v, raw); len(vs) > 0 {
-		return nil, settingsdomain.ErrInvalidSetting.WithViolations(vs...)
+		return nil, settings.ErrInvalidSetting.WithViolations(vs...)
 	}
 
 	return v, nil

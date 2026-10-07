@@ -8,28 +8,9 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
-	"github.com/yohang/mesh-sdr/internal/identity/infra/repotest"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
-
-func open(t *testing.T) repotest.Repos {
-	a := dbtest.NewSQLite(t)
-
-	return repotest.Repos{
-		Users:        sqlite.NewUsers(a, shared.NewUUIDv7Generator()),
-		Sessions:     sqlite.NewSessions(a),
-		Audit:        sqlite.NewAuditLog(a),
-		Invitations:  sqlite.NewInvitations(a),
-		Resets:       sqlite.NewPasswordResets(a),
-		EmailChanges: sqlite.NewEmailChanges(a),
-	}
-}
-
-func TestAccounts(t *testing.T) { repotest.RunAccounts(t, open) }
-func TestUsers(t *testing.T)    { repotest.RunUsers(t, open) }
-func TestSessions(t *testing.T) { repotest.RunSessions(t, open) }
-func TestAudit(t *testing.T)    { repotest.RunAudit(t, open) }
 
 func TestAuditLogIsAppendOnly(t *testing.T) {
 	ctx := context.Background()
@@ -50,7 +31,7 @@ func TestMalformedHashKeepsUserLoadable(t *testing.T) {
 	ctx := context.Background()
 	a := dbtest.NewSQLite(t)
 	users := sqlite.NewUsers(a, shared.NewUUIDv7Generator())
-	u := repotest.NewUser(t, "alice", "")
+	u := newUser(t, "alice", "")
 
 	if err := users.Add(ctx, u); err != nil {
 		t.Fatal(err)

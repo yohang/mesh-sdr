@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
+
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
-	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -21,7 +22,7 @@ func (e *env) invitations(n app.Notifier) *app.Invitations {
 		Invitations: sqlite.NewInvitations(e.db), Users: e.users, Audit: e.audit, Tx: e.db, Hasher: e.hasher,
 		IDs: shared.NewUUIDv7Generator(), Now: e.clock.Now, Settings: app.DefaultSettings{}, Policies: app.NewPolicies(nil, nil),
 		Auth: e.auth, Notifier: n, Links: app.NewLinks("https://hub.example"),
-		Limiter: memory.NewIPLimiter(time.Millisecond, 1000, 100), Logger: slog.New(slog.DiscardHandler),
+		Limiter: ratelimit.NewIP(time.Millisecond, 1000, 100), Logger: slog.New(slog.DiscardHandler),
 	})
 }
 
@@ -91,10 +92,10 @@ func TestInvitationLifecycle(t *testing.T) {
 	}
 }
 
-func mustDevice(t *testing.T, s string) domain.DeviceID {
+func mustDevice(t *testing.T, s string) shared.DeviceID {
 	t.Helper()
 
-	d, err := domain.NewDeviceID(s)
+	d, err := shared.NewDeviceID(s)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/yohang/mesh-sdr/internal/files/domain"
+	"github.com/yohang/mesh-sdr/internal/files"
 )
 
 // BrandingService reads the receiver images (ADM-004).
 type BrandingService interface {
-	Current(ctx context.Context, slot domain.Slot) (*domain.File, error)
-	Content(ctx context.Context, slot domain.Slot) (*domain.File, []byte, error)
+	Current(ctx context.Context, slot files.Slot) (*files.File, error)
+	Content(ctx context.Context, slot files.Slot) (*files.File, []byte, error)
 }
 
 // BrandingHandlers serve GET /branding/{slot}, the images the pages show.
@@ -29,7 +29,7 @@ func NewBrandingHandlers(b BrandingService) BrandingHandlers {
 
 // GetReceiverImage implements StrictServerInterface.
 func (h BrandingHandlers) GetReceiverImage(ctx context.Context, req GetReceiverImageRequestObject) (GetReceiverImageResponseObject, error) {
-	slot, err := domain.ParseSlot(req.Slot)
+	slot, err := files.ParseSlot(req.Slot)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (h BrandingHandlers) GetReceiverImage(ctx context.Context, req GetReceiverI
 }
 
 type imageResponse struct {
-	file        *domain.File
+	file        *files.File
 	data        []byte
 	etag        string
 	notModified bool

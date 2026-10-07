@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -17,16 +19,16 @@ type DeviceListener interface {
 	// DeviceReported runs for every device of a capability report.
 	DeviceReported(ctx context.Context, d *domain.Device) error
 	// DevicesStale runs for the devices a report no longer lists.
-	DevicesStale(ctx context.Context, ids []domain.DeviceID) error
+	DevicesStale(ctx context.Context, ids []shared.DeviceID) error
 	// DevicesRemoved runs for devices deleted from the registry.
-	DevicesRemoved(ctx context.Context, ids []domain.DeviceID) error
+	DevicesRemoved(ctx context.Context, ids []shared.DeviceID) error
 }
 
 // Devices mirrors node device definitions and states into the read-only
 // device registry (§7.1 devices, GRID-016).
 type Devices struct {
 	repo      domain.DeviceRepository
-	audit     Auditor
+	audit     auditor
 	logger    *slog.Logger
 	listener  DeviceListener
 	tx        Transactor
@@ -40,8 +42,8 @@ func (s *Devices) OnForget(f func(ctx context.Context, d *domain.Device)) {
 }
 
 // NewDevices returns the service.
-func NewDevices(repo domain.DeviceRepository, audit Auditor, logger *slog.Logger) *Devices {
-	return &Devices{repo: repo, audit: audit, logger: logger}
+func NewDevices(repo domain.DeviceRepository, auditLog audit.Appender, logger *slog.Logger) *Devices {
+	return &Devices{repo: repo, audit: auditor{auditLog, logger}, logger: logger}
 }
 
 // SetListener registers the registry listener and the transactor that
@@ -50,7 +52,7 @@ func (s *Devices) SetListener(l DeviceListener, tx Transactor) { s.listener, s.t
 
 // SpecOf converts a reported device.
 func SpecOf(d ctl.Device) (domain.DeviceSpec, error) {
-	id, err := domain.NewDeviceID(d.ID)
+	id, err := shared.NewDeviceID(d.ID)
 	if err != nil {
 		return domain.DeviceSpec{}, err
 	}
@@ -67,7 +69,7 @@ func SpecOf(d ctl.Device) (domain.DeviceSpec, error) {
 // refused (device_id_conflict), devices no longer reported become
 // unavailable.
 func (s *Devices) Sync(ctx context.Context, n *domain.Node, caps ctl.Capabilities, now time.Time) error {
-	reported := map[domain.DeviceID]bool{}
+	reported := map[shared.DeviceID]bool{}
 
 	for i, rd := range caps.Devices {
 		spec, err := SpecOf(rd)
@@ -112,7 +114,7 @@ func (s *Devices) Sync(ctx context.Context, n *domain.Node, caps ctl.Capabilitie
 		return err
 	}
 
-	var stale []domain.DeviceID
+	var stale []shared.DeviceID
 
 	for _, d := range known {
 		if !reported[d.ID()] && d.MarkUnavailable(now) {
@@ -138,8 +140,8 @@ func (s *Devices) reject(ctx context.Context, n *domain.Node, id string, err err
 		slog.String("device_id", id), slog.Any("error", err))
 
 	if errors.Is(err, domain.ErrDeviceIDConflict) {
-		s.audit.Record(ctx, AuditRecord{ActorKind: ActorNode, Action: "device.register", Target: id, Result: ResultDenied,
-			Detail: map[string]string{"node_id": n.ID().String(), "reason": err.Error()}})
+		s.audit.Record(ctx, audit.Record{Actor: audit.System, Action: "device.register", TargetType: "device", TargetID: id, Result: audit.ResultDenied,
+			After: map[string]string{"node_id": n.ID().String(), "reason": err.Error()}})
 	}
 }
 
@@ -151,7 +153,7 @@ func (s *Devices) StateHandler() EventHandler {
 			return nil //nolint:nilerr // a malformed event is skipped
 		}
 
-		id, err := domain.NewDeviceID(st.DeviceID)
+		id, err := shared.NewDeviceID(st.DeviceID)
 		if err != nil {
 			return nil //nolint:nilerr // a malformed event is skipped
 		}
@@ -202,7 +204,7 @@ func (s *Devices) NodeStatusChanged(ctx context.Context, id domain.NodeID, statu
 // forgotten (domain.ErrDeviceStillReported): it is removed from the node
 // config first. Presets are device-independent and not affected; the
 // schedules of the device are disabled (listener).
-func (s *Devices) Forget(ctx context.Context, actor, id string) error {
+func (s *Devices) Forget(ctx context.Context, actor audit.Actor, id string) error {
 	d, err := s.Get(ctx, id)
 	if err != nil {
 		return err
@@ -224,7 +226,7 @@ func (s *Devices) Forget(ctx context.Context, actor, id string) error {
 		}
 
 		if s.listener != nil {
-			return s.listener.DevicesRemoved(ctx, []domain.DeviceID{d.ID()})
+			return s.listener.DevicesRemoved(ctx, []shared.DeviceID{d.ID()})
 		}
 
 		return nil
@@ -240,8 +242,8 @@ func (s *Devices) Forget(ctx context.Context, actor, id string) error {
 		return err
 	}
 
-	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "device.forget", Target: d.ID().String(), Result: ResultOK,
-		Detail: map[string]string{"node_id": d.Node().String(), "missing_since": since.UTC().Format(time.RFC3339)}})
+	s.audit.Record(ctx, audit.Record{Actor: actor, Action: "device.forget", TargetType: "device", TargetID: d.ID().String(), Result: audit.ResultOK,
+		After: map[string]string{"node_id": d.Node().String(), "missing_since": since.UTC().Format(time.RFC3339)}})
 
 	for _, f := range s.forgotten {
 		f(ctx, d)
@@ -260,7 +262,7 @@ func (s *Devices) List(ctx context.Context) ([]*domain.Device, error) { return s
 
 // Get returns one device.
 func (s *Devices) Get(ctx context.Context, id string) (*domain.Device, error) {
-	did, err := domain.NewDeviceID(id)
+	did, err := shared.NewDeviceID(id)
 	if err != nil {
 		return nil, domain.ErrDeviceNotFound
 	}

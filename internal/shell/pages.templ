@@ -1,0 +1,75 @@
+package shell
+
+import (
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+)
+
+// receiverPage is the Receiver section until the receiver exists (M1): the
+// station and a notice. descHTML is goldmark output, which carries no raw
+// HTML nor dangerous URLs (see markdown.go).
+templ receiverPage(siteName string, st StationView, descHTML string) {
+	<div class="flex items-center gap-3">
+		if st.HasAvatar {
+			<img src="/api/v1/branding/avatar" alt="" width="48" height="48" class="size-12 rounded-md object-cover"/>
+		}
+		<div>
+			<h1 class="text-2xl font-semibold">{ siteName }</h1>
+			if st.Location != "" {
+				<p class="text-fg-muted">{ st.Location }</p>
+			}
+		</div>
+	</div>
+	<p class="mt-4 text-fg-muted">Live listening is not available yet.</p>
+	if st.HasPanorama || st.PhotoTitle != "" || descHTML != "" {
+		<figure class="mt-6 flex max-w-4xl flex-col gap-2">
+			if st.HasPanorama {
+				<img src="/api/v1/branding/panorama" alt={ st.PhotoTitle } class="w-full rounded-md"/>
+			}
+			if st.PhotoTitle != "" || descHTML != "" {
+				<figcaption class="prose-text">
+					if st.PhotoTitle != "" {
+						<p class="font-semibold">{ st.PhotoTitle }</p>
+					}
+					@templ.Raw(descHTML)
+				</figcaption>
+			}
+		</figure>
+	}
+}
+
+// placeholderPage is a section whose module does not exist yet.
+templ placeholderPage(title, notice string) {
+	<h1 class="text-2xl font-semibold">{ title }</h1>
+	<p class="mt-2 text-fg-muted">{ notice }</p>
+}
+
+// policyPage renders the usage policy. policyHTML is goldmark output, which
+// carries no raw HTML nor dangerous URLs (see markdown.go).
+templ policyPage(policyHTML string) {
+	<article class="prose-text">
+		<h1>Usage policy</h1>
+		@templ.Raw(policyHTML)
+	</article>
+}
+
+// aboutPage shows the running software and where its source code is.
+templ aboutPage(p layout.Product) {
+	<article class="prose-text">
+		<h1>About</h1>
+		<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+			<dt class="font-semibold">Software</dt>
+			<dd>{ p.Name }</dd>
+			<dt class="font-semibold">Version</dt>
+			<dd>{ p.Version }</dd>
+			<dt class="font-semibold">Licence</dt>
+			<dd>{ p.License }</dd>
+			<dt class="font-semibold">Source code</dt>
+			<dd><a href={ templ.URL(p.SourceURL) } rel="noopener noreferrer" hx-boost="false">{ p.SourceURL }</a></dd>
+		</dl>
+		<p>
+			{ p.Name } is free software: you can redistribute it and modify it under the terms of the
+			GNU Affero General Public License, version 3 or any later version. It comes with no warranty.
+			The source code of this version is available at the address above.
+		</p>
+	</article>
+}

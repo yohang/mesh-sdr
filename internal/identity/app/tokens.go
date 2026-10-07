@@ -12,6 +12,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // TokenSigner gives the key that signs at now (the keyring).
@@ -211,7 +212,7 @@ func Scopes(p domain.Principal, devices []NodeDevice, global domain.ListenPolicy
 			continue
 		}
 
-		dev, err := domain.NewDeviceID(d.ID)
+		dev, err := shared.NewDeviceID(d.ID)
 		if err != nil {
 			continue
 		}

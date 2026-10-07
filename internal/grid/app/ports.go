@@ -4,10 +4,12 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 )
 
 // Clock returns the current time.
@@ -18,33 +20,18 @@ type Transactor interface {
 	WithinTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
-// Actor kinds of audit records (§7.1 audit_log.actor_kind).
-const (
-	ActorSystem = "system"
-	ActorCLI    = "cli"
-	ActorUser   = "user"
-	ActorNode   = "node"
-)
-
-// Audit results.
-const (
-	ResultOK     = "ok"
-	ResultDenied = "denied"
-	ResultError  = "error"
-)
-
-// AuditRecord is one audited action (ADR 0008 Q3).
-type AuditRecord struct {
-	ActorKind string
-	Action    string
-	Target    string
-	Result    string
-	Detail    map[string]string
+// auditor appends grid audit records (ADR 0008 Q3). A record that cannot
+// be written is logged and never fails the audited action.
+type auditor struct {
+	log    audit.Appender
+	logger *slog.Logger
 }
 
-// Auditor records security-relevant actions.
-type Auditor interface {
-	Record(ctx context.Context, r AuditRecord)
+func (a auditor) Record(ctx context.Context, r audit.Record) {
+	if err := a.log.Append(ctx, r); err != nil {
+		a.logger.ErrorContext(ctx, "write grid audit record", slog.String("action", r.Action), slog.String("target", r.TargetID),
+			slog.String("result", string(r.Result)), slog.Any("error", err))
+	}
 }
 
 // VerificationKeys are the published access-token keys (§5.8).

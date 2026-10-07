@@ -441,9 +441,9 @@ func rehydrateUser(row sqlc.User, identities []sqlc.ListUserIdentitiesRow, roles
 			return nil, err
 		}
 
-		var dev domain.DeviceID
+		var dev shared.DeviceID
 		if g.DeviceID.Valid {
-			if dev, err = domain.NewDeviceID(g.DeviceID.String); err != nil {
+			if dev, err = shared.NewDeviceID(g.DeviceID.String); err != nil {
 				return nil, err
 			}
 		}

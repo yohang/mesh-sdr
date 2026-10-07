@@ -32,7 +32,7 @@ func (v values) String(key string) string {
 
 // router serves the shell module the way the hub does, with a stub API.
 func router(settings values) http.Handler {
-	m := shell.Wire(shell.Deps{Settings: settings, Logger: discard})
+	m := shell.New(shell.Deps{Settings: settings, Logger: discard})
 	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 
 	return httpserver.NewRouter(discard, api, m.HTTP)

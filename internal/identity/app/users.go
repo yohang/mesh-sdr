@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // UserAdmin runs the account administration done from the command line on
@@ -99,7 +100,7 @@ func (s *UserAdmin) Add(ctx context.Context, in AddUserInput) (AddUserResult, er
 	switch in.Role {
 	case domain.RoleListener, domain.RoleAnonymous:
 	case domain.RoleOperator, domain.RoleAdmin:
-		g, err := domain.NewRoleGrant(in.Role, domain.DeviceID{})
+		g, err := domain.NewRoleGrant(in.Role, shared.DeviceID{})
 		if err != nil {
 			return AddUserResult{}, err
 		}

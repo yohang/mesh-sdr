@@ -3,6 +3,8 @@ package domain
 import (
 	"errors"
 	"testing"
+
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 func params(t *testing.T) DeviceParams {
@@ -24,14 +26,14 @@ func params(t *testing.T) DeviceParams {
 	}
 
 	return DeviceParams{
-		ID: MustDeviceID("vhf"), Name: "VHF", Type: typ, Enabled: true, Range: r,
+		ID: shared.MustDeviceID("vhf"), Name: "VHF", Type: typ, Enabled: true, Range: r,
 		Rates: []SampleRate{MustSampleRate(2_400_000), MustSampleRate(1_024_000)}, Driver: drv,
 	}
 }
 
 func TestValueObjects(t *testing.T) {
 	for _, s := range []string{"", "A", "-x", "x y"} {
-		if _, err := NewDeviceID(s); !errors.Is(err, ErrInvalidDeviceID) {
+		if _, err := shared.NewDeviceID(s); !errors.Is(err, shared.ErrInvalidDeviceID) {
 			t.Fatalf("device id %q: %v", s, err)
 		}
 	}

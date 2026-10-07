@@ -368,8 +368,8 @@ func (n *Node) validate(o Origins) []Problem {
 		d := n.Devices[id]
 		key := "devices." + id
 
-		if _, err := griddomain.NewDeviceID(id); err != nil {
-			c.fail(key, CodeInvalidValue, "invalid device id "+strconv.Quote(id)+": must match ^[a-z0-9][a-z0-9_-]{0,62}$")
+		if _, err := shared.NewDeviceID(id); err != nil {
+			c.fail(key, CodeInvalidValue, "invalid device id "+strconv.Quote(id)+": must match "+shared.DeviceIDPattern)
 		}
 
 		if d.Name == "" || len(d.Name) > 128 {

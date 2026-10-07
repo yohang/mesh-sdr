@@ -12,17 +12,16 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
-	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
+	"github.com/yohang/mesh-sdr/internal/events"
 	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
-	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
-	settingsdomain "github.com/yohang/mesh-sdr/internal/settings/domain"
+	"github.com/yohang/mesh-sdr/internal/settings"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
 
@@ -164,7 +163,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter *db.DB, now func() 
 	// once identity is wired (newHub).
 	keys := newHubKeys(now)
 
-	audit := newGridAuditor(adapter, now, logger)
+	audit := newAuditAppender(adapter, now)
 	nodeRepo := gridsqlite.NewNodeRepository(adapter)
 	revocations := gridsqlite.NewRevocationRepository(adapter)
 
@@ -272,20 +271,15 @@ func HubNodes(cfg config.Hub, logger *slog.Logger, adapter *db.DB) (*app.Nodes, 
 		return nil, err
 	}
 
-	audit := newGridAuditor(adapter, time.Now, logger)
+	audit := newAuditAppender(adapter, time.Now)
 
 	return app.NewNodes(gridsqlite.NewNodeRepository(adapter), gridsqlite.NewRevocationRepository(adapter), adapter,
 		audit, caInfo{ca: ca}, app.DefaultTimings(), time.Now, component(logger, "grid.app.nodes")), nil
 }
 
-// newGridAuditor writes grid audit records to the identity audit_log.
-func newGridAuditor(adapter *db.DB, now func() time.Time, logger *slog.Logger) gridAuditor {
-	return gridAuditor{log: identitysqlite.NewAuditLog(adapter), now: now, logger: component(logger, "grid.audit")}
-}
-
 // gridSettings reads the grid DB settings.
 type gridSettings interface {
-	Get(key string) (settingsdomain.Effective, bool)
+	Get(key string) (settings.Effective, bool)
 	Int(key string) int
 }
 
@@ -295,11 +289,11 @@ type gridSettings interface {
 func (g *hubGrid) applySettings(base app.Timings, s gridSettings) {
 	t := base
 
-	if e, ok := s.Get("grid.heartbeat_interval_s"); ok && e.Source() != settingsdomain.SourceDefault {
+	if e, ok := s.Get("grid.heartbeat_interval_s"); ok && e.Source() != settings.SourceDefault {
 		t.HeartbeatInterval = time.Duration(s.Int("grid.heartbeat_interval_s")) * time.Second
 	}
 
-	if e, ok := s.Get("grid.offline_after_s"); ok && e.Source() != settingsdomain.SourceDefault {
+	if e, ok := s.Get("grid.offline_after_s"); ok && e.Source() != settings.SourceDefault {
 		t.OfflineAfter = time.Duration(s.Int("grid.offline_after_s")) * time.Second
 	}
 
@@ -318,7 +312,7 @@ func (g *hubGrid) applySettings(base app.Timings, s gridSettings) {
 // transitions (after the device registry listener), committed node event
 // batches, admin node changes, enrollments, forgotten devices and presence
 // changes.
-func (g *hubGrid) publishEvents(b *eventsapp.Broker, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
+func (g *hubGrid) publishEvents(b *events.Broker, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
 	ge := newGridEvents(b, g, policies, now, logger)
 
 	if g.status != nil {

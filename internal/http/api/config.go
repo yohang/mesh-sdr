@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"time"
 
-	settingsapp "github.com/yohang/mesh-sdr/internal/settings/app"
+	"github.com/yohang/mesh-sdr/internal/settings"
 )
 
 // ConfigViewer returns the effective configuration (ADM-010).
 type ConfigViewer interface {
-	View() settingsapp.ConfigView
+	View() settings.ConfigView
 }
 
 // ConfigHandlers serve /config/effective (ADM-010): the download of

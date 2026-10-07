@@ -11,14 +11,13 @@ import (
 
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/shell"
-	"github.com/yohang/mesh-sdr/internal/shell/app"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // navRouter serves the shell with an admin gate that is open or closed.
 func navRouter(admin bool) http.Handler {
-	gate := app.GateFunc(func(context.Context) bool { return admin })
-	m := shell.Wire(shell.Deps{Settings: values{}, AdminGate: gate, Logger: discard})
+	gate := shell.GateFunc(func(context.Context) bool { return admin })
+	m := shell.New(shell.Deps{Settings: values{}, AdminGate: gate, Logger: discard})
 	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 
 	return httpserver.NewRouter(discard, api, m.HTTP)
@@ -123,7 +122,7 @@ func TestSectionPages(t *testing.T) {
 // a machine-readable datetime, not a live region.
 func TestUTCClock(t *testing.T) {
 	now := func() time.Time { return time.Date(2026, 10, 6, 21, 7, 59, 0, time.FixedZone("CEST", 2*3600)) }
-	m := shell.Wire(shell.Deps{Settings: values{}, Now: now, Logger: discard})
+	m := shell.New(shell.Deps{Settings: values{}, Now: now, Logger: discard})
 	h := httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP)
 
 	_, body := do(t, h, http.MethodGet, "/policy", nil)
@@ -146,7 +145,7 @@ func TestUserMenu(t *testing.T) {
 		return &layout.User{Name: "Ada <Lovelace>", Role: "Operator", Links: []layout.Link{{Label: "Change password", Href: "/account/password"}}}
 	}
 
-	m := shell.Wire(shell.Deps{Settings: values{}, User: user, Logger: discard})
+	m := shell.New(shell.Deps{Settings: values{}, User: user, Logger: discard})
 	h := httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP)
 
 	_, anon := do(t, h, http.MethodGet, "/", nil)
@@ -224,7 +223,7 @@ func TestHelp(t *testing.T) {
 	page := func(v values) string {
 		t.Helper()
 
-		m := shell.Wire(shell.Deps{Settings: v, User: user, Logger: discard})
+		m := shell.New(shell.Deps{Settings: v, User: user, Logger: discard})
 		_, body := do(t, httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP), http.MethodGet, "/map", nil)
 
 		return body
@@ -269,7 +268,7 @@ func TestReceiverStation(t *testing.T) {
 		"receiver.photo_desc": "A **loop** on the roof.<script>alert(1)</script>",
 	}
 
-	m := shell.Wire(shell.Deps{Settings: v, Images: images{"avatar": true, "panorama": true}, Logger: discard})
+	m := shell.New(shell.Deps{Settings: v, Images: images{"avatar": true, "panorama": true}, Logger: discard})
 	_, body := do(t, httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP), http.MethodGet, "/", nil)
 
 	for _, want := range []string{
@@ -287,7 +286,7 @@ func TestReceiverStation(t *testing.T) {
 	}
 
 	// Without images nor description, only the name and the notice.
-	m = shell.Wire(shell.Deps{Settings: values{}, Logger: discard})
+	m = shell.New(shell.Deps{Settings: values{}, Logger: discard})
 	_, body = do(t, httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP), http.MethodGet, "/", nil)
 
 	if strings.Contains(body, "/api/v1/branding/") || strings.Contains(body, "<figure") {

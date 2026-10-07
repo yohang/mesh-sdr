@@ -50,8 +50,10 @@ internal/web/icongen/   icon generator (go:generate, golang.org/x/image/vector)
 internal/dsp/           node DSP: rings with gap markers, shared spectrum, FFT channelizer, NFM chain, audio framing (no I/O, no goroutines)
 internal/dsp/csdr/      cgo shim over libcsdr++ (the only cgo package)
 internal/protocol/rxv1/ rx.v1 codec, payloads (ctl, media), tokens, wsconn adapter, sendq (§6.8 media send queue)
-internal/wire/          composition root (hand-written IoC)
-internal/shared/domain/ shared kernel (common VOs, domain error type)
+internal/wire/          composition root (hand-written IoC) and the adapters between modules
+internal/shared/domain/ shared kernel: domain error type, UUID, DeviceID
+internal/shared/audit/  audit Record, actors and Appender port (implemented once in internal/wire over identity's audit_log)
+internal/shared/ratelimit/ token bucket per key bounded by an LRU, client keys (IPv4 address, IPv6 /64)
 internal/<module>/      one bounded context / module, see Architecture
 docs/adr/               architecture decision records
 .infra/                 infrastructure files
@@ -62,15 +64,19 @@ docs/adr/               architecture decision records
 
 Modules (bounded contexts):
 
-- `grid`: nodes, enrollment, internal CA / mTLS, control channel, heartbeat, capabilities, device registry, gateway (`infra/gateway`, net/http: TLS, hub router, node media proxy) and its forward auth, node media WebSocket and access-token verification
-- `identity`: users, roles, sessions, passwords, invitations, access tokens, CSRF, audit log
-- `settings`: DB settings store, config locking/precedence, retention
-- `shell`: app shell UI (layout, navigation, theming, static pages)
-- `radio`: node devices (ADR 0019): device lifecycle and manager, owrx connectors under the process supervisor (`infra/process`, ADR 0017), DSP engine (`infra/engine`), media stream handler (`http`); wired by `internal/radio/wire.go`
+- `grid` (layered): nodes, enrollment, internal CA / mTLS, control channel, heartbeat, capabilities, device registry, gateway (`infra/gateway`, net/http: TLS, hub router, node media proxy) and its forward auth, node media WebSocket and access-token verification
+- `identity` (layered): users, roles, sessions, passwords, invitations, access tokens, CSRF, audit log; wired by `internal/identity/wire.go`
+- `radio` (layered): node devices (ADR 0019): device lifecycle and manager, owrx connectors under the process supervisor (`infra/process`, ADR 0017), DSP engine (`infra/engine`), media stream handler (`http`)
+- `settings`: DB settings store, config locking/precedence, effective configuration, admin settings pages
+- `shell`: app shell UI (layout data, navigation, theming, static and error pages)
+- `events`: hub events bus, socket admission, `/api/ws`
+- `jobs`: periodic jobs scheduler, retention view
+- `files`: receiver images (upload, re-encoding, blobs)
+- `presets`, `schedules`: presets, schedules, the guard and the planner of the desired state (ADR 0020)
 
-## Architecture (light DDD)
+## Architecture (pragmatic DDD, ADR 0025)
 
-Code is organized by module, layered inside each module:
+Layers only where the domain is large: `identity`, `grid` and `radio`.
 
 ```
 internal/<module>/
@@ -78,29 +84,30 @@ internal/<module>/
   app/      use cases / application services (orchestrate domain + ports)
   infra/    adapters: repositories (infra/sqlite/, sqlc, taking a *db.DB), external systems, hardware
   http/     handlers + templ views for this module
-  wire.go   module wiring, once the module is big enough (see Dependency injection)
 ```
 
-Dependency rule: `http` → `app` → `domain` ← `infra`. `domain` imports only the stdlib and `internal/shared/domain`: no SQL, HTTP, templ, slog, config.
+Dependency rule there: `http` → `app` → `domain` ← `infra`. `domain` imports only the stdlib and `internal/shared/domain`: no SQL, HTTP, templ, slog, config.
 
-The domain must be fully modeled — no primitive obsession, no anemic structs:
+Every other module is one flat package `internal/<module>`: model, use cases, SQLite repository (sqlc queries of `internal/db/sqlite`), handlers and templates together, as plain structs. Declare an interface only where a consumer needs another implementation (a test fake, another module); a new module starts flat and gets layers only when the owner decides so.
 
-- **Value objects**: immutable, unexported fields, compared by value. Created only through `NewX(...) (X, error)`, which validates and returns a domain error if invalid — an existing VO is always valid. Add a `MustX` only for tests/constants. Expose getters/`String()`, never setters.
-- **Aggregates**: unexported fields, built by a constructor enforcing invariants, state changed only through behavior methods that keep invariants and return domain errors. One repository per aggregate root; the interface lives in `domain/`, the implementation in `infra/`. Persistence maps rows ↔ aggregates in `infra/` (rehydration constructor, no validation bypass leaking to callers).
-- **Domain errors**: explicit and typed (sentinels or a shared `DomainError` type with a stable code) declared in `domain/`. Checked with `errors.Is`/`errors.As`. Boundaries map them to transport responses (e.g. HTTP status); infra errors are wrapped, never leaked as domain errors.
-- Use cases in `app/` take/return domain types or dedicated DTOs; handlers stay thin.
+Modeling rules (all modules):
+
+- **Value objects only for real invariants**: ranges and units (frequencies, sample rates, gains), time windows, normalised or secret values (e-mails, passwords, tokens), ids (UUID, `DeviceID`). Immutable, unexported fields, created through `NewX(...) (X, error)` returning a domain error; `MustX` for tests/constants only. A string that only has to match a pattern stays a `string`, checked where it enters (constructor, form, row rehydration).
+- **Aggregates**: unexported fields, built by a constructor enforcing invariants, state changed only through behavior methods returning domain errors; a rehydration constructor maps rows back (no validation bypass leaking to callers).
+- **Domain errors**: sentinels of the shared `Error` type (`internal/shared/domain`) with a stable code, checked with `errors.Is`/`errors.As`. Boundaries map them to transport responses (e.g. HTTP status); infra errors are wrapped, never leaked as domain errors.
+- **Shared kernel**: one `DeviceID` (`internal/shared/domain`); audit through `audit.Appender` (`internal/shared/audit`: the actor is the caller of the request in ctx, `audit.System` or `audit.CLI`; mask secrets before recording); rate limits through `internal/shared/ratelimit`. Identity writes its own audit entries.
+- Handlers stay thin; use cases take/return domain types or dedicated DTOs.
 
 ## Dependency injection
 
 - Hand-written IoC, no DI library/codegen. Constructor injection only: dependencies are explicit constructor params, interfaces declared on the consumer side. No globals, no `init()` side effects, no service locator.
-- `internal/wire` is the composition root: `wire.Hub(cfg, logger, adapter)` and `wire.Node(cfg, logger, now)` build the object graph of each role from its config, `*slog.Logger` and, for the hub, the `*db.DB` opened by `wire.OpenDB` (from `db.dsn`, `sqlite:` only). CLI commands call them.
-- When volume grows, each module exposes its own `internal/<module>/wire.go` (`Wire(deps) Module`), and the root composes modules.
+- `internal/wire` is the composition root: `wire.Hub(cfg, logger, adapter)` and `wire.Node(cfg, logger, now)` build the object graph of each role from its config, `*slog.Logger` and, for the hub, the `*db.DB` opened by `wire.OpenDB` (from `db.dsn`, `sqlite:` only). CLI commands call them. It builds the modules directly (flat modules expose constructors such as `shell.New`); only `identity` keeps a module `wire.go` (`identity.Wire`). Adapters between modules live in `internal/wire`; no adapter that only forwards.
 
 ## Logging
 
 Goal: know everything that goes wrong or not as well as expected, plus debug info, filterable by level and by affected component — without cluttering business code.
 
-- Only `log/slog`. Loggers are injected, scoped at wiring: `logger.With(slog.String("component", "<module>.<layer>.<name>"))` (e.g. `radio.infra.repository`). Never `slog.Default()` in business code.
+- Only `log/slog`. Loggers are injected, scoped at wiring: `logger.With(slog.String("component", "<module>.<layer>.<name>"))` (e.g. `radio.infra.process`; flat modules keep stable names such as `settings.app.store`). Never `slog.Default()` in business code.
 - Levels:
   - `Debug`: flow details useful for diagnosis (inputs, decisions, external calls).
   - `Info`: lifecycle and significant business events.
@@ -170,7 +177,7 @@ Dev containers are rootless: the `dev` stage creates an `app` user with the host
 - Logging only with `log/slog`.
 - Migrations are not applied at startup; run `meshsdr hub migrate` (one run at a time, no lock). The hub refuses to start while migrations are pending or when the schema is newer than the binary.
 - `make lint` and `make test` must pass before committing.
-- Tests: stdlib `testing`, table-driven; repositories tested against real SQLite in `t.TempDir()` (`dbtest.NewSQLite`).
+- Tests: stdlib `testing`, table-driven; repositories are tested by ordinary package tests against real SQLite in `t.TempDir()` (`dbtest.NewSQLite`), no contract suites.
 - Dependencies: stdlib and `golang.org/x/*` are fine; any other third-party dependency requires the owner's approval.
 - REST: `/api/v1` only for JSON needed by JS/islands/nodes (and the resources pages link to); UI actions are HTML forms; no API twins (ADR 0023). Every `/api/v1` endpoint is declared in `internal/http/api/openapi.yaml` first, then generated (oapi-codegen strict chi server); module handler structs are embedded in `api.Server`. One JSON error format: RFC 9457 `application/problem+json` with a stable `code` (`internal/http/problem`).
 - Git: one branch + PR per epic (`epic/<area>-<n>`), split into ordered parts when another epic needs a subset first; PR body lists `Closes #<n>` per ticket; spikes get `spike/<key>-<topic>` branches. No AI attribution in commits or PRs.

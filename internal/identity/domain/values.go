@@ -229,23 +229,3 @@ func (h PasswordHash) String() string { return h.v }
 
 // IsZero reports whether h is the zero value (no local password).
 func (h PasswordHash) IsZero() bool { return h.v == "" }
-
-var devicePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
-
-// DeviceID is the slug of a device, used to scope a role grant.
-type DeviceID struct{ v string }
-
-// NewDeviceID validates a device slug (TECHNICAL_SPEC §7.1 "Slugs").
-func NewDeviceID(s string) (DeviceID, error) {
-	if !devicePattern.MatchString(s) {
-		return DeviceID{}, ErrInvalidDevice
-	}
-
-	return DeviceID{v: s}, nil
-}
-
-// String returns the slug.
-func (d DeviceID) String() string { return d.v }
-
-// IsZero reports whether d is the zero value (no device scope).
-func (d DeviceID) IsZero() bool { return d.v == "" }

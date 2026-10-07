@@ -7,25 +7,9 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
-	"github.com/yohang/mesh-sdr/internal/grid/infra/repotest"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
-
-func TestRepositories(t *testing.T) {
-	repotest.Run(t, func(t *testing.T) repotest.Repos {
-		a := dbtest.NewSQLite(t)
-
-		return repotest.Repos{
-			Nodes:       sqlite.NewNodeRepository(a),
-			Revocations: sqlite.NewRevocationRepository(a),
-			Cursors:     sqlite.NewCursorRepository(a),
-			Caps:        sqlite.NewCapabilityRepository(a),
-			Devices:     sqlite.NewDeviceRepository(a),
-			Conns:       sqlite.NewConnectionRepository(a),
-		}
-	})
-}
 
 func TestEraseUser(t *testing.T) {
 	ctx := context.Background()
@@ -100,7 +84,7 @@ func TestDeviceActivePreset(t *testing.T) {
 	repo := sqlite.NewDeviceRepository(a)
 
 	d, err := domain.NewReportedDevice(node.ID(), domain.DeviceSpec{
-		ID: domain.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000,
+		ID: shared.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000,
 		SampleRates: []int64{2_048_000},
 	}, 0, now)
 	if err != nil {

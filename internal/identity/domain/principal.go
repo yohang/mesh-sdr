@@ -2,6 +2,8 @@ package domain
 
 import (
 	"slices"
+
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Principal is who makes a request: anonymous, or a user through a session.
@@ -91,7 +93,7 @@ func (p Principal) Has(role Role) bool { return p.Role().Includes(role) }
 
 // HasOnDevice reports whether the principal holds role on device, globally
 // or through a grant scoped to it.
-func (p Principal) HasOnDevice(role Role, device DeviceID) bool {
+func (p Principal) HasOnDevice(role Role, device shared.DeviceID) bool {
 	if p.Has(role) {
 		return true
 	}

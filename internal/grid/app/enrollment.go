@@ -8,6 +8,8 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 )
 
@@ -33,7 +35,7 @@ type Enrollment struct {
 	repo     domain.NodeRepository
 	tx       Transactor
 	enroller Enroller
-	audit    Auditor
+	audit    auditor
 	now      Clock
 	logger   *slog.Logger
 	interval time.Duration
@@ -45,8 +47,8 @@ type Enrollment struct {
 
 // NewEnrollment returns the service. interval is the scan period of the
 // worker.
-func NewEnrollment(repo domain.NodeRepository, tx Transactor, enroller Enroller, audit Auditor, now Clock, interval time.Duration, logger *slog.Logger) *Enrollment {
-	return &Enrollment{repo: repo, tx: tx, enroller: enroller, audit: audit, now: now, interval: interval, logger: logger}
+func NewEnrollment(repo domain.NodeRepository, tx Transactor, enroller Enroller, auditLog audit.Appender, now Clock, interval time.Duration, logger *slog.Logger) *Enrollment {
+	return &Enrollment{repo: repo, tx: tx, enroller: enroller, audit: auditor{auditLog, logger}, now: now, interval: interval, logger: logger}
 }
 
 // Targets returns the pending, enabled nodes whose token has not expired.
@@ -81,8 +83,8 @@ func (s *Enrollment) Attempt(ctx context.Context, t EnrollmentTarget) error {
 	cert, err := s.enroller.Enroll(ctx, t)
 	if err != nil {
 		if errors.Is(err, ErrEnrollmentRejected) {
-			s.audit.Record(ctx, AuditRecord{ActorKind: ActorSystem, Action: "node.enroll", Target: t.ID.String(), Result: ResultDenied,
-				Detail: map[string]string{"reason": err.Error()}})
+			s.audit.Record(ctx, audit.Record{Actor: audit.System, Action: "node.enroll", TargetType: "node", TargetID: t.ID.String(), Result: audit.ResultDenied,
+				After: map[string]string{"reason": err.Error()}})
 		}
 
 		return fmt.Errorf("enroll node %s: %w", t.ID, err)
@@ -102,14 +104,14 @@ func (s *Enrollment) Attempt(ctx context.Context, t EnrollmentTarget) error {
 		return s.repo.Save(ctx, n, v)
 	})
 	if err != nil {
-		s.audit.Record(ctx, AuditRecord{ActorKind: ActorSystem, Action: "node.enroll", Target: t.ID.String(), Result: ResultError,
-			Detail: map[string]string{"reason": err.Error()}})
+		s.audit.Record(ctx, audit.Record{Actor: audit.System, Action: "node.enroll", TargetType: "node", TargetID: t.ID.String(), Result: audit.ResultError,
+			After: map[string]string{"reason": err.Error()}})
 
 		return fmt.Errorf("record enrollment of node %s: %w", t.ID, err)
 	}
 
-	s.audit.Record(ctx, AuditRecord{ActorKind: ActorSystem, Action: "node.enroll", Target: t.ID.String(), Result: ResultOK,
-		Detail: map[string]string{"cert_serial": cert.Serial()}})
+	s.audit.Record(ctx, audit.Record{Actor: audit.System, Action: "node.enroll", TargetType: "node", TargetID: t.ID.String(), Result: audit.ResultOK,
+		After: map[string]string{"cert_serial": cert.Serial()}})
 	s.logger.InfoContext(ctx, "node enrolled", slog.String("node_id", t.ID.String()), slog.String("cert_serial", cert.Serial()))
 
 	if s.Enrolled != nil {
