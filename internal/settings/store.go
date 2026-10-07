@@ -1,4 +1,11 @@
-package app
+// Package settings is the settings module (TECHNICAL_SPEC §7.1 `settings`,
+// §7.4 "Locking semantics and precedence", ADM-002, ADR 0010): setting keys,
+// values and definitions, the effective value of each key with its source,
+// the settings store (load, resolve, validate, save, audit, publish) over
+// its SQLite repository, the effective configuration view, and the admin
+// settings pages (ADM-001, ADM-003, ADM-005, ADM-006, ADM-010, ADM-011;
+// FEATURE_SPEC §10.13). The JSON API lives in internal/http/api.
+package settings
 
 import (
 	"context"
@@ -14,7 +21,6 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
-	"github.com/yohang/mesh-sdr/internal/settings/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -26,7 +32,7 @@ const secretMask = `"***"`
 // their audit records, and publishes an immutable snapshot after each
 // committed write (ADM-002, ADR 0010).
 type Store struct {
-	repo    domain.Repository
+	repo    Repository
 	catalog Catalog
 	tx      Transactor
 	audit   audit.Appender
@@ -40,7 +46,7 @@ type Store struct {
 
 // StoreDeps are the dependencies of Store.
 type StoreDeps struct {
-	Repo    domain.Repository
+	Repo    Repository
 	Catalog Catalog
 	Tx      Transactor
 	Audit   audit.Appender
@@ -87,7 +93,7 @@ func (s *Store) Load(ctx context.Context) error {
 	}
 
 	for _, ig := range ignored {
-		if errors.Is(ig.err, domain.ErrUnknownSetting) {
+		if errors.Is(ig.err, ErrUnknownSetting) {
 			s.logger.WarnContext(ctx, "DB setting with an unknown key ignored", slog.String("key", ig.row.Key()))
 
 			continue
@@ -110,7 +116,7 @@ func (s *Store) Load(ctx context.Context) error {
 }
 
 type ignoredRow struct {
-	row *domain.Setting
+	row *Setting
 	err error
 }
 
@@ -126,7 +132,7 @@ func (s *Store) read(ctx context.Context) (*Snapshot, []ignoredRow, error) {
 		return nil, nil, err
 	}
 
-	valid := map[string]*domain.Setting{}
+	valid := map[string]*Setting{}
 
 	var ignored []ignoredRow
 
@@ -140,8 +146,8 @@ func (s *Store) read(ctx context.Context) (*Snapshot, []ignoredRow, error) {
 		valid[r.Key()] = r
 	}
 
-	invalid := func() map[string]*domain.Setting {
-		m := map[string]*domain.Setting{}
+	invalid := func() map[string]*Setting {
+		m := map[string]*Setting{}
 		for _, ig := range ignored {
 			m[ig.row.Key()] = ig.row
 		}
@@ -157,7 +163,7 @@ func (s *Store) read(ctx context.Context) (*Snapshot, []ignoredRow, error) {
 
 	for _, v := range s.catalog.Check(func(k string) (any, bool) { t := snap.Typed(k); return t, t != nil }) {
 		if r, ok := valid[v.Path()]; ok {
-			ignored = append(ignored, ignoredRow{row: r, err: domain.ErrInvalidSetting.WithViolations(v)})
+			ignored = append(ignored, ignoredRow{row: r, err: ErrInvalidSetting.WithViolations(v)})
 			delete(valid, v.Path())
 
 			dropped = true
@@ -173,20 +179,20 @@ func (s *Store) read(ctx context.Context) (*Snapshot, []ignoredRow, error) {
 
 // resolve builds the snapshot of the definitions over the valid DB rows;
 // ignored rows keep only their version.
-func (s *Store) resolve(rev int64, rows, ignored map[string]*domain.Setting) *Snapshot {
+func (s *Store) resolve(rev int64, rows, ignored map[string]*Setting) *Snapshot {
 	defs := s.catalog.Definitions()
-	entries := make([]domain.Effective, 0, len(defs))
+	entries := make([]Effective, 0, len(defs))
 	typed := make(map[string]any, len(defs))
 
 	for _, d := range defs {
-		var cfg *domain.Configured
+		var cfg *Configured
 		if c, ok := s.catalog.Configured(d.Key()); ok {
 			cfg = &c
 		}
 
-		e := domain.Resolve(d, cfg, rows[d.Key()])
+		e := Resolve(d, cfg, rows[d.Key()])
 		if ig, ok := ignored[d.Key()]; ok && rows[d.Key()] == nil {
-			e = domain.ResolveIgnoring(d, cfg, ig)
+			e = ResolveIgnoring(d, cfg, ig)
 		}
 		entries = append(entries, e)
 
@@ -202,11 +208,11 @@ func (s *Store) resolve(rev int64, rows, ignored map[string]*domain.Setting) *Sn
 
 // Apply writes a change set atomically for the user by (zero: the hub
 // itself; the audit names the caller of the request in ctx) and returns the new
-// snapshot. Errors: domain.ErrSettingLocked (audited as denied),
-// domain.ErrSecretsUnavailable, domain.ErrInvalidSetting with one violation
-// per rejected key (unknown keys included), domain.ErrVersionConflict
+// snapshot. Errors: ErrSettingLocked (audited as denied),
+// ErrSecretsUnavailable, ErrInvalidSetting with one violation
+// per rejected key (unknown keys included), ErrVersionConflict
 // naming the stale keys.
-func (s *Store) Apply(ctx context.Context, by shared.UUID, set domain.ChangeSet) (*Snapshot, error) {
+func (s *Store) Apply(ctx context.Context, by shared.UUID, set ChangeSet) (*Snapshot, error) {
 	snap, subs, err := s.apply(ctx, by, set)
 	if err != nil {
 		return nil, err
@@ -219,7 +225,7 @@ func (s *Store) Apply(ctx context.Context, by shared.UUID, set domain.ChangeSet)
 	return snap, nil
 }
 
-func (s *Store) apply(ctx context.Context, by shared.UUID, set domain.ChangeSet) (*Snapshot, []func(*Snapshot), error) {
+func (s *Store) apply(ctx context.Context, by shared.UUID, set ChangeSet) (*Snapshot, []func(*Snapshot), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -235,7 +241,7 @@ func (s *Store) apply(ctx context.Context, by shared.UUID, set domain.ChangeSet)
 
 	var (
 		violations []shared.Violation
-		locked     []domain.Effective
+		locked     []Effective
 	)
 
 	for _, c := range changes {
@@ -243,7 +249,7 @@ func (s *Store) apply(ctx context.Context, by shared.UUID, set domain.ChangeSet)
 
 		e, ok := cur.Get(key)
 		if !ok {
-			violations = append(violations, shared.NewViolation(key, domain.ErrUnknownSetting.Code(), "unknown setting"))
+			violations = append(violations, shared.NewViolation(key, ErrUnknownSetting.Code(), "unknown setting"))
 
 			continue
 		}
@@ -255,7 +261,7 @@ func (s *Store) apply(ctx context.Context, by shared.UUID, set domain.ChangeSet)
 		}
 
 		if e.Definition().Secret() {
-			return nil, nil, domain.ErrSecretsUnavailable
+			return nil, nil, ErrSecretsUnavailable
 		}
 
 		v, ok := c.Value()
@@ -289,7 +295,7 @@ func (s *Store) apply(ctx context.Context, by shared.UUID, set domain.ChangeSet)
 	}
 
 	if len(violations) > 0 {
-		return nil, nil, domain.ErrInvalidSetting.WithViolations(violations...)
+		return nil, nil, ErrInvalidSetting.WithViolations(violations...)
 	}
 
 	if err := s.tx.WithinTx(ctx, func(ctx context.Context) error { return s.write(ctx, by, cur, changes) }); err != nil {
@@ -324,8 +330,8 @@ func violationsOf(key string, err error) []shared.Violation {
 }
 
 // denyLocked audits the refused writes to locked keys and returns the 409.
-func (s *Store) denyLocked(ctx context.Context, changes []domain.Change, locked []domain.Effective) error {
-	byKey := map[string]domain.Change{}
+func (s *Store) denyLocked(ctx context.Context, changes []Change, locked []Effective) error {
+	byKey := map[string]Change{}
 	for _, c := range changes {
 		byKey[c.Key()] = c
 	}
@@ -350,10 +356,10 @@ func (s *Store) denyLocked(ctx context.Context, changes []domain.Change, locked 
 		origins = append(origins, e.Key()+" is set in "+e.Origin())
 	}
 
-	return domain.ErrSettingLocked.WithDetail(strings.Join(origins, "; "))
+	return ErrSettingLocked.WithDetail(strings.Join(origins, "; "))
 }
 
-func mask(d domain.Definition, v domain.Value) string {
+func mask(d Definition, v Value) string {
 	if d.Secret() && !v.IsNull() {
 		return secretMask
 	}
@@ -363,8 +369,8 @@ func mask(d domain.Definition, v domain.Value) string {
 
 // write runs in the transaction: version check, then one revision for the
 // whole change set and one audit record per changed key.
-func (s *Store) write(ctx context.Context, by shared.UUID, cur *Snapshot, changes []domain.Change) error {
-	rows := make([]*domain.Setting, len(changes))
+func (s *Store) write(ctx context.Context, by shared.UUID, cur *Snapshot, changes []Change) error {
+	rows := make([]*Setting, len(changes))
 
 	var conflicts []shared.Violation
 
@@ -380,7 +386,7 @@ func (s *Store) write(ctx context.Context, by shared.UUID, cur *Snapshot, change
 		}
 
 		if have != c.Expected() {
-			conflicts = append(conflicts, shared.NewViolation(c.Key(), domain.ErrVersionConflict.Code(),
+			conflicts = append(conflicts, shared.NewViolation(c.Key(), ErrVersionConflict.Code(),
 				"current version "+strconv.FormatInt(have, 10)))
 		}
 
@@ -388,7 +394,7 @@ func (s *Store) write(ctx context.Context, by shared.UUID, cur *Snapshot, change
 	}
 
 	if len(conflicts) > 0 {
-		return domain.ErrVersionConflict.WithViolations(conflicts...)
+		return ErrVersionConflict.WithViolations(conflicts...)
 	}
 
 	rev, err := s.repo.NextRevision(ctx)
@@ -420,7 +426,7 @@ func (s *Store) write(ctx context.Context, by shared.UUID, cur *Snapshot, change
 
 			action, after = ActionReset, mask(def, def.Default())
 		case row == nil:
-			if row, err = domain.NewSetting(c.Key(), v, rev, by, now); err != nil {
+			if row, err = NewSetting(c.Key(), v, rev, by, now); err != nil {
 				return err
 			}
 

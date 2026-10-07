@@ -1,23 +1,21 @@
-package sqlite_test
+package settings_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/yohang/mesh-sdr/internal/settings/domain"
+	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Fixture is a fresh, migrated database: the repository and the id of an
 // existing user (settings.updated_by references users).
 type Fixture struct {
-	Settings domain.Repository
+	Settings settings.Repository
 	User     shared.UUID
 	Tx       func(ctx context.Context, fn func(ctx context.Context) error) error
 }
-
-var t0 = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 
 func TestSettings(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
@@ -49,7 +47,7 @@ func TestSettings(t *testing.T) {
 			t.Fatalf("next revision = %d, %v", rev, err)
 		}
 
-		s, err := domain.NewSetting(key, domain.MustValue(`{"lat":50.5,"lon":3}`), rev, f.User, t0)
+		s, err := settings.NewSetting(key, settings.MustValue(`{"lat":50.5,"lon":3}`), rev, f.User, t0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +66,7 @@ func TestSettings(t *testing.T) {
 		}
 
 		rev, _ = f.Settings.NextRevision(ctx)
-		if err := got.Replace(domain.MustValue(`{"lat":1,"lon":2}`), rev, shared.UUID{}, t0.Add(time.Minute)); err != nil {
+		if err := got.Replace(settings.MustValue(`{"lat":1,"lon":2}`), rev, shared.UUID{}, t0.Add(time.Minute)); err != nil {
 			t.Fatal(err)
 		}
 
@@ -108,7 +106,7 @@ func TestSettings(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			s, _ := domain.NewSetting("listen_policy", domain.MustValue(`"registered"`), rev, shared.UUID{}, t0)
+			s, _ := settings.NewSetting("listen_policy", settings.MustValue(`"registered"`), rev, shared.UUID{}, t0)
 			if err := f.Settings.Save(ctx, s); err != nil {
 				t.Fatal(err)
 			}

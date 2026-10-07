@@ -21,7 +21,7 @@ import (
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
-	settingsdomain "github.com/yohang/mesh-sdr/internal/settings/domain"
+	"github.com/yohang/mesh-sdr/internal/settings"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
 
@@ -279,7 +279,7 @@ func HubNodes(cfg config.Hub, logger *slog.Logger, adapter *db.DB) (*app.Nodes, 
 
 // gridSettings reads the grid DB settings.
 type gridSettings interface {
-	Get(key string) (settingsdomain.Effective, bool)
+	Get(key string) (settings.Effective, bool)
 	Int(key string) int
 }
 
@@ -289,11 +289,11 @@ type gridSettings interface {
 func (g *hubGrid) applySettings(base app.Timings, s gridSettings) {
 	t := base
 
-	if e, ok := s.Get("grid.heartbeat_interval_s"); ok && e.Source() != settingsdomain.SourceDefault {
+	if e, ok := s.Get("grid.heartbeat_interval_s"); ok && e.Source() != settings.SourceDefault {
 		t.HeartbeatInterval = time.Duration(s.Int("grid.heartbeat_interval_s")) * time.Second
 	}
 
-	if e, ok := s.Get("grid.offline_after_s"); ok && e.Source() != settingsdomain.SourceDefault {
+	if e, ok := s.Get("grid.offline_after_s"); ok && e.Source() != settings.SourceDefault {
 		t.OfflineAfter = time.Duration(s.Int("grid.offline_after_s")) * time.Second
 	}
 

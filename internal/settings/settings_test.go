@@ -1,4 +1,4 @@
-package sqlite_test
+package settings_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
-	"github.com/yohang/mesh-sdr/internal/settings/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -37,5 +37,5 @@ func open(t *testing.T) Fixture {
 		t.Fatal(err)
 	}
 
-	return Fixture{Settings: sqlite.NewSettings(a, 1), User: id, Tx: a.WithinTx}
+	return Fixture{Settings: settings.NewSettings(a, 1), User: id, Tx: a.WithinTx}
 }

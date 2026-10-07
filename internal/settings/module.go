@@ -1,8 +1,4 @@
-// Package http serves the admin settings pages (ADM-001, ADM-003, ADM-005,
-// ADM-006, ADM-010, ADM-011; FEATURE_SPEC §10.13): forms generated from the
-// settings definitions, saved through the settings store, rendered in the
-// app shell. The JSON API lives in internal/http/api.
-package http
+package settings
 
 import (
 	"context"
@@ -16,8 +12,6 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/yohang/mesh-sdr/internal/settings/app"
-	"github.com/yohang/mesh-sdr/internal/settings/domain"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
@@ -26,17 +20,6 @@ import (
 // FormBodyLimit bounds the body of the admin forms (the usage policy is the
 // largest field: 20 000 characters).
 const FormBodyLimit = 256 << 10
-
-// Store is the settings store.
-type Store interface {
-	Snapshot() *app.Snapshot
-	Apply(ctx context.Context, by shared.UUID, set domain.ChangeSet) (*app.Snapshot, error)
-}
-
-// ConfigViewer returns the effective configuration.
-type ConfigViewer interface {
-	View() app.ConfigView
-}
 
 // RetentionRow is one store of the retention view.
 type RetentionRow struct {
@@ -68,8 +51,8 @@ type Renderer interface {
 type Deps struct {
 	Render    Renderer
 	Guard     func(http.Handler) http.Handler // admin role and network (identity)
-	Store     Store
-	Config    ConfigViewer
+	Store     *Store
+	Config    *EffectiveConfig
 	Retention Retention
 	User      func(ctx context.Context) shared.UUID // signed-in user of a request
 	Images    ImagesSection                         // receiver images of the Site page; nil: none
@@ -178,14 +161,14 @@ func (m *Module) formPageContent(r *http.Request, p formPage, result *sectionVie
 	return formPageView(p, views, extra)
 }
 
-func configEntry(v app.ConfigView, key string) app.ConfigEntry {
+func configEntry(v ConfigView, key string) ConfigEntry {
 	for _, e := range v.Entries {
 		if e.Key == key {
 			return e
 		}
 	}
 
-	return app.ConfigEntry{Key: key}
+	return ConfigEntry{Key: key}
 }
 
 // save handles the submission of one section of a page.
@@ -238,10 +221,10 @@ func (m *Module) save(p formPage) http.HandlerFunc {
 	}
 }
 
-func (m *Module) apply(r *http.Request, view *sectionView, spec sectionSpec, action string, changes []domain.Change) int {
-	set, err := domain.NewChangeSet(changes...)
+func (m *Module) apply(r *http.Request, view *sectionView, spec sectionSpec, action string, changes []Change) int {
+	set, err := NewChangeSet(changes...)
 	if err == nil {
-		var snap *app.Snapshot
+		var snap *Snapshot
 
 		if snap, err = m.d.Store.Apply(r.Context(), m.d.User(r.Context()), set); err == nil {
 			*view = buildSection(spec, action, snap)
@@ -254,9 +237,9 @@ func (m *Module) apply(r *http.Request, view *sectionView, spec sectionSpec, act
 	applyErrors(view, err)
 
 	switch {
-	case errors.Is(err, domain.ErrInvalidSetting):
+	case errors.Is(err, ErrInvalidSetting):
 		return http.StatusUnprocessableEntity
-	case errors.Is(err, domain.ErrVersionConflict), errors.Is(err, domain.ErrSettingLocked), errors.Is(err, domain.ErrSecretsUnavailable):
+	case errors.Is(err, ErrVersionConflict), errors.Is(err, ErrSettingLocked), errors.Is(err, ErrSecretsUnavailable):
 		return http.StatusConflict
 	default:
 		m.d.Logger.ErrorContext(r.Context(), "save settings", slog.String("section", spec.ID), slog.Any("error", err))

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	settingsdomain "github.com/yohang/mesh-sdr/internal/settings/domain"
+	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -15,8 +15,8 @@ import (
 // 0010): the key definitions, the values the hub config sets (locked) and
 // the validator.
 type SettingsCatalog struct {
-	defs       []settingsdomain.Definition
-	configured map[string]settingsdomain.Configured
+	defs       []settings.Definition
+	configured map[string]settings.Configured
 	schema     json.RawMessage
 }
 
@@ -35,7 +35,7 @@ func NewSettingsCatalog(cfg Hub, origins Origins) (*SettingsCatalog, error) {
 		defLeaves[lf.key] = lf
 	}
 
-	c := &SettingsCatalog{configured: map[string]settingsdomain.Configured{}}
+	c := &SettingsCatalog{configured: map[string]settings.Configured{}}
 
 	for _, lf := range leaves(&cfg) {
 		key, ok := strings.CutPrefix(lf.key, settingsPrefix)
@@ -53,15 +53,15 @@ func NewSettingsCatalog(cfg Hub, origins Origins) (*SettingsCatalog, error) {
 		c.defs = append(c.defs, def)
 
 		if o := origins.Of(lf.key); o.Locked() {
-			v := settingsdomain.Value{} // a secret is never copied out of the config
+			v := settings.Value{} // a secret is never copied out of the config
 
 			if !def.Secret() {
-				if v, err = settingsdomain.ValueOf(lf.value.Interface()); err != nil {
+				if v, err = settings.ValueOf(lf.value.Interface()); err != nil {
 					return nil, fmt.Errorf("%s: %w", lf.key, err)
 				}
 			}
 
-			c.configured[key] = settingsdomain.Configured{Value: v, Origin: o.String()}
+			c.configured[key] = settings.Configured{Value: v, Origin: o.String()}
 		}
 	}
 
@@ -73,30 +73,30 @@ func NewSettingsCatalog(cfg Hub, origins Origins) (*SettingsCatalog, error) {
 	return c, nil
 }
 
-func definition(sl *settingLeaf, def any) (settingsdomain.Definition, error) {
+func definition(sl *settingLeaf, def any) (settings.Definition, error) {
 	key := sl.key
 
-	dv, err := settingsdomain.ValueOf(def)
+	dv, err := settings.ValueOf(def)
 	if err != nil {
-		return settingsdomain.Definition{}, fmt.Errorf("default of %s: %w", sl.key, err)
+		return settings.Definition{}, fmt.Errorf("default of %s: %w", sl.key, err)
 	}
 
 	s := sl.schema
 	str := func(k string) string { v, _ := s[k].(string); return v }
 	flag := func(k string) bool { v, _ := s[k].(bool); return v }
 
-	apply := settingsdomain.Apply(str("x-apply"))
+	apply := settings.Apply(str("x-apply"))
 	if apply == "" {
-		apply = settingsdomain.ApplyLive
+		apply = settings.ApplyLive
 	}
 
-	return settingsdomain.NewDefinition(settingsdomain.DefinitionSpec{
+	return settings.NewDefinition(settings.DefinitionSpec{
 		Key: key, Default: dv, Label: str("x-label"), Description: str("description"),
 		Secret: flag("secret"), Public: flag("x-public"), Apply: apply, Input: input(sl.typ, s),
 	})
 }
 
-func input(t reflect.Type, s map[string]any) settingsdomain.Input {
+func input(t reflect.Type, s map[string]any) settings.Input {
 	num := func(k string) *float64 {
 		if v, ok := s[k].(float64); ok {
 			return &v
@@ -105,7 +105,7 @@ func input(t reflect.Type, s map[string]any) settingsdomain.Input {
 		return nil
 	}
 
-	in := settingsdomain.Input{Min: num("minimum"), Max: num("maximum")}
+	in := settings.Input{Min: num("minimum"), Max: num("maximum")}
 
 	if v, ok := s["maxLength"].(float64); ok {
 		in.MaxLength = int(v)
@@ -115,30 +115,30 @@ func input(t reflect.Type, s map[string]any) settingsdomain.Input {
 
 	switch t {
 	case reflect.TypeFor[Duration]():
-		in.Kind = settingsdomain.InputDuration
+		in.Kind = settings.InputDuration
 		in.MinText, _ = s["x-min-duration"].(string)
 
 		return in
 	case reflect.TypeFor[Rate]():
-		in.Kind = settingsdomain.InputRate
+		in.Kind = settings.InputRate
 
 		return in
 	case reflect.TypeFor[GeoPoint]():
-		in.Kind = settingsdomain.InputGeo
+		in.Kind = settings.InputGeo
 
 		return in
 	}
 
 	switch t.Kind() {
 	case reflect.Bool:
-		in.Kind = settingsdomain.InputBoolean
+		in.Kind = settings.InputBoolean
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		in.Kind = settingsdomain.InputInteger
+		in.Kind = settings.InputInteger
 	case reflect.Float32, reflect.Float64:
-		in.Kind = settingsdomain.InputNumber
+		in.Kind = settings.InputNumber
 	case reflect.Slice:
-		in.Kind = settingsdomain.InputList
+		in.Kind = settings.InputList
 	default:
 		in.Kind = stringInput(s, in.MaxLength)
 
@@ -152,42 +152,42 @@ func input(t reflect.Type, s map[string]any) settingsdomain.Input {
 	return in
 }
 
-func stringInput(s map[string]any, maxLength int) settingsdomain.InputKind {
+func stringInput(s map[string]any, maxLength int) settings.InputKind {
 	if _, ok := s["enum"]; ok {
-		return settingsdomain.InputEnum
+		return settings.InputEnum
 	}
 
-	if w, _ := s["x-widget"].(string); w == string(settingsdomain.InputMarkdown) {
-		return settingsdomain.InputMarkdown
+	if w, _ := s["x-widget"].(string); w == string(settings.InputMarkdown) {
+		return settings.InputMarkdown
 	}
 
 	switch f, _ := s["format"].(string); f {
 	case "email":
-		return settingsdomain.InputEmail
+		return settings.InputEmail
 	case "uri", "uri-reference":
-		return settingsdomain.InputURL
+		return settings.InputURL
 	}
 
 	if maxLength > 512 {
-		return settingsdomain.InputTextarea
+		return settings.InputTextarea
 	}
 
-	return settingsdomain.InputText
+	return settings.InputText
 }
 
 // Definitions returns the key definitions in schema order.
-func (c *SettingsCatalog) Definitions() []settingsdomain.Definition { return slices.Clone(c.defs) }
+func (c *SettingsCatalog) Definitions() []settings.Definition { return slices.Clone(c.defs) }
 
 // Configured returns the value the hub config sets for key, if any (a
 // secret's value stays empty).
-func (c *SettingsCatalog) Configured(key string) (settingsdomain.Configured, bool) {
+func (c *SettingsCatalog) Configured(key string) (settings.Configured, bool) {
 	v, ok := c.configured[key]
 
 	return v, ok
 }
 
 // Validate checks a value of key (ValidateSetting) and returns its Go value.
-func (c *SettingsCatalog) Validate(key string, v settingsdomain.Value) (any, error) {
+func (c *SettingsCatalog) Validate(key string, v settings.Value) (any, error) {
 	return ValidateSetting(key, v.JSON())
 }
 

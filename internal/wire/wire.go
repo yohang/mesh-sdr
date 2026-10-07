@@ -38,8 +38,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/mail"
-	settingsapp "github.com/yohang/mesh-sdr/internal/settings/app"
-	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
+	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shell"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
@@ -295,7 +294,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	// grid.heartbeat_interval_s and grid.offline_after_s apply live.
 	g.applySettings(timings, settingsStore.Snapshot())
-	settingsStore.Subscribe(func(s *settingsapp.Snapshot) { g.applySettings(timings, s) })
+	settingsStore.Subscribe(func(s *settings.Snapshot) { g.applySettings(timings, s) })
 
 	adminGate := &roleGate{role: identitydomain.RoleAdmin}
 	shellModule := shell.New(shell.Deps{
@@ -353,7 +352,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		// stops with the hub.
 		changed := make(chan struct{}, 1)
 
-		settingsStore.Subscribe(func(*settingsapp.Snapshot) {
+		settingsStore.Subscribe(func(*settings.Snapshot) {
 			select {
 			case changed <- struct{}{}:
 			default:
@@ -419,7 +418,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		// before any module reads it.
 		bodyLimit(cfg.Gateway.MaxBody.Bytes()),
 		idm.HTTP,
-		settingshttp.New(settingshttp.Deps{
+		settings.New(settings.Deps{
 			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin),
 			Store: settingsStore, Config: effective, Retention: retentionRows{r: retention},
 			User: currentUser, Images: imagesHTTP, Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets},

@@ -1,9 +1,4 @@
-// Package app holds the settings use cases: the settings store (load,
-// resolve, validate, save, audit, publish) and the effective configuration
-// view (ADM-002, ADM-010, ADR 0010). Ports are declared here, on the
-// consumer side; adapters live in internal/settings/infra and the
-// composition root.
-package app
+package settings
 
 import (
 	"context"
@@ -12,18 +7,17 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
-	"github.com/yohang/mesh-sdr/internal/settings/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Catalog is the settings schema: key definitions, the values the hub
 // config sets (locked) and the shared validator.
 type Catalog interface {
-	Definitions() []domain.Definition
-	Configured(key string) (domain.Configured, bool)
+	Definitions() []Definition
+	Configured(key string) (Configured, bool)
 	// Validate checks a value of key and returns its Go value, or an error
-	// matching domain.ErrUnknownSetting or domain.ErrInvalidSetting.
-	Validate(key string, v domain.Value) (any, error)
+	// matching ErrUnknownSetting or ErrInvalidSetting.
+	Validate(key string, v Value) (any, error)
 	// Check runs the checks across keys on effective Go values.
 	Check(get func(key string) (any, bool)) []shared.Violation
 	// Schema returns the JSON Schema of the settings namespace.

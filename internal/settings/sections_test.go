@@ -1,9 +1,10 @@
-package http
+package settings_test
 
 import (
 	"testing"
 
 	"github.com/yohang/mesh-sdr/internal/config"
+	"github.com/yohang/mesh-sdr/internal/settings"
 )
 
 // Every settings key is editable on exactly one admin page section.
@@ -15,7 +16,7 @@ func TestEverySettingHasASection(t *testing.T) {
 
 	seen := map[string]string{}
 
-	for _, p := range formPages {
+	for _, p := range settings.FormPages {
 		for _, s := range p.Forms {
 			for _, k := range s.Keys {
 				if prev, dup := seen[k]; dup {

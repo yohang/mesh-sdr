@@ -14,7 +14,7 @@ import (
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
-	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
+	"github.com/yohang/mesh-sdr/internal/settings"
 )
 
 // newJobs builds the hub's jobs scheduler with the retention jobs, and the
@@ -63,17 +63,17 @@ func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobs.
 // retentionRows adapts the retention view to the admin pages.
 type retentionRows struct{ r *jobs.Retention }
 
-// Stores implements settingshttp.Retention.
-func (a retentionRows) Stores(ctx context.Context) ([]settingshttp.RetentionRow, error) {
+// Stores implements settings.Retention.
+func (a retentionRows) Stores(ctx context.Context) ([]settings.RetentionRow, error) {
 	views, err := a.r.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]settingshttp.RetentionRow, 0, len(views))
+	out := make([]settings.RetentionRow, 0, len(views))
 
 	for _, v := range views {
-		out = append(out, settingshttp.RetentionRow{
+		out = append(out, settings.RetentionRow{
 			Store: v.Store.Name, Label: v.Store.Label, SettingKey: v.Store.SettingKey, Retention: v.Retention,
 			Rows: v.Rows, Bytes: v.Bytes, Sized: v.Sized, Running: v.LastRun.Running(), LastFinished: v.LastRun.LastFinished(),
 			LastFailed: v.LastRun.Status() == jobs.StatusError, LastError: v.LastRun.LastError(), LastRows: v.LastRun.Rows(),
@@ -83,7 +83,7 @@ func (a retentionRows) Stores(ctx context.Context) ([]settingshttp.RetentionRow,
 	return out, nil
 }
 
-// Purge implements settingshttp.Retention.
+// Purge implements settings.Retention.
 func (a retentionRows) Purge(ctx context.Context, store string) (int64, error) {
 	return a.r.Purge(ctx, store)
 }

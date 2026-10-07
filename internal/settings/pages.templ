@@ -1,10 +1,8 @@
-package http
+package settings
 
 import (
 	"strconv"
 
-	"github.com/yohang/mesh-sdr/internal/settings/app"
-	"github.com/yohang/mesh-sdr/internal/settings/domain"
 )
 
 // formPageView is a page of form sections. extra is a page-specific block
@@ -89,10 +87,10 @@ templ fieldHelp(f field) {
 		}
 		<p>
 			{ sourceText(f.Source, f.Origin) }
-			if !f.Locked && f.Source != domain.SourceDefault && !f.Secret {
+			if !f.Locked && f.Source != SourceDefault && !f.Secret {
 				Default: { f.Default }.
 			}
-			if f.Kind == domain.InputDuration {
+			if f.Kind == InputDuration {
 				Units: m, h, d, w (for example 30d).
 				if f.MinText != "" {
 					At least { f.MinText }.
@@ -122,19 +120,19 @@ func describedBy(f field) string {
 	return "help-" + f.ID
 }
 
-func inputType(k domain.InputKind) string {
+func inputType(k InputKind) string {
 	switch k {
-	case domain.InputEmail:
+	case InputEmail:
 		return "email"
-	case domain.InputInteger, domain.InputNumber:
+	case InputInteger, InputNumber:
 		return "number"
 	default:
 		return "text"
 	}
 }
 
-func step(k domain.InputKind) string {
-	if k == domain.InputNumber {
+func step(k InputKind) string {
+	if k == InputNumber {
 		return "any"
 	}
 
@@ -152,13 +150,13 @@ templ fieldView(f field) {
 			case f.Locked:
 				<label for={ f.ID } class="font-medium">{ f.Label } <span class="text-sm text-fg-muted">(locked)</span></label>
 				<input id={ f.ID } type="text" class="rounded border border-border bg-surface-raised px-2 py-1" readonly aria-readonly="true" value={ displayValue(f.Kind, lockedValue(f)) } aria-describedby={ describedBy(f) } { invalid(f)... }/>
-			case f.Kind == domain.InputBoolean:
+			case f.Kind == InputBoolean:
 				<div class="flex items-center gap-2">
 					<input type="hidden" name={ f.Key } value="false"/>
 					<input id={ f.ID } type="checkbox" name={ f.Key } value="true" checked?={ f.Checked } aria-describedby={ describedBy(f) } { invalid(f)... }/>
 					<label for={ f.ID } class="font-medium">{ f.Label }</label>
 				</div>
-			case f.Kind == domain.InputGeo:
+			case f.Kind == InputGeo:
 				<fieldset class="flex flex-col gap-1" aria-describedby={ describedBy(f) }>
 					<legend class="font-medium">{ f.Label }</legend>
 					<div class="flex flex-wrap gap-4">
@@ -172,14 +170,14 @@ templ fieldView(f field) {
 						</label>
 					</div>
 				</fieldset>
-			case f.Kind == domain.InputEnum:
+			case f.Kind == InputEnum:
 				<label for={ f.ID } class="font-medium">{ f.Label }</label>
 				<select id={ f.ID } name={ f.Key } class="rounded border border-border px-2 py-1" aria-describedby={ describedBy(f) } { invalid(f)... }>
 					for _, o := range f.Options {
 						<option value={ o } selected?={ o == f.Value }>{ o }</option>
 					}
 				</select>
-			case f.Kind == domain.InputMarkdown || f.Kind == domain.InputTextarea || f.Kind == domain.InputList:
+			case f.Kind == InputMarkdown || f.Kind == InputTextarea || f.Kind == InputList:
 				<label for={ f.ID } class="font-medium">{ f.Label }</label>
 				<textarea
 					id={ f.ID }
@@ -199,7 +197,7 @@ templ fieldView(f field) {
 					name={ f.Key }
 					value={ f.Value }
 					class="rounded border border-border px-2 py-1"
-					if f.Kind == domain.InputInteger || f.Kind == domain.InputNumber {
+					if f.Kind == InputInteger || f.Kind == InputNumber {
 						step={ step(f.Kind) }
 						if f.Min != "" {
 							min={ f.Min }
@@ -208,10 +206,10 @@ templ fieldView(f field) {
 							max={ f.Max }
 						}
 					}
-					if f.Kind == domain.InputURL {
+					if f.Kind == InputURL {
 						inputmode="url"
 					}
-					if f.MaxLen > 0 && f.Kind != domain.InputInteger && f.Kind != domain.InputNumber {
+					if f.MaxLen > 0 && f.Kind != InputInteger && f.Kind != InputNumber {
 						maxlength={ strconv.Itoa(f.MaxLen) }
 					}
 					autocomplete="off"
@@ -224,7 +222,7 @@ templ fieldView(f field) {
 }
 
 func textareaRows(f field) string {
-	if f.Kind == domain.InputMarkdown && f.MaxLen > 5000 {
+	if f.Kind == InputMarkdown && f.MaxLen > 5000 {
 		return "12"
 	}
 
@@ -232,29 +230,29 @@ func textareaRows(f field) string {
 }
 
 // lockedValue rebuilds the effective value of a locked field for display.
-func lockedValue(f field) domain.Value {
+func lockedValue(f field) Value {
 	switch f.Kind {
-	case domain.InputBoolean:
+	case InputBoolean:
 		if f.Checked {
-			return domain.MustValue("true")
+			return MustValue("true")
 		}
 
-		return domain.MustValue("false")
-	case domain.InputGeo:
+		return MustValue("false")
+	case InputGeo:
 		if f.Lat == "" {
-			return domain.MustValue("null")
+			return MustValue("null")
 		}
 
-		v, err := domain.NewValue([]byte(`{"lat":` + f.Lat + `,"lon":` + f.Lon + `}`))
+		v, err := NewValue([]byte(`{"lat":` + f.Lat + `,"lon":` + f.Lon + `}`))
 		if err != nil {
-			return domain.MustValue("null")
+			return MustValue("null")
 		}
 
 		return v
 	default:
-		v, err := domain.ValueOf(f.Value)
+		v, err := ValueOf(f.Value)
 		if err != nil {
-			return domain.MustValue("null")
+			return MustValue("null")
 		}
 
 		return v
@@ -262,7 +260,7 @@ func lockedValue(f field) domain.Value {
 }
 
 // adminNetworks shows admin.allowed_networks, a config-only key (ADM-005).
-templ adminNetworks(e app.ConfigEntry) {
+templ adminNetworks(e ConfigEntry) {
 	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-admin-networks">
 		<h2 id="title-admin-networks" class="text-lg font-semibold">Admin networks</h2>
 		<p>
@@ -382,7 +380,7 @@ templ overviewPage(s overviewSummary) {
 }
 
 // systemPage is the effective configuration view (ADM-010).
-templ systemPage(v app.ConfigView) {
+templ systemPage(v ConfigView) {
 	<h1 class="text-2xl font-semibold">System</h1>
 	<section class="flex flex-col gap-2" aria-labelledby="title-config">
 		<div class="flex flex-wrap items-baseline justify-between gap-2">

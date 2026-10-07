@@ -1,4 +1,4 @@
-package http
+package settings
 
 import (
 	"encoding/json"
@@ -11,8 +11,6 @@ import (
 
 	"github.com/a-h/templ"
 
-	"github.com/yohang/mesh-sdr/internal/settings/app"
-	"github.com/yohang/mesh-sdr/internal/settings/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -84,11 +82,11 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 		sum.Settings++
 
 		switch e.Source() {
-		case domain.SourceConfig:
+		case SourceConfig:
 			sum.Locked++
-		case domain.SourceDB:
+		case SourceDB:
 			sum.DB++
-		case domain.SourceDefault:
+		case SourceDefault:
 		}
 	}
 
@@ -190,11 +188,11 @@ func (m *Module) purge(w http.ResponseWriter, r *http.Request) {
 }
 
 // sourceText describes where a value comes from, for people.
-func sourceText(source domain.Source, origin string) string {
+func sourceText(source Source, origin string) string {
 	switch source {
-	case domain.SourceConfig:
+	case SourceConfig:
 		return lockText(origin)
-	case domain.SourceDB:
+	case SourceDB:
 		return "Set by an admin."
 	default:
 		return "Default value."
@@ -210,7 +208,7 @@ func lockText(origin string) string {
 }
 
 // entryValue is a config entry value as shown to people.
-func entryValue(e app.ConfigEntry) string {
+func entryValue(e ConfigEntry) string {
 	if e.Secret {
 		if e.Set {
 			return "set (hidden)"
@@ -228,12 +226,12 @@ func entryValue(e app.ConfigEntry) string {
 		return strings.Join(list, ", ")
 	}
 
-	v, err := domain.NewValue(e.Value)
+	v, err := NewValue(e.Value)
 	if err != nil {
 		return ""
 	}
 
-	return displayValue(domain.InputText, v)
+	return displayValue(InputText, v)
 }
 
 func formatDuration(d time.Duration) string {

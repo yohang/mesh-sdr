@@ -18,7 +18,7 @@ import (
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
-	settingsapp "github.com/yohang/mesh-sdr/internal/settings/app"
+	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
@@ -283,13 +283,13 @@ func newEventsModule(hubURL string, b *events.Broker, id eventsIdentity, policie
 
 // listenPolicyWatch reloads the listen policies when the global listen
 // policy changes (a settings Store.Subscribe callback).
-func listenPolicyWatch(c *policyCache, initial string) func(*settingsapp.Snapshot) {
+func listenPolicyWatch(c *policyCache, initial string) func(*settings.Snapshot) {
 	var (
 		mu   sync.Mutex
 		last = initial
 	)
 
-	return func(s *settingsapp.Snapshot) {
+	return func(s *settings.Snapshot) {
 		v := s.String("listen_policy")
 
 		mu.Lock()

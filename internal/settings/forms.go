@@ -1,4 +1,4 @@
-package http
+package settings
 
 import (
 	"encoding/json"
@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yohang/mesh-sdr/internal/settings/app"
-	"github.com/yohang/mesh-sdr/internal/settings/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -28,7 +26,7 @@ type field struct {
 	ID       string
 	Label    string
 	Help     string
-	Kind     domain.InputKind
+	Kind     InputKind
 	Options  []string
 	Min, Max string
 	MaxLen   int
@@ -39,7 +37,7 @@ type field struct {
 	Version  int64
 	Locked   bool
 	Origin   string
-	Source   domain.Source
+	Source   Source
 	Default  string
 	Secret   bool
 	Set      bool
@@ -64,7 +62,7 @@ type sectionView struct {
 func fieldID(key string) string { return "f-" + strings.ReplaceAll(key, ".", "-") }
 
 // textOf returns the form text of a JSON value of a kind.
-func textOf(kind domain.InputKind, v domain.Value) string {
+func textOf(kind InputKind, v Value) string {
 	if v.IsNull() {
 		return ""
 	}
@@ -74,7 +72,7 @@ func textOf(kind domain.InputKind, v domain.Value) string {
 		return s
 	}
 
-	if kind == domain.InputList {
+	if kind == InputList {
 		var list []string
 		if err := json.Unmarshal(v.JSON(), &list); err == nil {
 			return strings.Join(list, "\n")
@@ -98,7 +96,7 @@ func fmtFloat(f *float64) string {
 }
 
 // newField builds the view of an effective setting.
-func newField(e domain.Effective) field {
+func newField(e Effective) field {
 	d := e.Definition()
 	in := d.Input()
 
@@ -127,11 +125,11 @@ func newField(e domain.Effective) field {
 	return f
 }
 
-func (f *field) setValue(v domain.Value) {
+func (f *field) setValue(v Value) {
 	switch f.Kind {
-	case domain.InputBoolean:
+	case InputBoolean:
 		f.Checked = v.String() == "true"
-	case domain.InputGeo:
+	case InputGeo:
 		var g geo
 		if err := json.Unmarshal(v.JSON(), &g); err == nil {
 			f.Lat, f.Lon = fmtFloat(g.Lat), fmtFloat(g.Lon)
@@ -142,17 +140,17 @@ func (f *field) setValue(v domain.Value) {
 }
 
 // displayValue is a value as shown to people (read-only fields, tables).
-func displayValue(kind domain.InputKind, v domain.Value) string {
+func displayValue(kind InputKind, v Value) string {
 	switch {
 	case v.IsNull():
 		return "not set"
-	case kind == domain.InputBoolean:
+	case kind == InputBoolean:
 		if v.String() == "true" {
 			return "yes"
 		}
 
 		return "no"
-	case kind == domain.InputGeo:
+	case kind == InputGeo:
 		var g geo
 		if err := json.Unmarshal(v.JSON(), &g); err == nil {
 			return fmtFloat(g.Lat) + ", " + fmtFloat(g.Lon)
@@ -168,7 +166,7 @@ func displayValue(kind domain.InputKind, v domain.Value) string {
 }
 
 // buildSection returns the view of a section from a snapshot.
-func buildSection(spec sectionSpec, action string, snap *app.Snapshot) sectionView {
+func buildSection(spec sectionSpec, action string, snap *Snapshot) sectionView {
 	v := sectionView{Spec: spec, Action: action}
 
 	for _, k := range spec.Keys {
@@ -185,16 +183,16 @@ var errInvalidNumber = errors.New("enter a number")
 
 // formValue turns the submitted form text of a field into a change: nil for
 // a reset (empty field), or the new JSON value.
-func formValue(f field, form url.Values) (*domain.Value, error) {
+func formValue(f field, form url.Values) (*Value, error) {
 	text := func(name string) string { return strings.TrimSpace(form.Get(name)) }
 
 	var raw any
 
 	switch f.Kind {
-	case domain.InputBoolean:
+	case InputBoolean:
 		vals := form[f.Key]
 		raw = len(vals) > 0 && vals[len(vals)-1] == "true"
-	case domain.InputGeo:
+	case InputGeo:
 		lat, lon := text(f.Key+".lat"), text(f.Key+".lon")
 		if lat == "" && lon == "" {
 			return nil, nil //nolint:nilnil // reset
@@ -208,7 +206,7 @@ func formValue(f field, form url.Values) (*domain.Value, error) {
 		}
 
 		raw = geo{Lat: &la, Lon: &lo}
-	case domain.InputInteger, domain.InputNumber:
+	case InputInteger, InputNumber:
 		s := text(f.Key)
 		if s == "" {
 			return nil, nil //nolint:nilnil // reset
@@ -218,13 +216,13 @@ func formValue(f field, form url.Values) (*domain.Value, error) {
 			return nil, errInvalidNumber
 		}
 
-		v, err := domain.NewValue([]byte(s))
+		v, err := NewValue([]byte(s))
 		if err != nil {
 			return nil, errInvalidNumber
 		}
 
 		return &v, nil
-	case domain.InputList:
+	case InputList:
 		var items []string
 
 		for line := range strings.SplitSeq(form.Get(f.Key), "\n") {
@@ -238,7 +236,7 @@ func formValue(f field, form url.Values) (*domain.Value, error) {
 		}
 
 		raw = items
-	case domain.InputTextarea, domain.InputMarkdown:
+	case InputTextarea, InputMarkdown:
 		s := strings.ReplaceAll(form.Get(f.Key), "\r\n", "\n")
 		if strings.TrimSpace(s) == "" {
 			return nil, nil //nolint:nilnil // reset
@@ -254,7 +252,7 @@ func formValue(f field, form url.Values) (*domain.Value, error) {
 		raw = s
 	}
 
-	v, err := domain.ValueOf(raw)
+	v, err := ValueOf(raw)
 	if err != nil {
 		return nil, fmt.Errorf("invalid value: %w", err)
 	}
@@ -266,8 +264,8 @@ func formValue(f field, form url.Values) (*domain.Value, error) {
 // fields whose value differs from the effective one (untouched defaults
 // never become DB rows), and the field errors of values that cannot be
 // read. The returned view holds the submitted values.
-func parseSection(view sectionView, snap *app.Snapshot, form url.Values) (sectionView, []domain.Change) {
-	var changes []domain.Change
+func parseSection(view sectionView, snap *Snapshot, form url.Values) (sectionView, []Change) {
+	var changes []Change
 
 	for i := range view.Fields {
 		f := &view.Fields[i]
@@ -278,7 +276,7 @@ func parseSection(view sectionView, snap *app.Snapshot, form url.Values) (sectio
 		e, _ := snap.Get(f.Key)
 
 		key := f.Key
-		if !domain.ValidKey(key) {
+		if !ValidKey(key) {
 			continue
 		}
 
@@ -290,7 +288,7 @@ func parseSection(view sectionView, snap *app.Snapshot, form url.Values) (sectio
 
 		// Keep what was typed, for a re-render with errors.
 		f.Value, f.Lat, f.Lon = form.Get(f.Key), form.Get(f.Key+".lat"), form.Get(f.Key+".lon")
-		if f.Kind == domain.InputBoolean {
+		if f.Kind == InputBoolean {
 			vals := form[f.Key]
 			f.Checked = len(vals) > 0 && vals[len(vals)-1] == "true"
 		}
@@ -302,15 +300,15 @@ func parseSection(view sectionView, snap *app.Snapshot, form url.Values) (sectio
 		}
 
 		switch {
-		case v == nil && (e.Source() == domain.SourceDB || e.Version() > 0):
+		case v == nil && (e.Source() == SourceDB || e.Version() > 0):
 			// A DB value, or an ignored (invalid) DB row: reset it.
-			changes = append(changes, domain.ResetTo(key, f.Version))
+			changes = append(changes, ResetTo(key, f.Version))
 		case v == nil:
 			// Empty and not set in the DB: nothing to reset.
 		case v.Equal(e.Value()):
 			// Unchanged.
 		default:
-			changes = append(changes, domain.SetTo(key, *v, f.Version))
+			changes = append(changes, SetTo(key, *v, f.Version))
 		}
 	}
 
@@ -327,9 +325,9 @@ func applyErrors(view *sectionView, err error) {
 	}
 
 	switch {
-	case errors.Is(err, domain.ErrVersionConflict):
+	case errors.Is(err, ErrVersionConflict):
 		view.Problems = append(view.Problems, problem{Text: "These settings were changed meanwhile. Reload the page to see the current values, then save again."})
-	case errors.Is(err, domain.ErrSettingLocked):
+	case errors.Is(err, ErrSettingLocked):
 		view.Problems = append(view.Problems, problem{Text: "Some settings are now locked by the hub configuration: " + de.Message() + "."})
 	}
 
@@ -347,7 +345,7 @@ func applyErrors(view *sectionView, err error) {
 			}
 		}
 
-		if !placed && !errors.Is(err, domain.ErrVersionConflict) {
+		if !placed && !errors.Is(err, ErrVersionConflict) {
 			view.Problems = append(view.Problems, problem{Text: vi.Path() + ": " + sentence(vi.Message())})
 		}
 	}

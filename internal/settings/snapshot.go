@@ -1,9 +1,7 @@
-package app
+package settings
 
 import (
 	"time"
-
-	"github.com/yohang/mesh-sdr/internal/settings/domain"
 )
 
 // Snapshot is an immutable view of every effective setting at one settings
@@ -11,12 +9,12 @@ import (
 // every use, so a saved change applies at once (ADR 0010 "Live apply").
 type Snapshot struct {
 	revision int64
-	entries  []domain.Effective
+	entries  []Effective
 	index    map[string]int
 	typed    map[string]any
 }
 
-func newSnapshot(revision int64, entries []domain.Effective, typed map[string]any) *Snapshot {
+func newSnapshot(revision int64, entries []Effective, typed map[string]any) *Snapshot {
 	s := &Snapshot{revision: revision, entries: entries, index: make(map[string]int, len(entries)), typed: typed}
 	for i, e := range entries {
 		s.index[e.Key()] = i
@@ -29,13 +27,13 @@ func newSnapshot(revision int64, entries []domain.Effective, typed map[string]an
 func (s *Snapshot) Revision() int64 { return s.revision }
 
 // All returns every effective setting in schema order.
-func (s *Snapshot) All() []domain.Effective { return append([]domain.Effective(nil), s.entries...) }
+func (s *Snapshot) All() []Effective { return append([]Effective(nil), s.entries...) }
 
 // Get returns the effective setting of key.
-func (s *Snapshot) Get(key string) (domain.Effective, bool) {
+func (s *Snapshot) Get(key string) (Effective, bool) {
 	i, ok := s.index[key]
 	if !ok {
-		return domain.Effective{}, false
+		return Effective{}, false
 	}
 
 	return s.entries[i], true

@@ -1,8 +1,4 @@
-// Package domain is the settings store domain (TECHNICAL_SPEC §7.1
-// `settings`, §7.4 "Locking semantics and precedence"): setting keys and
-// values, the persisted DB setting, key definitions, effective values with
-// their source, and the errors of the save cycle (ADM-002, ADR 0010).
-package domain
+package settings
 
 import shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 

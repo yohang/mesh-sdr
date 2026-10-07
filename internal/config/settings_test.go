@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	settingsdomain "github.com/yohang/mesh-sdr/internal/settings/domain"
+	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -45,7 +45,7 @@ func violationCode(t *testing.T, err error) string {
 		t.Fatalf("error %v is not a domain error", err)
 	}
 
-	if !errors.Is(err, settingsdomain.ErrInvalidSetting) {
+	if !errors.Is(err, settings.ErrInvalidSetting) {
 		return string(de.Code())
 	}
 
@@ -175,10 +175,10 @@ func TestSettingsCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for key, want := range map[string]settingsdomain.Configured{
-		"receiver.name": {Value: settingsdomain.MustValue(`"F4XYZ"`), Origin: "hub.toml"},
-		"receiver.gps":  {Value: settingsdomain.MustValue(`{"lat":50.5,"lon":3}`), Origin: "hub.toml"},
-		"ui.theme_mode": {Value: settingsdomain.MustValue(`"dark"`), Origin: "env:MESHSDR_SETTINGS__UI__THEME_MODE"},
+	for key, want := range map[string]settings.Configured{
+		"receiver.name": {Value: settings.MustValue(`"F4XYZ"`), Origin: "hub.toml"},
+		"receiver.gps":  {Value: settings.MustValue(`{"lat":50.5,"lon":3}`), Origin: "hub.toml"},
+		"ui.theme_mode": {Value: settings.MustValue(`"dark"`), Origin: "env:MESHSDR_SETTINGS__UI__THEME_MODE"},
 	} {
 		got, ok := cat.Configured(key)
 		if !ok || !got.Value.Equal(want.Value) || got.Origin != want.Origin {
@@ -190,20 +190,20 @@ func TestSettingsCatalog(t *testing.T) {
 		t.Error("ui.shortcut_set is not set in the config")
 	}
 
-	kinds := map[string]settingsdomain.InputKind{}
+	kinds := map[string]settings.InputKind{}
 	for _, d := range cat.Definitions() {
 		kinds[d.Key()] = d.Input().Kind
 	}
 
-	for key, want := range map[string]settingsdomain.InputKind{
-		"ui.theme_mode":              settingsdomain.InputEnum,
-		"grid.heartbeat_interval_s":  settingsdomain.InputInteger,
-		"retention.audit_log":        settingsdomain.InputDuration,
-		"auth.login_rate_limit":      settingsdomain.InputRate,
-		"receiver.gps":               settingsdomain.InputGeo,
-		"receiver.help_url":          settingsdomain.InputURL,
-		"receiver.usage_policy_text": settingsdomain.InputMarkdown,
-		"receiver.location":          settingsdomain.InputText,
+	for key, want := range map[string]settings.InputKind{
+		"ui.theme_mode":              settings.InputEnum,
+		"grid.heartbeat_interval_s":  settings.InputInteger,
+		"retention.audit_log":        settings.InputDuration,
+		"auth.login_rate_limit":      settings.InputRate,
+		"receiver.gps":               settings.InputGeo,
+		"receiver.help_url":          settings.InputURL,
+		"receiver.usage_policy_text": settings.InputMarkdown,
+		"receiver.location":          settings.InputText,
 	} {
 		if kinds[key] != want {
 			t.Errorf("input of %s = %s, want %s", key, kinds[key], want)

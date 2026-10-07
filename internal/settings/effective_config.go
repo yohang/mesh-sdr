@@ -1,10 +1,8 @@
-package app
+package settings
 
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/yohang/mesh-sdr/internal/settings/domain"
 )
 
 // Classes of keys in the effective configuration (FEATURE_SPEC §9.1).
@@ -34,7 +32,7 @@ type ConfigEntry struct {
 	Class  string
 	Value  json.RawMessage // absent (nil) for secrets
 	Set    bool            // secrets only
-	Source domain.Source
+	Source Source
 	Origin string
 	Locked bool
 	Secret bool
@@ -69,9 +67,9 @@ func (c *EffectiveConfig) View() ConfigView {
 
 	for _, b := range c.bootstrap.BootstrapEntries() {
 		e := ConfigEntry{Key: b.Key, Class: ClassConfig, Origin: b.Origin, Locked: b.Locked, Secret: b.Secret, Set: b.Set,
-			Source: domain.SourceDefault}
+			Source: SourceDefault}
 		if b.Locked {
-			e.Source = domain.SourceConfig
+			e.Source = SourceConfig
 		}
 
 		if !b.Secret {
@@ -83,7 +81,7 @@ func (c *EffectiveConfig) View() ConfigView {
 
 	for _, s := range snap.All() {
 		d := s.Definition()
-		e := ConfigEntry{Key: domain.ConfigKey(s.Key()), Class: ClassDB, Source: s.Source(), Origin: s.Origin(), Locked: s.Locked(), Secret: d.Secret()}
+		e := ConfigEntry{Key: ConfigKey(s.Key()), Class: ClassDB, Source: s.Source(), Origin: s.Origin(), Locked: s.Locked(), Secret: d.Secret()}
 
 		if d.Secret() {
 			e.Set = s.IsSet()
