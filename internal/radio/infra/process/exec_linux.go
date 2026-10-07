@@ -62,6 +62,20 @@ func killGroup(pgid int, sig syscall.Signal) error {
 	return nil
 }
 
+// killGroupIfAny sends SIGKILL to the group pgid when it still has a
+// member (kill(-pgid, 0) succeeds).
+func killGroupIfAny(pgid int) error {
+	if pgid <= 1 {
+		return fmt.Errorf("refusing to signal pgid %d", pgid)
+	}
+
+	if err := syscall.Kill(-pgid, 0); err != nil {
+		return nil // ESRCH: the group is gone; EPERM: not ours.
+	}
+
+	return killGroup(pgid, syscall.SIGKILL)
+}
+
 // Limits are applied in the child, between fork and exec, by the exec helper
 // (the node binary re-executed with ExecHelperArg). os/exec has no rlimit or
 // no_new_privs hook, and prlimit(2) after Start leaves a window in which the

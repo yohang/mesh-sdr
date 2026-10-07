@@ -629,8 +629,12 @@ loop:
 	}
 	res.ran = time.Since(started)
 	res.state = cmd.ProcessState
-	// Grandchildren may outlive the leader: kill what is left of the group.
-	_ = killGroup(pid, syscall.SIGKILL)
+	// Grandchildren may outlive the leader: kill what is left of the group,
+	// only if it still has members. The leader is reaped, so its pid could
+	// be reused; probing first narrows that window to a new process that
+	// both reuses the pid and leads a group of it, which only a cgroup
+	// rules out (ADR 0017, A4).
+	_ = killGroupIfAny(pid)
 	cancel()
 	in.drain(&wg, outR, errR)
 	r.mu.Lock()
