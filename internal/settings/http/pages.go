@@ -67,7 +67,16 @@ var formPages = []formPage{
 		Forms: []sectionSpec{
 			{ID: "retention", Title: "Retention policies", Keys: []string{
 				"retention.sessions", "retention.audit_log", "retention.reporting_outbox.sent", "retention.reporting_outbox.dead",
+				"retention.connections",
 			}},
+		},
+	},
+	{
+		Section: "nodes", Title: "Node health", Path: "/admin/grid",
+		Intro: "How often nodes report, and when the hub marks a silent node degraded or offline (GRID-009).",
+		Forms: []sectionSpec{
+			{ID: "heartbeats", Title: "Heartbeats", Description: "Nodes take a new heartbeat interval when their control channel reconnects.",
+				Keys: []string{"grid.heartbeat_interval_s", "grid.offline_after_s"}},
 		},
 	},
 }

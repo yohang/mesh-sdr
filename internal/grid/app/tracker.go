@@ -28,6 +28,9 @@ type LinkState struct {
 	StateRevision   int64
 	AppliedRevision int64
 	StateErrors     []ctl.StateError
+	// HeartbeatInterval is the interval sent to the node in the ctl.hello
+	// of its current channel: the node keeps it until it reconnects.
+	HeartbeatInterval time.Duration
 }
 
 // Tracker holds the link state of every node (RAM only; rebuilt from the
@@ -93,6 +96,14 @@ func (t *Tracker) Connected() []domain.NodeID {
 	}
 
 	return out
+}
+
+// HelloSent records the heartbeat interval sent in a ctl.hello.
+func (t *Tracker) HelloSent(id domain.NodeID, interval time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.get(id).HeartbeatInterval = interval
 }
 
 // Heartbeat records a heartbeat applied at now.

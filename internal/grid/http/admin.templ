@@ -11,46 +11,61 @@ import (
 templ devicesPage(devices []*domain.Device) {
 	<h1 class="text-2xl font-semibold">Devices</h1>
 	<p class="text-fg-muted">Devices are configured only in the node config of their node: this registry is read-only.</p>
-	if len(devices) == 0 {
-		<p>No device has been reported yet.</p>
-	} else {
-		<div class="overflow-x-auto">
-			<table class="w-full text-left">
-				<caption class="sr-only">Device registry</caption>
-				<thead>
-					<tr class="border-b border-border">
-						<th scope="col" class="py-1 pr-4">Device</th>
-						<th scope="col" class="py-1 pr-4">Node</th>
-						<th scope="col" class="py-1 pr-4">Type</th>
-						<th scope="col" class="py-1 pr-4">Frequency range</th>
-						<th scope="col" class="py-1">State</th>
-					</tr>
-				</thead>
-				<tbody>
-					for _, d := range devices {
-						<tr class={ "border-b border-border", templ.KV("text-fg-muted", !d.Online()) }>
-							<th scope="row" class="py-1 pr-4 font-medium">
-								<a href={ templ.URL("/admin/devices/" + d.ID().String()) }>{ d.Name() }</a>
-							</th>
-							<td class="py-1 pr-4">{ d.Node().String() }</td>
-							<td class="py-1 pr-4">{ d.Type() }</td>
-							<td class="py-1 pr-4">{ frequency(minFreq(d)) } – { frequency(maxFreq(d)) }</td>
-							<td class="py-1">
-								if since, ok := missing(d); ok {
-									no longer reported since { since }
-								} else {
-									{ state(d) }
-									if !d.Online() {
-										(offline)
-									}
-								}
-							</td>
+	@devicesTable(devices)
+}
+
+// devicesTable is the live part of the device list, also its htmx fragment
+// (same URL): it refetches itself when a device changes, or after the hub
+// events socket (re)subscribed (ADR 0016).
+templ devicesTable(devices []*domain.Device) {
+	<div
+		id="devices-table"
+		data-msdr-topics="devices"
+		hx-get="/admin/devices"
+		hx-trigger="msdr:device.status from:body delay:1s, msdr:resync from:body"
+		hx-swap="outerMorph"
+	>
+		if len(devices) == 0 {
+			<p>No device has been reported yet.</p>
+		} else {
+			<div class="overflow-x-auto">
+				<table class="w-full text-left">
+					<caption class="sr-only">Device registry</caption>
+					<thead>
+						<tr class="border-b border-border">
+							<th scope="col" class="py-1 pr-4">Device</th>
+							<th scope="col" class="py-1 pr-4">Node</th>
+							<th scope="col" class="py-1 pr-4">Type</th>
+							<th scope="col" class="py-1 pr-4">Frequency range</th>
+							<th scope="col" class="py-1">State</th>
 						</tr>
-					}
-				</tbody>
-			</table>
-		</div>
-	}
+					</thead>
+					<tbody>
+						for _, d := range devices {
+							<tr class={ "border-b border-border", templ.KV("text-fg-muted", !d.Online()) }>
+								<th scope="row" class="py-1 pr-4 font-medium">
+									<a href={ templ.URL("/admin/devices/" + d.ID().String()) }>{ d.Name() }</a>
+								</th>
+								<td class="py-1 pr-4">{ d.Node().String() }</td>
+								<td class="py-1 pr-4">{ d.Type() }</td>
+								<td class="py-1 pr-4">{ frequency(minFreq(d)) } – { frequency(maxFreq(d)) }</td>
+								<td class="py-1">
+									if since, ok := missing(d); ok {
+										no longer reported since { since }
+									} else {
+										{ state(d) }
+										if !d.Online() {
+											(offline)
+										}
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</div>
 }
 
 func minFreq(d *domain.Device) int64 { lo, _ := d.FreqRange(); return lo }

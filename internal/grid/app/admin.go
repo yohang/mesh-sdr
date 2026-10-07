@@ -51,6 +51,19 @@ type NewNodeInput struct {
 	URL  string
 }
 
+// OnChange registers a callback run after an admin change of a node
+// committed: added, updated, disabled, revoked, deleted, re-enrolled
+// (composition time only).
+func (s *Nodes) OnChange(f func(ctx context.Context, id domain.NodeID)) {
+	s.changed = append(s.changed, f)
+}
+
+func (s *Nodes) notify(ctx context.Context, id domain.NodeID) {
+	for _, f := range s.changed {
+		f(ctx, id)
+	}
+}
+
 // SetLinks wires the control channels; until then NoLinks is used.
 func (s *Nodes) SetLinks(l Links) { s.links = l }
 
@@ -105,6 +118,7 @@ func (s *Nodes) Add(ctx context.Context, actor string, in NewNodeInput) (Issued,
 
 	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.add", Target: id.String(), Result: ResultOK})
 	s.logger.InfoContext(ctx, "node added", slog.String("node_id", id.String()), slog.String("url", u.String()))
+	s.notify(ctx, id)
 
 	return Issued{Node: n, Token: tok, CAFingerprint: fp, ExpiresAt: n.Snapshot().KeyExpiresAt}, nil
 }
@@ -172,6 +186,7 @@ func (s *Nodes) Update(ctx context.Context, actor, id string, name, url *string,
 	}
 
 	s.linksOrNone().Wake()
+	s.notify(ctx, n.ID())
 
 	return n, nil
 }
@@ -228,6 +243,7 @@ func (s *Nodes) Delete(ctx context.Context, actor, id string) error {
 	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.delete", Target: id, Result: ResultOK})
 	s.logger.InfoContext(ctx, "node deleted", slog.String("node_id", id))
 	s.linksOrNone().Drop(ctx, n.ID())
+	s.notify(ctx, n.ID())
 
 	return nil
 }
@@ -274,6 +290,7 @@ func (s *Nodes) Revoke(ctx context.Context, actor, id string) (*domain.Node, err
 	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.revoke", Target: id, Result: ResultOK})
 	s.logger.InfoContext(ctx, "node revoked", slog.String("node_id", id))
 	s.linksOrNone().Drop(ctx, n.ID())
+	s.notify(ctx, n.ID())
 
 	return n, nil
 }
@@ -326,6 +343,7 @@ func (s *Nodes) EnrollLocal(ctx context.Context, id string, cert domain.CertInfo
 	s.audit.Record(ctx, AuditRecord{ActorKind: ActorSystem, Action: "node.enroll", Target: id, Result: ResultOK,
 		Detail: map[string]string{"via": "local", "cert_serial": cert.Serial()}})
 	s.linksOrNone().Wake()
+	s.notify(ctx, n.ID())
 
 	return nil
 }
@@ -381,6 +399,7 @@ func (s *Nodes) IssueToken(ctx context.Context, actor, id string) (Issued, error
 
 	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.enrollment_token.issue", Target: id, Result: ResultOK})
 	s.linksOrNone().Drop(ctx, n.ID())
+	s.notify(ctx, n.ID())
 
 	return Issued{Node: n, Token: tok, CAFingerprint: fp, ExpiresAt: n.Snapshot().KeyExpiresAt}, nil
 }

@@ -44,6 +44,9 @@ SELECT * FROM connections WHERE closed_at IS NULL ORDER BY opened_at, id;
 -- name: CountOpenConnections :one
 SELECT count(*) FROM connections WHERE closed_at IS NULL;
 
+-- name: CountOpenKindConnections :one
+SELECT count(*) FROM connections WHERE closed_at IS NULL AND kind = ?;
+
 -- name: OpenMediaNodes :many
 SELECT DISTINCT node_id FROM connections WHERE closed_at IS NULL AND node_id IS NOT NULL;
 

@@ -37,7 +37,7 @@ type Status struct {
 	tx        Transactor
 	tracker   *Tracker
 	history   *History
-	timings   Timings
+	timings   *timingsCell
 	now       Clock
 	logger    *slog.Logger
 	listeners []StatusListener
@@ -45,8 +45,11 @@ type Status struct {
 
 // NewStatus returns the service.
 func NewStatus(nodes domain.NodeRepository, tx Transactor, tracker *Tracker, history *History, timings Timings, now Clock, logger *slog.Logger) *Status {
-	return &Status{nodes: nodes, tx: tx, tracker: tracker, history: history, timings: timings, now: now, logger: logger}
+	return &Status{nodes: nodes, tx: tx, tracker: tracker, history: history, timings: newTimingsCell(timings), now: now, logger: logger}
 }
+
+// SetTimings replaces the timings (settings change).
+func (s *Status) SetTimings(t Timings) { s.timings.set(t) }
 
 // Listen registers a transition listener (composition time only).
 func (s *Status) Listen(l StatusListener) { s.listeners = append(s.listeners, l) }
@@ -74,10 +77,16 @@ func (s *Status) Evaluate(n *domain.Node, link LinkState, known bool, now time.T
 	}
 
 	silent := now.Sub(last)
-	interval := s.timings.HeartbeatInterval
+
+	// The node heartbeats at the interval of its channel's ctl.hello, not
+	// at a setting changed since (ADR 0018).
+	interval := link.HeartbeatInterval
+	if interval <= 0 {
+		interval = s.timings.get().HeartbeatInterval
+	}
 
 	switch {
-	case silent >= s.timings.OfflineAfter:
+	case silent >= s.timings.get().OfflineAfter:
 		return domain.StatusOffline, HintHeartbeatTimeout
 	case silent > 2*interval+interval/2:
 		return domain.StatusDegraded, HintMissedHeartbeats
@@ -182,8 +191,9 @@ func (s *Status) Sweep(ctx context.Context) {
 }
 
 // Run sweeps until ctx is done, at most every 5 s.
+// The period follows the heartbeat interval setting.
 func (s *Status) Run(ctx context.Context) {
-	every := min(5*time.Second, s.timings.HeartbeatInterval)
+	every := s.sweepEvery()
 	t := time.NewTicker(every)
 
 	defer t.Stop()
@@ -195,8 +205,18 @@ func (s *Status) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-s.timings.changes:
+		}
+
+		if e := s.sweepEvery(); e != every {
+			every = e
+			t.Reset(every)
 		}
 	}
+}
+
+func (s *Status) sweepEvery() time.Duration {
+	return max(min(5*time.Second, s.timings.get().HeartbeatInterval), 10*time.Millisecond)
 }
 
 // HeartbeatHandler applies node.heartbeat events (control ingestion).

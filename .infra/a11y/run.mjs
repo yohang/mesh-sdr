@@ -131,6 +131,43 @@ async function checkTheme(page, where, mode, scheme) {
   if (got.bg !== background[effective]) fail(where, `background ${got.bg}, want ${background[effective]} (${effective})`);
 }
 
+// checkEvents opens a live page as a signed-in admin: the shell opens the
+// hub events socket (ADR 0016), subscribes to the topics the page declares,
+// and the live table refetches itself after the ack as a background request
+// (X-Msdr-Background), under the strict CSP.
+async function checkEvents(context, where) {
+  const page = await context.newPage();
+  watch(page, where);
+
+  const acked = new Promise((resolve) => {
+    page.on("websocket", (ws) => {
+      if (!ws.url().endsWith("/api/ws")) return;
+      ws.on("framereceived", (frame) => {
+        try {
+          const env = JSON.parse(frame.payload);
+          if (env.type === "ack" && env.payload?.result?.subscribed?.includes("nodes")) resolve(true);
+        } catch {
+          // not an envelope
+        }
+      });
+    });
+  });
+  const refetched = page
+    .waitForRequest((req) => new URL(req.url()).pathname === "/admin/nodes" && req.headers()["x-msdr-background"] === "1", {
+      timeout: 15000,
+    })
+    .then(() => true)
+    .catch(() => false);
+  const timeout = new Promise((resolve) => setTimeout(() => resolve(false), 15000));
+
+  await page.goto("/admin/nodes", { waitUntil: "domcontentloaded" });
+
+  if (!(await Promise.race([acked, timeout]))) fail(where, "the events socket did not subscribe to nodes");
+  if (!(await refetched)) fail(where, "the live table did not refetch after the subscription");
+
+  await page.close();
+}
+
 // Help link set on every hub by the compose file.
 const helpPath = "/about";
 
@@ -208,6 +245,7 @@ for (const { mode, url } of hubs) {
 
       if (signedIn) {
         await checkFormErrors(context, `/admin/access invalid form [mode ${mode}, os ${scheme}, ${name}]`);
+        await checkEvents(context, `/admin/nodes live events [mode ${mode}, os ${scheme}, ${name}]`);
       }
 
       // Boosted navigation keeps the shell, moves focus to #main and

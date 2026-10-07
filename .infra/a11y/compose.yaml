@@ -5,7 +5,8 @@
 #   docker compose -f .infra/a11y/compose.yaml run --rm --build --no-deps a11y
 #   docker compose -f .infra/a11y/compose.yaml down -v
 # The three hubs share one migrated SQLite database with one seeded admin
-# (pages marked signed-in in urls.txt).
+# (pages marked signed-in in urls.txt), a hub CA and one config-declared node
+# (hub.d/grid.toml).
 name: meshsdr-a11y
 
 x-hub: &hub
@@ -28,6 +29,7 @@ x-hub: &hub
     MESHSDR_GATEWAY__HTTP_LISTEN: ":8073"
   volumes:
     - data:/var/lib/meshsdr
+    - ./hub.d:/etc/meshsdr/hub.d:ro
 
 x-served: &served
   <<: *hub
@@ -41,9 +43,16 @@ x-account: &account
   A11Y_PASSWORD: accessibility check passphrase
 
 services:
+  ca-init:
+    <<: *hub
+    command: ["hub", "ca", "init"]
+
   migrate:
     <<: *hub
     command: ["hub", "migrate", "up"]
+    depends_on:
+      ca-init:
+        condition: service_completed_successfully
 
   seed:
     <<: *hub

@@ -12,6 +12,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
+	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
 	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
@@ -21,6 +22,7 @@ import (
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	settingsdomain "github.com/yohang/mesh-sdr/internal/settings/domain"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
 
@@ -279,4 +281,71 @@ func HubNodes(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) (*app.Nod
 // newGridAuditor writes grid audit records to the identity audit_log.
 func newGridAuditor(adapter db.Adapter, now func() time.Time, logger *slog.Logger) gridAuditor {
 	return gridAuditor{log: identitysqlite.NewAuditLog(adapter), now: now, logger: component(logger, "grid.audit")}
+}
+
+// gridSettings reads the grid DB settings.
+type gridSettings interface {
+	Get(key string) (settingsdomain.Effective, bool)
+	Int(key string) int
+}
+
+// applySettings applies the grid timings of the settings snapshot: a value
+// set in the DB or the config replaces the base timing, a default keeps it
+// (the defaults are the FEATURE_SPEC ones; tests run with faster bases).
+func (g *hubGrid) applySettings(base app.Timings, s gridSettings) {
+	t := base
+
+	if e, ok := s.Get("grid.heartbeat_interval_s"); ok && e.Source() != settingsdomain.SourceDefault {
+		t.HeartbeatInterval = time.Duration(s.Int("grid.heartbeat_interval_s")) * time.Second
+	}
+
+	if e, ok := s.Get("grid.offline_after_s"); ok && e.Source() != settingsdomain.SourceDefault {
+		t.OfflineAfter = time.Duration(s.Int("grid.offline_after_s")) * time.Second
+	}
+
+	if g.status != nil {
+		g.status.SetTimings(t)
+	}
+
+	if g.manager != nil {
+		g.manager.SetHeartbeatInterval(t.HeartbeatInterval)
+	}
+
+	g.presence.SetTimings(t)
+}
+
+// publishEvents connects the grid producers of hub events: status
+// transitions (after the device registry listener), committed node event
+// batches, admin node changes, enrollments, forgotten devices and presence
+// changes.
+func (g *hubGrid) publishEvents(b *eventsapp.Broker, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
+	ge := newGridEvents(b, g, policies, now, logger)
+
+	if g.status != nil {
+		g.status.Listen(ge.statusChanged)
+	}
+
+	if g.control != nil {
+		// Policies first: the events of the batch use the new snapshot.
+		g.control.OnApplied(refreshOnDevices(policies))
+		g.control.OnApplied(ge.applied)
+	}
+
+	if g.enrollment != nil {
+		enrolled := g.enrollment.Enrolled
+		g.enrollment.Enrolled = func(ctx context.Context, id domain.NodeID) {
+			if enrolled != nil {
+				enrolled(ctx, id)
+			}
+
+			ge.node(ctx, id)
+		}
+	}
+
+	g.nodes.OnChange(ge.node)
+	g.devices.OnForget(ge.forgotten)
+	g.devices.OnForget(func(ctx context.Context, _ *domain.Device) { policies.refresh(ctx) })
+	g.presence.OnChange(ge.presenceChanged)
+
+	return ge
 }

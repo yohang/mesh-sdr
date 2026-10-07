@@ -272,7 +272,7 @@ sample_rates = [2_048_000]
 
 // enrollNode adds the node on the hub and runs `node enroll` until the hub
 // has enrolled it, then starts the enrolled node.
-func (e *gridEnv) enrollNode(t *testing.T, prober fakeProber) (stop func()) {
+func (e *gridEnv) enrollNode(t *testing.T, prober fakeProber, opts ...NodeOption) (stop func()) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -282,9 +282,18 @@ func (e *gridEnv) enrollNode(t *testing.T, prober fakeProber) (stop func()) {
 		t.Fatal(err)
 	}
 
-	fp, _ := pki.ParseFingerprint(issued.CAFingerprint)
+	return e.enrollWith(t, issued.Token, issued.CAFingerprint, prober, opts...)
+}
 
-	en, err := NodeEnrollment(e.nodeCfg, quiet, issued.Token, fp, time.Now)
+// enrollWith runs `node enroll` with a token the hub issued until the hub
+// has enrolled the node, then starts the enrolled node.
+func (e *gridEnv) enrollWith(t *testing.T, token domain.EnrollmentToken, caFingerprint string, prober fakeProber, opts ...NodeOption) (stop func()) {
+	t.Helper()
+
+	ctx := context.Background()
+	fp, _ := pki.ParseFingerprint(caFingerprint)
+
+	en, err := NodeEnrollment(e.nodeCfg, quiet, token, fp, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,17 +318,17 @@ func (e *gridEnv) enrollNode(t *testing.T, prober fakeProber) (stop func()) {
 		t.Fatal(err)
 	}
 
-	return e.startNode(t, prober)
+	return e.startNode(t, prober, opts...)
 }
 
-func (e *gridEnv) startNode(t *testing.T, prober fakeProber) (stop func()) {
+func (e *gridEnv) startNode(t *testing.T, prober fakeProber, opts ...NodeOption) (stop func()) {
 	t.Helper()
 
 	if prober.devices == nil {
 		prober.devices = DevicesOf(e.nodeCfg)
 	}
 
-	np, err := Node(e.nodeCfg, quiet, time.Now(), WithProber(prober))
+	np, err := Node(e.nodeCfg, quiet, time.Now(), append([]NodeOption{WithProber(prober)}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

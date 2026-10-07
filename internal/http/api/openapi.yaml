@@ -142,8 +142,8 @@ paths:
   /nodes:
     get:
       operationId: listNodes
-      x-meshsdr-access: admin
-      summary: List nodes and their status (admin)
+      x-meshsdr-access: operator
+      summary: List nodes and their status (operators read, GRID-009)
       tags: [grid]
       responses:
         "200":
@@ -179,8 +179,8 @@ paths:
       - $ref: "#/components/parameters/NodeID"
     get:
       operationId: getNode
-      x-meshsdr-access: admin
-      summary: Node detail with recent load history (admin)
+      x-meshsdr-access: operator
+      summary: Node detail with recent load history (operators read, GRID-009)
       tags: [grid]
       responses:
         "200":
@@ -260,8 +260,8 @@ paths:
       - $ref: "#/components/parameters/NodeID"
     get:
       operationId: getNodeCapabilities
-      x-meshsdr-access: admin
-      summary: Last capability report of a node (admin)
+      x-meshsdr-access: operator
+      summary: Last capability report of a node (operators read, GRID-009)
       tags: [grid]
       responses:
         "200":
@@ -2211,10 +2211,14 @@ components:
           maxLength: 64
     ConnectionList:
       type: object
-      required: [count]
+      required: [count, listeners]
       properties:
         count:
           type: integer
+          description: Open connections of every kind (events sockets and media connections).
+        listeners:
+          type: integer
+          description: Listeners, the open media connections (ADR 0018).
         items:
           type: array
           description: Present for admins only.

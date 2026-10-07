@@ -6,6 +6,7 @@ package wire
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -18,6 +19,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite"
+	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
 	fileshttp "github.com/yohang/mesh-sdr/internal/files/http"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
@@ -301,6 +303,10 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, fmt.Errorf("settings: %w", err)
 	}
 
+	// grid.heartbeat_interval_s and grid.offline_after_s apply live.
+	g.applySettings(timings, settingsModule.Store.Snapshot())
+	settingsModule.Store.Subscribe(func(s *settingsapp.Snapshot) { g.applySettings(timings, s) })
+
 	adminGate := &roleGate{role: identitydomain.RoleAdmin}
 	shellModule := shell.Wire(shell.Deps{
 		Settings: settingsModule.Store, AdminGate: adminGate, User: userOf, Logger: logger,
@@ -322,9 +328,16 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	// Grid ↔ identity (ACC-007, GRID-011/012): revoked sessions and users
 	// go to the nodes, and POST /auth/token refreshes only connections the
 	// gateway authz issued to the caller.
+	// Revoked sessions and users also end their events sockets at once
+	// (ADR 0016 decision 4).
+	broker := eventsapp.NewBroker()
+	revocations := revocationFanout{brokerRevocations{b: broker}}
+
 	if g.manager != nil {
-		ideps.Revocations = nodeRevocations{b: g.manager, now: now}
+		revocations = append(revocations, nodeRevocations{b: g.manager, now: now})
 	}
+
+	ideps.Revocations = revocations
 
 	ideps.Binder = connectionBinder{repo: gridsqlite.NewConnectionRepository(adapter)}
 
@@ -372,6 +385,16 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 			}
 		})
 	}
+
+	// Hub events WebSocket (ADR 0016, ADR 0018) and its grid producers.
+	policies := &policyCache{
+		policies: gridapp.NewListenPolicies(gridsqlite.NewDeviceRepository(adapter), storeListenPolicy{store: settingsModule.Store}),
+		broker:   broker, logger: component(logger, "events.wire.policies"),
+	}
+	events := newEventsModule(cfg.Hub.URL, broker, idm.HTTP, policies, g.presence, now, logger)
+	settingsModule.Store.Subscribe(listenPolicyWatch(policies, settingsModule.Store.String("listen_policy")))
+	ge := g.publishEvents(broker, policies, now, logger)
+	workers = append(workers, events.Run, ge.runPresence)
 
 	scheduler, retention, err := jobs(adapter, idm, sch, settingsModule.Store, auditLog, logger)
 	if err != nil {
@@ -422,12 +445,15 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		}),
 		imagesHTTP,
 		gridhttp.NewAdminModule(gridhttp.AdminDeps{
-			Render: shellModule.Renderer, Devices: g.devices, Nodes: g.nodes,
+			Render: shellModule.Renderer, Devices: g.devices, Nodes: g.nodes, History: g.history, Capabilities: g.caps,
+			Connections: g.presence, Users: userNames{users: identitysqlite.NewUsers(adapter, shared.NewUUIDv7Generator())},
 			Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets},
 			Operator:  idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
-			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Logger: component(logger, "grid.http.admin"),
+			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Now: now,
+			Logger: component(logger, "grid.http.admin"),
 		}),
 		routes(func(r chi.Router) { r.Method(http.MethodGet, gateway.AuthzPath, authz) }),
+		events,
 		shellModule.HTTP,
 	)
 
@@ -512,4 +538,41 @@ func (g gridDevices) NodeDevices(ctx context.Context, nodeID string) ([]identity
 // TokenKeyring opens the token signing keyring (meshsdr hub keys …).
 func TokenKeyring(cfg config.Hub, now time.Time) (*keyring.Keyring, error) {
 	return identity.Keyring(cfg, now)
+}
+
+// userNames gives the names of users to the grid admin pages.
+type userNames struct{ users identitydomain.UserRepository }
+
+// Names implements gridhttp.UserNames: the display name, else the username.
+func (u userNames) Names(ctx context.Context, ids []shared.UUID) (map[shared.UUID]string, error) {
+	out := make(map[shared.UUID]string, len(ids))
+
+	for _, id := range ids {
+		if _, done := out[id]; done {
+			continue
+		}
+
+		uid, err := identitydomain.NewUserID(id)
+		if err != nil {
+			continue
+		}
+
+		user, err := u.users.ByID(ctx, uid)
+		if errors.Is(err, identitydomain.ErrUserNotFound) {
+			continue
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		name := user.Username().String()
+		if d := user.DisplayName(); !d.IsZero() {
+			name = d.String()
+		}
+
+		out[id] = name
+	}
+
+	return out, nil
 }

@@ -14,7 +14,9 @@ import "./token-url.js";
 import "./download.js";
 import { installNavigation } from "./navigation.js";
 import { installShortcuts } from "./shortcuts.js";
+import { installEvents } from "./events.js";
 
 installNavigation();
 installShortcuts();
 installAdminForms();
+installEvents();

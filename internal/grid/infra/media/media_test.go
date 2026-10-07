@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -408,4 +409,46 @@ func TestWithdrawn(t *testing.T) {
 		t.Fatalf("open sessions = %d", n)
 	}
 
+}
+
+// TestDemodScopeAndStrikes: demod.create needs the demod permission on the
+// device, and more than ten forbidden messages in a minute close the
+// connection with 4403 (§5.9, AUTH-004).
+func TestDemodScopeAndStrikes(t *testing.T) {
+	e := newEnv(t)
+	e.installKeys(t, e.key)
+
+	exp := time.Now().Add(5 * time.Minute)
+
+	ws, st := e.dial(t, e.client, e.token(t, "c1", exp, func(c *token.Claims) {
+		c.Scopes = []token.Scope{{Device: "hf", Perms: []string{token.PermListen}}}
+	}), "c1", origin)
+	if st != http.StatusSwitchingProtocols {
+		t.Fatalf("status %d", st)
+	}
+
+	hello(t, ws)
+
+	send(t, ws, rxv1.TypeDemodCreate, "d0", map[string]any{"device_id": "hf", "mode": "usb", "offset_hz": 0})
+
+	if p := string(expectType(t, ws, rxv1.TypeError).Payload()); !strings.Contains(p, `"forbidden"`) {
+		t.Fatalf("demod.create without the demod permission: %s", p)
+	}
+
+	// Allowed: not implemented yet, but not forbidden.
+	send(t, ws, rxv1.TypeDeviceAttach, "a0", map[string]any{"device_id": "hf"})
+
+	if p := string(expectType(t, ws, rxv1.TypeError).Payload()); !strings.Contains(p, "unsupported_type") {
+		t.Fatalf("attach in scope: %s", p)
+	}
+
+	// Nine more refusals (ten in the minute) keep the connection open.
+	for i := range media.MaxForbiddenPerMinute - 1 {
+		send(t, ws, rxv1.TypeDeviceAttach, "f"+strconv.Itoa(i), map[string]any{"device_id": "vhf"})
+		expectType(t, ws, rxv1.TypeError)
+	}
+
+	// The eleventh closes it.
+	send(t, ws, rxv1.TypeDeviceAttach, "f-last", map[string]any{"device_id": "vhf"})
+	expectClose(t, ws, websocket.StatusCode(rxv1.CloseForbidden))
 }

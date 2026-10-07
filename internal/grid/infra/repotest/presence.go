@@ -46,6 +46,26 @@ func testConnections(t *testing.T, r Repos) {
 		t.Error("hub_issued not stored")
 	}
 
+	// An events socket is an open row, not a listener.
+	viewer := must(domain.NewConnection(domain.ConnectionInfo{ID: must(shared.NewUUIDv7(t0)), Kind: domain.ConnectionEvents, IP: "192.0.2.9"}, t0))
+	if _, err := repo.Open(ctx, viewer); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := must(repo.CountOpenKind(ctx, domain.ConnectionMedia)); n != 4 {
+		t.Errorf("open media = %d, want 4", n)
+	}
+
+	if n := must(repo.CountOpenKind(ctx, domain.ConnectionEvents)); n != 1 {
+		t.Errorf("open events = %d, want 1", n)
+	}
+
+	viewer.Close(domain.CloseClient, t0.Add(3*time.Minute))
+
+	if err := repo.Save(ctx, viewer); err != nil {
+		t.Fatal(err)
+	}
+
 	if n, err := repo.CloseNode(ctx, domain.MustNodeID("cellar"), domain.CloseNodeLost, t0); err != nil || n != 1 {
 		t.Fatalf("close node = %d, %v", n, err)
 	}

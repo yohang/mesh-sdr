@@ -171,6 +171,21 @@ func (n *Node) UpdatedAt() time.Time { return n.updatedAt }
 // Version returns the optimistic concurrency version.
 func (n *Node) Version() int { return n.version }
 
+// Health is what people see of a node: "enrolling" while it waits for its
+// enrollment, "revoked" once revoked, its runtime status otherwise
+// (online, degraded, offline, unreachable, incompatible).
+func (n *Node) Health() string {
+	switch n.enrollment {
+	case EnrollmentPending:
+		return "enrolling"
+	case EnrollmentRevoked:
+		return "revoked"
+	case EnrollmentEnrolled:
+	}
+
+	return string(n.runtime.Status)
+}
+
 // Active reports whether the hub keeps a control channel to the node.
 func (n *Node) Active() bool { return n.enrollment == EnrollmentEnrolled && !n.disabled }
 

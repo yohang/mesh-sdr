@@ -1,0 +1,556 @@
+package http
+
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/grid/domain"
+)
+
+// nodesPage lists the nodes (GRID-009). Operators read it; admins also add
+// nodes and reach the heartbeat settings.
+templ nodesPage(v nodesView) {
+	<h1 class="text-2xl font-semibold">Nodes</h1>
+	<p class="text-fg-muted">Nodes run the receivers. The hub connects to each enrolled node and follows its health.</p>
+	if v.CanAdmin {
+		<p class="flex flex-wrap gap-x-4 gap-y-1">
+			<a href="/admin/nodes/new">Add a node</a>
+			<a href="/admin/grid">Heartbeat settings</a>
+		</p>
+	}
+	@nodesTable(v)
+}
+
+// nodesTable is the live part of the list, also its htmx fragment (same
+// URL): it refetches itself when a node changes, or after the hub events
+// socket (re)subscribed (ADR 0016).
+templ nodesTable(v nodesView) {
+	<div
+		id="nodes-table"
+		data-msdr-topics="nodes"
+		hx-get="/admin/nodes"
+		hx-trigger="msdr:node.status from:body delay:1s, msdr:resync from:body"
+		hx-swap="outerMorph"
+	>
+		if len(v.Rows) == 0 {
+			<p>No node is declared yet.</p>
+		} else {
+			<div class="overflow-x-auto">
+				<table class="w-full text-left">
+					<caption class="sr-only">Nodes</caption>
+					<thead>
+						<tr class="border-b border-border">
+							<th scope="col" class="py-1 pr-4">Node</th>
+							<th scope="col" class="py-1 pr-4">State</th>
+							<th scope="col" class="py-1 pr-4">Last seen</th>
+							<th scope="col" class="py-1 pr-4">Version</th>
+							<th scope="col" class="py-1 pr-4">Certificate expiry</th>
+							<th scope="col" class="py-1 pr-4">Devices</th>
+							<th scope="col" class="py-1">Listeners</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range v.Rows {
+							<tr class="border-b border-border">
+								<th scope="row" class="py-1 pr-4 font-medium">
+									<a href={ templ.URL("/admin/nodes/" + row.Node.ID().String()) }>{ row.Node.Name().String() }</a>
+									<span class="block font-mono text-sm font-normal text-fg-muted">{ row.Node.ID().String() }</span>
+								</th>
+								<td class="py-1 pr-4">
+									@health(row.Node)
+								</td>
+								<td class="py-1 pr-4">{ lastSeen(row.Node) }</td>
+								<td class="py-1 pr-4">{ orDash(row.Node.Runtime().SoftwareVersion) }</td>
+								<td class="py-1 pr-4">
+									@certExpiry(row.Node, row.CertWarn)
+								</td>
+								<td class="py-1 pr-4">{ strconv.Itoa(row.Devices) }</td>
+								<td class="py-1">{ strconv.Itoa(row.Listeners) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</div>
+}
+
+// health is the state of a node, with its hint and the disabled flag.
+templ health(n *domain.Node) {
+	<span class={ templ.KV("font-semibold text-danger", n.Health() == "offline" || n.Health() == "unreachable" || n.Health() == "incompatible" || n.Health() == "revoked"), templ.KV("font-semibold text-warning", n.Health() == "degraded") }>
+		{ n.Health() }
+	</span>
+	if h := n.Runtime().StatusHint; h != "" && n.Enrollment() == domain.EnrollmentEnrolled {
+		<span class="text-fg-muted">({ h })</span>
+	}
+	if n.Disabled() {
+		<span class="text-fg-muted">, disabled</span>
+	}
+}
+
+templ certExpiry(n *domain.Node, warn bool) {
+	if c := n.Certificate(); c.IsZero() {
+		—
+	} else if warn {
+		<span class="font-semibold text-warning">{ utc(c.NotAfter()) } (not renewed)</span>
+	} else {
+		{ utc(c.NotAfter()) }
+	}
+}
+
+// nodePage is the detail of a node (GRID-009) with its admin actions
+// (GRID-005, GRID-015). The status part is the live fragment; the forms are
+// outside it, so a refresh never touches what an admin is typing.
+templ nodePage(v nodeView) {
+	<h1 class="text-2xl font-semibold">{ v.Node.Name().String() }</h1>
+	<p class="text-fg-muted">
+		Node <span class="font-mono">{ v.Node.ID().String() }</span>,
+		if v.Node.Origin() == domain.OriginConfig {
+			declared in the hub config.
+		} else {
+			added by an admin.
+		}
+		<a href="/admin/nodes">All nodes</a>
+	</p>
+	if v.Notice != "" {
+		<p class="rounded border border-success p-3" role="status">{ v.Notice }</p>
+	}
+	if v.Failure != "" {
+		<p class="rounded border border-danger p-3 font-semibold text-danger" role="alert">{ v.Failure }</p>
+	}
+	@nodeLive(v)
+	if v.CanAdmin {
+		@nodeActions(v)
+	}
+}
+
+// nodeLive is the live part of the detail, also its htmx fragment.
+templ nodeLive(v nodeView) {
+	<div
+		id="node-live"
+		class="flex flex-col gap-6"
+		data-msdr-topics="nodes devices"
+		hx-get={ "/admin/nodes/" + v.Node.ID().String() }
+		hx-trigger="msdr:node.status from:body delay:1s, msdr:device.status from:body delay:1s, msdr:resync from:body"
+		hx-swap="outerMorph"
+	>
+		<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-health">
+			<h2 id="title-health" class="text-lg font-semibold">Health</h2>
+			<dl class="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-[max-content_1fr]">
+				<dt class="font-medium">State</dt>
+				<dd>
+					@health(v.Node)
+				</dd>
+				<dt class="font-medium">Last seen</dt>
+				<dd>{ lastSeen(v.Node) }</dd>
+				<dt class="font-medium">Version</dt>
+				<dd>{ orDash(v.Node.Runtime().SoftwareVersion) }</dd>
+				<dt class="font-medium">Control protocol</dt>
+				<dd>{ orDash(v.Node.Runtime().ProtocolVersion) }</dd>
+				<dt class="font-medium">Host</dt>
+				<dd>{ orDash(v.Node.Runtime().Hostname) }</dd>
+				<dt class="font-medium">Clock offset</dt>
+				<dd>{ clockOffset(v.Node) }</dd>
+				<dt class="font-medium">Listeners</dt>
+				<dd>{ strconv.Itoa(v.Listeners) }</dd>
+				<dt class="font-medium">Address</dt>
+				<dd class="break-all font-mono">{ v.Node.URL().String() }</dd>
+				if v.Node.Enrollment() == domain.EnrollmentPending {
+					<dt class="font-medium">Enrollment</dt>
+					<dd>{ enrollmentText(v.Node) }</dd>
+				} else if !v.Node.EnrolledAt().IsZero() {
+					<dt class="font-medium">Enrolled</dt>
+					<dd>{ utc(v.Node.EnrolledAt()) }</dd>
+				}
+			</dl>
+		</section>
+		<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-cert">
+			<h2 id="title-cert" class="text-lg font-semibold">Certificate</h2>
+			if c := v.Node.Certificate(); c.IsZero() {
+				<p>The node has no certificate yet.</p>
+			} else {
+				<dl class="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-[max-content_1fr]">
+					<dt class="font-medium">Expires</dt>
+					<dd>
+						@certExpiry(v.Node, v.CertWarn)
+					</dd>
+					<dt class="font-medium">Serial</dt>
+					<dd class="break-all font-mono">{ c.Serial() }</dd>
+					<dt class="font-medium">Fingerprint (SHA-256)</dt>
+					<dd class="break-all font-mono text-sm">{ c.FingerprintString() }</dd>
+					if p := v.Node.PendingCertificate(); !p.IsZero() {
+						<dt class="font-medium">Renewal in progress</dt>
+						<dd>{ "until " + utc(p.NotAfter()) }</dd>
+					}
+				</dl>
+				if v.CertWarn {
+					<p class="text-warning">The hub renews node certificates when two thirds of their life is over: this one was not renewed. Check that the node is connected.</p>
+				}
+			}
+		</section>
+		@loadSection(v.Load)
+		<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-devices">
+			<h2 id="title-devices" class="text-lg font-semibold">Devices</h2>
+			if len(v.Devices) == 0 {
+				<p>The node has reported no device.</p>
+			} else {
+				<div class="overflow-x-auto">
+					<table class="w-full text-left">
+						<caption class="sr-only">Devices of the node</caption>
+						<thead>
+							<tr class="border-b border-border">
+								<th scope="col" class="py-1 pr-4">Device</th>
+								<th scope="col" class="py-1 pr-4">Type</th>
+								<th scope="col" class="py-1">State</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, d := range v.Devices {
+								<tr class="border-b border-border">
+									<th scope="row" class="py-1 pr-4 font-medium">
+										<a href={ templ.URL("/admin/devices/" + d.ID().String()) }>{ d.Name() }</a>
+									</th>
+									<td class="py-1 pr-4">{ d.Type() }</td>
+									<td class="py-1">{ state(d) }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			}
+		</section>
+		@capsSection(v)
+	</div>
+}
+
+// loadSection is the load history: charts and their data table.
+templ loadSection(l loadView) {
+	<section class="flex flex-col gap-3 rounded border border-border bg-surface p-4" aria-labelledby="title-load">
+		<h2 id="title-load" class="text-lg font-semibold">Load</h2>
+		if l.Empty {
+			<p>No heartbeat received since the hub started.</p>
+		} else {
+			<p class="text-fg-muted">{ "Heartbeats since " + l.Since + " (the hub keeps the last hour in memory)." }</p>
+			for _, c := range l.Charts {
+				@loadChart(c)
+			}
+			<details>
+				<summary class="cursor-pointer">Load figures</summary>
+				<div class="overflow-x-auto">
+					<table class="mt-2 w-full text-left">
+						<caption class="sr-only">Load every 5 minutes, newest first</caption>
+						<thead>
+							<tr class="border-b border-border">
+								<th scope="col" class="py-1 pr-4">Time</th>
+								<th scope="col" class="py-1 pr-4">CPU</th>
+								<th scope="col" class="py-1 pr-4">Load (1 min)</th>
+								<th scope="col" class="py-1 pr-4">Memory in use</th>
+								<th scope="col" class="py-1">Temperature</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, r := range l.Rows {
+								<tr class="border-b border-border">
+									<th scope="row" class="py-1 pr-4 font-normal">{ r.At }</th>
+									<td class="py-1 pr-4">{ r.CPU }</td>
+									<td class="py-1 pr-4">{ r.Load }</td>
+									<td class="py-1 pr-4">{ r.Mem }</td>
+									<td class="py-1">{ r.Temp }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			</details>
+		}
+	</section>
+}
+
+// loadChart draws one chart as inline SVG; its figcaption says what it
+// shows.
+templ loadChart(c chart) {
+	<figure class="flex flex-col gap-1">
+		<figcaption id={ "chart-" + c.ID } class="text-sm">{ c.Summary }</figcaption>
+		<svg
+			viewBox={ "0 0 " + strconv.Itoa(chartWidth) + " " + strconv.Itoa(chartHeight) }
+			class="h-auto w-full max-w-2xl"
+			role="img"
+			aria-labelledby={ "chart-" + c.ID }
+		>
+			for _, t := range c.YTicks {
+				<line x1={ strconv.Itoa(chartLeft) } x2={ strconv.Itoa(chartWidth - chartRight) } y1={ t.Pos } y2={ t.Pos } class="stroke-border" stroke-width="1"></line>
+				<text x={ strconv.Itoa(chartLeft - 4) } y={ t.Pos } text-anchor="end" dominant-baseline="middle" class="fill-fg-muted text-xs">{ t.Label }</text>
+			}
+			for i, t := range c.XTicks {
+				<text
+					x={ t.Pos }
+					y={ strconv.Itoa(chartHeight - 6) }
+					if i == 0 {
+						text-anchor="start"
+					} else {
+						text-anchor="end"
+					}
+					class="fill-fg-muted text-xs"
+				>{ t.Label }</text>
+			}
+			for _, s := range c.Series {
+				for _, pts := range s.Lines {
+					<polyline points={ pts } fill="none" stroke-width="2" stroke-linejoin="round" class={ s.Class }></polyline>
+				}
+			}
+		</svg>
+		if len(c.Series) > 1 {
+			<ul class="flex flex-wrap gap-x-4 text-sm" aria-hidden="true">
+				for _, s := range c.Series {
+					<li class="flex items-center gap-1">
+						<svg viewBox="0 0 24 8" class="h-2 w-6"><line x1="0" x2="24" y1="4" y2="4" stroke-width="2" class={ s.Class }></line></svg>
+						{ s.Label }
+					</li>
+				}
+			</ul>
+		}
+	</figure>
+}
+
+// capsSection summarises the last capability report (GRID-010).
+templ capsSection(v nodeView) {
+	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-caps">
+		<h2 id="title-caps" class="text-lg font-semibold">Capabilities</h2>
+		if v.Caps == nil {
+			<p>The node has not reported its capabilities yet.</p>
+		} else {
+			<dl class="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-[max-content_1fr]">
+				<dt class="font-medium">Reported</dt>
+				<dd>{ utc(v.Caps.ReportedAt) }</dd>
+				<dt class="font-medium">Product version</dt>
+				<dd>{ orDash(v.Caps.ProductVersion) }</dd>
+				<dt class="font-medium">Protocols</dt>
+				<dd>{ orDash(v.Caps.Protocols) }</dd>
+				<dt class="font-medium">Platform</dt>
+				<dd>{ platformText(v.Caps.Platform) }</dd>
+			</dl>
+			if len(v.Caps.Capabilities) > 0 {
+				<div class="overflow-x-auto">
+					<table class="w-full text-left">
+						<caption class="sr-only">Capabilities of the node</caption>
+						<thead>
+							<tr class="border-b border-border">
+								<th scope="col" class="py-1 pr-4">Capability</th>
+								<th scope="col" class="py-1 pr-4">Status</th>
+								<th scope="col" class="py-1">Version</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, c := range v.Caps.Capabilities {
+								<tr class="border-b border-border">
+									<th scope="row" class="py-1 pr-4 font-mono font-normal">{ c.Key() }</th>
+									<td class={ "py-1 pr-4", templ.KV("text-warning", !c.Available()) }>{ string(c.Status()) }</td>
+									<td class="py-1">{ orDash(c.Version()) }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			}
+		}
+	</section>
+}
+
+// nodeActions are the admin forms of a node.
+templ nodeActions(v nodeView) {
+	<section class="flex flex-col gap-4 rounded border border-border bg-surface p-4" aria-labelledby="title-manage">
+		<h2 id="title-manage" class="text-lg font-semibold">Manage</h2>
+		<form class="flex flex-col gap-3" method="post" action={ templ.SafeURL("/admin/nodes/" + v.Node.ID().String()) }>
+			<input type="hidden" name="version" value={ strconv.Itoa(v.Form.Version) }/>
+			<label class="flex flex-col gap-1">
+				<span class="font-medium">Name</span>
+				if v.locked(domain.FieldName) {
+					<input class="rounded border border-border bg-surface-raised px-2 py-1" type="text" value={ v.Form.Name } disabled aria-describedby="locked-name"/>
+					<span id="locked-name" class="text-sm text-fg-muted">Set in the hub config.</span>
+				} else {
+					<input class="rounded border border-border px-2 py-1" type="text" name="name" value={ v.Form.Name } required maxlength="128"/>
+				}
+			</label>
+			<label class="flex flex-col gap-1">
+				<span class="font-medium">Address</span>
+				if v.locked(domain.FieldURL) {
+					<input class="rounded border border-border bg-surface-raised px-2 py-1 font-mono" type="url" value={ v.Form.URL } disabled aria-describedby="locked-url"/>
+					<span id="locked-url" class="text-sm text-fg-muted">Set in the hub config.</span>
+				} else {
+					<input class="rounded border border-border px-2 py-1 font-mono" type="url" name="url" value={ v.Form.URL } required maxlength="512" aria-describedby="url-help"/>
+					<span id="url-help" class="text-sm text-fg-muted">The base URL the hub dials: https://host:port.</span>
+				}
+			</label>
+			if !v.locked(domain.FieldName) || !v.locked(domain.FieldURL) {
+				<button class="self-start rounded border px-3 py-1 font-semibold" type="submit">Save</button>
+			}
+		</form>
+		<div class="flex flex-wrap gap-3">
+			if v.Node.Disabled() {
+				<form method="post" action={ templ.SafeURL("/admin/nodes/" + v.Node.ID().String() + "/enable") }>
+					<button class="rounded border px-3 py-1" type="submit">Enable the node</button>
+				</form>
+			} else {
+				<form method="post" action={ templ.SafeURL("/admin/nodes/" + v.Node.ID().String() + "/disable") }>
+					<button class="rounded border px-3 py-1" type="submit">Disable the node</button>
+				</form>
+			}
+			if v.Node.Enrollment() == domain.EnrollmentEnrolled {
+				<form method="post" action={ templ.SafeURL("/admin/nodes/" + v.Node.ID().String() + "/probe") }>
+					<button class="rounded border px-3 py-1" type="submit">Probe the capabilities again</button>
+				</form>
+			}
+		</div>
+		<details class="rounded border border-border p-3">
+			<summary class="cursor-pointer font-semibold">Issue a new enrollment token</summary>
+			<form class="mt-3 flex flex-col gap-3" method="post" action={ templ.SafeURL("/admin/nodes/" + v.Node.ID().String() + "/token") }>
+				<p>The node goes back to enrollment: its current certificate is revoked, and it must be enrolled again with the new token.</p>
+				<label class="flex items-center gap-2">
+					<input type="checkbox" name="confirm" value="1" required/>
+					<span>{ "Re-enroll " + v.Node.Name().String() }</span>
+				</label>
+				<button class="self-start rounded border px-3 py-1 font-semibold" type="submit">Issue a token</button>
+			</form>
+		</details>
+		if v.Node.Enrollment() == domain.EnrollmentEnrolled {
+			<details class="rounded border border-border p-3">
+				<summary class="cursor-pointer font-semibold">Revoke the node</summary>
+				<form class="mt-3 flex flex-col gap-3" method="post" action={ templ.SafeURL("/admin/nodes/" + v.Node.ID().String() + "/revoke") }>
+					<p>The hub stops trusting the node: its certificate is revoked, its control channel and listener connections are closed. The node stays listed; issue a new token to enroll it again.</p>
+					<label class="flex items-center gap-2">
+						<input type="checkbox" name="confirm" value="1" required/>
+						<span>{ "Revoke " + v.Node.Name().String() }</span>
+					</label>
+					<button class="self-start rounded border px-3 py-1 font-semibold" type="submit">Revoke</button>
+				</form>
+			</details>
+		}
+		if v.Node.Origin() == domain.OriginDB {
+			<details class="rounded border border-border p-3">
+				<summary class="cursor-pointer font-semibold">Remove the node</summary>
+				<form class="mt-3 flex flex-col gap-3" method="post" action={ templ.SafeURL("/admin/nodes/" + v.Node.ID().String() + "/delete") }>
+					<p>The node and its devices are removed and its certificate is revoked. Presets are not affected.</p>
+					<label class="flex items-center gap-2">
+						<input type="checkbox" name="confirm" value="1" required/>
+						<span>{ "Remove " + v.Node.Name().String() + " for good" }</span>
+					</label>
+					<button class="self-start rounded border px-3 py-1 font-semibold" type="submit">Remove</button>
+				</form>
+			</details>
+		} else {
+			<p class="text-fg-muted">This node is declared in the hub config: remove it there, or disable it here.</p>
+		}
+	</section>
+}
+
+// newNodePage is the form that adds a node (GRID-005).
+templ newNodePage(f nodeForm, failure string) {
+	<h1 class="text-2xl font-semibold">Add a node</h1>
+	<p class="text-fg-muted">The hub declares the node and shows a one-time enrollment token. Run the enrollment on the node with it: the hub then connects to the node.</p>
+	if failure != "" {
+		<p class="rounded border border-danger p-3 font-semibold text-danger" role="alert">{ failure }</p>
+	}
+	<form class="flex max-w-xl flex-col gap-3" method="post" action="/admin/nodes">
+		<label class="flex flex-col gap-1">
+			<span class="font-medium">Node id</span>
+			<input class="rounded border border-border px-2 py-1 font-mono" type="text" name="id" value={ f.ID } required maxlength="64" pattern="[a-z0-9][a-z0-9\-]{1,62}" aria-describedby="id-help" autocomplete="off"/>
+			<span id="id-help" class="text-sm text-fg-muted">The node.id of its node.toml: 2 to 63 lowercase letters, digits and hyphens.</span>
+		</label>
+		<label class="flex flex-col gap-1">
+			<span class="font-medium">Name</span>
+			<input class="rounded border border-border px-2 py-1" type="text" name="name" value={ f.Name } maxlength="128" aria-describedby="name-help"/>
+			<span id="name-help" class="text-sm text-fg-muted">Optional: the id when empty.</span>
+		</label>
+		<label class="flex flex-col gap-1">
+			<span class="font-medium">Address</span>
+			<input class="rounded border border-border px-2 py-1 font-mono" type="url" name="url" value={ f.URL } required maxlength="512" placeholder="https://10.0.0.12:8074" aria-describedby="add-url-help"/>
+			<span id="add-url-help" class="text-sm text-fg-muted">The base URL the hub dials: https://host:port (the node.listen address).</span>
+		</label>
+		<button class="self-start rounded border px-3 py-1 font-semibold" type="submit">Add the node</button>
+	</form>
+}
+
+// tokenPage shows an enrollment token once (GRID-006).
+templ tokenPage(v tokenView) {
+	<h1 class="text-2xl font-semibold">
+		if v.Added {
+			Node added
+		} else {
+			New enrollment token
+		}
+	</h1>
+	<p class="rounded border border-warning p-3" role="status">
+		{ "The enrollment token of " + v.Node.Name().String() + " is shown once: copy it now. It can be used once, until " + utc(v.ExpiresAt) + "." }
+	</p>
+	<dl class="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-[max-content_1fr]">
+		<dt class="font-medium">Node id</dt>
+		<dd class="font-mono">{ v.Node.ID().String() }</dd>
+		<dt class="font-medium">Enrollment token</dt>
+		<dd class="break-all font-mono select-all">{ v.Token }</dd>
+		<dt class="font-medium">Hub CA fingerprint</dt>
+		<dd class="break-all font-mono text-sm select-all">{ v.CAFingerprint }</dd>
+	</dl>
+	<section class="flex flex-col gap-2" aria-labelledby="title-enroll">
+		<h2 id="title-enroll" class="text-lg font-semibold">Enroll the node</h2>
+		<p>On the node, save the token in a file readable by the meshsdr user only, then run:</p>
+		<pre class="overflow-x-auto rounded border border-border bg-surface p-3 font-mono text-sm"><code>{ "meshsdr node enroll --token-file <file> --ca-fingerprint " + v.CAFingerprint }</code></pre>
+		<p>The node waits for the hub, which connects to { v.Node.URL().String() } and signs the node certificate.</p>
+	</section>
+	<p><a href={ templ.URL("/admin/nodes/" + v.Node.ID().String()) }>Go to the node</a></p>
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+
+	return s
+}
+
+func lastSeen(n *domain.Node) string {
+	if t := n.Runtime().LastHeartbeatAt; !t.IsZero() {
+		return utc(t)
+	}
+
+	return "never"
+}
+
+func clockOffset(n *domain.Node) string {
+	if o := n.Runtime().ClockOffsetMS; o != nil {
+		return strconv.FormatInt(*o, 10) + " ms"
+	}
+
+	return "—"
+}
+
+func enrollmentText(n *domain.Node) string {
+	if _, exp, ok := n.StoredEnrollmentKey(); ok {
+		if exp.IsZero() {
+			return "waiting for enrollment"
+		}
+
+		return "waiting for enrollment, token valid until " + utc(exp)
+	}
+
+	return "waiting for an enrollment token"
+}
+
+func platformText(p platform) string {
+	if p.OS == "" {
+		return "—"
+	}
+
+	s := p.OS + "/" + p.Arch
+	if p.CPUModel != "" {
+		s += ", " + p.CPUModel
+	}
+
+	if p.CPUCores > 0 {
+		s += ", " + strconv.Itoa(p.CPUCores) + " cores"
+	}
+
+	if p.RAMBytes > 0 {
+		s += ", " + strconv.FormatUint(p.RAMBytes/(1<<20), 10) + " MiB"
+	}
+
+	return s
+}

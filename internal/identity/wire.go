@@ -209,6 +209,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Unknown:         memory.NewThrottle(memory.DefaultCapacity),
 		Refusals:        memory.NewRefusalGate(memory.DefaultCapacity),
 		SessionPolicies: lifetimes,
+		Revocations:     d.Revocations,
 		Logger:          component(d.Logger, "identity.app.auth"),
 	})
 

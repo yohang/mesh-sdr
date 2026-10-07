@@ -745,3 +745,25 @@ func (testDevices) NodeDevices(_ context.Context, node string) ([]app.NodeDevice
 
 	return []app.NodeDevice{{ID: "hf"}}, nil
 }
+
+// TestBackgroundRequests: a request marked as a background refresh is
+// served for the signed-in user, without counting as activity (the
+// session is only peeked at, ADR 0018).
+func TestBackgroundRequests(t *testing.T) {
+	h := newHub(t)
+	h.addUser("alice", domain.RoleListener)
+
+	c := h.client()
+	c.session()
+
+	if res := c.login("alice", password, false); res.StatusCode != http.StatusOK {
+		t.Fatalf("login = %d", res.StatusCode)
+	}
+
+	res := c.do(http.MethodGet, "/shell-user", "", "", map[string]string{identityhttp.BackgroundHeader: "1"})
+	body, _ := io.ReadAll(res.Body)
+
+	if !strings.HasPrefix(string(body), "alice|") {
+		t.Errorf("background request served as %q", body)
+	}
+}

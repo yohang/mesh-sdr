@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
@@ -74,14 +75,41 @@ type RevocationBroadcaster interface {
 	BroadcastRevocations(ctx context.Context, at time.Time, sessions, users []string)
 }
 
-// Timings are the grid durations that become DB settings later (ADR 0008
-// Q2), with the FEATURE_SPEC defaults.
+// Timings are the grid durations, with the FEATURE_SPEC defaults. The
+// heartbeat interval and the offline delay follow the DB settings
+// grid.heartbeat_interval_s and grid.offline_after_s (ADR 0018).
 type Timings struct {
 	HeartbeatInterval time.Duration // grid.heartbeat_interval_s
 	OfflineAfter      time.Duration // grid.offline_after_s
 	EnrollmentTTL     time.Duration // grid.enrollment_ttl_minutes
-	ConnectionsKeep   time.Duration // retention.connections
 	PresenceStale     time.Duration // presence.stale_after (§7.3)
+}
+
+// timingsCell holds the current Timings of a service: the heartbeat
+// interval and the offline delay are DB settings that change at run time
+// (ADR 0018).
+type timingsCell struct {
+	p       atomic.Pointer[Timings]
+	changes chan struct{}
+}
+
+func newTimingsCell(t Timings) *timingsCell {
+	c := &timingsCell{changes: make(chan struct{}, 1)}
+	c.p.Store(&t)
+
+	return c
+}
+
+func (c *timingsCell) get() Timings { return *c.p.Load() }
+
+// set stores t and wakes the service loop, which resets its ticker.
+func (c *timingsCell) set(t Timings) {
+	c.p.Store(&t)
+
+	select {
+	case c.changes <- struct{}{}:
+	default:
+	}
 }
 
 // DefaultTimings returns the defaults.
@@ -90,7 +118,6 @@ func DefaultTimings() Timings {
 		HeartbeatInterval: 10 * time.Second,
 		OfflineAfter:      60 * time.Second,
 		EnrollmentTTL:     60 * time.Minute,
-		ConnectionsKeep:   30 * 24 * time.Hour,
 		PresenceStale:     45 * time.Second,
 	}
 }

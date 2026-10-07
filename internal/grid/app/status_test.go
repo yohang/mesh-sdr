@@ -67,6 +67,27 @@ func TestStatusEvaluate(t *testing.T) {
 			t.Errorf("%s: %s %q, want %s %q", tt.name, status, hint, tt.status, tt.hint)
 		}
 	}
+
+	// Lowering the heartbeat interval setting does not flap a connected
+	// node: it is evaluated against the interval of its ctl.hello until it
+	// reconnects (ADR 0018).
+	faster := timings
+	faster.HeartbeatInterval = 2 * time.Second
+	s.SetTimings(faster)
+
+	sent := with(func(l *app.LinkState) {
+		l.HeartbeatInterval = 10 * time.Second
+		l.LastHeartbeat = now.Add(-9 * time.Second)
+	})
+	if status, hint := s.Evaluate(enrolled, sent, true, now); status != domain.StatusOnline {
+		t.Errorf("connected node after a lower setting: %s %q, want online", status, hint)
+	}
+
+	// A node that took the new interval is held to it.
+	sent.HeartbeatInterval = 2 * time.Second
+	if status, _ := s.Evaluate(enrolled, sent, true, now); status != domain.StatusDegraded {
+		t.Errorf("node on the 2 s interval silent for 9 s: %s, want degraded", status)
+	}
 }
 
 func TestHeartbeatUpdatesNodeAndHistory(t *testing.T) {

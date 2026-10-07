@@ -24,6 +24,28 @@ type session struct {
 	conn    *wsconn.Conn
 	cur     token.Claims
 	pending *closeReq
+
+	// forbidden counts the forbidden messages of the last minute (read
+	// loop only).
+	forbidden strikes
+}
+
+// strikes is a sliding one-minute window of violations.
+type strikes struct{ at []time.Time }
+
+// add records a violation at now and returns the count of the last minute.
+func (s *strikes) add(now time.Time) int {
+	keep := s.at[:0]
+
+	for _, t := range s.at {
+		if now.Sub(t) < time.Minute {
+			keep = append(keep, t)
+		}
+	}
+
+	s.at = append(keep, now)
+
+	return len(s.at)
 }
 
 type closeReq struct {
@@ -124,6 +146,8 @@ func (ss *session) run(ctx context.Context) {
 	ss.emit(rxv1.TypeConnectionOpened, c, "")
 	ss.logger.InfoContext(ctx, "media connection opened", slog.String("sub", c.Subject))
 
+	beats := ss.heartbeats(ctx)
+
 	hello := time.AfterFunc(HelloTimeout, func() { ss.conn.Close(rxv1.CloseHandshakeTimeout, "session.hello not received in time") })
 	expire := time.AfterFunc(ss.expiry(), func() { ss.conn.Close(rxv1.CloseUnauthenticated, "token_expired") })
 
@@ -203,6 +227,8 @@ func (ss *session) run(ctx context.Context) {
 			ss.conn.Close(rxv1.CloseNormal, "bye")
 		case rxv1.TypeDeviceAttach:
 			ss.scoped(env, token.PermListen)
+		case rxv1.TypeDemodCreate:
+			ss.scoped(env, token.PermDemod)
 		case rxv1.TypePresetSelect:
 			ss.scoped(env, token.PermPreset)
 		case rxv1.TypeDeviceRetune:
@@ -213,8 +239,40 @@ func (ss *session) run(ctx context.Context) {
 		}
 	}
 
+	beats()
 	ss.emit(rxv1.TypeConnectionClosed, ss.claims(), reason)
 	ss.logger.InfoContext(ctx, "media connection closed", slog.String("reason", reason))
+}
+
+// heartbeats reports the session alive to the hub every HeartbeatInterval
+// until the returned stop function is called (§7.3 rule 2: the hub reaps
+// presence rows silent for presence.stale_after). Successive heartbeats of
+// one session coalesce in the event buffer while the control channel is
+// down.
+func (ss *session) heartbeats(ctx context.Context) (stop func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		t := time.NewTicker(ss.s.heartbeatInterval())
+		defer t.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				ss.emit(rxv1.TypeConnectionHeart, ss.claims(), "")
+			}
+		}
+	}()
+
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 // refresh replaces the token of the connection (§5.8): same cid, same
@@ -289,6 +347,12 @@ func (ss *session) scoped(env rxv1.Envelope, perm string) {
 	if !ss.claims().Allows(ref.DeviceID, perm) {
 		ss.reply(env, rxv1.CodeForbidden, "the access token does not grant "+perm+" on this device")
 
+		// §5.9: repeated violations (more than 10 per minute) close 4403.
+		if ss.forbidden.add(ss.s.o.Now()) > MaxForbiddenPerMinute {
+			ss.logger.Warn("media connection closed after repeated forbidden messages")
+			ss.conn.Close(rxv1.CloseForbidden, "repeated forbidden messages")
+		}
+
 		return
 	}
 
@@ -308,7 +372,12 @@ func (ss *session) emit(typ rxv1.MessageType, c token.Claims, reason string) {
 		user = c.Subject
 	}
 
-	a.Emit(typ, "", agent.ClassState, func(seq int64) any {
+	key := ""
+	if typ == rxv1.TypeConnectionHeart {
+		key = string(typ) + ":" + c.ConnectionID
+	}
+
+	a.Emit(typ, key, agent.ClassState, func(seq int64) any {
 		return ctl.Connection{Seq: seq, CID: c.ConnectionID, SID: "", UserID: user, Reason: reason, Since: c.IssuedAt.UnixMilli()}
 	})
 }
