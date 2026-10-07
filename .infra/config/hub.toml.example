@@ -149,11 +149,7 @@ trusted_proxies = []
 [settings.receiver]
 # name = "MeshSDR"                       # station name (top bar, titles)
 # location = "Lille, France"
-# altitude_m = 0                         # antenna altitude, m (-500..9000)
-# admin_email = "admin@example.org"
-# admin_email_public = false
 # gps = { lat = 50.63, lon = 3.06 }      # env: "50.63,3.06"
-# country = "FR"                         # ISO 3166-1 alpha-2
 # help_url = "https://example.org/help"
 # photo_title = "View from the roof"
 # photo_desc = "Markdown text"
@@ -164,27 +160,11 @@ trusted_proxies = []
 # """
 # usage_policy_url = "/policy"           # footer link: a path or an http(s) URL
 
-[settings.bandplan]
-# region = 0                             # IARU region 1, 2, 3, or 0 for all
-
 [settings.ui]
 # Theme mode: light | dark | auto (follows the visitor's prefers-color-scheme).
 # A change applies on the next full page load.
 # theme_mode = "auto"
 # shortcut_set = "default"               # default | off
-# tuning_precision = 2                   # 0..6 decimal digits
-# recorder_enabled = true
-
-[settings.ui.layout]
-# side_panel_open = true
-# default_tab = "decoders"               # decoders | bookmarks | info
-# spectrum = false
-# bandplan = true
-# frequency_format = "radio"             # radio | locale
-
-[settings.bookmarks]
-# eibi_range_km = 0                      # 0 disables EIBi auto-bookmarks
-# repeater_range_km = 0
 
 [settings.session]
 # idle_timeout = "24h"
@@ -209,10 +189,6 @@ trusted_proxies = []
 [settings.grid]
 # heartbeat_interval_s = 10              # node heartbeat period (1..300 s)
 # offline_after_s = 60                   # offline without heartbeat (5..3600 s, > 2 heartbeats)
-
-[settings.retention.reporting_outbox]
-# sent = "7d"                            # reports delivered to external networks
-# dead = "30d"                           # reports given up on
 
 [settings.invitations]
 # ttl_hours = 168                        # invitation link validity (1..720 hours)

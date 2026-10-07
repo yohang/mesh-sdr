@@ -85,10 +85,10 @@ max_read_connections = 3
 	}
 
 	origins := map[string]string{
-		"hub.url":                 "hub.toml:4",
+		"hub.url":                 "hub.toml",
 		"gateway.https_listen":    "default",
-		"db.dsn":                  filepath.Join("hub.d", "20-b.toml") + ":2",
-		"db.max_read_connections": filepath.Join("hub.d", "10-a.toml") + ":4",
+		"db.dsn":                  filepath.Join("hub.d", "20-b.toml"),
+		"db.max_read_connections": filepath.Join("hub.d", "10-a.toml"),
 		"log.level":               "env:MESHSDR_LOG__LEVEL",
 		"log.format":              "default",
 	}
@@ -127,7 +127,7 @@ func TestLoadHubSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if o := meta.Origins.Of("settings.ui.theme_mode"); cfg.Settings.UI.ThemeMode != "dark" || o.String() != "hub.toml:7" {
+	if o := meta.Origins.Of("settings.ui.theme_mode"); cfg.Settings.UI.ThemeMode != "dark" || o.String() != "hub.toml" {
 		t.Errorf("file theme_mode = %q (%s)", cfg.Settings.UI.ThemeMode, o)
 	}
 
@@ -156,7 +156,7 @@ func TestLoadNode(t *testing.T) {
 		t.Errorf("node = %+v", cfg.Node)
 	}
 
-	if got := meta.Origins.Of("node.id").String(); got != "node.toml:3" {
+	if got := meta.Origins.Of("node.id").String(); got != "node.toml" {
 		t.Errorf("origin = %q", got)
 	}
 }
@@ -185,18 +185,18 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "unknown key", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub + "ulr = \"https://x\"\n"},
-			code:  CodeUnknownKey, origin: "hub.toml:5", message: `did you mean "hub.url"?`,
+			code:  CodeUnknownKey, origin: "hub.toml", message: `did you mean "hub.url"?`,
 		},
 		{
 			name: "unknown table", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub + "[gatway]\nmode = \"x\"\n"},
-			code:  CodeUnknownKey, origin: "hub.toml:5",
+			code:  CodeUnknownKey, origin: "hub.toml",
 		},
 		{
 			name: "unknown env var", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub},
 			env:   map[string]string{"MESHSDR_GATEWAY__HTTP_LISTN": ":80"},
-			code:  CodeUnknownEnv, origin: "env:MESHSDR_GATEWAY__HTTP_LISTN", message: "MESHSDR_GATEWAY__HTTP_LISTEN",
+			code:  CodeUnknownEnv, origin: "env:MESHSDR_GATEWAY__HTTP_LISTN", message: "unknown config env var",
 		},
 		{
 			name: "parse error", role: RoleHub,
@@ -216,7 +216,7 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "insecure hub.url", role: RoleHub,
 			files: map[string]string{"hub.toml": "schema_version = 1\n[hub]\nurl = \"http://x\"\n"},
-			code:  CodeInvalidValue, origin: "hub.toml:3",
+			code:  CodeInvalidValue, origin: "hub.toml",
 		},
 		{
 			name: "postgres dsn", role: RoleHub,
@@ -239,7 +239,7 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "invalid theme mode", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub + "[settings.ui]\ntheme_mode = \"sepia\"\n"},
-			code:  CodeInvalidValue, origin: "hub.toml:6",
+			code:  CodeInvalidValue, origin: "hub.toml",
 		},
 		{
 			name: "read pool size", role: RoleHub,
@@ -255,12 +255,12 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "bad listen", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub + "[gateway]\nhttps_listen = \"nope\"\n"},
-			code:  CodeInvalidValue, origin: "hub.toml:6",
+			code:  CodeInvalidValue, origin: "hub.toml",
 		},
 		{
 			name: "gateway sidecar", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub + "[gateway]\nmode = \"sidecar\"\n"},
-			code:  CodeInvalidValue, origin: "hub.toml:6", message: "not implemented",
+			code:  CodeInvalidValue, origin: "hub.toml", message: "not implemented",
 		},
 		{
 			name: "tls off without a plain listener", role: RoleHub,
@@ -280,12 +280,12 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "bad listen policy", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub + "[settings]\nlisten_policy = \"everyone\"\n"},
-			code:  CodeInvalidValue, origin: "hub.toml:6",
+			code:  CodeInvalidValue, origin: "hub.toml",
 		},
 		{
 			name: "argon2 memory below floor", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub + "[auth.argon2]\nmemory_kib = 1024\n"},
-			code:  CodeInvalidValue, origin: "hub.toml:6",
+			code:  CodeInvalidValue, origin: "hub.toml",
 		},
 		{
 			name: "argon2 iterations below floor", role: RoleHub,
@@ -301,7 +301,7 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "bad admin network", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub + "[admin]\nallowed_networks = [\"10.0.0.1\"]\n"},
-			code:  CodeInvalidValue, origin: "hub.toml:6",
+			code:  CodeInvalidValue, origin: "hub.toml",
 		},
 		{
 			name: "bad trusted proxy", role: RoleHub,
@@ -312,7 +312,7 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "bad log level", role: RoleNode,
 			files: map[string]string{"node.toml": "schema_version = 1\nnode.id = \"attic\"\nlog.level = \"trace\"\n"},
-			code:  CodeInvalidValue, origin: "node.toml:3",
+			code:  CodeInvalidValue, origin: "node.toml",
 		},
 		{
 			name: "node.id required", role: RoleNode,
@@ -322,7 +322,7 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "invalid node.id", role: RoleNode,
 			files: map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"Attic_1\"\n"},
-			code:  "invalid_node_id", origin: "node.toml:3",
+			code:  "invalid_node_id", origin: "node.toml",
 		},
 	}
 

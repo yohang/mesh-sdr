@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-06
+- Amended by: ADR 0022 (no adapter contract, `internal/db` is the SQLite package, plain goose migrations)
 
 ## Context
 

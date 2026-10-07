@@ -14,7 +14,7 @@ import (
 
 // AuditLog is the append-only SQLite audit repository. The table also has a
 // trigger that aborts any UPDATE.
-type AuditLog struct{ db db.Adapter }
+type AuditLog struct{ db *db.DB }
 
 var (
 	_ domain.AuditLog    = (*AuditLog)(nil)
@@ -22,7 +22,7 @@ var (
 )
 
 // NewAuditLog returns the repository.
-func NewAuditLog(a db.Adapter) *AuditLog { return &AuditLog{db: a} }
+func NewAuditLog(a *db.DB) *AuditLog { return &AuditLog{db: a} }
 
 // Append inserts an entry.
 func (r *AuditLog) Append(ctx context.Context, e domain.AuditEntry) error {

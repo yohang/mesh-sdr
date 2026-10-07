@@ -128,7 +128,7 @@ func TestResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := &domain.Configured{Value: domain.MustValue(`"light"`), Origin: "hub.toml:3"}
+	cfg := &domain.Configured{Value: domain.MustValue(`"light"`), Origin: "hub.toml"}
 
 	tests := []struct {
 		name     string
@@ -142,8 +142,8 @@ func TestResolve(t *testing.T) {
 	}{
 		{"default", nil, nil, `"auto"`, domain.SourceDefault, "default", 0, false},
 		{"db", nil, row, `"dark"`, domain.SourceDB, "db", 7, false},
-		{"config", cfg, nil, `"light"`, domain.SourceConfig, "hub.toml:3", 0, false},
-		{"config over db", cfg, row, `"light"`, domain.SourceConfig, "hub.toml:3", 7, true},
+		{"config", cfg, nil, `"light"`, domain.SourceConfig, "hub.toml", 0, false},
+		{"config over db", cfg, row, `"light"`, domain.SourceConfig, "hub.toml", 7, true},
 	}
 
 	for _, tt := range tests {

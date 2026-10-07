@@ -1,9 +1,6 @@
 package config
 
-import (
-	"sort"
-	"strconv"
-)
+import "sort"
 
 // OriginKind tells where an effective config value comes from.
 type OriginKind int
@@ -15,12 +12,12 @@ const (
 	OriginEnv
 )
 
-// Origin is the source of one config key: "default", "hub.toml:42" or
-// "env:MESHSDR_DB__DSN". Keys set by a file or env var are locked.
+// Origin is the source of one config key: "default", the file name
+// ("hub.toml", "hub.d/10-site.toml") or "env:MESHSDR_DB__DSN". Keys set by a
+// file or env var are locked.
 type Origin struct {
 	kind OriginKind
 	file string // path relative to the config dir
-	line int    // 0 when unknown
 	env  string
 }
 
@@ -34,10 +31,6 @@ func (o Origin) Locked() bool { return o.kind != OriginDefault }
 func (o Origin) String() string {
 	switch o.kind {
 	case OriginFile:
-		if o.line > 0 {
-			return o.file + ":" + strconv.Itoa(o.line)
-		}
-
 		return o.file
 	case OriginEnv:
 		return "env:" + o.env

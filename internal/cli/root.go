@@ -183,7 +183,7 @@ func exitCode(err error) int {
 func errorCode(err error) string {
 	var cerr *config.Error
 
-	for _, e := range []error{db.ErrMigrationsPending, db.ErrSchemaTooNew, db.ErrChecksumMismatch, db.ErrEngineUnsupported} {
+	for _, e := range []error{db.ErrMigrationsPending, db.ErrSchemaTooNew, db.ErrEngineUnsupported} {
 		if errors.Is(err, e) {
 			return e.Error()
 		}

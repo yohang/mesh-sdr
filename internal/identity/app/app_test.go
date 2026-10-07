@@ -74,7 +74,7 @@ func (h *spyHasher) count() int {
 }
 
 type env struct {
-	db       db.Adapter
+	db       *db.DB
 	clock    *clock
 	hasher   *spyHasher
 	auth     *app.Auth

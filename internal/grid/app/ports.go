@@ -13,7 +13,7 @@ import (
 // Clock returns the current time.
 type Clock func() time.Time
 
-// Transactor runs fn in one write transaction (db.Adapter.WithinTx).
+// Transactor runs fn in one write transaction (db.DB.WithinTx).
 type Transactor interface {
 	WithinTx(ctx context.Context, fn func(ctx context.Context) error) error
 }

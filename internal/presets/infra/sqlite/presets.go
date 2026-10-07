@@ -18,10 +18,10 @@ import (
 )
 
 // Presets implements domain.Repository.
-type Presets struct{ db db.Adapter }
+type Presets struct{ db *db.DB }
 
 // NewPresets returns the repository.
-func NewPresets(a db.Adapter) *Presets { return &Presets{db: a} }
+func NewPresets(a *db.DB) *Presets { return &Presets{db: a} }
 
 var _ domain.Repository = (*Presets)(nil)
 

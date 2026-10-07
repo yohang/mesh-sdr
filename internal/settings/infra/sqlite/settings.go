@@ -18,7 +18,7 @@ import (
 
 // Settings is the SQLite settings repository.
 type Settings struct {
-	db            db.Adapter
+	db            *db.DB
 	schemaVersion int64
 }
 
@@ -27,7 +27,7 @@ var _ domain.Repository = (*Settings)(nil)
 // NewSettings returns the repository. schemaVersion is the version of the
 // settings schema that validates the values it writes
 // (`settings.schema_version`).
-func NewSettings(a db.Adapter, schemaVersion int) *Settings {
+func NewSettings(a *db.DB, schemaVersion int) *Settings {
 	return &Settings{db: a, schemaVersion: int64(schemaVersion)}
 }
 

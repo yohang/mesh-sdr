@@ -29,12 +29,12 @@ func idBytes(id domain.UserID) []byte {
 }
 
 // Invitations is the SQLite InvitationRepository.
-type Invitations struct{ db db.Adapter }
+type Invitations struct{ db *db.DB }
 
 var _ domain.InvitationRepository = (*Invitations)(nil)
 
 // NewInvitations returns the repository.
-func NewInvitations(a db.Adapter) *Invitations { return &Invitations{db: a} }
+func NewInvitations(a *db.DB) *Invitations { return &Invitations{db: a} }
 
 // Add inserts an invitation.
 func (r *Invitations) Add(ctx context.Context, i *domain.Invitation) error {
@@ -188,12 +188,12 @@ func rehydrateInvitation(row sqlc.Invitation) (*domain.Invitation, error) {
 }
 
 // PasswordResets is the SQLite PasswordResetRepository.
-type PasswordResets struct{ db db.Adapter }
+type PasswordResets struct{ db *db.DB }
 
 var _ domain.PasswordResetRepository = (*PasswordResets)(nil)
 
 // NewPasswordResets returns the repository.
-func NewPasswordResets(a db.Adapter) *PasswordResets { return &PasswordResets{db: a} }
+func NewPasswordResets(a *db.DB) *PasswordResets { return &PasswordResets{db: a} }
 
 // Add invalidates the user's unused tokens and inserts t, in one
 // transaction.
@@ -278,12 +278,12 @@ func (r *PasswordResets) DeleteEndedBefore(ctx context.Context, cutoff time.Time
 }
 
 // EmailChanges is the SQLite EmailChangeRepository.
-type EmailChanges struct{ db db.Adapter }
+type EmailChanges struct{ db *db.DB }
 
 var _ domain.EmailChangeRepository = (*EmailChanges)(nil)
 
 // NewEmailChanges returns the repository.
-func NewEmailChanges(a db.Adapter) *EmailChanges { return &EmailChanges{db: a} }
+func NewEmailChanges(a *db.DB) *EmailChanges { return &EmailChanges{db: a} }
 
 // Add invalidates the user's unused tokens and inserts t.
 func (r *EmailChanges) Add(ctx context.Context, t *domain.EmailChangeToken) error {

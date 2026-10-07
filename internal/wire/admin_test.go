@@ -28,7 +28,7 @@ const testPassword = "correct horse battery"
 type adminHub struct {
 	t    *testing.T
 	base string
-	db   db.Adapter
+	db   *db.DB
 }
 
 // newAdminHub serves a hub whose config sets env (locked settings).
@@ -220,7 +220,7 @@ func TestSettingsAPIAccess(t *testing.T) {
 			t.Errorf("%q PATCH = %d, want %d", tt.user, status, tt.status)
 		}
 
-		if status, v, _ := b.json(http.MethodGet, "/api/v1/settings/public", ""); status != 200 || v["receiver.name"] != "MeshSDR" || v["receiver.admin_email"] != nil {
+		if status, v, _ := b.json(http.MethodGet, "/api/v1/settings/public", ""); status != 200 || v["receiver.name"] != "MeshSDR" || v["receiver.usage_policy_text"] != nil {
 			t.Errorf("%q public settings = %d %v", tt.user, status, v)
 		}
 	}
@@ -264,7 +264,7 @@ func TestSettingsAPISaveCycle(t *testing.T) {
 	}
 
 	// Per-field errors.
-	status, p, _ = b.json(http.MethodPatch, "/api/v1/settings", `{"values":{"ui.theme_mode":"sepia","ui.tuning_precision":9,"nope":1}}`)
+	status, p, _ = b.json(http.MethodPatch, "/api/v1/settings", `{"values":{"ui.theme_mode":"sepia","auth.password_min_length":7,"nope":1}}`)
 
 	errs, _ := p["errors"].([]any)
 	if status != 422 || p["code"] != "invalid_setting" || len(errs) != 3 {
@@ -324,7 +324,7 @@ func TestEffectiveConfigAPI(t *testing.T) {
 		byKey[e["key"].(string)] = e
 	}
 
-	if e := byKey["hub.url"]; e["class"] != "cfg" || e["origin"] != "hub.toml:3" || e["locked"] != true || e["value"] != "http://127.0.0.1" {
+	if e := byKey["hub.url"]; e["class"] != "cfg" || e["origin"] != "hub.toml" || e["locked"] != true || e["value"] != "http://127.0.0.1" {
 		t.Errorf("hub.url = %v", e)
 	}
 
@@ -386,19 +386,13 @@ func TestRetentionAPI(t *testing.T) {
 	status, v, _ := b.json(http.MethodGet, "/api/v1/retention", "")
 	stores, _ := v["stores"].([]any)
 
-	if status != 200 || len(stores) != 4 {
+	if status != 200 || len(stores) != 3 {
 		t.Fatalf("GET = %d %v", status, v)
 	}
 
 	audit, _ := stores[1].(map[string]any)
 	if audit["store"] != "audit_log" || audit["retention"] != "365d" || audit["setting_key"] != "retention.audit_log" {
 		t.Errorf("audit store = %v", audit)
-	}
-
-	// The reporting outbox (ADR 0020).
-	outbox, _ := stores[2].(map[string]any)
-	if outbox["store"] != "reporting_outbox" || outbox["retention"] != "7d" || outbox["setting_key"] != "retention.reporting_outbox.sent" {
-		t.Errorf("outbox store = %v", outbox)
 	}
 
 	if status, v, _ = b.json(http.MethodPost, "/api/v1/retention/audit_log/purge", ""); status != 200 || v["rows_deleted"] != 0.0 {

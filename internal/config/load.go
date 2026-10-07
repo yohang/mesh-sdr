@@ -65,7 +65,7 @@ const (
 // Problem is one configuration error.
 type Problem struct {
 	Key     string // dotted key or env var, may be empty
-	Origin  string // "hub.toml:12", "env:MESHSDR_X", "default" or empty
+	Origin  string // "hub.toml", "hub.toml:3:5" (parse error), "env:MESHSDR_X", "default" or empty
 	Code    string
 	Message string
 }
@@ -320,8 +320,7 @@ func (l *loader) decodeFile(path string, cfg any) {
 		return
 	}
 
-	lines := keyLines(string(data))
-	origin := func(key string) Origin { return Origin{kind: OriginFile, file: name, line: lines[key]} }
+	origin := Origin{kind: OriginFile, file: name}
 
 	undecoded := map[string]bool{}
 	for _, k := range md.Undecoded() {
@@ -334,7 +333,7 @@ func (l *loader) decodeFile(path string, cfg any) {
 			continue
 		}
 
-		l.fail(Problem{Origin: origin(key).String(), Key: key, Code: CodeUnknownKey,
+		l.fail(Problem{Origin: name, Key: key, Code: CodeUnknownKey,
 			Message: "unknown key" + suggest(key, l.keys())})
 	}
 
@@ -345,14 +344,14 @@ func (l *loader) decodeFile(path string, cfg any) {
 			continue
 		}
 
-		l.origins[lf.key] = origin(lf.key)
+		l.origins[lf.key] = origin
 
 		if s, ok := lf.value.Addr().Interface().(*Secret); ok && s.source == secretInline {
 			if !h.AllowInlineSecrets {
-				l.fail(Problem{Origin: origin(lf.key).String(), Key: lf.key, Code: CodeInlineSecretForbidden,
+				l.fail(Problem{Origin: name, Key: lf.key, Code: CodeInlineSecretForbidden,
 					Message: `inline secret value; use { file = "…" } or { env = "…" }, or set allow_inline_secrets = true in this file`})
 			} else {
-				l.warnings = append(l.warnings, fmt.Sprintf("%s: %s: inline secret value (allow_inline_secrets = true)", origin(lf.key), lf.key))
+				l.warnings = append(l.warnings, fmt.Sprintf("%s: %s: inline secret value (allow_inline_secrets = true)", name, lf.key))
 			}
 		}
 	}
@@ -413,7 +412,7 @@ func (l *loader) applyEnv(cfg any) {
 
 	for name := range l.env {
 		if strings.HasPrefix(name, EnvPrefix) && !slices.Contains(known, name) {
-			l.fail(Problem{Origin: "env:" + name, Code: CodeUnknownEnv, Message: "unknown config env var" + suggest(name, known)})
+			l.fail(Problem{Origin: "env:" + name, Code: CodeUnknownEnv, Message: "unknown config env var"})
 		}
 	}
 

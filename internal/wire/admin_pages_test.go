@@ -96,18 +96,14 @@ func TestAdminFormSave(t *testing.T) {
 		t.Errorf("unchanged = %s", body)
 	}
 
-	// Display defaults: only the changed checkbox becomes a DB row.
-	res, body = b.form("/admin/look-and-feel", url.Values{
-		"section": {"display"}, "ui.shortcut_set": {"default"}, "ui.tuning_precision": {"2"},
-		"ui.layout.side_panel_open": {"false"}, "ui.layout.spectrum": {"false", "true"}, "ui.layout.bandplan": {"false", "true"},
-		"ui.layout.default_tab": {"decoders"}, "ui.layout.frequency_format": {"radio"},
-	}, true)
+	// Display defaults: only the changed value becomes a DB row.
+	res, body = b.form("/admin/look-and-feel", url.Values{"section": {"display"}, "ui.shortcut_set": {"off"}}, true)
 	if res.StatusCode != http.StatusOK || !strings.Contains(body, "Saved.") {
 		t.Fatalf("display = %d %s", res.StatusCode, body)
 	}
 
-	if n := h.count("SELECT count(*) FROM settings WHERE key LIKE 'ui.layout.%'"); n != 2 {
-		t.Errorf("layout rows = %d, want 2 (side panel closed, spectrum shown)", n)
+	if n := h.count("SELECT count(*) FROM settings WHERE key = 'ui.shortcut_set'"); n != 1 {
+		t.Errorf("shortcut rows = %d, want 1", n)
 	}
 
 	// Invalid values: 422 with inline errors and a summary.
@@ -122,7 +118,6 @@ func TestAdminFormSave(t *testing.T) {
 	// A position, then a reset by emptying the fields.
 	station := url.Values{
 		"section": {"station"}, "receiver.name": {"F4XYZ"}, "receiver.gps.lat": {"50.63"}, "receiver.gps.lon": {"3.06"},
-		"receiver.altitude_m": {"0"}, "bandplan.region": {"0"},
 	}
 	if res, body = b.form("/admin/site", station, true); res.StatusCode != http.StatusOK {
 		t.Fatalf("station = %d %s", res.StatusCode, body)

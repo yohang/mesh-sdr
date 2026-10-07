@@ -20,7 +20,7 @@ import (
 type Deps struct {
 	Config  config.Hub
 	Origins config.Origins
-	DB      db.Adapter
+	DB      *db.DB
 	// Audit appends the audit records of settings writes (identity's
 	// audit_log).
 	Audit  app.Auditor

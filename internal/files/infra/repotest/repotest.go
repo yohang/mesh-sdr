@@ -15,7 +15,7 @@ import (
 
 // Factory opens a fresh repository on a migrated database, with its
 // adapter (transactions and row counts).
-type Factory func(t *testing.T) (domain.Repository, db.Adapter)
+type Factory func(t *testing.T) (domain.Repository, *db.DB)
 
 // Run runs the repository contract: content larger than a chunk is stored
 // in several chunks and read back in order.

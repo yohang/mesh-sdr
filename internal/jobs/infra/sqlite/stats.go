@@ -13,12 +13,12 @@ var tableName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // TableStats counts the rows of a table and measures its size on disk
 // (pages of the table and its indexes, from the dbstat virtual table).
 type TableStats struct {
-	db    db.Adapter
+	db    *db.DB
 	table string
 }
 
 // NewTableStats returns the statistics of table, a constant table name.
-func NewTableStats(a db.Adapter, table string) (*TableStats, error) {
+func NewTableStats(a *db.DB, table string) (*TableStats, error) {
 	if !tableName.MatchString(table) {
 		return nil, fmt.Errorf("invalid table name %q", table)
 	}

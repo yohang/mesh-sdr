@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-06
+- Amended by: ADR 0022 (settings without a consumer removed, file origins without line)
 - Deciders: project owner
 - Scope: epic #449 (Administration), part `epic/adm-1`: ADM-002 #60, ADM-010 #68, ADM-011 #69, ADM-006 #64, ADM-003 #61, ADM-004 #62, ADM-005 #63, ADM-001 #59, ADM-008 #66, ADM-009 #67, and UI-001 #70.
 

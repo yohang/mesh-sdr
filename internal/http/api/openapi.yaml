@@ -1717,25 +1717,6 @@ paths:
           description: Deleted
         default:
           $ref: "#/components/responses/Problem"
-  /reporting/status:
-    get:
-      operationId: getReportingStatus
-      x-meshsdr-access: admin
-      summary: Reporting outbox queue per network and last delivery (admin)
-      description: |
-        One entry per external network (TECHNICAL_SPEC §7.1
-        `reporting_outbox`): whether a transport is enabled, the entries per
-        status, the last delivery and the oldest entry waiting.
-      tags: [reporting]
-      responses:
-        "200":
-          description: Outbox status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReportingStatus"
-        default:
-          $ref: "#/components/responses/Problem"
 components:
   parameters:
     PresetID:
@@ -2716,7 +2697,7 @@ components:
           enum: [cfg, db, default]
         origin:
           type: string
-          description: '"hub.toml:42", "env:MESHSDR_…", "db" or "default".'
+          description: '"hub.toml", "env:MESHSDR_…", "db" or "default".'
         locked:
           type: boolean
         version:
@@ -3160,46 +3141,6 @@ components:
           type: integer
         enabled:
           type: boolean
-    ReportingStatus:
-      type: object
-      required: [networks]
-      properties:
-        networks:
-          type: array
-          items:
-            $ref: "#/components/schemas/ReportingNetwork"
-    ReportingNetwork:
-      type: object
-      required: [network, enabled, pending, in_flight, failed, sent, dead]
-      properties:
-        network:
-          type: string
-          enum: [pskreporter, wsprnet, aprs_is, sondehub, sondehub_listener, ais_udp, mqtt]
-        enabled:
-          type: boolean
-          description: A transport for the network is enabled.
-        pending:
-          type: integer
-          format: int64
-        in_flight:
-          type: integer
-          format: int64
-        failed:
-          type: integer
-          format: int64
-        sent:
-          type: integer
-          format: int64
-        dead:
-          type: integer
-          format: int64
-        last_sent_at:
-          type: string
-          format: date-time
-        oldest_due_at:
-          type: string
-          format: date-time
-          description: Enqueue time of the oldest entry waiting (pending or failed).
   responses:
     Problem:
       description: Error

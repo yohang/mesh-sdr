@@ -14,10 +14,10 @@ import (
 )
 
 // CursorRepository implements domain.EventCursorRepository.
-type CursorRepository struct{ db db.Adapter }
+type CursorRepository struct{ db *db.DB }
 
 // NewCursorRepository returns the repository.
-func NewCursorRepository(a db.Adapter) *CursorRepository { return &CursorRepository{db: a} }
+func NewCursorRepository(a *db.DB) *CursorRepository { return &CursorRepository{db: a} }
 
 var _ domain.EventCursorRepository = (*CursorRepository)(nil)
 

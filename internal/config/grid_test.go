@@ -52,7 +52,7 @@ name = "Garden"
 		t.Errorf("nodes = %+v", hub.Nodes)
 	}
 
-	if got := meta.Origins.Of("nodes.garden.name").String(); got != "hub.toml:12" {
+	if got := meta.Origins.Of("nodes.garden.name").String(); got != "hub.toml" {
 		t.Errorf("origin of nodes.garden.name = %q", got)
 	}
 

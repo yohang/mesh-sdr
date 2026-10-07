@@ -18,7 +18,6 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
-	"github.com/yohang/mesh-sdr/internal/db/sqlite"
 	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
 	fileshttp "github.com/yohang/mesh-sdr/internal/files/http"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
@@ -51,28 +50,23 @@ func component(logger *slog.Logger, name string) *slog.Logger {
 	return logger.With(slog.String("component", name))
 }
 
-// OpenDB opens the adapter selected by the db.dsn scheme. The caller closes it.
-func OpenDB(ctx context.Context, cfg config.DB, logger *slog.Logger) (db.Adapter, error) {
-	dsn, err := db.ParseDSN(cfg.DSN)
+// OpenDB opens the SQLite database named by db.dsn. The caller closes it.
+func OpenDB(ctx context.Context, cfg config.DB, logger *slog.Logger) (*db.DB, error) {
+	path, err := db.ParseDSN(cfg.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("db.dsn: %w", err)
 	}
 
-	switch dsn.Dialect() {
-	case db.DialectSQLite:
-		a, err := sqlite.Open(ctx, sqlite.Options{
-			Path:               dsn.Path(),
-			MaxReadConnections: cfg.MaxReadConnections,
-			Logger:             component(logger, "db.sqlite.adapter"),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("open database: %w", err)
-		}
-
-		return a, nil
-	default:
-		return nil, fmt.Errorf("db.dsn: %w: %s", db.ErrEngineUnsupported, dsn.Dialect())
+	d, err := db.Open(ctx, db.Options{
+		Path:               path,
+		MaxReadConnections: cfg.MaxReadConnections,
+		Logger:             component(logger, "db"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
 	}
+
+	return d, nil
 }
 
 // Front owns the public listeners of a process (the hub gateway).
@@ -215,7 +209,7 @@ func (p *Process) runFront(ctx context.Context) error {
 }
 
 // identityDeps returns the dependencies of the identity module.
-func identityDeps(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) identity.Deps {
+func identityDeps(cfg config.Hub, logger *slog.Logger, adapter *db.DB) identity.Deps {
 	return identity.Deps{
 		Config: cfg, Logger: logger, DB: adapter, IDs: shared.NewUUIDv7Generator(), Now: time.Now,
 		Erasers: []identityapp.UserEraser{connectionEraser{gridsqlite.NewConnectionRepository(adapter)}},
@@ -259,20 +253,20 @@ func mailQueue(cfg config.SMTP, logger *slog.Logger) *mail.Queue {
 
 // UserAdmin builds the user administration service of the hub CLI
 // (meshsdr hub user …), backed by adapter.
-func UserAdmin(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) *identityapp.UserAdmin {
+func UserAdmin(cfg config.Hub, logger *slog.Logger, adapter *db.DB) *identityapp.UserAdmin {
 	return identity.UserAdmin(identityDeps(cfg, logger, adapter))
 }
 
 // Hub builds the hub: web UI and REST API behind the embedded gateway,
 // backed by adapter, the session reaper and the grid. The caller checks the schema version before (see
 // db.Migrator.Check).
-func Hub(ctx context.Context, cfg config.Hub, origins config.Origins, logger *slog.Logger, adapter db.Adapter) (*Process, error) {
+func Hub(ctx context.Context, cfg config.Hub, origins config.Origins, logger *slog.Logger, adapter *db.DB) (*Process, error) {
 	p, _, err := newHub(ctx, cfg, origins, logger, adapter, time.Now, gridapp.DefaultTimings())
 
 	return p, err
 }
 
-func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger *slog.Logger, adapter db.Adapter,
+func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger *slog.Logger, adapter *db.DB,
 	now func() time.Time, timings gridapp.Timings, tweaks ...func(*control.HubOptions),
 ) (*Process, *hubGrid, error) {
 	g, err := newHubGrid(cfg, logger, adapter, now, timings, tweaks...)
@@ -355,7 +349,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	adminGate.authz = idm.HTTP
 	identityHTTP = idm.HTTP
 
-	// Presets, schedules and reporting (ADR 0020), wired to the grid.
+	// Presets and schedules (ADR 0020), wired to the grid.
 	sch := newScheduling(adapter, g, settingsModule.Store, auditLog, now, logger)
 
 	if g.states != nil {
@@ -425,9 +419,8 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		TokenHandlers:      api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
 		FeatureHandlers: api.NewFeatureHandlers(idm.HTTP, gridapp.NewFeatures(gridsqlite.NewDeviceRepository(adapter),
 			gridsqlite.NewCapabilityRepository(adapter), storeListenPolicy{store: settingsModule.Store})),
-		PresetHandlers:    api.NewPresetHandlers(sch.presets, scheduleDevices{repo: g.deviceRepo}),
-		ScheduleHandlers:  api.NewScheduleHandlers(sch.schedules, deviceScope{}),
-		ReportingHandlers: api.NewReportingHandlers(sch.reporting),
+		PresetHandlers:   api.NewPresetHandlers(sch.presets, scheduleDevices{repo: g.deviceRepo}),
+		ScheduleHandlers: api.NewScheduleHandlers(sch.schedules, deviceScope{}),
 	}
 
 	router := httpserver.NewRouter(
@@ -473,7 +466,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		front:    front,
 		logger:   component(logger, "http.server"),
 		startup:  g.startup,
-		workers:  append(append(workers, scheduler.Run, sch.reporting.Run), g.workers...),
+		workers:  append(append(workers, scheduler.Run), g.workers...),
 		setupURL: setupURL,
 	}, g, nil
 }

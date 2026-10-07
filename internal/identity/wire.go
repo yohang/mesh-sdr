@@ -20,7 +20,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/infra/keyring"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/notify"
-	"github.com/yohang/mesh-sdr/internal/identity/infra/settings"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -54,7 +53,7 @@ const (
 type Deps struct {
 	Config config.Hub
 	Logger *slog.Logger
-	DB     db.Adapter
+	DB     *db.DB
 	IDs    *shared.UUIDv7Generator
 	Now    func() time.Time
 	// Settings reads the identity policies from the settings store. Nil
@@ -137,7 +136,7 @@ var commonPasswords = sync.OnceValue(func() *commonpw.List {
 // bundled common-password list.
 func policies(s app.Settings) app.Policies {
 	if s == nil {
-		s = settings.Defaults{}
+		s = app.DefaultSettings{}
 	}
 
 	return app.NewPolicies(s, commonPasswords())
@@ -191,7 +190,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		lifetimes app.SessionPolicies = app.DefaultSessionPolicies()
 		retention app.Retention       = app.FixedRetention{Sessions: app.DefaultSessionRetention, Audit: 365 * 24 * time.Hour}
 		passwords                     = policies(nil)
-		values    app.Settings        = settings.Defaults{}
+		values    app.Settings        = app.DefaultSettings{}
 		limiter   *memory.IPLimiter
 	)
 

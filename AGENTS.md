@@ -18,7 +18,7 @@ MeshSDR: Go web application for Software Defined Radio (SDR) with Mesh capabilit
 - Database: SQLite via `modernc.org/sqlite` (pure Go)
 - Build: `CGO_ENABLED=1` for every binary (ADR 0014, ADR 0019); cgo only in `internal/dsp/csdr` (libcsdr++ C ABI shim, checked by a test)
 - DSP: libcsdr++ (luarvique/csdr 0.18.41, built from source) through cgo, `gonum.org/v1/gonum/dsp/fourier` for the channelizer; SDR connectors are owrx_connector 0.6.5 processes
-- Queries: `sqlc`; migrations: `goose` (embedded, per dialect, checksummed, applied by `meshsdr hub migrate`)
+- Queries: `sqlc`; migrations: plain `goose` (embedded, applied by `meshsdr hub migrate`)
 - Config: TOML files (`github.com/BurntSushi/toml`) + env overrides (`github.com/caarlos0/env/v11`); JSON Schema generated from the config structs (`github.com/invopop/jsonschema`)
 - Logging: `log/slog`; CLI: `github.com/spf13/cobra`
 - REST API: spec-first OpenAPI (`openapi.yaml` embedded, served at `/api/v1/openapi.json`) + `oapi-codegen` (chi server)
@@ -32,14 +32,14 @@ MeshSDR: Go web application for Software Defined Radio (SDR) with Mesh capabilit
 ```
 cmd/meshsdr/            entrypoint (single binary)
 internal/cli/           cobra commands (hub, node, all and their subcommands)
-internal/config/        TOML + env config loading, origin tracking, JSON Schema
+internal/config/        TOML + env config loading, origin tracking (file name, env var or default), JSON Schema
 internal/log/           slog logger factory
-internal/db/            DB engine contract (Adapter, Migrator, DSN), see docs/adr/0006
-internal/db/sqlite/     SQLite dialect adapter (single writer + read pool), sqlc.yaml, go:generate for sqlc
-internal/db/sqlite/migrations/ goose SQL migrations of the dialect (embedded)
-internal/db/sqlite/queries/    sqlc queries of the dialect
+internal/db/            SQLite database (`*db.DB`: single writer + read pool, WithinTx, goose migrator, DSN), see docs/adr/0006 and 0022
+internal/db/sqlite/     SQLite schema: sqlc.yaml, go:generate for sqlc
+internal/db/sqlite/migrations/ goose SQL migrations (embedded)
+internal/db/sqlite/queries/    sqlc queries
 internal/db/sqlite/sqlc/       sqlc output (generated)
-internal/db/dbtest/     contract-test harness (engine contract, migrated test DBs)
+internal/db/dbtest/     test helper (`dbtest.NewSQLite`: migrated database in t.TempDir())
 internal/http/          chi router, middlewares, server
 internal/http/api/      openapi.yaml (source of truth), oapi-codegen config, generated server, /api/v1 handlers
 internal/http/problem/  RFC 9457 problem+json errors, domain error → HTTP status
@@ -76,7 +76,7 @@ Code is organized by module, layered inside each module:
 internal/<module>/
   domain/   aggregates, entities, value objects, domain errors, repository interfaces
   app/      use cases / application services (orchestrate domain + ports)
-  infra/    adapters: repositories (infra/<dialect>/, sqlc), external systems, hardware
+  infra/    adapters: repositories (infra/sqlite/, sqlc, taking a *db.DB), external systems, hardware
   http/     handlers + templ views for this module
   wire.go   module wiring, once the module is big enough (see Dependency injection)
 ```
@@ -93,7 +93,7 @@ The domain must be fully modeled — no primitive obsession, no anemic structs:
 ## Dependency injection
 
 - Hand-written IoC, no DI library/codegen. Constructor injection only: dependencies are explicit constructor params, interfaces declared on the consumer side. No globals, no `init()` side effects, no service locator.
-- `internal/wire` is the composition root: `wire.Hub(cfg, logger, adapter)` and `wire.Node(cfg, logger, now)` build the object graph of each role from its config, `*slog.Logger` and, for the hub, the `db.Adapter` opened by `wire.OpenDB` (chosen by the `db.dsn` scheme). CLI commands call them.
+- `internal/wire` is the composition root: `wire.Hub(cfg, logger, adapter)` and `wire.Node(cfg, logger, now)` build the object graph of each role from its config, `*slog.Logger` and, for the hub, the `*db.DB` opened by `wire.OpenDB` (from `db.dsn`, `sqlite:` only). CLI commands call them.
 - When volume grows, each module exposes its own `internal/<module>/wire.go` (`Wire(deps) Module`), and the root composes modules.
 
 ## Logging
@@ -117,7 +117,7 @@ Spec TECHNICAL_SPEC §7.4 is authoritative:
 
 - TOML v1.0 files, declarative only, starting with `schema_version`: `hub.toml`, `node.toml` and `hub.d/*.toml`, `node.d/*.toml` drop-ins (lexical order, recursive table merge). Default dir `/etc/meshsdr`, overridable with `--config-dir` / `MESHSDR_CONFIG_DIR`. Secrets referenced by `{ file = "…" }`.
 - Every key can be overridden by an env var: `MESHSDR_` prefix, `__` between nesting levels (`db.dsn` → `MESHSDR_DB__DSN`, `gateway.tls_mode` → `MESHSDR_GATEWAY__TLS_MODE`). Env-set keys are locked like file-set keys, with origin `env:<VAR>`.
-- Precedence: env > config files > DB settings > defaults. Config/env keys are read-only (locked) in the UI, which shows their origin (`hub.toml:42`).
+- Precedence: env > config files > DB settings > defaults. Config/env keys are read-only (locked) in the UI, which shows their origin (the file name, such as `hub.toml`, or `env:MESHSDR_…`).
 - Typed Go structs are the source of truth; JSON Schema (draft 2020-12) is generated from them (`meshsdr hub|node config schema`, attached to releases by CI). Validation happens at load; invalid config is a startup error (exit code 78). `meshsdr hub|node config check` validates and prints each key's origin. See docs/adr/0005.
 - The binary never writes config files (only exception: first-start TLS bootstrap of `all`).
 
@@ -166,12 +166,12 @@ Dev containers are rootless: the `dev` stage creates an `app` user with the host
 
 - Generated files are never committed nor edited: `*_templ.go`, `*.gen.go`, `internal/db/sqlite/sqlc/`, `internal/http/api/openapi.json`, `internal/web/static/css/app.css`, `internal/web/static/icons/`. Regenerate with `make generate`.
 - Go tools are declared with the go.mod `tool` directive (`go get -tool <pkg>`) and run with `go tool <name>`.
-- Schema changes go through goose migrations only, per dialect; sqlc reads the schema from `internal/db/sqlite/migrations/`. Never edit an applied migration (checksums are verified).
+- Schema changes go through goose migrations only; sqlc reads the schema from `internal/db/sqlite/migrations/`. Never edit an applied migration (nothing detects it).
 - Configuration only through the config structs in `internal/config` (TOML + `MESHSDR_` env; every leaf has `toml`, `env` and `jsonschema` description tags). Document new keys in `.infra/config/*.toml.example`.
 - Logging only with `log/slog`.
-- Migrations are not applied at startup; run `meshsdr hub migrate`. The hub refuses to start while migrations are pending, when the schema is newer than the binary, or when an applied migration's checksum differs.
+- Migrations are not applied at startup; run `meshsdr hub migrate` (one run at a time, no lock). The hub refuses to start while migrations are pending or when the schema is newer than the binary.
 - `make lint` and `make test` must pass before committing.
-- Tests: stdlib `testing`, table-driven; repositories tested against real SQLite in `t.TempDir()` (`dbtest.NewSQLite`) through a shared contract suite (future adapters run the same suite; `dbtest.RunAdapterContract` covers the engine contract).
+- Tests: stdlib `testing`, table-driven; repositories tested against real SQLite in `t.TempDir()` (`dbtest.NewSQLite`).
 - Dependencies: stdlib and `golang.org/x/*` are fine; any other third-party dependency requires the owner's approval.
 - REST: every `/api/v1` endpoint is declared in `internal/http/api/openapi.yaml` first, then generated (oapi-codegen strict chi server); module handler structs are embedded in `api.Server`. One JSON error format: RFC 9457 `application/problem+json` with a stable `code` (`internal/http/problem`).
 - Git: one branch + PR per epic (`epic/<area>-<n>`), split into ordered parts when another epic needs a subset first; PR body lists `Closes #<n>` per ticket; spikes get `spike/<key>-<topic>` branches. No AI attribution in commits or PRs.
