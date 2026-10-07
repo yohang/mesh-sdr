@@ -151,6 +151,35 @@ func TestDemodValidation(t *testing.T) {
 		}
 	}
 
+	// Before the device runs, offsets and bands are checked against its
+	// tuning, and the spectrum geometry is known.
+	e.SetTuning(tuning())
+
+	if info := e.Spectrum(); info.SpanHz != rate {
+		t.Fatalf("spectrum before start %+v", info)
+	}
+
+	wide := params()
+	wide.LowHz, wide.HighHz = -20_000, 20_000
+
+	if _, err := e.NewDemod(wide, nop, nom); !errors.Is(err, domain.ErrOutOfRange) {
+		t.Fatalf("band wider than the channel before start: %v", err)
+	}
+
+	d, err := e.NewDemod(params(), nop, nom)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	far := params()
+	far.OffsetHz = 400_000
+
+	if err := d.Set(far); !errors.Is(err, domain.ErrOutOfRange) {
+		t.Fatalf("offset outside the band before start: %v", err)
+	}
+
+	d.Close()
+
 	e.Start(tuning())
 
 	p := params()

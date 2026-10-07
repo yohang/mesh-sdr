@@ -88,37 +88,6 @@ func newBinding(ep *epoch, p app.DemodParams) (*binding, error) {
 	return &binding{ep: ep, ch: ch, ring: ring}, nil
 }
 
-// bindChecked binds d to ep (callers hold e.mu).
-func (d *demod) bindChecked(ep *epoch) error {
-	d.mu.Lock()
-	p := d.params
-	d.mu.Unlock()
-
-	b, err := newBinding(ep, p)
-	if err != nil {
-		return err
-	}
-
-	d.setBinding(b)
-
-	return nil
-}
-
-// bind rebinds d to a new run, or unbinds it (nil). An offset that no
-// longer fits leaves the demodulator silent until it is changed.
-func (d *demod) bind(ep *epoch) {
-	if ep == nil {
-		d.setBinding(nil)
-
-		return
-	}
-
-	if err := d.bindChecked(ep); err != nil {
-		d.e.log.Warn("demodulator does not fit the new sample rate", slog.Any("error", err))
-		d.setBinding(nil)
-	}
-}
-
 func (d *demod) setBinding(b *binding) {
 	d.mu.Lock()
 	old := d.b
@@ -148,39 +117,61 @@ func (d *demod) extract(ep *epoch, bins []complex128, first uint64, at time.Time
 	return out
 }
 
-// Set implements app.Demod.
+// Set implements app.Demod. A new channel is built outside the engine
+// lock and installed if the run did not change meanwhile.
 func (d *demod) Set(p app.DemodParams) error {
 	if err := validate(p); err != nil {
 		return err
 	}
 
-	d.e.mu.Lock()
-	defer d.e.mu.Unlock()
+	e := d.e
 
-	d.mu.Lock()
-	old := d.params
-	d.mu.Unlock()
+	e.mu.Lock()
+	ep, tuning := e.ep, e.tuning
+	e.mu.Unlock()
 
-	if ep := d.e.ep; ep != nil && (p.OffsetHz != old.OffsetHz || p.LowHz != old.LowHz || p.HighHz != old.HighHz) {
-		b, err := newBinding(ep, p)
+	old := d.Params()
+	channel := p.OffsetHz != old.OffsetHz || p.LowHz != old.LowHz || p.HighHz != old.HighHz
+
+	var b *binding
+
+	switch {
+	case channel && ep != nil:
+		nb, err := newBinding(ep, p)
 		if err != nil {
 			return err
 		}
 
-		d.mu.Lock()
-		d.params = p
-		d.gen++
-		d.mu.Unlock()
-		d.setBinding(b)
-
-		return nil
+		b = nb
+	case channel && tuning.Rate().PerSecond() > 0:
+		if err := checkChannel(tuning.Rate().PerSecond(), p); err != nil {
+			return err
+		}
 	}
 
 	d.mu.Lock()
 	d.params = p
 	d.gen++
 	d.mu.Unlock()
-	d.poke()
+
+	if !channel {
+		d.poke()
+
+		return nil
+	}
+
+	e.mu.Lock()
+	current := e.ep
+	_, live := e.demods[d]
+
+	if live && b != nil && b.ep == current {
+		d.setBinding(b)
+	}
+	e.mu.Unlock()
+
+	if live && current != nil && (b == nil || b.ep != current) {
+		e.bind(d, current)
+	}
 
 	return nil
 }

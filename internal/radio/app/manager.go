@@ -64,6 +64,8 @@ func NewManager(o Options) (*Manager, error) {
 			wake: make(chan struct{}, 1), log: o.Logger.With(slog.String("device_id", id)),
 		}
 
+		r.engine.SetTuning(d.Tuning())
+
 		if d.Usable() {
 			src, err := o.Sources.New(d.Params())
 			if err != nil {
