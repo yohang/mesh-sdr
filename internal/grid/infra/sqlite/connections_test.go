@@ -1,4 +1,4 @@
-package repotest
+package sqlite_test
 
 import (
 	"context"

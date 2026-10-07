@@ -1,7 +1,4 @@
-// Package repotest holds the contract suites of the grid repositories
-// (ADR 0006). Every dialect adapter runs them against a fresh, migrated
-// database.
-package repotest
+package sqlite_test
 
 import (
 	"context"
@@ -10,11 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/db/dbtest"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
-// Repos is the set of grid repositories of one dialect, on one database.
+// Repos is the set of grid repositories on one database.
 type Repos struct {
 	Nodes       domain.NodeRepository
 	Revocations domain.RevocationRepository
@@ -24,13 +24,23 @@ type Repos struct {
 	Conns       domain.ConnectionRepository
 }
 
-// Factory returns the repositories on a fresh, migrated database.
-type Factory func(t *testing.T) Repos
+// newRepos returns the repositories on a fresh, migrated database.
+func newRepos(t *testing.T) Repos {
+	a := dbtest.NewSQLite(t)
+
+	return Repos{
+		Nodes:       sqlite.NewNodeRepository(a),
+		Revocations: sqlite.NewRevocationRepository(a),
+		Cursors:     sqlite.NewCursorRepository(a),
+		Caps:        sqlite.NewCapabilityRepository(a),
+		Devices:     sqlite.NewDeviceRepository(a),
+		Conns:       sqlite.NewConnectionRepository(a),
+	}
+}
 
 var t0 = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 
-// Run runs every grid contract suite.
-func Run(t *testing.T, newRepos Factory) {
+func TestRepositories(t *testing.T) {
 	t.Run("nodes", func(t *testing.T) { testNodes(t, newRepos(t)) })
 	t.Run("revocations", func(t *testing.T) { testRevocations(t, newRepos(t)) })
 	t.Run("cursors", func(t *testing.T) { testCursors(t, newRepos(t)) })

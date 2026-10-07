@@ -7,25 +7,9 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
-	"github.com/yohang/mesh-sdr/internal/grid/infra/repotest"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
-
-func TestRepositories(t *testing.T) {
-	repotest.Run(t, func(t *testing.T) repotest.Repos {
-		a := dbtest.NewSQLite(t)
-
-		return repotest.Repos{
-			Nodes:       sqlite.NewNodeRepository(a),
-			Revocations: sqlite.NewRevocationRepository(a),
-			Cursors:     sqlite.NewCursorRepository(a),
-			Caps:        sqlite.NewCapabilityRepository(a),
-			Devices:     sqlite.NewDeviceRepository(a),
-			Conns:       sqlite.NewConnectionRepository(a),
-		}
-	})
-}
 
 func TestEraseUser(t *testing.T) {
 	ctx := context.Background()

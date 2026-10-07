@@ -1,6 +1,4 @@
-// Package repotest holds the contract suite of the settings repository (ADR
-// 0006): every dialect adapter runs it against a migrated database.
-package repotest
+package sqlite_test
 
 import (
 	"context"
@@ -19,13 +17,9 @@ type Fixture struct {
 	Tx       func(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
-// Factory opens a fresh fixture for a test.
-type Factory func(t *testing.T) Fixture
-
 var t0 = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 
-// Run runs the settings repository contract.
-func Run(t *testing.T, open Factory) {
+func TestSettings(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		f := open(t)
 		ctx := context.Background()
