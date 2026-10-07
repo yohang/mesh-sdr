@@ -6,8 +6,10 @@
 // the hub.
 //
 // Streaming (device attach, demodulators, FFT) comes with the DSP epics;
-// device-scoped messages are checked against the token scope and answered
-// unsupported_type.
+// device-scoped messages (device.attach, demod.create, preset.select,
+// device.retune) are checked against the token scope and answered
+// unsupported_type. More than MaxForbiddenPerMinute refusals in a minute
+// close the connection with 4403 (§5.9).
 package media
 
 import (
@@ -44,6 +46,12 @@ const (
 	PongTimeout    = 30 * time.Second
 	RevokedMemory  = 15 * time.Minute
 	defaultMsgRate = 20
+	// HeartbeatInterval is the period of the connection.heartbeat events
+	// that keep the hub presence row of a session alive (§7.3 rule 2).
+	HeartbeatInterval = 15 * time.Second
+	// MaxForbiddenPerMinute is the number of forbidden messages a
+	// connection may send in a minute; one more closes it with 4403 (§5.9).
+	MaxForbiddenPerMinute = 10
 )
 
 // Problem codes of refused upgrades.
@@ -66,8 +74,19 @@ type Options struct {
 	// OwnSerial returns the serial of the node certificate in use.
 	OwnSerial func() string
 	Agent     *agent.Agent
-	Now       func() time.Time
-	Logger    *slog.Logger
+	// HeartbeatInterval overrides the connection.heartbeat period (tests);
+	// zero means HeartbeatInterval.
+	HeartbeatInterval time.Duration
+	Now               func() time.Time
+	Logger            *slog.Logger
+}
+
+func (s *Server) heartbeatInterval() time.Duration {
+	if s.o.HeartbeatInterval > 0 {
+		return s.o.HeartbeatInterval
+	}
+
+	return HeartbeatInterval
 }
 
 // Server is the /ws endpoint and the registry of its sessions.

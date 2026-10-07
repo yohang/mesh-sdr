@@ -32,12 +32,19 @@ import (
 type NodeOption func(*nodeOptions)
 
 type nodeOptions struct {
-	prober  agent.Prober
-	devices func() []ctl.Device
+	prober         agent.Prober
+	devices        func() []ctl.Device
+	mediaHeartbeat time.Duration
 }
 
 // WithProber replaces the host prober.
 func WithProber(p agent.Prober) NodeOption { return func(o *nodeOptions) { o.prober = p } }
+
+// WithMediaHeartbeat sets the connection.heartbeat period of media
+// sessions.
+func WithMediaHeartbeat(d time.Duration) NodeOption {
+	return func(o *nodeOptions) { o.mediaHeartbeat = d }
+}
 
 // NodeEnrolled reports whether the node has its certificate (tls.cert).
 func NodeEnrolled(cfg config.Node) bool {
@@ -103,7 +110,8 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 
 	mediaServer := media.NewServer(media.Options{
 		NodeID: id.String(), Version: version.String(), GatewayIdentity: cfg.HubTrust.HubIdentity,
-		OwnSerial: holder.Serial, Agent: ag, Now: time.Now, Logger: component(logger, "grid.infra.media"),
+		OwnSerial: holder.Serial, Agent: ag, HeartbeatInterval: o.mediaHeartbeat, Now: time.Now,
+		Logger: component(logger, "grid.infra.media"),
 	})
 
 	ctlServer := control.NewNodeServer(control.NodeOptions{

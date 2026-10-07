@@ -11,8 +11,10 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // dialMedia opens the node /ws directly with the gateway certificate, as
@@ -118,4 +120,67 @@ func TestMediaKeysOverControl(t *testing.T) {
 
 		return st == http.StatusServiceUnavailable || st == 0
 	})
+}
+
+// TestMediaPresenceHeartbeats: a media session reports connection.heartbeat
+// over the control channel, so its presence row outlives the stale delay,
+// and is closed when the session ends (§7.3, GRID-017).
+func TestMediaPresenceHeartbeats(t *testing.T) {
+	timings := fastTimings()
+	timings.PresenceStale = 1500 * time.Millisecond
+
+	e := newGridEnv(t, timings)
+	e.enrollNode(t, fakeProber{}, WithMediaHeartbeat(200*time.Millisecond))
+
+	eventually(t, "control channel", 15*time.Second, func() bool { return e.g.manager.Connected(domain.MustNodeID("attic")) })
+
+	cidUUID, err := shared.NewUUIDv7(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cid := cidUUID.String()
+
+	var ws *websocket.Conn
+
+	eventually(t, "keys installed", 5*time.Second, func() bool {
+		var st int
+		ws, st = e.dialMedia(t, e.mediaToken(t, cid), cid)
+
+		return st == http.StatusSwitchingProtocols
+	})
+
+	repo := gridsqlite.NewConnectionRepository(e.adapter)
+	open := func() bool {
+		c, err := repo.Get(context.Background(), cidUUID)
+		if err != nil {
+			return false
+		}
+
+		_, _, closed := c.Closed()
+
+		return !closed
+	}
+
+	eventually(t, "presence row opened", 5*time.Second, open)
+
+	// Three stale delays later the row is still open: heartbeats keep it.
+	time.Sleep(3 * timings.PresenceStale)
+
+	if !open() {
+		t.Fatal("the presence row of a live media session was reaped")
+	}
+
+	_ = ws.Close(websocket.StatusNormalClosure, "bye")
+
+	eventually(t, "presence row closed", 5*time.Second, func() bool { return !open() })
+
+	c, err := repo.Get(context.Background(), cidUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, reason, _ := c.Closed(); reason != domain.CloseClient {
+		t.Fatalf("close reason = %s, want client", reason)
+	}
 }
