@@ -93,6 +93,8 @@ type DemodParams struct {
 
 // AudioOut is one encoded audio frame of a demodulator.
 type AudioOut struct {
+	// Codec is the encoding of this frame.
+	Codec       AudioCodec
 	Payload     []byte
 	Samples     int
 	Duration    time.Duration

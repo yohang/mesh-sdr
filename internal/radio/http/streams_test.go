@@ -190,6 +190,7 @@ func TestStreamSessionErrors(t *testing.T) {
 	check(rxv1.TypeStreamConfigure, map[string]any{"stream_id": 1, "fps": 50}, rxv1.CodeOutOfRange)
 	check(rxv1.TypeStreamConfigure, map[string]any{"stream_id": 1, "paused": true}, "")
 	check(rxv1.TypeAudioConfigure, map[string]any{"codec": "pcm-s16le", "sample_rate": 9000}, rxv1.CodeOutOfRange)
+	check(rxv1.TypeAudioConfigure, map[string]any{"codec": "vorbis", "sample_rate": 48000}, rxv1.CodeOutOfRange)
 	check(rxv1.TypeAudioConfigure, map[string]any{"codec": "opus", "sample_rate": 48000}, "")
 
 	if res := p.last().result.(media.AudioConfigure); res.Codec != media.CodecADPCM {

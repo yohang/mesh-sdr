@@ -69,7 +69,7 @@ func TestSpectrumAndDemodLifecycle(t *testing.T) {
 
 	// Demodulators may be created before the source runs.
 	d, err := e.NewDemod(params(), func(a app.AudioOut) {
-		if len(a.Payload) == 4+120 {
+		if len(a.Payload) == 4+120 && a.Codec == app.CodecADPCM {
 			audio.Add(1)
 		}
 	}, func(app.Meter) { meters.Add(1) })
