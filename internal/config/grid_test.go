@@ -100,6 +100,13 @@ sample_rates = [2_048_000]
 		{"device range", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[devices.hf]\nname = \"x\"\ntype = \"rtl_sdr\"\nfreq_range = { min = 10, max = 5 }\nsample_rates = [1]\n"}, "devices.hf.freq_range"},
 		{"cert without key", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[tls]\ncert = \"a\"\n"}, "tls.key"},
 		{"bad fingerprint", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[hub_trust]\nca_fingerprint = \"zz\"\n"}, "hub_trust.ca_fingerprint"},
+		{"relative runtime dir", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\nruntime_dir = \"run\"\n"}, "node.runtime_dir"},
+		{"bad port range", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\nipc_port_range = \"5000-4000\"\n"}, "node.ipc_port_range"},
+		{"tiny notsent lowat", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\nws_notsent_lowat = 10\n"}, "node.ws_notsent_lowat"},
+		{"relative tool dir", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[tools]\ndirs = [\"bin\"]\n"}, "tools.dirs[0]"},
+		{"relative tool", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[tools]\nrtl_connector = \"rtl_connector\"\n"}, "tools.rtl_connector"},
+		{"rtl_tcp without port", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[devices.v]\nname = \"x\"\nfreq_range = { min = 10, max = 50 }\nsample_rates = [1]\ntype = \"rtl_tcp\"\ndriver = { device = \"sdr.lan\" }\n"}, "devices.v.driver"},
+		{"gain out of range", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[devices.v]\nname = \"x\"\nfreq_range = { min = 10, max = 50 }\nsample_rates = [1]\ntype = \"rtl_sdr\"\ndriver = { rf_gain = 300 }\n"}, "devices.v.driver.rf_gain"},
 	}
 
 	for _, tt := range tests {

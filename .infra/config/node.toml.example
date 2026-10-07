@@ -18,6 +18,17 @@ schema_version = 1
 id = "attic"
 # Node API and WebSocket listen address (host:port). TLS only.
 listen = "0.0.0.0:8074"
+# Private runtime directory: absolute, mode 0700, owned by the node user
+# (the node refuses to start otherwise). Per-tool workdirs live in its
+# sessions/ subdirectory, swept at start. It is the only place the node
+# writes (the images create it; use a tmpfs in other deployments).
+runtime_dir = "/run/meshsdr-node"
+# Loopback ports for the connector IQ and control sockets (lo-hi).
+ipc_port_range = "40000-40999"
+# TCP_NOTSENT_LOWAT of the node API sockets: bounds the kernel send
+# buffering of media WebSockets so that slow listeners lose FFT frames
+# instead of accumulating latency (ADR 0004).
+ws_notsent_lowat = "16KiB"
 
 # RAM buffer of node events while the hub is unreachable; on overflow the
 # node drops diagnostics, then map updates, then decodes (oldest first).
@@ -43,10 +54,24 @@ max_bytes = "16MiB"
 # Single-use enrollment token issued by the hub (secret).
 # enrollment_token = { file = "/etc/meshsdr/secrets/enrollment.token" }
 
+# External programs. A tool is its tools.<name> absolute path when set,
+# otherwise found by name in tools.dirs, which is also the PATH of every
+# tool (the node's own PATH is never used). The node image ships
+# rtl_connector and rtl_tcp_connector (owrx_connector) in /usr/local/bin.
+[tools]
+dirs = ["/usr/local/bin", "/usr/bin"]
+# rtl_connector = "/usr/local/bin/rtl_connector"
+# rtl_tcp_connector = "/usr/local/bin/rtl_tcp_connector"
+
 # SDR devices of this node (GRID-016), keyed by a hub-wide unique id
 # (^[a-z0-9][a-z0-9_-]{0,62}$). The hub mirrors them read-only into its
 # device registry; they are configured here only. File-only: no env
-# override. Driver settings arrive with the device epic.
+# override. This node runs rtl_sdr and rtl_tcp devices; other types are
+# reported as unavailable. A device starts when a listener attaches (or
+# with always_on) and stops 10 s after the last one leaves. Without
+# presets, it tunes to its first sample rate with the capture band at the
+# bottom of freq_range; operators (operator_can_retune) and admins retune
+# it from the receiver.
 # [devices.hf-sdrplay]
 # name = "SDRplay RSPdx (HF)"        # required
 # type = "soapy:sdrplay"             # required: driver type
@@ -57,6 +82,16 @@ max_bytes = "16MiB"
 # operator_can_retune = true
 # always_on = true
 # scheduler_enabled = true
+# auto_recover = true                # restart a failed device every 15 min
+#
+# [devices.vhf-rtl]
+# name = "RTL-SDR (2 m)"
+# type = "rtl_sdr"                   # rtl_sdr (USB) | rtl_tcp (remote rtl_tcp server)
+# freq_range = { min = "24MHz", max = "1766MHz" }
+# sample_rates = [2_400_000, 1_024_000]
+# listen_policy = "anonymous"
+# # rtl_sdr: device index or serial (default 0); rtl_tcp: host:port.
+# driver = { device = "0", ppm = 1, rf_gain = 29.7 }   # rf_gain: auto | dB; iqswap = false
 
 [log]
 # debug | info | warn | error. --debug overrides it.
