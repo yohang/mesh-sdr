@@ -117,19 +117,13 @@ func (p Policies) PasswordMinLength(context.Context) int {
 	return domain.DefaultPasswordMinLength
 }
 
-// Default link lifetimes, used when the setting is unavailable (ADR 0011).
-const (
-	defaultInvitationTTL    = 7 * 24 * time.Hour
-	defaultPasswordResetTTL = 30 * time.Minute
-)
-
 // InvitationTTL implements app.Settings (invitations.ttl_hours).
 func (p Policies) InvitationTTL(context.Context) time.Duration {
 	if h := p.values.Int(KeyInvitationTTL); h > 0 {
 		return time.Duration(h) * time.Hour
 	}
 
-	return defaultInvitationTTL
+	return app.DefaultInvitationTTL
 }
 
 // PasswordResetTTL implements app.Settings (password_reset.ttl_minutes).
@@ -138,7 +132,7 @@ func (p Policies) PasswordResetTTL(context.Context) time.Duration {
 		return time.Duration(m) * time.Minute
 	}
 
-	return defaultPasswordResetTTL
+	return app.DefaultPasswordResetTTL
 }
 
 // ListenPolicy implements app.Settings (listen_policy). An unavailable or

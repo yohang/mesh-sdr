@@ -106,6 +106,32 @@ type Settings interface {
 	ListenPolicy(ctx context.Context) domain.ListenPolicy
 }
 
+// Default link lifetimes (ADR 0011).
+const (
+	DefaultInvitationTTL    = 7 * 24 * time.Hour
+	DefaultPasswordResetTTL = 30 * time.Minute
+)
+
+// DefaultSettings are the built-in identity settings, for CLI commands and
+// tests that run without the settings store.
+type DefaultSettings struct{}
+
+// PasswordMinLength implements Settings.
+func (DefaultSettings) PasswordMinLength(context.Context) int { return domain.DefaultPasswordMinLength }
+
+// InvitationTTL implements Settings.
+func (DefaultSettings) InvitationTTL(context.Context) time.Duration { return DefaultInvitationTTL }
+
+// PasswordResetTTL implements Settings.
+func (DefaultSettings) PasswordResetTTL(context.Context) time.Duration {
+	return DefaultPasswordResetTTL
+}
+
+// ListenPolicy implements Settings (listen_policy defaults to anonymous).
+func (DefaultSettings) ListenPolicy(context.Context) domain.ListenPolicy {
+	return domain.ListenAnonymous
+}
+
 // Policies builds the password policy in force: the minimum length from the
 // settings, the bundled common-password list.
 type Policies struct {

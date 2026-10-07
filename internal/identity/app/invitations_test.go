@@ -12,7 +12,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/memory"
-	"github.com/yohang/mesh-sdr/internal/identity/infra/settings"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -20,7 +19,7 @@ import (
 func (e *env) invitations(n app.Notifier) *app.Invitations {
 	return app.NewInvitations(app.InvitationsDeps{
 		Invitations: sqlite.NewInvitations(e.db), Users: e.users, Audit: e.audit, Tx: e.db, Hasher: e.hasher,
-		IDs: shared.NewUUIDv7Generator(), Now: e.clock.Now, Settings: settings.Defaults{}, Policies: app.NewPolicies(nil, nil),
+		IDs: shared.NewUUIDv7Generator(), Now: e.clock.Now, Settings: app.DefaultSettings{}, Policies: app.NewPolicies(nil, nil),
 		Auth: e.auth, Notifier: n, Links: app.NewLinks("https://hub.example"),
 		Limiter: memory.NewIPLimiter(time.Millisecond, 1000, 100), Logger: slog.New(slog.DiscardHandler),
 	})
