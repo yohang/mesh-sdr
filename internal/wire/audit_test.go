@@ -7,25 +7,25 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
-	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/http/clientip"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 )
 
-// Grid audit records land in the identity audit_log.
-func TestGridAuditorWritesAuditLog(t *testing.T) {
+// Audit records land in the identity audit_log with their actor.
+func TestAuditAppenderWritesAuditLog(t *testing.T) {
 	a := dbtest.NewSQLite(t)
 	ctx := context.Background()
 
-	aud := newGridAuditor(a, time.Now, quiet)
-	aud.Record(ctx, gridapp.AuditRecord{ActorKind: gridapp.ActorCLI, Action: "node.add", Target: "attic", Result: gridapp.ResultOK})
-	aud.Record(ctx, gridapp.AuditRecord{ActorKind: gridapp.ActorSystem, Action: "node.enroll", Target: "attic", Result: gridapp.ResultDenied,
-		Detail: map[string]string{"reason": "bad proof"}})
+	aud := newAuditAppender(a, time.Now)
+	mustAppend(t, aud, ctx, audit.Record{Actor: audit.CLI, Action: "node.add", TargetType: "node", TargetID: "attic", Result: audit.ResultOK})
+	mustAppend(t, aud, ctx, audit.Record{Actor: audit.System, Action: "node.enroll", TargetType: "node", TargetID: "attic", Result: audit.ResultDenied,
+		After: map[string]string{"reason": "bad proof"}})
 
 	// A REST call records the client address.
 	reqCtx := clientip.With(ctx, netip.MustParseAddr("192.0.2.7"))
-	aud.Record(reqCtx, gridapp.AuditRecord{ActorKind: gridapp.ActorUser, Action: "node.delete", Target: "attic", Result: gridapp.ResultOK})
+	mustAppend(t, aud, reqCtx, audit.Record{Actor: audit.Caller, Action: "node.delete", TargetType: "node", TargetID: "attic", Result: audit.ResultOK})
 
 	entries, err := identitysqlite.NewAuditLog(a).Recent(ctx, 10)
 	if err != nil {
@@ -52,5 +52,13 @@ func TestGridAuditorWritesAuditLog(t *testing.T) {
 
 	if enroll.Result() != identitydomain.ResultDenied || enroll.After()["reason"] != "bad proof" || enroll.Actor().Kind() != identitydomain.ActorSystem {
 		t.Errorf("node.enroll = %+v", enroll)
+	}
+}
+
+func mustAppend(t *testing.T, a auditAppender, ctx context.Context, r audit.Record) {
+	t.Helper()
+
+	if err := a.Append(ctx, r); err != nil {
+		t.Fatal(err)
 	}
 }

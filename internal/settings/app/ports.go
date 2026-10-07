@@ -8,8 +8,9 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"net/netip"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	"github.com/yohang/mesh-sdr/internal/settings/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -37,41 +38,25 @@ type Transactor interface {
 // Clock returns the current time.
 type Clock func() time.Time
 
-// Actor is who changes settings: a signed-in admin, or the hub itself (zero
-// User).
-type Actor struct {
-	User      shared.UUID
-	IP        netip.Addr
-	RequestID string
-}
-
-// IsSystem reports whether the hub itself acts.
-func (a Actor) IsSystem() bool { return a.User.IsZero() }
-
 // Audit actions and results of the settings store.
 const (
 	ActionUpdate  = "settings.update"
 	ActionReset   = "settings.reset"
 	ActionIgnored = "settings.invalid_ignored"
-
-	ResultOK     = "ok"
-	ResultDenied = "denied"
 )
 
-// AuditRecord is one audited settings event. Before and After hold JSON
-// text; secrets are masked.
-type AuditRecord struct {
-	Actor  Actor
-	At     time.Time
-	Action string
-	Key    string
-	Result string
-	Before string
-	After  string
-}
+// record is the audit record of one settings event; before and after hold
+// JSON text (secrets masked), empty when absent.
+func record(action, key string, result audit.Result, before, after string) audit.Record {
+	r := audit.Record{Action: action, Result: result, TargetType: "setting", TargetID: key}
 
-// Auditor appends audit records (TECHNICAL_SPEC §7.1 audit_log). It joins
-// the caller's transaction.
-type Auditor interface {
-	Record(ctx context.Context, r AuditRecord) error
+	if before != "" {
+		r.Before = map[string]string{"value": before}
+	}
+
+	if after != "" {
+		r.After = map[string]string{"value": after}
+	}
+
+	return r
 }

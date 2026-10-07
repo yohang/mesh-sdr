@@ -8,6 +8,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 )
 
 type fakeEnroller struct {
@@ -75,7 +76,7 @@ func TestEnrollmentAttempt(t *testing.T) {
 		t.Errorf("audit = %v", got)
 	}
 
-	if e.audit.records[0].Result != app.ResultDenied || e.audit.records[1].Result != app.ResultOK || e.audit.records[2].Result != app.ResultError {
+	if e.audit.records[0].Result != audit.ResultDenied || e.audit.records[1].Result != audit.ResultOK || e.audit.records[2].Result != audit.ResultError {
 		t.Errorf("audit results = %+v", e.audit.records)
 	}
 }

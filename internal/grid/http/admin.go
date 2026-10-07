@@ -12,8 +12,8 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
@@ -24,7 +24,7 @@ type Devices interface {
 	List(ctx context.Context) ([]*domain.Device, error)
 	ListByNode(ctx context.Context, id domain.NodeID) ([]*domain.Device, error)
 	Get(ctx context.Context, id string) (*domain.Device, error)
-	Forget(ctx context.Context, actor, id string) error
+	Forget(ctx context.Context, actor audit.Actor, id string) error
 }
 
 // Renderer renders pages in the app shell (internal/web/render).
@@ -203,7 +203,7 @@ func (m *AdminModule) detail(w http.ResponseWriter, r *http.Request) {
 func (m *AdminModule) forget(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	err := m.d.Devices.Forget(r.Context(), app.ActorUser, id)
+	err := m.d.Devices.Forget(r.Context(), audit.Caller, id)
 	if err == nil {
 		redirect(w, r, "/admin/devices")
 

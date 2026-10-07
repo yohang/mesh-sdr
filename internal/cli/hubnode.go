@@ -9,6 +9,7 @@ import (
 
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	"github.com/yohang/mesh-sdr/internal/wire"
 )
 
@@ -27,7 +28,7 @@ func (a *app) newHubNodeCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.withNodes(cmd.Context(), func(ctx context.Context, s *gridapp.Nodes) error {
-				issued, err := s.Add(ctx, gridapp.ActorCLI, gridapp.NewNodeInput{ID: args[0], Name: name, URL: url})
+				issued, err := s.Add(ctx, audit.CLI, gridapp.NewNodeInput{ID: args[0], Name: name, URL: url})
 				if err != nil {
 					return err
 				}
@@ -91,7 +92,7 @@ func (a *app) newHubNodeCmd() *cobra.Command {
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				return a.withNodes(cmd.Context(), func(ctx context.Context, s *gridapp.Nodes) error {
-					issued, err := s.IssueToken(ctx, gridapp.ActorCLI, args[0])
+					issued, err := s.IssueToken(ctx, audit.CLI, args[0])
 					if err != nil {
 						return err
 					}
@@ -108,7 +109,7 @@ func (a *app) newHubNodeCmd() *cobra.Command {
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				return a.withNodes(cmd.Context(), func(ctx context.Context, s *gridapp.Nodes) error {
-					if _, err := s.Revoke(ctx, gridapp.ActorCLI, args[0]); err != nil {
+					if _, err := s.Revoke(ctx, audit.CLI, args[0]); err != nil {
 						return err
 					}
 
@@ -124,7 +125,7 @@ func (a *app) newHubNodeCmd() *cobra.Command {
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				return a.withNodes(cmd.Context(), func(ctx context.Context, s *gridapp.Nodes) error {
-					if err := s.Delete(ctx, gridapp.ActorCLI, args[0]); err != nil {
+					if err := s.Delete(ctx, audit.CLI, args[0]); err != nil {
 						return err
 					}
 
@@ -151,7 +152,7 @@ func (a *app) newNodeToggleCmd(verb string, disabled bool) *cobra.Command {
 					return err
 				}
 
-				if _, err := s.Update(ctx, gridapp.ActorCLI, args[0], nil, nil, &disabled, n.Version()); err != nil {
+				if _, err := s.Update(ctx, audit.CLI, args[0], nil, nil, &disabled, n.Version()); err != nil {
 					return err
 				}
 

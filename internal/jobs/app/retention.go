@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/netip"
+	"strconv"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	"github.com/yohang/mesh-sdr/internal/jobs/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -34,29 +36,8 @@ type RetentionValues interface {
 	Duration(key string) time.Duration
 }
 
-// Actor is who asks for a purge.
-type Actor struct {
-	User      shared.UUID
-	IP        netip.Addr
-	RequestID string
-}
-
 // ActionPurge is the audited action of "purge now".
 const ActionPurge = "retention.purge"
-
-// PurgeRecord is an audited "purge now".
-type PurgeRecord struct {
-	Actor  Actor
-	At     time.Time
-	Store  string
-	Rows   int64
-	Failed bool
-}
-
-// Auditor appends audit records.
-type Auditor interface {
-	RecordPurge(ctx context.Context, r PurgeRecord) error
-}
 
 // Retention is the retention policies view (ADM-011): the stores that
 // exist, their retention, size and last purge, and "purge now".
@@ -64,13 +45,12 @@ type Retention struct {
 	stores    []Store
 	scheduler *Scheduler
 	values    RetentionValues
-	audit     Auditor
-	now       Clock
+	audit     audit.Appender
 }
 
 // NewRetention returns the use case over stores.
-func NewRetention(stores []Store, scheduler *Scheduler, values RetentionValues, audit Auditor, now Clock) *Retention {
-	return &Retention{stores: append([]Store(nil), stores...), scheduler: scheduler, values: values, audit: audit, now: now}
+func NewRetention(stores []Store, scheduler *Scheduler, values RetentionValues, auditLog audit.Appender) *Retention {
+	return &Retention{stores: append([]Store(nil), stores...), scheduler: scheduler, values: values, audit: auditLog}
 }
 
 // StoreView is one store of the retention view.
@@ -109,7 +89,7 @@ func (r *Retention) List(ctx context.Context) ([]StoreView, error) {
 // Purge applies the retention policy of a store now ("purge now"): it runs
 // its job (which never deletes rows younger than the retention) and audits
 // it. It returns the rows deleted, ErrUnknownStore or domain.ErrJobRunning.
-func (r *Retention) Purge(ctx context.Context, actor Actor, store string) (int64, error) {
+func (r *Retention) Purge(ctx context.Context, store string) (int64, error) {
 	for _, s := range r.stores {
 		if s.Name != store {
 			continue
@@ -120,8 +100,15 @@ func (r *Retention) Purge(ctx context.Context, actor Actor, store string) (int64
 			return 0, err
 		}
 
-		rec := PurgeRecord{Actor: actor, At: r.now(), Store: s.Name, Rows: rows, Failed: err != nil}
-		if aerr := r.audit.RecordPurge(ctx, rec); aerr != nil {
+		rec := audit.Record{
+			Action: ActionPurge, TargetType: "store", TargetID: s.Name,
+			After: map[string]string{"rows_deleted": strconv.FormatInt(rows, 10)},
+		}
+		if err != nil {
+			rec.Result = audit.ResultError
+		}
+
+		if aerr := r.audit.Append(ctx, rec); aerr != nil {
 			return rows, errors.Join(err, fmt.Errorf("audit purge of %s: %w", s.Name, aerr))
 		}
 

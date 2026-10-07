@@ -157,7 +157,7 @@ func (m *Module) purge(w http.ResponseWriter, r *http.Request) {
 	store := r.PostForm.Get("store")
 	status, notice, failure := http.StatusOK, "", ""
 
-	n, err := m.d.Retention.Purge(r.Context(), m.d.Actor(r.Context()), store)
+	n, err := m.d.Retention.Purge(r.Context(), store)
 
 	var de *shared.Error
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/schedules/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -197,7 +199,7 @@ func (g *Guard) disable(ctx context.Context, sc *domain.Schedule, reason domain.
 		after["reason_detail"] = detail
 	}
 
-	if err := g.d.Audit.Record(ctx, AuditRecord{System: true, Action: ActionDisable, Target: sc.ID(), Before: before, After: after}); err != nil {
+	if err := g.d.Audit.Append(ctx, audit.Record{Actor: audit.System, Action: ActionDisable, TargetType: "schedule", TargetID: sc.ID().String(), Before: before, After: after}); err != nil {
 		return false, err
 	}
 

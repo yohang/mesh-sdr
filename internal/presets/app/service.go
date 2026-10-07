@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/presets/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -36,19 +38,6 @@ const (
 	ActionDelete = "preset.delete"
 )
 
-// AuditRecord is one preset change. The actor is the caller of the request
-// in ctx (the auditor resolves it).
-type AuditRecord struct {
-	Action        string
-	Target        shared.UUID
-	Before, After map[string]string
-}
-
-// Auditor appends audit records, inside the transaction of the change.
-type Auditor interface {
-	Record(ctx context.Context, r AuditRecord) error
-}
-
 // Usage lists the schedules that reference a preset (ADM-020).
 type Usage interface {
 	SchedulesUsing(ctx context.Context, preset shared.UUID) ([]shared.UUID, error)
@@ -67,7 +56,7 @@ type ChangeListener interface {
 type Deps struct {
 	Repo     domain.Repository
 	Tx       Transactor
-	Audit    Auditor
+	Audit    audit.Appender
 	IDs      IDs
 	Now      Clock
 	Usage    Usage
@@ -141,7 +130,7 @@ func (s *Service) Create(ctx context.Context, d domain.Draft) (*domain.Preset, e
 			return err
 		}
 
-		return s.d.Audit.Record(ctx, AuditRecord{Action: ActionCreate, Target: id, After: auditFields(p)})
+		return s.d.Audit.Append(ctx, audit.Record{Action: ActionCreate, TargetType: "preset", TargetID: id.String(), After: auditFields(p)})
 	})
 	if err != nil {
 		return nil, err
@@ -231,7 +220,7 @@ func (s *Service) Replace(ctx context.Context, id string, expectedVersion int, d
 
 		out.Preset = p
 
-		return s.d.Audit.Record(ctx, AuditRecord{Action: ActionUpdate, Target: pid, Before: before, After: auditFields(p)})
+		return s.d.Audit.Append(ctx, audit.Record{Action: ActionUpdate, TargetType: "preset", TargetID: pid.String(), Before: before, After: auditFields(p)})
 	})
 	if err != nil {
 		return Replaced{}, err
@@ -276,7 +265,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 			return err
 		}
 
-		return s.d.Audit.Record(ctx, AuditRecord{Action: ActionDelete, Target: pid, Before: auditFields(p)})
+		return s.d.Audit.Append(ctx, audit.Record{Action: ActionDelete, TargetType: "preset", TargetID: pid.String(), Before: auditFields(p)})
 	})
 	if err != nil {
 		return err

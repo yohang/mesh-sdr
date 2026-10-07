@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/settings/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -27,7 +29,7 @@ type Store struct {
 	repo    domain.Repository
 	catalog Catalog
 	tx      Transactor
-	audit   Auditor
+	audit   audit.Appender
 	now     Clock
 	logger  *slog.Logger
 
@@ -41,7 +43,7 @@ type StoreDeps struct {
 	Repo    domain.Repository
 	Catalog Catalog
 	Tx      Transactor
-	Audit   Auditor
+	Audit   audit.Appender
 	Now     Clock
 	Logger  *slog.Logger
 }
@@ -94,8 +96,10 @@ func (s *Store) Load(ctx context.Context) error {
 		s.logger.WarnContext(ctx, "invalid DB setting ignored, the default applies",
 			slog.String("key", ig.row.Key().String()), slog.Any("error", ig.err))
 
-		rec := AuditRecord{At: s.now(), Action: ActionIgnored, Key: ig.row.Key().String(), Result: ResultOK, Before: ig.row.Value().String()}
-		if err := s.audit.Record(ctx, rec); err != nil {
+		rec := record(ActionIgnored, ig.row.Key().String(), audit.ResultOK, ig.row.Value().String(), "")
+		rec.Actor = audit.System
+
+		if err := s.audit.Append(ctx, rec); err != nil {
 			return fmt.Errorf("audit ignored setting %s: %w", ig.row.Key(), err)
 		}
 	}
@@ -196,13 +200,14 @@ func (s *Store) resolve(rev int64, rows, ignored map[string]*domain.Setting) *Sn
 	return newSnapshot(rev, entries, typed)
 }
 
-// Apply writes a change set atomically for actor and returns the new
+// Apply writes a change set atomically for the user by (zero: the hub
+// itself; the audit names the caller of the request in ctx) and returns the new
 // snapshot. Errors: domain.ErrSettingLocked (audited as denied),
 // domain.ErrSecretsUnavailable, domain.ErrInvalidSetting with one violation
 // per rejected key (unknown keys included), domain.ErrVersionConflict
 // naming the stale keys.
-func (s *Store) Apply(ctx context.Context, actor Actor, set domain.ChangeSet) (*Snapshot, error) {
-	snap, subs, err := s.apply(ctx, actor, set)
+func (s *Store) Apply(ctx context.Context, by shared.UUID, set domain.ChangeSet) (*Snapshot, error) {
+	snap, subs, err := s.apply(ctx, by, set)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +219,7 @@ func (s *Store) Apply(ctx context.Context, actor Actor, set domain.ChangeSet) (*
 	return snap, nil
 }
 
-func (s *Store) apply(ctx context.Context, actor Actor, set domain.ChangeSet) (*Snapshot, []func(*Snapshot), error) {
+func (s *Store) apply(ctx context.Context, by shared.UUID, set domain.ChangeSet) (*Snapshot, []func(*Snapshot), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -276,7 +281,7 @@ func (s *Store) apply(ctx context.Context, actor Actor, set domain.ChangeSet) (*
 	}
 
 	if len(locked) > 0 {
-		return nil, nil, s.denyLocked(ctx, actor, changes, locked)
+		return nil, nil, s.denyLocked(ctx, changes, locked)
 	}
 
 	if len(violations) == 0 {
@@ -287,7 +292,7 @@ func (s *Store) apply(ctx context.Context, actor Actor, set domain.ChangeSet) (*
 		return nil, nil, domain.ErrInvalidSetting.WithViolations(violations...)
 	}
 
-	if err := s.tx.WithinTx(ctx, func(ctx context.Context) error { return s.write(ctx, actor, cur, changes) }); err != nil {
+	if err := s.tx.WithinTx(ctx, func(ctx context.Context) error { return s.write(ctx, by, cur, changes) }); err != nil {
 		return nil, nil, err
 	}
 
@@ -319,7 +324,7 @@ func violationsOf(key string, err error) []shared.Violation {
 }
 
 // denyLocked audits the refused writes to locked keys and returns the 409.
-func (s *Store) denyLocked(ctx context.Context, actor Actor, changes []domain.Change, locked []domain.Effective) error {
+func (s *Store) denyLocked(ctx context.Context, changes []domain.Change, locked []domain.Effective) error {
 	byKey := map[string]domain.Change{}
 	for _, c := range changes {
 		byKey[c.Key().String()] = c
@@ -337,11 +342,8 @@ func (s *Store) denyLocked(ctx context.Context, actor Actor, changes []domain.Ch
 			action = ActionReset
 		}
 
-		rec := AuditRecord{
-			Actor: actor, At: s.now(), Action: action, Key: e.Key().String(), Result: ResultDenied,
-			Before: mask(e.Definition(), e.Value()), After: after,
-		}
-		if err := s.audit.Record(ctx, rec); err != nil {
+		rec := record(action, e.Key().String(), audit.ResultDenied, mask(e.Definition(), e.Value()), after)
+		if err := s.audit.Append(ctx, rec); err != nil {
 			return fmt.Errorf("audit denied setting write: %w", err)
 		}
 
@@ -361,7 +363,7 @@ func mask(d domain.Definition, v domain.Value) string {
 
 // write runs in the transaction: version check, then one revision for the
 // whole change set and one audit record per changed key.
-func (s *Store) write(ctx context.Context, actor Actor, cur *Snapshot, changes []domain.Change) error {
+func (s *Store) write(ctx context.Context, by shared.UUID, cur *Snapshot, changes []domain.Change) error {
 	rows := make([]*domain.Setting, len(changes))
 
 	var conflicts []shared.Violation
@@ -401,9 +403,9 @@ func (s *Store) write(ctx context.Context, actor Actor, cur *Snapshot, changes [
 		e, _ := cur.Get(c.Key().String())
 		def := e.Definition()
 
-		rec := AuditRecord{Actor: actor, At: now, Key: c.Key().String(), Result: ResultOK}
+		var before, after, action string
 		if row != nil {
-			rec.Before = mask(def, row.Value())
+			before = mask(def, row.Value())
 		}
 
 		v, set := c.Value()
@@ -416,16 +418,16 @@ func (s *Store) write(ctx context.Context, actor Actor, cur *Snapshot, changes [
 				return err
 			}
 
-			rec.Action, rec.After = ActionReset, mask(def, def.Default())
+			action, after = ActionReset, mask(def, def.Default())
 		case row == nil:
-			if row, err = domain.NewSetting(c.Key(), v, rev, actor.User, now); err != nil {
+			if row, err = domain.NewSetting(c.Key(), v, rev, by, now); err != nil {
 				return err
 			}
 
 			fallthrough
 		default:
 			if row.Version() != rev {
-				if err := row.Replace(v, rev, actor.User, now); err != nil {
+				if err := row.Replace(v, rev, by, now); err != nil {
 					return err
 				}
 			}
@@ -434,10 +436,10 @@ func (s *Store) write(ctx context.Context, actor Actor, cur *Snapshot, changes [
 				return err
 			}
 
-			rec.Action, rec.After = ActionUpdate, mask(def, v)
+			action, after = ActionUpdate, mask(def, v)
 		}
 
-		if err := s.audit.Record(ctx, rec); err != nil {
+		if err := s.audit.Append(ctx, record(action, c.Key().String(), audit.ResultOK, before, after)); err != nil {
 			return fmt.Errorf("audit setting %s: %w", c.Key(), err)
 		}
 	}

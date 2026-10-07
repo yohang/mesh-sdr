@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	presetsrepotest "github.com/yohang/mesh-sdr/internal/presets/infra/repotest"
 	presetssqlite "github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
@@ -72,9 +74,9 @@ func (p presets) Compatible(_ context.Context, d app.Device) ([]shared.UUID, err
 	return p.fits[d.ID], nil
 }
 
-type audit struct{ records []app.AuditRecord }
+type recorder struct{ records []audit.Record }
 
-func (a *audit) Record(_ context.Context, r app.AuditRecord) error {
+func (a *recorder) Append(_ context.Context, r audit.Record) error {
 	a.records = append(a.records, r)
 
 	return nil
@@ -84,7 +86,7 @@ type env struct {
 	deps    app.Deps
 	devices devices
 	presets *presets
-	audit   *audit
+	audit   *recorder
 	changed int
 }
 
@@ -106,7 +108,7 @@ func newEnv(t *testing.T) *env {
 			"vhf": {ID: "vhf", Node: "attic", FreqMin: 24_000_000, FreqMax: 1_700_000_000, SampleRates: []int64{2_048_000}},
 		},
 		presets: &presets{fits: map[string][]shared.UUID{"hf": {presetA, presetB}, "vhf": {presetB}}},
-		audit:   &audit{},
+		audit:   &recorder{},
 	}
 
 	e.deps = app.Deps{
@@ -197,7 +199,7 @@ func TestServiceChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(e.audit.records) != 7 || e.audit.records[0].System || e.changed != 7 {
+	if len(e.audit.records) != 7 || e.audit.records[0].Actor == audit.System || e.changed != 7 {
 		t.Errorf("audit = %+v, changed %d", e.audit.records, e.changed)
 	}
 }
@@ -270,7 +272,7 @@ func TestGuard(t *testing.T) {
 	system := 0
 
 	for _, r := range e.audit.records {
-		if r.System && r.Action == app.ActionDisable {
+		if r.Actor == audit.System && r.Action == app.ActionDisable {
 			system++
 		}
 	}

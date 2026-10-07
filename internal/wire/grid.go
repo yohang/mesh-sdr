@@ -19,7 +19,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
-	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	settingsdomain "github.com/yohang/mesh-sdr/internal/settings/domain"
@@ -164,7 +163,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter *db.DB, now func() 
 	// once identity is wired (newHub).
 	keys := newHubKeys(now)
 
-	audit := newGridAuditor(adapter, now, logger)
+	audit := newAuditAppender(adapter, now)
 	nodeRepo := gridsqlite.NewNodeRepository(adapter)
 	revocations := gridsqlite.NewRevocationRepository(adapter)
 
@@ -272,15 +271,10 @@ func HubNodes(cfg config.Hub, logger *slog.Logger, adapter *db.DB) (*app.Nodes, 
 		return nil, err
 	}
 
-	audit := newGridAuditor(adapter, time.Now, logger)
+	audit := newAuditAppender(adapter, time.Now)
 
 	return app.NewNodes(gridsqlite.NewNodeRepository(adapter), gridsqlite.NewRevocationRepository(adapter), adapter,
 		audit, caInfo{ca: ca}, app.DefaultTimings(), time.Now, component(logger, "grid.app.nodes")), nil
-}
-
-// newGridAuditor writes grid audit records to the identity audit_log.
-func newGridAuditor(adapter *db.DB, now func() time.Time, logger *slog.Logger) gridAuditor {
-	return gridAuditor{log: identitysqlite.NewAuditLog(adapter), now: now, logger: component(logger, "grid.audit")}
 }
 
 // gridSettings reads the grid DB settings.

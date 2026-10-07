@@ -12,20 +12,23 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 )
 
 var discard = slog.New(slog.DiscardHandler)
 
 type auditSpy struct {
 	mu      sync.Mutex
-	records []app.AuditRecord
+	records []audit.Record
 }
 
-func (a *auditSpy) Record(_ context.Context, r app.AuditRecord) {
+func (a *auditSpy) Append(_ context.Context, r audit.Record) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	a.records = append(a.records, r)
+
+	return nil
 }
 
 func (a *auditSpy) actions() []string {
@@ -34,7 +37,7 @@ func (a *auditSpy) actions() []string {
 
 	out := make([]string, len(a.records))
 	for i, r := range a.records {
-		out[i] = r.Action + ":" + r.Target
+		out[i] = r.Action + ":" + r.TargetID
 	}
 
 	return out

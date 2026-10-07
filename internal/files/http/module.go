@@ -10,7 +10,6 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/yohang/mesh-sdr/internal/files/app"
 	"github.com/yohang/mesh-sdr/internal/files/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -19,8 +18,8 @@ import (
 
 // Branding is the receiver images use case.
 type Branding interface {
-	Upload(ctx context.Context, actor app.Actor, slot domain.Slot, data []byte) (*domain.File, error)
-	Remove(ctx context.Context, actor app.Actor, slot domain.Slot) (bool, error)
+	Upload(ctx context.Context, by shared.UUID, slot domain.Slot, data []byte) (*domain.File, error)
+	Remove(ctx context.Context, slot domain.Slot) (bool, error)
 	Current(ctx context.Context, slot domain.Slot) (*domain.File, error)
 }
 
@@ -28,17 +27,18 @@ type Branding interface {
 type Module struct {
 	branding Branding
 	guard    func(http.Handler) http.Handler
-	actor    func(ctx context.Context) app.Actor
+	user     func(ctx context.Context) shared.UUID
 	errorPg  func(w http.ResponseWriter, r *http.Request, status int)
 	logger   *slog.Logger
 }
 
-// New returns the module. guard checks the admin role and network;
-// errorPage writes the shell error page.
-func New(branding Branding, guard func(http.Handler) http.Handler, actor func(ctx context.Context) app.Actor,
+// New returns the module. guard checks the admin role and network; user
+// returns the signed-in user of a request; errorPage writes the shell error
+// page.
+func New(branding Branding, guard func(http.Handler) http.Handler, user func(ctx context.Context) shared.UUID,
 	errorPage func(w http.ResponseWriter, r *http.Request, status int), logger *slog.Logger,
 ) *Module {
-	return &Module{branding: branding, guard: guard, actor: actor, errorPg: errorPage, logger: logger}
+	return &Module{branding: branding, guard: guard, user: user, errorPg: errorPage, logger: logger}
 }
 
 // Middlewares implements internal/http.Module.
@@ -143,7 +143,7 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := m.branding.Upload(r.Context(), m.actor(r.Context()), slot, data); err != nil {
+	if _, err := m.branding.Upload(r.Context(), m.user(r.Context()), slot, data); err != nil {
 		var de *shared.Error
 		if errors.As(err, &de) && de.Kind() == shared.KindInvalid {
 			m.respond(w, r, http.StatusUnprocessableEntity, "", de.Message()+".")
@@ -175,7 +175,7 @@ func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	removed, err := m.branding.Remove(r.Context(), m.actor(r.Context()), slot)
+	removed, err := m.branding.Remove(r.Context(), slot)
 	if err != nil {
 		m.logger.ErrorContext(r.Context(), "remove receiver image", slog.String("slot", slot.Name()), slog.Any("error", err))
 		m.respond(w, r, http.StatusInternalServerError, "", "The image could not be removed. Try again later.")

@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"time"
 
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
@@ -28,7 +30,7 @@ const FormBodyLimit = 256 << 10
 // Store is the settings store.
 type Store interface {
 	Snapshot() *app.Snapshot
-	Apply(ctx context.Context, actor app.Actor, set domain.ChangeSet) (*app.Snapshot, error)
+	Apply(ctx context.Context, by shared.UUID, set domain.ChangeSet) (*app.Snapshot, error)
 }
 
 // ConfigViewer returns the effective configuration.
@@ -53,7 +55,7 @@ type RetentionRow struct {
 // Retention is the retention view and "purge now".
 type Retention interface {
 	Stores(ctx context.Context) ([]RetentionRow, error)
-	Purge(ctx context.Context, actor app.Actor, store string) (int64, error)
+	Purge(ctx context.Context, store string) (int64, error)
 }
 
 // Renderer renders pages in the app shell (internal/web/render).
@@ -69,8 +71,8 @@ type Deps struct {
 	Store     Store
 	Config    ConfigViewer
 	Retention Retention
-	Actor     func(ctx context.Context) app.Actor
-	Images    ImagesSection // receiver images of the Site page; nil: none
+	User      func(ctx context.Context) shared.UUID // signed-in user of a request
+	Images    ImagesSection                         // receiver images of the Site page; nil: none
 	// Schedules counts the schedules the hub disabled, for the overview;
 	// nil: not shown.
 	Schedules ScheduleHealth
@@ -241,7 +243,7 @@ func (m *Module) apply(r *http.Request, view *sectionView, spec sectionSpec, act
 	if err == nil {
 		var snap *app.Snapshot
 
-		if snap, err = m.d.Store.Apply(r.Context(), m.d.Actor(r.Context()), set); err == nil {
+		if snap, err = m.d.Store.Apply(r.Context(), m.d.User(r.Context()), set); err == nil {
 			*view = buildSection(spec, action, snap)
 			view.Notice = "Saved."
 

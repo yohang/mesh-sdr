@@ -6,8 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/netip"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	"github.com/yohang/mesh-sdr/internal/files/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -40,32 +41,11 @@ type IDGenerator interface {
 // Clock returns the current time.
 type Clock func() time.Time
 
-// Actor is who changes the images.
-type Actor struct {
-	User      shared.UUID
-	IP        netip.Addr
-	RequestID string
-}
-
 // Audit actions of the receiver images.
 const (
 	ActionImageUpdate = "receiver_image.update"
 	ActionImageRemove = "receiver_image.remove"
 )
-
-// AuditRecord is one audited change of a receiver image.
-type AuditRecord struct {
-	Actor  Actor
-	At     time.Time
-	Action string
-	Slot   string
-	After  map[string]string
-}
-
-// Auditor appends audit records in the caller's transaction.
-type Auditor interface {
-	RecordImage(ctx context.Context, r AuditRecord) error
-}
 
 // Branding manages the receiver images.
 type Branding struct {
@@ -73,7 +53,7 @@ type Branding struct {
 	tx    Transactor
 	proc  ImageProcessor
 	ids   IDGenerator
-	audit Auditor
+	audit audit.Appender
 	now   Clock
 }
 
@@ -83,7 +63,7 @@ type BrandingDeps struct {
 	Tx        Transactor
 	Processor ImageProcessor
 	IDs       IDGenerator
-	Audit     Auditor
+	Audit     audit.Appender
 	Now       Clock
 }
 
@@ -95,7 +75,7 @@ func NewBranding(d BrandingDeps) *Branding {
 // Upload validates, re-encodes and stores an image for slot, replacing the
 // previous one in the same transaction. The caller bounds data to
 // slot.MaxUpload() before reading it; a larger upload is refused here too.
-func (b *Branding) Upload(ctx context.Context, actor Actor, slot domain.Slot, data []byte) (*domain.File, error) {
+func (b *Branding) Upload(ctx context.Context, by shared.UUID, slot domain.Slot, data []byte) (*domain.File, error) {
 	if int64(len(data)) > slot.MaxUpload() {
 		return nil, domain.ErrImageTooLarge.WithDetail(fmt.Sprintf("the %s must not exceed %d KiB", slot.Name(), slot.MaxUpload()>>10))
 	}
@@ -118,7 +98,7 @@ func (b *Branding) Upload(ctx context.Context, actor Actor, slot domain.Slot, da
 
 	f, err := domain.NewImage(domain.ImageSpec{
 		ID: id, Kind: slot.Kind(), MIME: img.MIME, Content: img.Data, Width: img.Width, Height: img.Height,
-		UploadedBy: actor.User, At: now,
+		UploadedBy: by, At: now,
 	})
 	if err != nil {
 		return nil, err
@@ -133,8 +113,8 @@ func (b *Branding) Upload(ctx context.Context, actor Actor, slot domain.Slot, da
 			return err
 		}
 
-		return b.audit.RecordImage(ctx, AuditRecord{
-			Actor: actor, At: now, Action: ActionImageUpdate, Slot: slot.Name(),
+		return b.audit.Append(ctx, audit.Record{
+			Action: ActionImageUpdate, TargetType: "receiver_image", TargetID: slot.Name(),
 			After: map[string]string{"file_id": f.ID().String(), "mime_type": string(f.MIME()), "size_bytes": fmt.Sprint(f.Size())},
 		})
 	})
@@ -147,7 +127,7 @@ func (b *Branding) Upload(ctx context.Context, actor Actor, slot domain.Slot, da
 
 // Remove restores the default of slot (no image) and reports whether an
 // image was removed.
-func (b *Branding) Remove(ctx context.Context, actor Actor, slot domain.Slot) (bool, error) {
+func (b *Branding) Remove(ctx context.Context, slot domain.Slot) (bool, error) {
 	removed := false
 
 	err := b.tx.WithinTx(ctx, func(ctx context.Context) error {
@@ -158,7 +138,7 @@ func (b *Branding) Remove(ctx context.Context, actor Actor, slot domain.Slot) (b
 
 		removed = true
 
-		return b.audit.RecordImage(ctx, AuditRecord{Actor: actor, At: b.now(), Action: ActionImageRemove, Slot: slot.Name()})
+		return b.audit.Append(ctx, audit.Record{Action: ActionImageRemove, TargetType: "receiver_image", TargetID: slot.Name()})
 	})
 
 	return removed, err

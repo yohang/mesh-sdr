@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strconv"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/schedules/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -18,7 +20,7 @@ type Deps struct {
 	Tx      Transactor
 	Devices Devices
 	Presets Presets
-	Audit   Auditor
+	Audit   audit.Appender
 	IDs     IDs
 	Now     Clock
 	Changed func(ctx context.Context)
@@ -109,7 +111,7 @@ func (s *Service) Create(ctx context.Context, d domain.Draft) (*domain.Schedule,
 			return err
 		}
 
-		return s.d.Audit.Record(ctx, AuditRecord{Action: ActionCreate, Target: id, After: auditFields(sc)})
+		return s.d.Audit.Append(ctx, audit.Record{Action: ActionCreate, TargetType: "schedule", TargetID: id.String(), After: auditFields(sc)})
 	})
 	if err != nil {
 		return nil, err
@@ -154,7 +156,7 @@ func (s *Service) Replace(ctx context.Context, id string, expectedVersion int, d
 			return err
 		}
 
-		return s.d.Audit.Record(ctx, AuditRecord{Action: ActionUpdate, Target: sid, Before: before, After: auditFields(sc)})
+		return s.d.Audit.Append(ctx, audit.Record{Action: ActionUpdate, TargetType: "schedule", TargetID: sid.String(), Before: before, After: auditFields(sc)})
 	})
 	if err != nil {
 		return nil, err
@@ -182,7 +184,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 			return err
 		}
 
-		return s.d.Audit.Record(ctx, AuditRecord{Action: ActionDelete, Target: sid, Before: auditFields(sc)})
+		return s.d.Audit.Append(ctx, audit.Record{Action: ActionDelete, TargetType: "schedule", TargetID: sid.String(), Before: auditFields(sc)})
 	})
 	if err != nil {
 		return err

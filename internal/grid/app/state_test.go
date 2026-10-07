@@ -11,6 +11,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -210,7 +211,7 @@ func TestDeviceListener(t *testing.T) {
 		t.Errorf("reported %v, stale %v", spy.reported, spy.stale)
 	}
 
-	if err := s.Forget(ctx, app.ActorUser, "vhf"); err != nil {
+	if err := s.Forget(ctx, audit.Caller, "vhf"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -232,7 +233,7 @@ func TestDeviceListener(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := e.svc.Delete(ctx, app.ActorUser, "garden"); err != nil {
+	if err := e.svc.Delete(ctx, audit.Caller, "garden"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -274,7 +274,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, err
 	}
 
-	auditLog := identitysqlite.NewAuditLog(adapter)
+	auditLog := newAuditAppender(adapter, now)
 	images := branding(adapter, auditLog)
 
 	// The top bar shows the signed-in user: the identity module, built
@@ -291,7 +291,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	settingsModule, err := settings.Wire(ctx, settings.Deps{
 		Config: cfg, Origins: origins, DB: adapter, Now: now, Logger: logger,
-		Audit: settingsAuditor{log: auditLog},
+		Audit: auditLog,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("settings: %w", err)
@@ -394,7 +394,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, fmt.Errorf("jobs: %w", err)
 	}
 
-	imagesHTTP := fileshttp.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), filesActor,
+	imagesHTTP := fileshttp.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), currentUser,
 		shellModule.Renderer.Error, component(logger, "files.http"))
 	access, err := g.mediaAccess(cfg, listenPolicy{settingsrc.New(settingsModule.Store, component(logger, "grid.infra.settings"))}, logger)
 	if err != nil {
@@ -426,7 +426,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		settingshttp.New(settingshttp.Deps{
 			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin),
 			Store: settingsModule.Store, Config: settingsModule.Effective, Retention: retentionRows{r: retention},
-			Actor: settingsActor, Images: imagesHTTP, Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets},
+			User: currentUser, Images: imagesHTTP, Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets},
 			Logger: component(logger, "settings.http"),
 		}),
 		imagesHTTP,

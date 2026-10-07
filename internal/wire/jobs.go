@@ -2,27 +2,25 @@ package wire
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
-	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	jobsapp "github.com/yohang/mesh-sdr/internal/jobs/app"
 	jobsdomain "github.com/yohang/mesh-sdr/internal/jobs/domain"
 	jobssqlite "github.com/yohang/mesh-sdr/internal/jobs/infra/sqlite"
-	settingsapp "github.com/yohang/mesh-sdr/internal/settings/app"
 	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 )
 
 // jobs builds the hub's jobs scheduler with the retention jobs, and the
 // retention view (ADM-011, ADR 0010).
-func jobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobsapp.RetentionValues, audit identitydomain.AuditLog,
+func jobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobsapp.RetentionValues, audit audit.Appender,
 	logger *slog.Logger,
 ) (*jobsapp.Scheduler, *jobsapp.Retention, error) {
 	sched := jobsapp.NewScheduler(jobssqlite.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.app.scheduler"))
@@ -60,39 +58,7 @@ func jobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobsapp.
 		{Name: "connections", Label: "Connections", SettingKey: "retention.connections", Job: gridapp.JobConnectionsPurge, Stats: connections},
 	}
 
-	return sched, jobsapp.NewRetention(stores, sched, values, purgeAuditor{log: audit}, time.Now), nil
-}
-
-// purgeAuditor writes "purge now" records to identity's audit_log.
-type purgeAuditor struct{ log identitydomain.AuditLog }
-
-// RecordPurge implements jobsapp.Auditor.
-func (a purgeAuditor) RecordPurge(ctx context.Context, r jobsapp.PurgeRecord) error {
-	actor := identitydomain.SystemActor()
-
-	if !r.Actor.User.IsZero() {
-		id, err := identitydomain.NewUserID(r.Actor.User)
-		if err != nil {
-			return fmt.Errorf("audit actor: %w", err)
-		}
-
-		actor = identitydomain.UserActor(id, r.Actor.IP)
-	}
-
-	result := identitydomain.ResultOK
-	if r.Failed {
-		result = identitydomain.ResultError
-	}
-
-	e, err := identitydomain.NewAuditEntry(r.At, actor, jobsapp.ActionPurge, result)
-	if err != nil {
-		return fmt.Errorf("audit entry: %w", err)
-	}
-
-	e = e.WithTarget("store", r.Store).WithRequestID(r.Actor.RequestID).
-		WithAfter(map[string]string{"rows_deleted": strconv.FormatInt(r.Rows, 10)})
-
-	return a.log.Append(ctx, e)
+	return sched, jobsapp.NewRetention(stores, sched, values, audit), nil
 }
 
 // retentionRows adapts the retention view to the admin pages.
@@ -119,6 +85,6 @@ func (a retentionRows) Stores(ctx context.Context) ([]settingshttp.RetentionRow,
 }
 
 // Purge implements settingshttp.Retention.
-func (a retentionRows) Purge(ctx context.Context, actor settingsapp.Actor, store string) (int64, error) {
-	return a.r.Purge(ctx, jobsapp.Actor{User: actor.User, IP: actor.IP, RequestID: actor.RequestID}, store)
+func (a retentionRows) Purge(ctx context.Context, store string) (int64, error) {
+	return a.r.Purge(ctx, store)
 }

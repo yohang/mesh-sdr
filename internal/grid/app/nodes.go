@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 )
 
@@ -22,7 +24,7 @@ type Nodes struct {
 	repo        domain.NodeRepository
 	revocations domain.RevocationRepository
 	tx          Transactor
-	audit       Auditor
+	audit       auditor
 	now         Clock
 	timings     Timings
 	ca          CAInfo
@@ -41,9 +43,9 @@ type CAInfo interface {
 
 // NewNodes returns the service.
 func NewNodes(repo domain.NodeRepository, revocations domain.RevocationRepository, tx Transactor,
-	audit Auditor, ca CAInfo, timings Timings, now Clock, logger *slog.Logger,
+	auditLog audit.Appender, ca CAInfo, timings Timings, now Clock, logger *slog.Logger,
 ) *Nodes {
-	return &Nodes{repo: repo, revocations: revocations, tx: tx, audit: audit, ca: ca, timings: timings, now: now, logger: logger}
+	return &Nodes{repo: repo, revocations: revocations, tx: tx, audit: auditor{auditLog, logger}, ca: ca, timings: timings, now: now, logger: logger}
 }
 
 // SyncConfig upserts the config-declared nodes and releases the config
@@ -53,7 +55,7 @@ func (s *Nodes) SyncConfig(ctx context.Context, declared []DeclaredNode) error {
 	now := s.now()
 	seen := map[domain.NodeID]bool{}
 
-	var records []AuditRecord
+	var records []audit.Record
 
 	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		records = records[:0]
@@ -73,7 +75,7 @@ func (s *Nodes) SyncConfig(ctx context.Context, declared []DeclaredNode) error {
 					return fmt.Errorf("declare node %s: %w", d.ID, err)
 				}
 
-				records = append(records, AuditRecord{ActorKind: ActorSystem, Action: "node.config.declare", Target: d.ID.String(), Result: ResultOK})
+				records = append(records, audit.Record{Actor: audit.System, Action: "node.config.declare", TargetType: "node", TargetID: d.ID.String(), Result: audit.ResultOK})
 
 				continue
 			}
@@ -88,7 +90,7 @@ func (s *Nodes) SyncConfig(ctx context.Context, declared []DeclaredNode) error {
 					return fmt.Errorf("sync node %s: %w", d.ID, err)
 				}
 
-				records = append(records, AuditRecord{ActorKind: ActorSystem, Action: "node.config.update", Target: d.ID.String(), Result: ResultOK})
+				records = append(records, audit.Record{Actor: audit.System, Action: "node.config.update", TargetType: "node", TargetID: d.ID.String(), Result: audit.ResultOK})
 			}
 		}
 
@@ -108,7 +110,7 @@ func (s *Nodes) SyncConfig(ctx context.Context, declared []DeclaredNode) error {
 					return fmt.Errorf("release node %s: %w", n.ID(), err)
 				}
 
-				records = append(records, AuditRecord{ActorKind: ActorSystem, Action: "node.config.release", Target: n.ID().String(), Result: ResultOK})
+				records = append(records, audit.Record{Actor: audit.System, Action: "node.config.release", TargetType: "node", TargetID: n.ID().String(), Result: audit.ResultOK})
 			}
 		}
 

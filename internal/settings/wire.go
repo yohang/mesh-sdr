@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/settings/app"
@@ -23,7 +25,7 @@ type Deps struct {
 	DB      *db.DB
 	// Audit appends the audit records of settings writes (identity's
 	// audit_log).
-	Audit  app.Auditor
+	Audit  audit.Appender
 	Now    func() time.Time
 	Logger *slog.Logger
 }

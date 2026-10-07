@@ -11,6 +11,7 @@ import (
 	presetssqlite "github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
 	schedulesdomain "github.com/yohang/mesh-sdr/internal/schedules/domain"
 	schedulessqlite "github.com/yohang/mesh-sdr/internal/schedules/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -88,7 +89,7 @@ func TestDesiredStateEndToEnd(t *testing.T) {
 	})
 
 	// Removing the node removes hf: its schedule is disabled, not deleted.
-	if err := e.g.nodes.Delete(ctx, gridapp.ActorCLI, "attic"); err != nil {
+	if err := e.g.nodes.Delete(ctx, audit.CLI, "attic"); err != nil {
 		t.Fatal(err)
 	}
 

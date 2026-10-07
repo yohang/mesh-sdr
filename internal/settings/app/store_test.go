@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/settings/app"
 	"github.com/yohang/mesh-sdr/internal/settings/domain"
@@ -79,9 +81,9 @@ func (r *memRepo) WithinTx(ctx context.Context, fn func(context.Context) error) 
 	return nil
 }
 
-type memAudit struct{ records []app.AuditRecord }
+type memAudit struct{ records []audit.Record }
 
-func (a *memAudit) Record(_ context.Context, r app.AuditRecord) error {
+func (a *memAudit) Append(_ context.Context, r audit.Record) error {
 	a.records = append(a.records, r)
 
 	return nil
@@ -211,9 +213,7 @@ func TestStoreUpdateAudited(t *testing.T) {
 
 	f.store.Subscribe(func(s *app.Snapshot) { published = s })
 
-	actor := app.Actor{User: admin, RequestID: "req-1"}
-
-	snap, err := f.store.Apply(ctx, actor, set(t, "ui.theme_mode", `"dark"`, 0, "receiver.gps", `{"lat":50.5,"lon":3}`, 0))
+	snap, err := f.store.Apply(ctx, admin, set(t, "ui.theme_mode", `"dark"`, 0, "receiver.gps", `{"lat":50.5,"lon":3}`, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestStoreUpdateAudited(t *testing.T) {
 	}
 
 	r := f.audit.records[0]
-	if r.Action != app.ActionUpdate || r.Key != "ui.theme_mode" || r.Result != app.ResultOK || r.After != `"dark"` || r.Before != "" || r.Actor != actor {
+	if r.Action != app.ActionUpdate || r.TargetID != "ui.theme_mode" || r.Result != audit.ResultOK || r.After["value"] != `"dark"` || r.Before != nil || r.Actor != audit.Caller {
 		t.Errorf("audit = %+v", r)
 	}
 }
@@ -245,23 +245,23 @@ func TestStoreVersionConflict(t *testing.T) {
 	f := newFixture(t, nil)
 	ctx := context.Background()
 
-	if _, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "ui.theme_mode", `"dark"`, 0)); err != nil {
+	if _, err := f.store.Apply(ctx, admin, set(t, "ui.theme_mode", `"dark"`, 0)); err != nil {
 		t.Fatal(err)
 	}
 
 	// Reset then write again: the version is new, so a writer that saw
 	// version 1 still conflicts (no ABA).
-	if _, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "ui.theme_mode", nil, 1)); err != nil {
+	if _, err := f.store.Apply(ctx, admin, set(t, "ui.theme_mode", nil, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "ui.theme_mode", `"light"`, 0)); err != nil {
+	if _, err := f.store.Apply(ctx, admin, set(t, "ui.theme_mode", `"light"`, 0)); err != nil {
 		t.Fatal(err)
 	}
 
 	audits := len(f.audit.records)
 
-	_, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "ui.shortcut_set", `"off"`, 0, "ui.theme_mode", `"dark"`, 1))
+	_, err := f.store.Apply(ctx, admin, set(t, "ui.shortcut_set", `"off"`, 0, "ui.theme_mode", `"dark"`, 1))
 	if !errors.Is(err, domain.ErrVersionConflict) {
 		t.Fatalf("err = %v", err)
 	}
@@ -290,12 +290,12 @@ func TestStoreLockedKey(t *testing.T) {
 		t.Fatalf("theme = %s %s", e.Source(), e.Origin())
 	}
 
-	_, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "ui.theme_mode", `"dark"`, 0, "ui.shortcut_set", `"off"`, 0))
+	_, err := f.store.Apply(ctx, admin, set(t, "ui.theme_mode", `"dark"`, 0, "ui.shortcut_set", `"off"`, 0))
 	if !errors.Is(err, domain.ErrSettingLocked) || !strings.Contains(err.Error(), "env:MESHSDR_SETTINGS__UI__THEME_MODE") {
 		t.Fatalf("err = %v", err)
 	}
 
-	if len(f.audit.records) != 1 || f.audit.records[0].Result != app.ResultDenied || f.audit.records[0].Key != "ui.theme_mode" {
+	if len(f.audit.records) != 1 || f.audit.records[0].Result != audit.ResultDenied || f.audit.records[0].TargetID != "ui.theme_mode" {
 		t.Errorf("audit = %+v", f.audit.records)
 	}
 
@@ -308,7 +308,7 @@ func TestStoreInvalidValues(t *testing.T) {
 	f := newFixture(t, nil)
 	ctx := context.Background()
 
-	_, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t,
+	_, err := f.store.Apply(ctx, admin, set(t,
 		"ui.theme_mode", `"sepia"`, 0, "no.such_key", `1`, 0, "retention.audit_log", `"7d"`, 0, "receiver.name", `"F4XYZ"`, 0))
 	if !errors.Is(err, domain.ErrInvalidSetting) {
 		t.Fatalf("err = %v", err)
@@ -333,12 +333,12 @@ func TestStoreInvalidValues(t *testing.T) {
 	}
 
 	// Checks across keys use the prospective values.
-	_, err = f.store.Apply(ctx, app.Actor{User: admin}, set(t, "auth.lockout.lock_after", `3`, 0))
+	_, err = f.store.Apply(ctx, admin, set(t, "auth.lockout.lock_after", `3`, 0))
 	if !errors.Is(err, domain.ErrInvalidSetting) {
 		t.Errorf("lock_after below delay_after: %v", err)
 	}
 
-	if _, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "auth.lockout.lock_after", `3`, 0, "auth.lockout.delay_after", `2`, 0)); err != nil {
+	if _, err := f.store.Apply(ctx, admin, set(t, "auth.lockout.lock_after", `3`, 0, "auth.lockout.delay_after", `2`, 0)); err != nil {
 		t.Errorf("valid combination: %v", err)
 	}
 }
@@ -347,11 +347,11 @@ func TestStoreReset(t *testing.T) {
 	f := newFixture(t, nil)
 	ctx := context.Background()
 
-	if _, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "receiver.name", `"F4XYZ"`, 0)); err != nil {
+	if _, err := f.store.Apply(ctx, admin, set(t, "receiver.name", `"F4XYZ"`, 0)); err != nil {
 		t.Fatal(err)
 	}
 
-	snap, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "receiver.name", nil, 1, "ui.shortcut_set", nil, 0))
+	snap, err := f.store.Apply(ctx, admin, set(t, "receiver.name", nil, 1, "ui.shortcut_set", nil, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestStoreReset(t *testing.T) {
 		t.Fatalf("audit = %+v", f.audit.records)
 	}
 
-	if r := f.audit.records[1]; r.Action != app.ActionReset || r.Before != `"F4XYZ"` || r.After != `"MeshSDR"` {
+	if r := f.audit.records[1]; r.Action != app.ActionReset || r.Before["value"] != `"F4XYZ"` || r.After["value"] != `"MeshSDR"` {
 		t.Errorf("reset audit = %+v", r)
 	}
 }
@@ -404,7 +404,7 @@ func TestStoreLoadIgnoresInvalidRows(t *testing.T) {
 		t.Errorf("shadowed = %s %v", v, ok)
 	}
 
-	if len(f.audit.records) != 1 || f.audit.records[0].Action != app.ActionIgnored || f.audit.records[0].Key != "ui.shortcut_set" {
+	if len(f.audit.records) != 1 || f.audit.records[0].Action != app.ActionIgnored || f.audit.records[0].TargetID != "ui.shortcut_set" || f.audit.records[0].Actor != audit.System {
 		t.Errorf("audit = %+v", f.audit.records)
 	}
 }
@@ -432,7 +432,7 @@ func TestStoreFixesAnIgnoredRow(t *testing.T) {
 		t.Fatalf("ignored row = %s v%d", e.Source(), e.Version())
 	}
 
-	snap, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "ui.shortcut_set", `"off"`, int(e.Version())))
+	snap, err := f.store.Apply(ctx, admin, set(t, "ui.shortcut_set", `"off"`, int(e.Version())))
 	if err != nil {
 		t.Fatalf("fix the ignored row: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestStoreFixesAnIgnoredRow(t *testing.T) {
 	f.repo.rev = 6
 	_ = f.store.Load(ctx)
 
-	if _, err := f.store.Apply(ctx, app.Actor{User: admin}, set(t, "ui.theme_mode", nil, 6)); err != nil {
+	if _, err := f.store.Apply(ctx, admin, set(t, "ui.theme_mode", nil, 6)); err != nil {
 		t.Errorf("reset the ignored row: %v", err)
 	}
 

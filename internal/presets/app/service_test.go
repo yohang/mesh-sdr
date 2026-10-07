@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	"github.com/yohang/mesh-sdr/internal/presets/app"
 	"github.com/yohang/mesh-sdr/internal/presets/domain"
@@ -15,9 +17,9 @@ import (
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
-type audit struct{ records []app.AuditRecord }
+type recorder struct{ records []audit.Record }
 
-func (a *audit) Record(_ context.Context, r app.AuditRecord) error {
+func (a *recorder) Append(_ context.Context, r audit.Record) error {
 	a.records = append(a.records, r)
 
 	return nil
@@ -39,11 +41,11 @@ func (s *schedules) PresetReplaced(_ context.Context, id shared.UUID) ([]shared.
 	return s.disabled, nil
 }
 
-func newService(t *testing.T) (*app.Service, *audit, *schedules, *int) {
+func newService(t *testing.T) (*app.Service, *recorder, *schedules, *int) {
 	t.Helper()
 
 	a := dbtest.NewSQLite(t)
-	au, sc, changed := &audit{}, &schedules{}, new(0)
+	au, sc, changed := &recorder{}, &schedules{}, new(0)
 	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 
 	return app.NewService(app.Deps{

@@ -24,6 +24,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 )
 
 var quiet = slog.New(slog.DiscardHandler)
@@ -273,7 +274,7 @@ func (e *gridEnv) enrollNode(t *testing.T, prober fakeProber, opts ...NodeOption
 
 	ctx := context.Background()
 
-	issued, err := e.g.nodes.Add(ctx, gridapp.ActorCLI, gridapp.NewNodeInput{ID: "attic", URL: "https://" + e.nodeAddr})
+	issued, err := e.g.nodes.Add(ctx, audit.CLI, gridapp.NewNodeInput{ID: "attic", URL: "https://" + e.nodeAddr})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +430,7 @@ func TestGridEndToEnd(t *testing.T) {
 	}
 
 	// Deleting the node closes its channel and revokes its certificate.
-	if err := e.g.nodes.Delete(ctx, gridapp.ActorCLI, "attic"); err != nil {
+	if err := e.g.nodes.Delete(ctx, audit.CLI, "attic"); err != nil {
 		t.Fatal(err)
 	}
 

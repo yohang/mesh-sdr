@@ -14,16 +14,9 @@ import (
 	"github.com/yohang/mesh-sdr/internal/files/domain"
 	"github.com/yohang/mesh-sdr/internal/files/infra/imaging"
 	"github.com/yohang/mesh-sdr/internal/files/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
-
-type audit struct{ records []app.AuditRecord }
-
-func (a *audit) RecordImage(_ context.Context, r app.AuditRecord) error {
-	a.records = append(a.records, r)
-
-	return nil
-}
 
 func pngOf(t *testing.T, w, h int) []byte {
 	t.Helper()
@@ -39,7 +32,7 @@ func pngOf(t *testing.T, w, h int) []byte {
 func TestBranding(t *testing.T) {
 	ctx := context.Background()
 	a := dbtest.NewSQLite(t)
-	au := &audit{}
+	au := &audit.Records{}
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 
 	b := app.NewBranding(app.BrandingDeps{
@@ -51,7 +44,7 @@ func TestBranding(t *testing.T) {
 		t.Fatalf("no avatar: %v", err)
 	}
 
-	first, err := b.Upload(ctx, app.Actor{}, domain.SlotAvatar, pngOf(t, 64, 64))
+	first, err := b.Upload(ctx, shared.UUID{}, domain.SlotAvatar, pngOf(t, 64, 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +53,7 @@ func TestBranding(t *testing.T) {
 		t.Errorf("avatar = %s %s %d", first.Name(), first.MIME(), first.Width())
 	}
 
-	second, err := b.Upload(ctx, app.Actor{}, domain.SlotAvatar, pngOf(t, 32, 16))
+	second, err := b.Upload(ctx, shared.UUID{}, domain.SlotAvatar, pngOf(t, 32, 16))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,23 +68,23 @@ func TestBranding(t *testing.T) {
 		t.Errorf("files rows = %d, %v (the previous avatar must be replaced)", n, err)
 	}
 
-	if _, err := b.Upload(ctx, app.Actor{}, domain.SlotAvatar, make([]byte, domain.MaxAvatarUpload+1)); !errors.Is(err, domain.ErrImageTooLarge) {
+	if _, err := b.Upload(ctx, shared.UUID{}, domain.SlotAvatar, make([]byte, domain.MaxAvatarUpload+1)); !errors.Is(err, domain.ErrImageTooLarge) {
 		t.Errorf("oversized: %v", err)
 	}
 
-	if _, err := b.Upload(ctx, app.Actor{}, domain.SlotPanorama, []byte("<svg/>")); !errors.Is(err, domain.ErrUnsupportedImage) {
+	if _, err := b.Upload(ctx, shared.UUID{}, domain.SlotPanorama, []byte("<svg/>")); !errors.Is(err, domain.ErrUnsupportedImage) {
 		t.Errorf("svg: %v", err)
 	}
 
-	if removed, err := b.Remove(ctx, app.Actor{}, domain.SlotAvatar); err != nil || !removed {
+	if removed, err := b.Remove(ctx, domain.SlotAvatar); err != nil || !removed {
 		t.Errorf("remove = %v, %v", removed, err)
 	}
 
-	if removed, err := b.Remove(ctx, app.Actor{}, domain.SlotAvatar); err != nil || removed {
+	if removed, err := b.Remove(ctx, domain.SlotAvatar); err != nil || removed {
 		t.Errorf("second remove = %v, %v", removed, err)
 	}
 
-	if len(au.records) != 3 || au.records[2].Action != app.ActionImageRemove || au.records[0].Slot != "avatar" {
-		t.Errorf("audit = %+v", au.records)
+	if len(*au) != 3 || (*au)[2].Action != app.ActionImageRemove || (*au)[0].TargetID != "avatar" {
+		t.Errorf("audit = %+v", *au)
 	}
 }

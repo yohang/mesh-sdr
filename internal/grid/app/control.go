@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
@@ -48,7 +50,7 @@ type Control struct {
 	revocations domain.RevocationRepository
 	cursors     domain.EventCursorRepository
 	tx          Transactor
-	audit       Auditor
+	audit       auditor
 	now         Clock
 	logger      *slog.Logger
 	hubVersion  string
@@ -65,10 +67,10 @@ type Control struct {
 
 // NewControl returns the service.
 func NewControl(nodes domain.NodeRepository, revocations domain.RevocationRepository, cursors domain.EventCursorRepository,
-	tx Transactor, audit Auditor, tracker *Tracker, hubVersion string, now Clock, logger *slog.Logger,
+	tx Transactor, auditLog audit.Appender, tracker *Tracker, hubVersion string, now Clock, logger *slog.Logger,
 ) *Control {
 	return &Control{
-		nodes: nodes, revocations: revocations, cursors: cursors, tx: tx, audit: audit, now: now, logger: logger, hubVersion: hubVersion,
+		nodes: nodes, revocations: revocations, cursors: cursors, tx: tx, audit: auditor{auditLog, logger}, now: now, logger: logger, hubVersion: hubVersion,
 		handlers: map[rxv1.MessageType]EventHandler{}, links: tracker, warned: map[rxv1.MessageType]bool{},
 	}
 }
@@ -341,8 +343,8 @@ func (c *Control) RecordRenewal(ctx context.Context, id domain.NodeID, serial st
 		return fmt.Errorf("record renewed certificate of %s: %w", id, err)
 	}
 
-	c.audit.Record(ctx, AuditRecord{ActorKind: ActorSystem, Action: "node.cert.renew", Target: id.String(), Result: ResultOK,
-		Detail: map[string]string{"cert_serial": serial}})
+	c.audit.Record(ctx, audit.Record{Actor: audit.System, Action: "node.cert.renew", TargetType: "node", TargetID: id.String(), Result: audit.ResultOK,
+		After: map[string]string{"cert_serial": serial}})
 
 	return nil
 }

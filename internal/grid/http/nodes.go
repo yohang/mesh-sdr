@@ -16,6 +16,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/http/problem"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -29,11 +30,11 @@ import (
 type NodeAdmin interface {
 	List(ctx context.Context) ([]*domain.Node, error)
 	Get(ctx context.Context, id string) (*domain.Node, error)
-	Add(ctx context.Context, actor string, in app.NewNodeInput) (app.Issued, error)
-	Update(ctx context.Context, actor, id string, name, url *string, disabled *bool, expectedVersion int) (*domain.Node, error)
-	Delete(ctx context.Context, actor, id string) error
-	Revoke(ctx context.Context, actor, id string) (*domain.Node, error)
-	IssueToken(ctx context.Context, actor, id string) (app.Issued, error)
+	Add(ctx context.Context, actor audit.Actor, in app.NewNodeInput) (app.Issued, error)
+	Update(ctx context.Context, actor audit.Actor, id string, name, url *string, disabled *bool, expectedVersion int) (*domain.Node, error)
+	Delete(ctx context.Context, actor audit.Actor, id string) error
+	Revoke(ctx context.Context, actor audit.Actor, id string) (*domain.Node, error)
+	IssueToken(ctx context.Context, actor audit.Actor, id string) (app.Issued, error)
 }
 
 // LoadHistory gives the recent heartbeats of a node (RAM ring).
@@ -309,7 +310,7 @@ func (m *AdminModule) addNode(w http.ResponseWriter, r *http.Request) {
 
 	f := nodeForm{ID: strings.TrimSpace(r.PostForm.Get("id")), Name: strings.TrimSpace(r.PostForm.Get("name")), URL: strings.TrimSpace(r.PostForm.Get("url"))}
 
-	issued, err := m.d.Nodes.Add(r.Context(), app.ActorUser, app.NewNodeInput{ID: f.ID, Name: f.Name, URL: f.URL})
+	issued, err := m.d.Nodes.Add(r.Context(), audit.Caller, app.NewNodeInput{ID: f.ID, Name: f.Name, URL: f.URL})
 	if err != nil {
 		status, msg := m.failure(r.Context(), "add node", err)
 		m.page(w, r, status, "Add a node", "nodes", newNodePage(f, msg), nil)
@@ -373,7 +374,7 @@ func (m *AdminModule) editNode(w http.ResponseWriter, r *http.Request) {
 			url = &s
 		}
 
-		_, err = m.d.Nodes.Update(r.Context(), app.ActorUser, id, name, url, nil, version)
+		_, err = m.d.Nodes.Update(r.Context(), audit.Caller, id, name, url, nil, version)
 
 		return "The node is saved.", err
 	})
@@ -387,7 +388,7 @@ func (m *AdminModule) setDisabled(disabled bool) http.HandlerFunc {
 				return "", err
 			}
 
-			if _, err := m.d.Nodes.Update(r.Context(), app.ActorUser, id, nil, nil, &disabled, n.Version()); err != nil {
+			if _, err := m.d.Nodes.Update(r.Context(), audit.Caller, id, nil, nil, &disabled, n.Version()); err != nil {
 				return "", err
 			}
 
@@ -408,7 +409,7 @@ func (m *AdminModule) probeNode(w http.ResponseWriter, r *http.Request) {
 
 func (m *AdminModule) revokeNode(w http.ResponseWriter, r *http.Request) {
 	m.nodeAction(w, r, "revoke node", func(id string) (string, error) {
-		_, err := m.d.Nodes.Revoke(r.Context(), app.ActorUser, id)
+		_, err := m.d.Nodes.Revoke(r.Context(), audit.Caller, id)
 
 		return "The node certificate is revoked: issue a new enrollment token to enroll the node again.", err
 	})
@@ -421,7 +422,7 @@ func (m *AdminModule) issueToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issued, err := m.d.Nodes.IssueToken(r.Context(), app.ActorUser, chi.URLParam(r, "id"))
+	issued, err := m.d.Nodes.IssueToken(r.Context(), audit.Caller, chi.URLParam(r, "id"))
 	if err == nil {
 		m.showToken(w, r, issued, false)
 
@@ -444,7 +445,7 @@ func (m *AdminModule) deleteNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := m.d.Nodes.Delete(r.Context(), app.ActorUser, chi.URLParam(r, "id"))
+	err := m.d.Nodes.Delete(r.Context(), audit.Caller, chi.URLParam(r, "id"))
 	if err == nil {
 		redirect(w, r, "/admin/nodes")
 

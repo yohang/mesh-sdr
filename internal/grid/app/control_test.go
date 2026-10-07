@@ -12,6 +12,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -253,7 +254,7 @@ func TestDroppedPendingCertificatesAreRevoked(t *testing.T) {
 		t.Fatalf("after a superseded renewal: %v", got)
 	}
 
-	if _, err := e.svc.IssueToken(ctx, app.ActorCLI, "attic"); err != nil {
+	if _, err := e.svc.IssueToken(ctx, audit.CLI, "attic"); err != nil {
 		t.Fatal(err)
 	}
 

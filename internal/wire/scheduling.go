@@ -3,17 +3,17 @@ package wire
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/db"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
-	"github.com/yohang/mesh-sdr/internal/http/clientip"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	presetsapp "github.com/yohang/mesh-sdr/internal/presets/app"
@@ -45,7 +45,7 @@ type settingsReader interface {
 
 // newScheduling builds the modules. g.states may be nil (grid disabled):
 // nothing is pushed then.
-func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit auditAppender, now func() time.Time,
+func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audit.Appender, now func() time.Time,
 	logger *slog.Logger,
 ) *scheduling {
 	ids := shared.NewUUIDv7Generator()
@@ -62,7 +62,7 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 	s := &scheduling{}
 
 	sdeps := schedulesapp.Deps{
-		Repo: schedRepo, Tx: adapter, Devices: devices, Audit: scheduleAuditor{log: audit, now: now}, IDs: ids, Now: now,
+		Repo: schedRepo, Tx: adapter, Devices: devices, Audit: audit, IDs: ids, Now: now,
 		Changed: changed, Logger: component(logger, "schedules.app"),
 	}
 
@@ -74,7 +74,7 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 	s.guard = schedulesapp.NewGuard(sdeps)
 	s.planner = schedulesapp.NewPlanner(sdeps)
 	s.presets = presetsapp.NewService(presetsapp.Deps{
-		Repo: presetRepo, Tx: adapter, Audit: presetAuditor{log: audit, now: now}, IDs: ids, Now: now,
+		Repo: presetRepo, Tx: adapter, Audit: audit, IDs: ids, Now: now,
 		Usage: s.schedules, Listener: s.guard, Changed: changed, Logger: component(logger, "presets.app"),
 	})
 	catalog.presets = s.presets
@@ -368,60 +368,6 @@ func (deviceScope) CanOperate(ctx context.Context, device string) bool {
 	}
 
 	return identityhttp.FromContext(ctx).Principal().HasOnDevice(identitydomain.RoleOperator, id)
-}
-
-// presetAuditor writes preset changes to identity's audit_log.
-type presetAuditor struct {
-	log auditAppender
-	now func() time.Time
-}
-
-func (a presetAuditor) Record(ctx context.Context, r presetsapp.AuditRecord) error {
-	return appendAudit(ctx, a.log, a.now(), false, r.Action, "preset", r.Target.String(), r.Before, r.After)
-}
-
-// scheduleAuditor writes schedule changes to identity's audit_log.
-type scheduleAuditor struct {
-	log auditAppender
-	now func() time.Time
-}
-
-func (a scheduleAuditor) Record(ctx context.Context, r schedulesapp.AuditRecord) error {
-	return appendAudit(ctx, a.log, a.now(), r.System, r.Action, "schedule", r.Target.String(), r.Before, r.After)
-}
-
-// appendAudit appends one record: the caller of the request in ctx, or the
-// system actor.
-func appendAudit(ctx context.Context, log auditAppender, at time.Time, system bool, action, kind, target string,
-	before, after map[string]string,
-) error {
-	actor := identitydomain.SystemActor()
-
-	if !system {
-		ip := clientip.From(ctx)
-		actor = identitydomain.AnonymousActor(ip)
-
-		if p := identityhttp.FromContext(ctx).Principal(); !p.IsAnonymous() {
-			actor = identitydomain.UserActor(p.UserID(), ip)
-		}
-	}
-
-	e, err := identitydomain.NewAuditEntry(at, actor, action, identitydomain.ResultOK)
-	if err != nil {
-		return fmt.Errorf("audit entry: %w", err)
-	}
-
-	e = e.WithTarget(kind, target)
-
-	if len(before) > 0 {
-		e = e.WithBefore(before)
-	}
-
-	if len(after) > 0 {
-		e = e.WithAfter(after)
-	}
-
-	return log.Append(ctx, e)
 }
 
 // deviceSchedules adapts the schedules to the device page (grid/http).

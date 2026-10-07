@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
+
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	"github.com/yohang/mesh-sdr/internal/jobs/app"
 	"github.com/yohang/mesh-sdr/internal/jobs/domain"
@@ -228,39 +230,29 @@ type values struct{}
 
 func (values) Duration(string) time.Duration { return 30 * 24 * time.Hour }
 
-type audit struct{ records []app.PurgeRecord }
-
-func (a *audit) RecordPurge(_ context.Context, r app.PurgeRecord) error {
-	a.records = append(a.records, r)
-
-	return nil
-}
-
 func TestRetention(t *testing.T) {
 	ctx := context.Background()
-	s, c := newScheduler(t)
+	s, _ := newScheduler(t)
 	s.Register(&fakeJob{name: "sessions.reap", rows: 3}, time.Hour)
 
-	au := &audit{}
+	au := &audit.Records{}
 	r := app.NewRetention([]app.Store{{Name: "sessions", Label: "Sessions", SettingKey: "retention.sessions", Job: "sessions.reap", Stats: stats{rows: 7}}},
-		s, values{}, au, c.Now)
+		s, values{}, au)
 
 	views, err := r.List(ctx)
 	if err != nil || len(views) != 1 || views[0].Rows != 7 || views[0].Retention != 30*24*time.Hour || views[0].LastRun.Status() != domain.StatusNone {
 		t.Fatalf("list = %+v, %v", views, err)
 	}
 
-	actor := app.Actor{RequestID: "r1"}
-
-	if n, err := r.Purge(ctx, actor, "sessions"); err != nil || n != 3 {
+	if n, err := r.Purge(ctx, "sessions"); err != nil || n != 3 {
 		t.Fatalf("purge = %d, %v", n, err)
 	}
 
-	if len(au.records) != 1 || au.records[0].Store != "sessions" || au.records[0].Rows != 3 || au.records[0].Actor != actor {
-		t.Errorf("audit = %+v", au.records)
+	if len(*au) != 1 || (*au)[0].TargetID != "sessions" || (*au)[0].After["rows_deleted"] != "3" || (*au)[0].Actor != audit.Caller {
+		t.Errorf("audit = %+v", *au)
 	}
 
-	if _, err := r.Purge(ctx, actor, "files"); !errors.Is(err, app.ErrUnknownStore) {
+	if _, err := r.Purge(ctx, "files"); !errors.Is(err, app.ErrUnknownStore) {
 		t.Errorf("unknown store: %v", err)
 	}
 }

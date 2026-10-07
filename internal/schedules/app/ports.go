@@ -69,17 +69,3 @@ const (
 	ActionDelete  = "schedule.delete"
 	ActionDisable = "schedule.disable"
 )
-
-// AuditRecord is one schedule change. System records come from the hub;
-// the others from the caller of the request in ctx.
-type AuditRecord struct {
-	System        bool
-	Action        string
-	Target        shared.UUID
-	Before, After map[string]string
-}
-
-// Auditor appends audit records, inside the transaction of the change.
-type Auditor interface {
-	Record(ctx context.Context, r AuditRecord) error
-}
