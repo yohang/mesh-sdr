@@ -16,3 +16,7 @@ ADRs are written with Status `Proposed` (spikes) and switch to `Accepted` once t
 | [0010](0010-settings-store.md) | Settings store, retention jobs and admin pages | Accepted |
 | [0011](0011-identity-part-2.md) | Identity part 2 (passwords, bootstrap, accounts and access) | Accepted |
 | [0013](0013-ui-navigation-and-api-contract.md) | App shell navigation and REST API contract | Accepted |
+| [0014](0014-dsp-engine-strategy.md) | DSP engine strategy | Accepted |
+| [0015](0015-receiver-js-island.md) | Receiver JS island (waterfall, spectrum, audio) | Accepted |
+| [0016](0016-events-websocket-htmx-bridge.md) | Events WebSocket to htmx bridge | Accepted |
+| [0017](0017-process-supervision.md) | Process supervision of external tools (node) | Accepted |
