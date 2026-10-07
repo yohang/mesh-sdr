@@ -48,7 +48,7 @@ func (a *app) newKeysCmd() *cobra.Command {
 }
 
 func (a *app) withKeyring(ctx context.Context, fn func(k *keyring.Keyring, now time.Time) error) error {
-	cfg, _, _, err := a.loadHub(ctx)
+	cfg, _, _, err := a.loadHub(ctx, true)
 	if err != nil {
 		return err
 	}

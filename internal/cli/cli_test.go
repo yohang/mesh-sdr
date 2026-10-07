@@ -233,6 +233,13 @@ func TestAllConfigCheck(t *testing.T) {
 		t.Fatalf("all config check = %+v", r)
 	}
 
+	// Every key is printed with its origin, for both files.
+	for _, want := range []string{"hub.toml:", "node.toml:", "hub.url", "node.id", "tls.ca_cert", "tls.cert"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("all config check does not print %q:\n%s", want, r.stdout)
+		}
+	}
+
 	r = run(t, context.Background(), map[string]string{"MESHSDR_CONFIG_DIR": dir}, "node", "config", "check")
 	if r.code != ExitConfig {
 		t.Fatalf("node config check without node.id = %+v", r)

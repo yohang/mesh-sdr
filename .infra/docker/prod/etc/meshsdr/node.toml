@@ -3,3 +3,12 @@
 # drop-ins in /etc/meshsdr/node.d/, or with MESHSDR_* env vars, for example
 # MESHSDR_NODE__ID=attic (required).
 schema_version = 1
+
+# Files written by `meshsdr node enroll` (and by `meshsdr all` for its local
+# node); /etc/meshsdr/tls is a link to the data volume.
+[tls]
+cert = "tls/node.pem"
+key = "tls/node.key"
+
+[hub_trust]
+ca_cert = "tls/ca.pem"

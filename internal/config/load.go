@@ -33,6 +33,10 @@ type Options struct {
 	// the all role uses it to find the paths of the files it creates on
 	// first start, before the real load.
 	DeferSecrets bool
+	// CADefaults gives the hub the CA paths of the all role (tls/ca.pem,
+	// tls/ca.key) when both files exist in the config dir: the hub admin
+	// subcommands use it, so they work on an all deployment.
+	CADefaults bool
 }
 
 // Meta describes a loaded configuration.
@@ -105,6 +109,18 @@ func (e *Error) Error() string {
 // LoadHub loads and validates the hub configuration.
 func LoadHub(opts Options) (Hub, Meta, error) {
 	cfg := DefaultHub()
+
+	if opts.CADefaults {
+		dir := opts.Dir
+		if dir == "" {
+			dir = DefaultDir
+		}
+
+		if fileExists(filepath.Join(dir, allCACert)) && fileExists(filepath.Join(dir, allCAKey)) {
+			cfg.TLS = allHubTLS()
+		}
+	}
+
 	meta, err := load(RoleHub, &cfg, opts)
 
 	return cfg, meta, err
@@ -118,7 +134,7 @@ func LoadHub(opts Options) (Hub, Meta, error) {
 // trusts the hub CA file unless hub_trust.ca_cert is set.
 func LoadAll(opts Options) (Hub, Meta, Node, Meta, error) {
 	hub := DefaultHub()
-	hub.TLS = HubTLS{CACert: "tls/ca.pem", CAKey: Secret{source: secretFile, ref: "tls/ca.key"}}
+	hub.TLS = allHubTLS()
 
 	hubMeta, err := load(RoleHub, &hub, opts)
 	if err != nil {
@@ -140,6 +156,22 @@ func LoadAll(opts Options) (Hub, Meta, Node, Meta, error) {
 	}
 
 	return hub, hubMeta, node, nodeMeta, nil
+}
+
+// CA files of the all role, relative to the config dir.
+const (
+	allCACert = "tls/ca.pem"
+	allCAKey  = "tls/ca.key"
+)
+
+func allHubTLS() HubTLS {
+	return HubTLS{CACert: allCACert, CAKey: Secret{source: secretFile, ref: allCAKey}}
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+
+	return err == nil && info.Mode().IsRegular()
 }
 
 // LoadNode loads and validates the node configuration.

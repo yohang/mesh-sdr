@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,11 +54,21 @@ func (a *app) allConfigCheck() error {
 		return err
 	}
 
+	files := append(slices.Clone(hubMeta.Files), nodeMeta.Files...)
+
 	if a.json {
-		return a.printJSON(map[string]any{"valid": true, "role": "all", "files": append(hubMeta.Files, nodeMeta.Files...)})
+		return a.printJSON(map[string]any{
+			"valid": true, "role": "all", "files": files,
+			"origins":  map[string]any{"hub": origins(hubMeta), "node": origins(nodeMeta)},
+			"warnings": append(slices.Clone(hubMeta.Warnings), nodeMeta.Warnings...),
+		})
 	}
 
-	a.print("all configuration is valid (files: %v)", append(hubMeta.Files, nodeMeta.Files...))
+	a.print("all configuration is valid (files: %s)", strings.Join(files, ", "))
+	a.print("hub.toml:")
+	a.printOrigins(hubMeta)
+	a.print("node.toml:")
+	a.printOrigins(nodeMeta)
 
 	return nil
 }

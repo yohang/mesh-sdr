@@ -52,6 +52,7 @@ func (a *app) configCheck(role config.Role) error {
 
 	switch role {
 	case config.RoleHub:
+		opts.CADefaults = true
 		_, meta, err = config.LoadHub(opts)
 	case config.RoleNode:
 		_, meta, err = config.LoadNode(opts)
@@ -61,31 +62,40 @@ func (a *app) configCheck(role config.Role) error {
 		return err
 	}
 
-	origins := map[string]string{}
-
-	for _, k := range meta.Origins.Keys() {
-		origins[k] = meta.Origins.Of(k).String()
-	}
-
 	if a.json {
 		return a.printJSON(map[string]any{
 			"valid":    true,
 			"role":     role,
 			"files":    meta.Files,
-			"origins":  origins,
+			"origins":  origins(meta),
 			"warnings": meta.Warnings,
 		})
 	}
 
 	a.print("%s configuration is valid (files: %s)", role, strings.Join(meta.Files, ", "))
+	a.printOrigins(meta)
+
+	return nil
+}
+
+// origins maps each key of meta to its origin.
+func origins(meta config.Meta) map[string]string {
+	out := map[string]string{}
 
 	for _, k := range meta.Origins.Keys() {
-		a.print("  %-32s %s", k, origins[k])
+		out[k] = meta.Origins.Of(k).String()
+	}
+
+	return out
+}
+
+// printOrigins prints each key with its origin, then the warnings.
+func (a *app) printOrigins(meta config.Meta) {
+	for _, k := range meta.Origins.Keys() {
+		a.print("  %-32s %s", k, meta.Origins.Of(k).String())
 	}
 
 	for _, w := range meta.Warnings {
 		a.print("warning: %s", w)
 	}
-
-	return nil
 }
