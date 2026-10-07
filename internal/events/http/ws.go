@@ -225,7 +225,15 @@ type conn struct {
 	strikes map[rxv1.CloseCode]*strikes
 	// reason is the close reason recorded in the presence row.
 	reason atomic.Value
+	// watched and watchedAt are the last device recorded from
+	// presence.heartbeat, and when (read loop only).
+	watched   string
+	watchedAt time.Time
 }
+
+// attachEvery is the shortest delay between two device records of one
+// connection (presence.heartbeat).
+const attachEvery = 10 * time.Second
 
 func (cn *conn) closeReason() app.CloseReason {
 	if r, ok := cn.reason.Load().(app.CloseReason); ok {
@@ -706,8 +714,13 @@ func (cn *conn) presence(ctx context.Context, env rxv1.Envelope, id rxv1.Correla
 			return
 		}
 
-		if err := cn.m.d.Presence.Attach(ctx, cn.id, p.DeviceID); err != nil {
-			cn.logger.ErrorContext(ctx, "record watched device", slog.Any("error", err))
+		// One write per change of device, at most every attachEvery.
+		if now := cn.m.d.Now(); p.DeviceID != cn.watched && now.Sub(cn.watchedAt) >= attachEvery {
+			if err := cn.m.d.Presence.Attach(ctx, cn.id, p.DeviceID); err != nil {
+				cn.logger.ErrorContext(ctx, "record watched device", slog.Any("error", err))
+			} else {
+				cn.watched, cn.watchedAt = p.DeviceID, now
+			}
 		}
 	}
 

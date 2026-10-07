@@ -77,6 +77,7 @@ type presence struct {
 	closed   map[shared.UUID]app.CloseReason
 	beats    int
 	attached map[shared.UUID]string
+	attaches int
 }
 
 func newPresence() *presence {
@@ -106,6 +107,7 @@ func (p *presence) Attach(_ context.Context, id shared.UUID, device string) erro
 	defer p.mu.Unlock()
 
 	p.attached[id] = device
+	p.attaches++
 
 	return nil
 }
@@ -449,12 +451,18 @@ func TestPresenceRows(t *testing.T) {
 		t.Fatalf("heartbeat on a forbidden device = %+v", e)
 	}
 
+	// The same device again, or another one within 10 s: no write.
+	send(t, ws, "presence.heartbeat", "p3", map[string]any{"view": "receiver", "device_id": "hf"})
+	recv(t, ws)
+	send(t, ws, "presence.heartbeat", "p4", map[string]any{"view": "receiver", "device_id": "vhf"})
+	recv(t, ws)
+
 	f.presence.mu.Lock()
-	attached := f.presence.attached[c.ID]
+	attached, writes := f.presence.attached[c.ID], f.presence.attaches
 	f.presence.mu.Unlock()
 
-	if attached != "hf" {
-		t.Errorf("attached device = %q", attached)
+	if attached != "hf" || writes != 1 {
+		t.Errorf("attached device = %q after %d writes, want hf after 1", attached, writes)
 	}
 
 	_ = ws.Close(websocket.StatusNormalClosure, "")
