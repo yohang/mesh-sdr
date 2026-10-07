@@ -386,19 +386,13 @@ func TestRetentionAPI(t *testing.T) {
 	status, v, _ := b.json(http.MethodGet, "/api/v1/retention", "")
 	stores, _ := v["stores"].([]any)
 
-	if status != 200 || len(stores) != 4 {
+	if status != 200 || len(stores) != 3 {
 		t.Fatalf("GET = %d %v", status, v)
 	}
 
 	audit, _ := stores[1].(map[string]any)
 	if audit["store"] != "audit_log" || audit["retention"] != "365d" || audit["setting_key"] != "retention.audit_log" {
 		t.Errorf("audit store = %v", audit)
-	}
-
-	// The reporting outbox (ADR 0020).
-	outbox, _ := stores[2].(map[string]any)
-	if outbox["store"] != "reporting_outbox" || outbox["retention"] != "7d" || outbox["setting_key"] != "retention.reporting_outbox.sent" {
-		t.Errorf("outbox store = %v", outbox)
 	}
 
 	if status, v, _ = b.json(http.MethodPost, "/api/v1/retention/audit_log/purge", ""); status != 200 || v["rows_deleted"] != 0.0 {

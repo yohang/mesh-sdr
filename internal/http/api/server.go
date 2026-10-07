@@ -40,7 +40,6 @@ type Server struct {
 	FeatureHandlers
 	PresetHandlers
 	ScheduleHandlers
-	ReportingHandlers
 }
 
 var _ StrictServerInterface = Server{}

@@ -76,15 +76,6 @@ type SettingsRetention struct {
 	AuditLog Duration `toml:"audit_log" env:"AUDIT_LOG" jsonschema_extras:"x-min-duration=30d,x-max-duration=3650d,x-label=Audit log" jsonschema_description:"Audit log entries are deleted after this long (at least 30 days)."`
 	// Connections is the retention of closed presence rows (GRID-017).
 	Connections Duration `toml:"connections" env:"CONNECTIONS" jsonschema_extras:"x-min-duration=1d,x-max-duration=3650d,x-label=Closed connections" jsonschema_description:"Closed connections of the presence registry are deleted after this long."`
-	// ReportingOutbox is the retention of the reporting outbox (ADR 0020).
-	ReportingOutbox SettingsRetentionOutbox `toml:"reporting_outbox" envPrefix:"REPORTING_OUTBOX__" jsonschema:"description=Retention of the reporting outbox."`
-}
-
-// SettingsRetentionOutbox is the [settings.retention.reporting_outbox]
-// table (TECHNICAL_SPEC §7.3 outbox.purge, ADR 0020 Q15).
-type SettingsRetentionOutbox struct {
-	Sent Duration `toml:"sent" env:"SENT" jsonschema_extras:"x-min-duration=1d,x-max-duration=3650d,x-label=Delivered reports" jsonschema_description:"Reports delivered to an external network are deleted from the outbox after this long."`
-	Dead Duration `toml:"dead" env:"DEAD" jsonschema_extras:"x-min-duration=1d,x-max-duration=3650d,x-label=Undeliverable reports" jsonschema_description:"Reports given up on (too many attempts, network disabled, outbox full) are deleted after this long."`
 }
 
 // SettingsGrid is the [settings.grid] table: node heartbeats and health
@@ -126,7 +117,6 @@ func DefaultSettings() Settings {
 		},
 		Retention: SettingsRetention{
 			Sessions: MustDuration("30d"), AuditLog: MustDuration("365d"), Connections: MustDuration("30d"),
-			ReportingOutbox: SettingsRetentionOutbox{Sent: MustDuration("7d"), Dead: MustDuration("30d")},
 		},
 		Grid:          SettingsGrid{HeartbeatIntervalS: 10, OfflineAfterS: 60},
 		Invitations:   SettingsInvitations{TTLHours: 168},

@@ -538,7 +538,7 @@ func happyPaths(t *testing.T, h *contractHub) {
 	expect(admin, http.MethodPost, "/auth/logout", nil, http.StatusNoContent)
 }
 
-// schedulingPaths runs the preset, schedule and reporting operations (ADR
+// schedulingPaths runs the preset and schedule operations (ADR
 // 0020) against the device hf (100 kHz–30 MHz, 2.048 MS/s).
 func schedulingPaths(t *testing.T, h *contractHub, admin *apiClient, expect func(*apiClient, string, string, any, int) map[string]any) {
 	t.Helper()
@@ -654,10 +654,6 @@ func schedulingPaths(t *testing.T, h *contractHub, admin *apiClient, expect func
 
 	if _, res := admin.do(http.MethodDelete, "/presets/"+pid, nil); res["code"] != "preset_in_use" {
 		t.Errorf("deleting a preset in use = %v", res)
-	}
-
-	if status := expect(admin, http.MethodGet, "/reporting/status", nil, http.StatusOK); len(status["networks"].([]any)) != 7 {
-		t.Errorf("reporting status = %v", status)
 	}
 
 	expect(admin, http.MethodDelete, "/schedules/"+sid, nil, http.StatusNoContent)

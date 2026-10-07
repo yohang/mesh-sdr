@@ -3,8 +3,6 @@ package api
 import (
 	"context"
 
-	reportingapp "github.com/yohang/mesh-sdr/internal/reporting/app"
-	reportingdomain "github.com/yohang/mesh-sdr/internal/reporting/domain"
 	schedulesdomain "github.com/yohang/mesh-sdr/internal/schedules/domain"
 )
 
@@ -155,38 +153,4 @@ func (h ScheduleHandlers) DeleteSchedule(ctx context.Context, req DeleteSchedule
 	}
 
 	return DeleteSchedule204Response{}, nil
-}
-
-// ReportingStatusReader reads the outbox status (reporting/app.Engine).
-type ReportingStatusReader interface {
-	Status(ctx context.Context) ([]reportingapp.NetworkStatus, error)
-}
-
-// ReportingHandlers serve /reporting.
-type ReportingHandlers struct{ status ReportingStatusReader }
-
-// NewReportingHandlers returns the handlers.
-func NewReportingHandlers(status ReportingStatusReader) ReportingHandlers {
-	return ReportingHandlers{status: status}
-}
-
-// GetReportingStatus implements StrictServerInterface.
-func (h ReportingHandlers) GetReportingStatus(ctx context.Context, _ GetReportingStatusRequestObject) (GetReportingStatusResponseObject, error) {
-	list, err := h.status.Status(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	out := GetReportingStatus200JSONResponse{Networks: make([]ReportingNetwork, 0, len(list))}
-
-	for _, n := range list {
-		out.Networks = append(out.Networks, ReportingNetwork{
-			Network: ReportingNetworkNetwork(n.Network), Enabled: n.Enabled,
-			Pending: n.Counts[reportingdomain.StatusPending], InFlight: n.Counts[reportingdomain.StatusInFlight],
-			Failed: n.Counts[reportingdomain.StatusFailed], Sent: n.Counts[reportingdomain.StatusSent],
-			Dead: n.Counts[reportingdomain.StatusDead], LastSentAt: optTime(n.LastSentAt), OldestDueAt: optTime(n.OldestDueAt),
-		})
-	}
-
-	return out, nil
 }

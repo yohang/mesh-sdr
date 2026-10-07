@@ -16,7 +16,6 @@ import (
 	jobsapp "github.com/yohang/mesh-sdr/internal/jobs/app"
 	jobsdomain "github.com/yohang/mesh-sdr/internal/jobs/domain"
 	jobssqlite "github.com/yohang/mesh-sdr/internal/jobs/infra/sqlite"
-	reportingapp "github.com/yohang/mesh-sdr/internal/reporting/app"
 	settingsapp "github.com/yohang/mesh-sdr/internal/settings/app"
 	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 )
@@ -29,10 +28,8 @@ func jobs(adapter db.Adapter, idm *identity.Module, sch *scheduling, values jobs
 	sched := jobsapp.NewScheduler(jobssqlite.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.app.scheduler"))
 	sched.Register(idm.Reaper, identityapp.SessionReapEvery)
 	sched.Register(idm.AuditPurger, identityapp.AuditPurgeEvery)
-	// ADR 0020: the schedules' safety net and hourly push, and the
-	// reporting outbox retention.
+	// ADR 0020: the schedules' safety net and hourly push.
 	sched.Register(sch.publish, SchedulesPublishEvery)
-	sched.Register(sch.outbox, reportingapp.OutboxPurgeEvery)
 
 	connectionsPurge := gridapp.NewConnectionsPurge(gridsqlite.NewConnectionRepository(adapter),
 		func() time.Duration { return values.Duration("retention.connections") }, time.Now)
@@ -52,11 +49,6 @@ func jobs(adapter db.Adapter, idm *identity.Module, sch *scheduling, values jobs
 		return nil, nil, err
 	}
 
-	outbox, err := jobssqlite.NewTableStats(adapter, "reporting_outbox")
-	if err != nil {
-		return nil, nil, err
-	}
-
 	connections, err := jobssqlite.NewTableStats(adapter, "connections")
 	if err != nil {
 		return nil, nil, err
@@ -65,10 +57,6 @@ func jobs(adapter db.Adapter, idm *identity.Module, sch *scheduling, values jobs
 	stores := []jobsapp.Store{
 		{Name: "sessions", Label: "Ended sessions", SettingKey: "retention.sessions", Job: identityapp.JobSessionsReap, Stats: sessions},
 		{Name: "audit_log", Label: "Audit log", SettingKey: "retention.audit_log", Job: identityapp.JobAuditPurge, Stats: auditLog},
-		{
-			Name: "reporting_outbox", Label: "Reporting outbox (delivered reports)", SettingKey: reportingapp.KeySentRetention,
-			Job: reportingapp.JobOutboxPurge, Stats: outbox,
-		},
 		{Name: "connections", Label: "Connections", SettingKey: "retention.connections", Job: gridapp.JobConnectionsPurge, Stats: connections},
 	}
 

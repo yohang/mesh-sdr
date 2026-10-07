@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -21,15 +20,13 @@ import (
 	presetsdomain "github.com/yohang/mesh-sdr/internal/presets/domain"
 	presetssqlite "github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
-	reportingapp "github.com/yohang/mesh-sdr/internal/reporting/app"
-	reportingsqlite "github.com/yohang/mesh-sdr/internal/reporting/infra/sqlite"
 	schedulesapp "github.com/yohang/mesh-sdr/internal/schedules/app"
 	schedulesdomain "github.com/yohang/mesh-sdr/internal/schedules/domain"
 	schedulessqlite "github.com/yohang/mesh-sdr/internal/schedules/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
-// scheduling is the presets, schedules and reporting modules of the hub
+// scheduling is the presets and schedules modules of the hub
 // (ADR 0020), wired to the grid: the schedule guard listens to the device
 // registry, the planner feeds the desired state pushed to the nodes.
 type scheduling struct {
@@ -37,8 +34,6 @@ type scheduling struct {
 	schedules *schedulesapp.Service
 	guard     *schedulesapp.Guard
 	planner   *schedulesapp.Planner
-	reporting *reportingapp.Engine
-	outbox    *reportingapp.PurgeJob
 	publish   *schedulesPublishJob
 }
 
@@ -84,10 +79,6 @@ func newScheduling(adapter db.Adapter, g *hubGrid, values settingsReader, audit 
 	})
 	catalog.presets = s.presets
 
-	host, _ := os.Hostname()
-	s.reporting = reportingapp.NewEngine(reportingsqlite.NewOutbox(adapter), nil, reportingapp.Options{Owner: "hub@" + host},
-		now, component(logger, "reporting.app.engine"))
-	s.outbox = reportingapp.NewPurgeJob(reportingsqlite.NewOutbox(adapter), s.reporting, values, now)
 	s.publish = &schedulesPublishJob{guard: s.guard, grid: g}
 
 	// Grid hooks (GRID-016, ADM-009): the guard joins the registry's

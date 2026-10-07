@@ -190,10 +190,6 @@ trusted_proxies = []
 # heartbeat_interval_s = 10              # node heartbeat period (1..300 s)
 # offline_after_s = 60                   # offline without heartbeat (5..3600 s, > 2 heartbeats)
 
-[settings.retention.reporting_outbox]
-# sent = "7d"                            # reports delivered to external networks
-# dead = "30d"                           # reports given up on
-
 [settings.invitations]
 # ttl_hours = 168                        # invitation link validity (1..720 hours)
 
