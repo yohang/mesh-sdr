@@ -8,15 +8,21 @@
 #include "shim.h"
 
 #include <csdr/agc.hpp>
+#include <csdr/amdemod.hpp>
 #include <csdr/audioresampler.hpp>
 #include <csdr/complex.hpp>
+#include <csdr/dcblock.hpp>
 #include <csdr/deemphasis.hpp>
 #include <csdr/fft.hpp>
+#include <csdr/fftfilter.hpp>
+#include <csdr/filter.hpp>
 #include <csdr/fmdemod.hpp>
 #include <csdr/limit.hpp>
 #include <csdr/logaveragepower.hpp>
 #include <csdr/module.hpp>
+#include <csdr/noisefilter.hpp>
 #include <csdr/reader.hpp>
+#include <csdr/realpart.hpp>
 #include <csdr/shift.hpp>
 #include <csdr/window.hpp>
 #include <csdr/writer.hpp>
@@ -127,6 +133,14 @@ class Stage : public msdr_stage {
 
 using cf = Csdr::complex<float>;
 
+// NoiseStage keeps the filter of its module to change the threshold.
+class NoiseStage : public Stage<float, float> {
+  public:
+    explicit NoiseStage(Csdr::NoiseFilter<float>* f) : Stage<float, float>(new Csdr::FilterModule<float>(f), true), filter(f) {}
+
+    Csdr::NoiseFilter<float>* filter;
+};
+
 template <typename F>
 msdr_stage* build(F f) {
     try {
@@ -196,6 +210,46 @@ msdr_stage* msdr_agc_new(float reference, float attack, float decay, float max_g
 
 msdr_stage* msdr_resampler_new(double ratio) {
     return build([&]() -> msdr_stage* { return new Stage<float, float>(new Csdr::AudioResampler(ratio)); });
+}
+
+msdr_stage* msdr_amdemod_new(void) {
+    return build([&]() -> msdr_stage* { return new Stage<cf, float>(new Csdr::AmDemod()); });
+}
+
+msdr_stage* msdr_dcblock_new(void) {
+    return build([&]() -> msdr_stage* { return new Stage<float, float>(new Csdr::DcBlock()); });
+}
+
+msdr_stage* msdr_realpart_new(void) {
+    return build([&]() -> msdr_stage* { return new Stage<cf, float>(new Csdr::Realpart()); });
+}
+
+msdr_stage* msdr_bandpass_new(float low, float high, float transition) {
+    return build([&]() -> msdr_stage* {
+        Csdr::HammingWindow window;
+        std::lock_guard<std::mutex> lock(fftwPlanner);
+        return new Stage<cf, cf>(new Csdr::FilterModule<cf>(new Csdr::FftBandPassFilter(low, high, transition, &window)), true);
+    });
+}
+
+msdr_stage* msdr_wfm_deemphasis_new(unsigned sample_rate, float tau) {
+    return build([&]() -> msdr_stage* { return new Stage<float, float>(new Csdr::WfmDeemphasis(sample_rate, tau)); });
+}
+
+msdr_stage* msdr_noisefilter_new(unsigned fft_size, float threshold_db) {
+    return build([&]() -> msdr_stage* {
+        std::lock_guard<std::mutex> lock(fftwPlanner);
+        auto* f = new Csdr::NoiseFilter<float>(fft_size);
+        f->setThreshold(threshold_db);
+        return new NoiseStage(f);
+    });
+}
+
+int msdr_noisefilter_set_threshold(msdr_stage* s, float threshold_db) {
+    auto* st = dynamic_cast<NoiseStage*>(s);
+    if (st == nullptr) return -1;
+    st->filter->setThreshold(threshold_db);
+    return 0;
 }
 
 long msdr_stage_process(msdr_stage* s, const void* in, size_t n_in, void* out, size_t cap_out) {

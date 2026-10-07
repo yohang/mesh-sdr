@@ -210,3 +210,74 @@ func NewResampler(inRate float64, outRate int) (*Stage[float32, float32], error)
 
 	return newStage[float32, float32](C.msdr_resampler_new(C.double(float64(outRate)/inRate)), "resampler")
 }
+
+// NewAMDemod returns Csdr::AmDemod: the magnitude of each sample.
+func NewAMDemod() (*Stage[complex64, float32], error) {
+	return newStage[complex64, float32](C.msdr_amdemod_new(), "am demod")
+}
+
+// NewDCBlock returns Csdr::DcBlock: a one-pole DC blocker.
+func NewDCBlock() (*Stage[float32, float32], error) {
+	return newStage[float32, float32](C.msdr_dcblock_new(), "dc block")
+}
+
+// NewRealPart returns Csdr::Realpart: the in-phase part of each sample.
+func NewRealPart() (*Stage[complex64, float32], error) {
+	return newStage[complex64, float32](C.msdr_realpart_new(), "real part")
+}
+
+// NewBandPass returns Csdr::FftBandPassFilter (Hamming window): a complex
+// band-pass filter from low to high with the given transition width, all
+// relative to the sample rate. It works on whole FFT blocks and holds one
+// block back.
+func NewBandPass(low, high, transition float32) (*Stage[complex64, complex64], error) {
+	if low >= high || low < -0.5 || high > 0.5 || transition <= 0 || transition > 0.5 {
+		return nil, fmt.Errorf("%w: band-pass [%g, %g] transition %g", ErrBuild, low, high, transition)
+	}
+
+	return newStage[complex64, complex64](C.msdr_bandpass_new(C.float(low), C.float(high), C.float(transition)), "band-pass")
+}
+
+// NewWFMDeemphasis returns Csdr::WfmDeemphasis: the one-pole broadcast FM
+// de-emphasis with time constant tau seconds at sampleRate.
+func NewWFMDeemphasis(sampleRate int, tau float32) (*Stage[float32, float32], error) {
+	if sampleRate <= 0 || tau <= 0 {
+		return nil, fmt.Errorf("%w: wfm deemphasis rate %d tau %g", ErrBuild, sampleRate, tau)
+	}
+
+	return newStage[float32, float32](C.msdr_wfm_deemphasis_new(C.uint(sampleRate), C.float(tau)), "wfm deemphasis")
+}
+
+// NoiseFilter is Csdr::NoiseFilter<float>: a spectral gate that keeps the
+// FFT bins above the average power times a threshold.
+type NoiseFilter struct {
+	*Stage[float32, float32]
+}
+
+// NewNoiseFilter returns a noise filter on fftSize-sample blocks (half a
+// block of output per block; one block held back).
+func NewNoiseFilter(fftSize int, thresholdDB float32) (*NoiseFilter, error) {
+	if fftSize < 32 {
+		return nil, fmt.Errorf("%w: noise filter size %d", ErrBuild, fftSize)
+	}
+
+	s, err := newStage[float32, float32](C.msdr_noisefilter_new(C.uint(fftSize), C.float(thresholdDB)), "noise filter")
+	if err != nil {
+		return nil, err
+	}
+
+	return &NoiseFilter{Stage: s}, nil
+}
+
+// SetThreshold changes the gate (dB).
+func (s *NoiseFilter) SetThreshold(db float32) error {
+	if s.h == nil {
+		return ErrClosed
+	}
+
+	if C.msdr_noisefilter_set_threshold(s.h, C.float(db)) != 0 {
+		return ErrProcess
+	}
+
+	return nil
+}

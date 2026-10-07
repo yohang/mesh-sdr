@@ -25,6 +25,18 @@ msdr_stage* msdr_nfm_deemphasis_new(unsigned sample_rate);
 msdr_stage* msdr_agc_new(float reference, float attack, float decay, float max_gain, unsigned hang);
 // ratio is output rate / input rate.
 msdr_stage* msdr_resampler_new(double ratio);
+msdr_stage* msdr_amdemod_new(void);
+msdr_stage* msdr_dcblock_new(void);
+msdr_stage* msdr_realpart_new(void);
+// low, high and transition are relative to the sample rate (-0.5..0.5).
+msdr_stage* msdr_bandpass_new(float low, float high, float transition);
+msdr_stage* msdr_wfm_deemphasis_new(unsigned sample_rate, float tau);
+// fft_size is the noise filter block; threshold_db is its gate above the
+// average power.
+msdr_stage* msdr_noisefilter_new(unsigned fft_size, float threshold_db);
+
+// msdr_noisefilter_set_threshold changes the gate of a noise filter stage.
+int msdr_noisefilter_set_threshold(msdr_stage* s, float threshold_db);
 
 // msdr_shift_set_rate changes the rate (cycles per sample) of a shift stage.
 int msdr_shift_set_rate(msdr_stage* s, float rate);
