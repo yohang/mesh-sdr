@@ -1044,7 +1044,12 @@ func (ss *session) presetApplied(device string, oldCenter int64, preset ctl.Pres
 		params := cur
 
 		if caller {
-			params.Mode, params.OffsetHz = preset.StartMod, start
+			params.OffsetHz = start
+
+			// A new mode takes its default pass band (demod.set).
+			if preset.StartMod != cur.Mode {
+				params.Mode, params.LowHz, params.HighHz = preset.StartMod, 0, 0
+			}
 
 			if q := preset.InitialSquelchLevel; q != nil {
 				params.SquelchDB = new(float64(*q))
@@ -1057,7 +1062,7 @@ func (ss *session) presetApplied(device string, oldCenter int64, preset ctl.Pres
 		if err != nil && params.Mode != cur.Mode {
 			// The preset's mode is not provided by this node: keep the
 			// current one.
-			params.Mode = cur.Mode
+			params.Mode, params.LowHz, params.HighHz = cur.Mode, cur.LowHz, cur.HighHz
 			err = d.demod.Set(params)
 		}
 
@@ -1068,7 +1073,7 @@ func (ss *session) presetApplied(device string, oldCenter int64, preset ctl.Pres
 			continue
 		}
 
-		res := applied(params)
+		res := applied(d.demod.Params())
 		ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: d.stream, Applied: &res})
 	}
 
