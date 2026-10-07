@@ -67,6 +67,7 @@ type fakeEngine struct {
 
 func (e *fakeEngine) Samples(uint64, time.Time, []complex64) { e.mu.Lock(); e.samples++; e.mu.Unlock() }
 func (e *fakeEngine) Start(domain.Tuning)                    { e.mu.Lock(); e.starts++; e.mu.Unlock() }
+func (e *fakeEngine) SetTuning(domain.Tuning)                {}
 func (e *fakeEngine) Stop()                                  { e.mu.Lock(); e.stops++; e.mu.Unlock() }
 func (e *fakeEngine) Retuned(domain.Tuning)                  { e.mu.Lock(); e.tunes++; e.mu.Unlock() }
 func (e *fakeEngine) Close()                                 {}

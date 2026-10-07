@@ -125,6 +125,8 @@ type Demod interface {
 // device source and serves the shared spectrum and the demodulators.
 type Engine interface {
 	IQSink
+	// SetTuning records the tuning of a device that is not running yet.
+	SetTuning(t domain.Tuning)
 	// Start begins a new run of the source at tuning t (rings reset).
 	Start(t domain.Tuning)
 	// Retuned records a live change of the centre frequency.

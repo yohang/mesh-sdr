@@ -84,14 +84,16 @@ func ringSlots(rate, block int) int {
 	return int(RingDuration.Seconds()*float64(rate))/block + 2
 }
 
-// Start implements app.Engine.
+// Start implements app.Engine. The demodulator channels are rebuilt for
+// the new run outside the engine lock, so the front-end is never held up
+// by filter design.
 func (e *Engine) Start(t domain.Tuning) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	e.stopLocked()
 
 	if e.closed {
+		e.mu.Unlock()
+
 		return
 	}
 
@@ -106,12 +108,46 @@ func (e *Engine) Start(t domain.Tuning) {
 
 	ep.plan = plan
 	e.ep, e.tuning = ep, t
+	demods := slices.Collect(maps.Keys(e.demods))
+	e.reconcileLocked()
+	e.mu.Unlock()
 
-	for d := range e.demods {
-		d.bind(ep)
+	for _, d := range demods {
+		e.bind(d, ep)
+	}
+}
+
+// bind builds the channel of d for ep outside the lock and installs it if
+// ep is still the current run. An offset that no longer fits leaves the
+// demodulator silent until it is changed.
+func (e *Engine) bind(d *demod, ep *epoch) {
+	b, err := newBinding(ep, d.Params())
+	if err != nil {
+		e.log.Warn("demodulator does not fit the new sample rate", slog.Any("error", err))
 	}
 
-	e.reconcileLocked()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.ep != ep {
+		return
+	}
+
+	if _, ok := e.demods[d]; ok {
+		d.setBinding(b)
+	}
+}
+
+// SetTuning records the tuning of a device that has not started yet, so
+// that the spectrum geometry and demodulator offsets are checked against
+// it.
+func (e *Engine) SetTuning(t domain.Tuning) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.ep == nil {
+		e.tuning = t
+	}
 }
 
 // Retuned implements app.Engine.
@@ -139,7 +175,7 @@ func (e *Engine) stopLocked() {
 	e.ep.iq.Close()
 
 	for d := range e.demods {
-		d.bind(nil)
+		d.setBinding(nil)
 	}
 
 	e.ep = nil
@@ -300,7 +336,8 @@ func (e *Engine) runChannelizer(ctx context.Context, ep *epoch) {
 	}
 }
 
-// NewDemod implements app.Engine.
+// NewDemod implements app.Engine. Its channel is validated against the
+// device tuning and built outside the engine lock.
 func (e *Engine) NewDemod(p app.DemodParams, audio func(app.AudioOut), meter func(app.Meter)) (app.Demod, error) {
 	if err := validate(p); err != nil {
 		return nil, err
@@ -309,24 +346,68 @@ func (e *Engine) NewDemod(p app.DemodParams, audio func(app.AudioOut), meter fun
 	d := &demod{e: e, audio: audio, meter: meter, params: p, wake: make(chan struct{}, 1), done: make(chan struct{})}
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	closed, ep, tuning := e.closed, e.ep, e.tuning
+	e.mu.Unlock()
 
-	if e.closed {
+	if closed {
 		return nil, domain.ErrDeviceUnavailable
 	}
 
-	if e.ep != nil {
-		if err := d.bindChecked(e.ep); err != nil {
+	var b *binding
+
+	switch {
+	case ep != nil:
+		nb, err := newBinding(ep, p)
+		if err != nil {
+			return nil, err
+		}
+
+		b = nb
+	case tuning.Rate().PerSecond() > 0:
+		if err := checkChannel(tuning.Rate().PerSecond(), p); err != nil {
 			return nil, err
 		}
 	}
 
-	e.demods[d] = struct{}{}
-	e.reconcileLocked()
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
 
+		return nil, domain.ErrDeviceUnavailable
+	}
+
+	e.demods[d] = struct{}{}
+	current := e.ep
+
+	if b != nil && b.ep == current {
+		d.setBinding(b)
+	}
+
+	e.reconcileLocked()
 	e.wg.Go(d.run)
+	e.mu.Unlock()
+
+	// A run started meanwhile: bind to it.
+	if current != nil && (b == nil || b.ep != current) {
+		e.bind(d, current)
+	}
 
 	return d, nil
+}
+
+// checkChannel validates the channel of p at a device rate before the
+// device runs.
+func checkChannel(rate int, p app.DemodParams) error {
+	plan, err := dsp.NewChannelPlan(rate, dsp.NFMChannelRate)
+	if err != nil {
+		return domain.ErrDeviceUnavailable.WithDetail("no demodulator at this sample rate")
+	}
+
+	if _, err := plan.NewChannel(float64(p.OffsetHz), p.LowHz, p.HighHz); err != nil {
+		return domain.ErrOutOfRange.WithDetail(err.Error())
+	}
+
+	return nil
 }
 
 func (e *Engine) removeDemod(d *demod) {
