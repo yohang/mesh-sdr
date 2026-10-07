@@ -13,6 +13,10 @@ func TestLoadBodyFields(t *testing.T) {
 		t.Errorf("login fields = %+v", login)
 	}
 
+	if req := login.required; len(req) != 2 || req[0] != "login" || req[1] != "password" {
+		t.Errorf("login required fields = %v", req)
+	}
+
 	if pw := f["POST /auth/password"].allowed; !pw["current_password"] || !pw["new_password"] || len(pw) != 2 {
 		t.Errorf("password fields = %v", pw)
 	}

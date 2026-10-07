@@ -25,6 +25,12 @@ type Sessions interface {
 	ChangePassword(ctx context.Context, current, newPassword string) (domain.Principal, string, *http.Cookie, bool, error)
 	// Actor returns who makes the request, for account operations.
 	Actor(ctx context.Context) app.Actor
+	// CheckSetup checks a first-admin setup token and returns the minimum
+	// password length.
+	CheckSetup(ctx context.Context, token string) (int, error)
+	// CompleteSetup creates the first admin and signs it in.
+	// email and displayName are optional.
+	CompleteSetup(ctx context.Context, token, username, email, displayName, password string) (domain.Principal, string, []*http.Cookie, error)
 }
 
 // AuthHandlers serve /auth/session, /auth/login and /auth/logout.
@@ -79,6 +85,48 @@ func (h AuthHandlers) ChangePassword(ctx context.Context, req ChangePasswordRequ
 	}
 
 	return sessionResponse{info: sessionInfo(p, token), cookies: []*http.Cookie{cookie}}, nil
+}
+
+// CheckSetup implements StrictServerInterface.
+func (h AuthHandlers) CheckSetup(ctx context.Context, req CheckSetupRequestObject) (CheckSetupResponseObject, error) {
+	n, err := h.sessions.CheckSetup(ctx, req.Token)
+
+	var rl *domain.RateLimitError
+	if errors.As(err, &rl) {
+		return rateLimited{err: rl}, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return CheckSetup200JSONResponse{MinPasswordLength: n}, nil
+}
+
+// CompleteSetup implements StrictServerInterface.
+func (h AuthHandlers) CompleteSetup(ctx context.Context, req CompleteSetupRequestObject) (CompleteSetupResponseObject, error) {
+	var email, displayName string
+	if req.Body.Email != nil {
+		email = *req.Body.Email
+	}
+
+	if req.Body.DisplayName != nil {
+		displayName = *req.Body.DisplayName
+	}
+
+	b := req.Body
+	p, token, cookies, err := h.sessions.CompleteSetup(ctx, b.Token, b.Username, email, displayName, b.Password)
+
+	var rl *domain.RateLimitError
+	if errors.As(err, &rl) {
+		return rateLimited{err: rl}, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return sessionResponse{info: sessionInfo(p, token), cookies: cookies}, nil
 }
 
 // Logout implements StrictServerInterface.
@@ -142,6 +190,7 @@ func (s sessionResponse) VisitLoginResponse(w http.ResponseWriter) error      { 
 func (s sessionResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
 	return s.write(w)
 }
+func (s sessionResponse) VisitCompleteSetupResponse(w http.ResponseWriter) error { return s.write(w) }
 
 // rateLimited is a 429 problem with Retry-After.
 type rateLimited struct{ err *domain.RateLimitError }
@@ -151,6 +200,10 @@ func (r rateLimited) VisitLoginResponse(w http.ResponseWriter) error { return r.
 func (r rateLimited) VisitChangePasswordResponse(w http.ResponseWriter) error { return r.write(w) }
 
 func (r rateLimited) VisitChangeMyEmailResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (r rateLimited) VisitCheckSetupResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (r rateLimited) VisitCompleteSetupResponse(w http.ResponseWriter) error { return r.write(w) }
 
 func (r rateLimited) write(w http.ResponseWriter) error {
 	w.Header().Set("Retry-After", strconv.Itoa(int(r.err.RetryAfter().Seconds())))

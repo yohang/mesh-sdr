@@ -5,8 +5,10 @@ package shell
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/shell/app"
+	"github.com/yohang/mesh-sdr/internal/shell/domain"
 	shellhttp "github.com/yohang/mesh-sdr/internal/shell/http"
 	"github.com/yohang/mesh-sdr/internal/shell/infra"
 	"github.com/yohang/mesh-sdr/internal/web"
@@ -18,12 +20,18 @@ import (
 type Deps struct {
 	// Settings reads the effective settings (the settings store).
 	Settings infra.Values
-	// Viewer tells what the visitor may open (nil: no navigation).
-	Viewer shellhttp.Viewer
-	Logger *slog.Logger
-	// User returns the signed-in user of a request for the top bar (nil:
-	// anonymous). Optional.
+	// AdminGate tells whether the visitor may open the admin area (admin
+	// role, from an allowed network). Nil: the Admin section is never shown.
+	AdminGate app.Gate
+	Logger    *slog.Logger
+	// User returns the signed-in visitor of a request for the user menu
+	// (nil: anonymous). Optional.
 	User func(r *http.Request) *layout.User
+	// Images tells whether a station image is set (Receiver page).
+	// Optional.
+	Images app.StationImages
+	// Now is the clock (time.Now when nil).
+	Now func() time.Time
 }
 
 // Module is the wired shell module.
@@ -42,11 +50,27 @@ func Wire(d Deps) Module {
 	settings := infra.NewStoreSettings(d.Settings)
 	lookAndFeel := app.NewLookAndFeel(settings, component("shell.app.look_and_feel"))
 	policy := app.NewPolicy(settings, component("shell.app.policy"))
-	source := shellhttp.NewShellSource(lookAndFeel, d.Viewer, d.User)
+	// Receiver, Map, Decodes and Files are open to everyone until their
+	// modules bring their own access policies (FEATURE_SPEC §10.2).
+	nav := app.NewNavigation(map[domain.Section]app.Gate{
+		domain.SectionReceiver: app.Everyone,
+		domain.SectionMap:      app.Everyone,
+		domain.SectionDecodes:  app.Everyone,
+		domain.SectionFiles:    app.Everyone,
+		domain.SectionAdmin:    d.AdminGate,
+	})
+	now := d.Now
+	if now == nil {
+		now = time.Now
+	}
+
+	source := shellhttp.NewShellSource(lookAndFeel, nav, d.User, now)
 	rd := render.New(source, component("web.render"))
+
+	station := app.NewStation(settings, d.Images)
 
 	return Module{
 		Renderer: rd,
-		HTTP:     shellhttp.NewModule(rd, source, policy, web.Static(), component("shell.http")),
+		HTTP:     shellhttp.NewModule(rd, source, policy, station, web.Static(), component("shell.http")),
 	}
 }

@@ -36,6 +36,7 @@ type Profile interface {
 	Me(ctx context.Context, by app.Actor) (*domain.User, error)
 	SetDisplayName(ctx context.Context, by app.Actor, name string) (*domain.User, error)
 	ChangeEmail(ctx context.Context, by app.Actor, email, currentPassword string) (app.EmailChangeResult, error)
+	ConfirmEmail(ctx context.Context, token string, meta app.RequestMeta) error
 }
 
 // AccountHandlers serve /me, /roles and /users/….
@@ -109,6 +110,17 @@ func (h AccountHandlers) ChangeMyEmail(ctx context.Context, req ChangeMyEmailReq
 
 	return jsonOK{EmailChangeResult{Pending: res.Pending}}, nil
 }
+
+// ConfirmEmail implements StrictServerInterface.
+func (h AccountHandlers) ConfirmEmail(ctx context.Context, req ConfirmEmailRequestObject) (ConfirmEmailResponseObject, error) {
+	if err := h.profile.ConfirmEmail(ctx, req.Body.Token, h.sessions.Actor(ctx).Meta); err != nil {
+		return nil, err
+	}
+
+	return noContent{}, nil
+}
+
+func (n noContent) VisitConfirmEmailResponse(w http.ResponseWriter) error { return n.write(w) }
 
 func (j jsonOK) VisitGetMeResponse(w http.ResponseWriter) error         { return j.write(w) }
 func (j jsonOK) VisitUpdateMeResponse(w http.ResponseWriter) error      { return j.write(w) }

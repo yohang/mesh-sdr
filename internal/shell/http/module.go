@@ -8,36 +8,35 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/yohang/mesh-sdr/internal/shell/app"
+	"github.com/yohang/mesh-sdr/internal/shell/domain"
+	"github.com/yohang/mesh-sdr/internal/version"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 //go:generate go tool templ generate
 
-// Viewer tells what the visitor of a request may open.
-type Viewer interface {
-	// IsAdmin reports whether the visitor may open the admin area (admin
-	// role, from an allowed network).
-	IsAdmin(r *http.Request) bool
-}
-
 // ShellSource builds the per-request shell data from the look and feel and
-// the visitor.
+// the sections the visitor may open.
 type ShellSource struct {
 	lookAndFeel *app.LookAndFeel
-	viewer      Viewer
+	nav         *app.Navigation
 	user        func(r *http.Request) *layout.User
+	now         func() time.Time
 }
 
-// NewShellSource returns a ShellSource. viewer may be nil (no navigation);
-// user returns the signed-in user of a request for the top bar (nil:
-// anonymous) and may be nil.
-func NewShellSource(lookAndFeel *app.LookAndFeel, viewer Viewer, user func(r *http.Request) *layout.User) *ShellSource {
-	return &ShellSource{lookAndFeel: lookAndFeel, viewer: viewer, user: user}
+// NewShellSource returns a ShellSource. user returns the signed-in visitor
+// of a request for the user menu (nil: anonymous); it may be nil. now is
+// the clock of the top bar.
+func NewShellSource(lookAndFeel *app.LookAndFeel, nav *app.Navigation, user func(r *http.Request) *layout.User,
+	now func() time.Time,
+) *ShellSource {
+	return &ShellSource{lookAndFeel: lookAndFeel, nav: nav, user: user, now: now}
 }
 
 // Shell implements render.ShellSource.
@@ -54,8 +53,8 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 	}
 
 	var nav []layout.Link
-	if s.viewer != nil && s.viewer.IsAdmin(r) {
-		nav = append(nav, layout.Link{Label: "Admin", Href: "/admin", Section: layout.SectionAdmin})
+	for _, sec := range s.nav.Sections(r.Context()) {
+		nav = append(nav, layout.Link{Label: sec.Label(), Href: sec.Path(), Section: sec.ID()})
 	}
 
 	var user *layout.User
@@ -67,8 +66,12 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 		User:        user,
 		SiteName:    v.SiteName,
 		Theme:       theme,
-		FooterLinks: []layout.Link{{Label: "Usage policy", Href: v.PolicyURL}},
+		FooterLinks: footerLinks(v),
+		HelpURL:     v.Help.String(),
+		Shortcuts:   v.Shortcuts.Enabled(),
+		Product:     product(),
 		Nav:         nav,
+		Now:         s.now(),
 	}
 }
 
@@ -77,6 +80,7 @@ type Module struct {
 	render   *render.Renderer
 	shell    render.ShellSource
 	policy   *app.Policy
+	station  *app.Station
 	static   fs.FS
 	markdown *markdown
 	logger   *slog.Logger
@@ -84,8 +88,10 @@ type Module struct {
 
 // NewModule returns the shell router module. static is the embedded static
 // assets filesystem (web.Static).
-func NewModule(rd *render.Renderer, shell render.ShellSource, policy *app.Policy, static fs.FS, logger *slog.Logger) *Module {
-	return &Module{render: rd, shell: shell, policy: policy, static: static, markdown: newMarkdown(), logger: logger}
+func NewModule(rd *render.Renderer, shell render.ShellSource, policy *app.Policy, station *app.Station, static fs.FS,
+	logger *slog.Logger,
+) *Module {
+	return &Module{render: rd, shell: shell, policy: policy, station: station, static: static, markdown: newMarkdown(), logger: logger}
 }
 
 // Middlewares implements internal/http.Module: the shell has none.
@@ -103,9 +109,13 @@ func (m *Module) Routes(r chi.Router) {
 		r.Head(pattern, h)
 	}
 
-	get("/", m.home)
+	get("/", m.receiver)
+	get(domain.SectionMap.Path(), m.placeholder(domain.SectionMap, "The live map is not available yet."))
+	get(domain.SectionDecodes.Path(), m.placeholder(domain.SectionDecodes, "Decoded messages are not available yet."))
+	get(domain.SectionFiles.Path(), m.placeholder(domain.SectionFiles, "Received files are not available yet."))
 	get("/robots.txt", robots)
 	get("/policy", m.policyPage)
+	get(AboutPath, m.aboutPage)
 	get("/manifest.webmanifest", m.manifest)
 	get("/favicon.ico", favicon(m.static))
 }
@@ -136,10 +146,31 @@ func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	m.render.MethodNotAllowed(w, r)
 }
 
-// home is a placeholder home page until the Receiver section (UI-006) takes
-// over "/".
-func (m *Module) home(w http.ResponseWriter, r *http.Request) {
-	m.render.Page(w, r, http.StatusOK, layout.Page{}, homePage(m.shell.Shell(r).SiteName), nil)
+// receiver is the Receiver section's entry page. Until the receiver exists
+// (M1), it presents the station (name, location, images, description) and
+// says that listening is not available yet.
+func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
+	st := m.station.View(r.Context())
+
+	desc, err := m.markdown.HTML(st.PhotoDesc)
+	if err != nil {
+		m.logger.WarnContext(r.Context(), "render station description", slog.Any("error", err))
+
+		desc = ""
+	}
+
+	page := layout.Page{Section: domain.SectionReceiver.ID()}
+	m.render.Page(w, r, http.StatusOK, page, receiverPage(m.shell.Shell(r).SiteName, st, desc), nil)
+}
+
+// placeholder serves the entry page of a section whose module does not
+// exist yet (Map, Decodes, Files): its heading and a short notice. The
+// section's module takes the route over when it lands.
+func (m *Module) placeholder(sec domain.Section, notice string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		page := layout.Page{Title: sec.Label(), Section: sec.ID()}
+		m.render.Page(w, r, http.StatusOK, page, placeholderPage(sec.Label(), notice), nil)
+	}
 }
 
 // policyPage serves the usage policy (UI-003), public.
@@ -153,4 +184,29 @@ func (m *Module) policyPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.render.Page(w, r, http.StatusOK, layout.Page{Title: "Usage policy"}, policyPage(html), nil)
+}
+
+// AboutPath is the About page (UI-010).
+const AboutPath = "/about"
+
+// product describes the running build.
+func product() layout.Product {
+	return layout.Product{Name: "MeshSDR", Version: version.String(), License: version.License, SourceURL: version.SourceURL()}
+}
+
+// aboutPage serves the About page: product, version, licence and the link
+// to the source code of this build (AGPL-3.0 section 13), public.
+func (m *Module) aboutPage(w http.ResponseWriter, r *http.Request) {
+	m.render.Page(w, r, http.StatusOK, layout.Page{Title: "About"}, aboutPage(product()), nil)
+}
+
+// footerLinks are the information links of the footer and the user menu:
+// help (when set), the usage policy and About.
+func footerLinks(v app.View) []layout.Link {
+	var links []layout.Link
+	if !v.Help.IsZero() {
+		links = append(links, layout.Link{Label: "Help", Href: v.Help.String(), External: true})
+	}
+
+	return append(links, layout.Link{Label: "Usage policy", Href: v.PolicyURL}, layout.Link{Label: "About", Href: AboutPath})
 }

@@ -19,6 +19,7 @@ type InvitationService interface {
 	Revoke(ctx context.Context, by app.Actor, id domain.InvitationID) error
 	Check(ctx context.Context, token string, meta app.RequestMeta) (*domain.Invitation, error)
 	Accept(ctx context.Context, in app.AcceptInput) (app.LoginResult, error)
+	TestMail(ctx context.Context, by app.Actor) (domain.Email, error)
 }
 
 // SessionOpener turns an opened session into its response parts.
@@ -186,6 +187,18 @@ func (j jsonOK) VisitListInvitationsResponse(w http.ResponseWriter) error { retu
 func (j jsonOK) VisitCheckInvitationResponse(w http.ResponseWriter) error { return j.write(w) }
 
 func (n noContent) VisitRevokeInvitationResponse(w http.ResponseWriter) error { return n.write(w) }
+
+// SendTestMail implements StrictServerInterface.
+func (h InvitationHandlers) SendTestMail(ctx context.Context, _ SendTestMailRequestObject) (SendTestMailResponseObject, error) {
+	to, err := h.invitations.TestMail(ctx, h.sessions.Actor(ctx))
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonOK{MailTest{To: to.String()}}, nil
+}
+
+func (j jsonOK) VisitSendTestMailResponse(w http.ResponseWriter) error { return j.write(w) }
 
 func (r rateLimited) VisitCheckInvitationResponse(w http.ResponseWriter) error  { return r.write(w) }
 func (r rateLimited) VisitAcceptInvitationResponse(w http.ResponseWriter) error { return r.write(w) }

@@ -15,18 +15,21 @@ import (
 )
 
 // bodyFields maps an operation ("METHOD /path" as in the OpenAPI document)
-// to the fields its JSON request body may carry: the properties of a body
-// schema that declares additionalProperties: false.
+// to the fields its JSON request body may carry (the properties of a body
+// schema that declares additionalProperties: false) and must carry (its
+// required properties).
 type bodyFields map[string]closedBody
 
 // closedBody is the closed request body of an operation.
 type closedBody struct {
 	operation string // generated Go name, as in Policy
 	allowed   map[string]bool
+	required  []string
 }
 
 type schemaDoc struct {
 	Ref                  string                     `json:"$ref"`
+	Required             []string                   `json:"required"`
 	Properties           map[string]json.RawMessage `json:"properties"`
 	AdditionalProperties *json.RawMessage           `json:"additionalProperties"`
 }
@@ -83,7 +86,10 @@ func loadBodyFields(spec []byte) (bodyFields, error) {
 				allowed[p] = true
 			}
 
-			out[strings.ToUpper(method)+" "+path] = closedBody{operation: goName(op.ID), allowed: allowed}
+			required := slices.Clone(s.Required)
+			slices.Sort(required)
+
+			out[strings.ToUpper(method)+" "+path] = closedBody{operation: goName(op.ID), allowed: allowed, required: required}
 		}
 	}
 
@@ -91,7 +97,10 @@ func loadBodyFields(spec []byte) (bodyFields, error) {
 }
 
 // rejectUnknownFields refuses JSON bodies with fields their schema does not
-// declare (SR-20): 400 unknown_field, one field error per unknown field.
+// declare (SR-20): 400 unknown_field, one field error per unknown field. It
+// also refuses bodies without a field their schema requires (400
+// missing_field), which the generated decoder would otherwise read as its
+// zero value (an absent display name would clear it).
 // It runs once the route is matched, and restores the body for the
 // generated decoder. A caller the policy refuses gets the policy's answer:
 // the body is checked only for authorised callers.
@@ -142,8 +151,27 @@ func (f bodyFields) handler(next http.Handler, policy Policy, authz Authorizer) 
 			}
 		}
 
-		if len(unknown) == 0 {
+		var missing []string
+
+		for _, k := range body.required {
+			if _, ok := obj[k]; !ok {
+				missing = append(missing, k)
+			}
+		}
+
+		if len(unknown) == 0 && len(missing) == 0 {
 			next.ServeHTTP(w, r)
+
+			return
+		}
+
+		if len(unknown) == 0 {
+			p := problem.New(http.StatusBadRequest, "missing_field", "the request body lacks required fields")
+			for _, k := range missing {
+				p.Errors = append(p.Errors, problem.FieldError{Path: k, Code: "missing_field", Message: "required field"})
+			}
+
+			problem.Write(w, p)
 
 			return
 		}

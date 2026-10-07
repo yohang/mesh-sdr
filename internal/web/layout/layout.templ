@@ -9,8 +9,9 @@ import "strconv"
 // audio engine, the live region) survives client-side navigation. Back/forward
 // restores only the [hx-history-elt] element.
 //
-// Slots for later tickets: the top bar gets the nav (UI-006), the UTC clock and
-// notifications (UI-006, UI-011) and the user menu (UI-010).
+// The top bar holds the logo and site name, the section nav (a bottom tab bar
+// below 768 px), the UTC clock, the notifications area and the user menu
+// (UI-006, UI-010).
 templ Document(s Shell, p Page, content templ.Component) {
 	<!DOCTYPE html>
 	<html lang="en" data-theme={ string(s.Theme) }>
@@ -34,69 +35,166 @@ templ Document(s Shell, p Page, content templ.Component) {
 			<script src="/static/js/shell.js" type="module" nonce={ templ.GetNonce(ctx) }></script>
 		</head>
 		<body
-			class="flex min-h-dvh flex-col bg-bg text-fg antialiased"
+			class="flex min-h-dvh flex-col bg-bg pb-16 text-fg antialiased md:pb-0"
+			data-shortcuts={ s.ShortcutsAttr() }
 			hx-boost:inherited='target:"#main" select:"#main" swap:"outerHTML"'
 		>
 			<a href="#main" class="skip-link">Skip to main content</a>
 			<header class="sticky top-0 z-10 border-b border-border bg-surface">
 				<div class="mx-auto flex h-14 max-w-screen-2xl items-center gap-4 px-4">
-					<a href="/" class="font-semibold tracking-tight text-fg no-underline">{ s.SiteName }</a>
-					<div class="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1">
-					if len(s.Nav) > 0 {
-						<nav aria-label="Main">
-							<ul class="flex gap-4">
-								for _, l := range s.Nav {
-									<li>
-										<a
-											href={ templ.URL(l.Href) }
-											data-section={ l.Section }
-											class="font-medium"
-											if l.Section != "" && l.Section == p.Section {
-												aria-current="page"
-											}
-										>{ l.Label }</a>
-									</li>
+					<a href="/" class="flex min-w-0 items-center gap-2 font-semibold tracking-tight text-fg no-underline">
+						<img src="/static/icons/icon.svg" alt="" width="28" height="28" class="size-7 shrink-0"/>
+						<span class="truncate">{ s.SiteName }</span>
+					</a>
+					@mainNav(s.Nav, p.Section)
+					<div class="ml-auto flex items-center gap-3 text-sm">
+						<msdr-utc-clock class="whitespace-nowrap font-mono tabular-nums text-fg-muted">
+							<time datetime={ s.ClockDateTime() }>{ s.ClockText() }</time> UTC
+						</msdr-utc-clock>
+						if s.HelpURL != "" {
+							<a
+								href={ templ.URL(s.HelpURL) }
+								target="_blank"
+								rel="noopener noreferrer"
+								hx-boost="false"
+								class="icon-button"
+								data-shortcut="h"
+								aria-label="Help (opens in a new tab)"
+								aria-keyshortcuts="h"
+							>
+								@icon() {
+									<circle cx="12" cy="12" r="9"></circle>
+									<path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"></path>
 								}
-							</ul>
-						</nav>
-					}
-						@userMenu(s.User)
+							</a>
+						}
+						@notifications()
+						@userMenu(s)
 					</div>
 				</div>
 			</header>
 			@Main(p, content)
 			<footer class="border-t border-border bg-surface px-4 py-3 text-sm text-fg-muted">
-				if len(s.FooterLinks) > 0 {
-					<ul class="mx-auto flex max-w-screen-2xl flex-wrap gap-x-4 gap-y-1">
-						for _, l := range s.FooterLinks {
-							<li><a href={ templ.URL(l.Href) }>{ l.Label }</a></li>
-						}
-					</ul>
-				}
+				<ul class="mx-auto flex max-w-screen-2xl flex-wrap gap-x-4 gap-y-1">
+					for _, l := range s.FooterLinks {
+						<li>@link(l, "")</li>
+					}
+					if s.Product.Name != "" {
+						<li>{ s.Product.Name } { s.Product.Version } · { s.Product.License }</li>
+						<li><a href={ templ.URL(s.Product.SourceURL) } rel="noopener noreferrer" hx-boost="false">Source code</a></li>
+					}
+				</ul>
 			</footer>
 			<div id="msdr-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 		</body>
 	</html>
 }
 
-// userMenu is the account area of the top bar (UI-010 slot): a discreet
-// sign-in link for anonymous visitors (ACC-001), otherwise the user's name,
-// the account and admin links and sign out. Sign out is a POST (CSRF
-// header from the shell), answered with a full page load.
-templ userMenu(u *User) {
-	<nav class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm" aria-label="Account">
-		if u == nil {
-			<a href="/login" class="text-fg-muted">Sign in</a>
-		} else {
-			<span class="font-medium">{ u.Name }</span>
-			for _, l := range u.Links {
-				<a href={ templ.URL(l.Href) }>{ l.Label }</a>
-			}
-			<form method="post" action="/logout" class="inline">
-				<button type="submit" class="underline">Sign out</button>
-			</form>
+// mainNav is the section navigation (UI-006): inline in the top bar from 768
+// px, a bottom tab bar below (CSS only, ADR 0003). Labels stay visible next
+// to the icons, so the icons are decorative. static/js/navigation.js keeps
+// aria-current in sync after boosted navigation.
+templ mainNav(nav []Link, current string) {
+	if len(nav) > 0 {
+		<nav
+			aria-label="Main"
+			class="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-surface md:static md:border-0 md:bg-transparent"
+		>
+			<ul class="flex h-16 items-stretch justify-around md:h-14 md:justify-start md:gap-1">
+				for _, l := range nav {
+					<li class="flex flex-1 md:flex-none">
+						<a
+							href={ templ.URL(l.Href) }
+							data-section={ l.Section }
+							class="nav-link"
+							if l.Section != "" && l.Section == current {
+								aria-current="page"
+							}
+						>
+							@sectionIcon(l.Section)
+							<span>{ l.Label }</span>
+						</a>
+					</li>
+				}
+			</ul>
+		</nav>
+	}
+}
+
+// notifications is the notifications area (UI-006): a bell that opens the
+// list of recent notifications. UI-011 fills it; until then it is empty.
+templ notifications() {
+	<button type="button" popovertarget="msdr-notifications" class="icon-button" aria-label="Notifications">
+		@icon() {
+			<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21a2 2 0 0 0 4 0"></path>
 		}
-	</nav>
+	</button>
+	<div id="msdr-notifications" popover class="menu-popover">
+		<p class="font-semibold">Notifications</p>
+		<p class="mt-1 text-fg-muted">No notifications.</p>
+	</div>
+}
+
+// userMenu is the user menu (UI-010): a "Sign in" link for anonymous
+// visitors (no sign-up: accounts are by invitation), otherwise a button
+// opening the menu with the name and role, the account links, the usage
+// policy and "Sign out". Menus are native popovers (Esc and outside clicks
+// close them); sign out is a POST answered with a full page load.
+templ userMenu(s Shell) {
+	if s.User == nil {
+		<a href="/login" class="font-medium">Sign in</a>
+	} else {
+		<button type="button" popovertarget="msdr-user-menu" class="icon-button gap-1.5">
+			@icon() {
+				<circle cx="12" cy="8" r="4"></circle>
+				<path d="M4 21a8 8 0 0 1 16 0"></path>
+			}
+			<span class="sr-only">Account menu for </span>
+			<span class="sr-only md:not-sr-only md:max-w-40 md:truncate">{ s.User.Name }</span>
+		</button>
+		<div id="msdr-user-menu" popover class="menu-popover">
+			<p class="flex flex-wrap items-center gap-2">
+				<span class="font-semibold">{ s.User.Name }</span>
+				<span class="badge">{ s.User.Role }</span>
+			</p>
+			<ul class="mt-2 flex flex-col">
+				for _, l := range s.User.Links {
+					<li><a href={ templ.URL(l.Href) } class="menu-item">{ l.Label }</a></li>
+				}
+				for _, l := range s.FooterLinks {
+					<li>@link(l, "menu-item")</li>
+				}
+				<li>
+					<form method="post" action="/logout">
+						<button type="submit" class="menu-item">Sign out</button>
+					</form>
+				</li>
+			</ul>
+		</div>
+	}
+}
+
+// link renders a link; an external one opens in a new tab, which its name
+// says.
+templ link(l Link, class string) {
+	if l.External {
+		<a
+			href={ templ.URL(l.Href) }
+			if class != "" {
+				class={ class }
+			}
+			target="_blank"
+			rel="noopener noreferrer"
+			hx-boost="false"
+		>{ l.Label }<span class="sr-only">{ " (opens in a new tab)" }</span></a>
+	} else {
+		<a
+			href={ templ.URL(l.Href) }
+			if class != "" {
+				class={ class }
+			}
+		>{ l.Label }</a>
+	}
 }
 
 // Main is the region swapped by boosted navigation. It carries the page

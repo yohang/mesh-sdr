@@ -1,0 +1,56 @@
+package layout
+
+// Icons are inline SVG, drawn for the project (no icon set is vendored).
+// They are decorative: every icon sits next to a visible label, so they are
+// hidden from assistive technologies. SVG presentation attributes are not
+// style attributes, so the CSP's style-src does not apply to them.
+
+// icon wraps the paths of a 24×24 stroke icon.
+templ icon() {
+	<svg
+		xmlns="http://www.w3.org/2000/svg"
+		viewBox="0 0 24 24"
+		width="24"
+		height="24"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="2"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+		focusable="false"
+		class="size-6 shrink-0"
+	>
+		{ children... }
+	</svg>
+}
+
+// sectionIcon is the icon of a top-level section.
+templ sectionIcon(section string) {
+	switch section {
+		case SectionReceiver:
+			@icon() {
+				<circle cx="12" cy="11" r="1.5"></circle>
+				<path d="M12 13v8M8.5 7.5a5 5 0 0 0 0 7M15.5 7.5a5 5 0 0 1 0 7M5.5 4.5a9 9 0 0 0 0 13M18.5 4.5a9 9 0 0 1 0 13"></path>
+			}
+		case SectionMap:
+			@icon() {
+				<path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15"></path>
+			}
+		case SectionDecodes:
+			@icon() {
+				<path d="M4 6h16M4 12h16M4 18h10"></path>
+			}
+		case SectionFiles:
+			@icon() {
+				<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+			}
+		case SectionAdmin:
+			@icon() {
+				<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"></path>
+				<circle cx="15" cy="6" r="2"></circle>
+				<circle cx="9" cy="12" r="2"></circle>
+				<circle cx="17" cy="18" r="2"></circle>
+			}
+	}
+}

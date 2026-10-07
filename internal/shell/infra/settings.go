@@ -15,6 +15,11 @@ const (
 	KeySiteName        = "receiver.name"
 	KeyUsagePolicyText = "receiver.usage_policy_text"
 	KeyUsagePolicyURL  = "receiver.usage_policy_url"
+	KeyHelpURL         = "receiver.help_url"
+	KeyShortcutSet     = "ui.shortcut_set"
+	KeyLocation        = "receiver.location"
+	KeyPhotoTitle      = "receiver.photo_title"
+	KeyPhotoDesc       = "receiver.photo_desc"
 )
 
 // Values reads the current effective settings (the settings store).
@@ -62,6 +67,26 @@ func (s *StoreSettings) PolicyURL(context.Context) (string, error) {
 	return u, nil
 }
 
+// HelpLink returns receiver.help_url (zero when unset).
+func (s *StoreSettings) HelpLink(context.Context) (domain.HelpLink, error) {
+	h, err := domain.NewHelpLink(strings.TrimSpace(s.values.String(KeyHelpURL)))
+	if err != nil {
+		return domain.HelpLink{}, fmt.Errorf("%s: %w", KeyHelpURL, err)
+	}
+
+	return h, nil
+}
+
+// ShortcutSet returns ui.shortcut_set.
+func (s *StoreSettings) ShortcutSet(context.Context) (domain.ShortcutSet, error) {
+	set, err := domain.NewShortcutSet(s.values.String(KeyShortcutSet))
+	if err != nil {
+		return domain.ShortcutSet{}, fmt.Errorf("%s: %w", KeyShortcutSet, err)
+	}
+
+	return set, nil
+}
+
 // UsagePolicy returns receiver.usage_policy_text; set is false when it is
 // empty.
 func (s *StoreSettings) UsagePolicy(context.Context) (domain.PolicyText, bool, error) {
@@ -77,3 +102,16 @@ func (s *StoreSettings) UsagePolicy(context.Context) (domain.PolicyText, bool, e
 
 	return p, true, nil
 }
+
+// Location returns receiver.location.
+func (s *StoreSettings) Location(context.Context) string {
+	return strings.TrimSpace(s.values.String(KeyLocation))
+}
+
+// PhotoTitle returns receiver.photo_title.
+func (s *StoreSettings) PhotoTitle(context.Context) string {
+	return strings.TrimSpace(s.values.String(KeyPhotoTitle))
+}
+
+// PhotoDesc returns receiver.photo_desc (Markdown).
+func (s *StoreSettings) PhotoDesc(context.Context) string { return s.values.String(KeyPhotoDesc) }

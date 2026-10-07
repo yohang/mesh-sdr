@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
@@ -23,8 +24,9 @@ const (
 	msgSaveFailed    = "The change could not be saved. Try again later."
 )
 
-// ShellUser returns the signed-in user of a request for the top bar, nil
-// when anonymous.
+// ShellUser returns the signed-in user of a request for the user menu of
+// the top bar (UI-010): display name (or username), the badge of the
+// highest global role and the account link. It returns nil when anonymous.
 func (m *Module) ShellUser(r *http.Request) *layout.User {
 	p := m.Principal(r.Context())
 	if p.IsAnonymous() {
@@ -36,7 +38,13 @@ func (m *Module) ShellUser(r *http.Request) *layout.User {
 		name = d.String()
 	}
 
-	return &layout.User{Name: name, Links: []layout.Link{{Label: "Account", Href: AccountPath}}}
+	role := p.Role().String()
+
+	return &layout.User{
+		Name:  name,
+		Role:  strings.ToUpper(role[:1]) + role[1:],
+		Links: []layout.Link{{Label: "Account", Href: AccountPath}},
+	}
 }
 
 // notice is the outcome message of a section form.

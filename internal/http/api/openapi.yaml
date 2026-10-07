@@ -342,6 +342,96 @@ paths:
                 $ref: "#/components/schemas/ConnectionList"
         default:
           $ref: "#/components/responses/Problem"
+  /features:
+    get:
+      operationId: getFeatures
+      x-meshsdr-access: anonymous
+      summary: Public feature summary (API-001)
+      description: |
+        The enabled devices the caller may listen to (effective listen
+        policy: the device's node config override, else the global
+        `listen_policy`), each with the modes its node reports available.
+        It never carries node addresses, versions or missing requirements:
+        the detailed report is `GET /nodes/{id}/capabilities` (admin).
+      tags: [grid]
+      responses:
+        "200":
+          description: Feature summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Features"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/setup/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        description: The single-use token of the setup link (it is redacted from logs).
+        schema:
+          type: string
+          maxLength: 128
+    get:
+      operationId: checkSetup
+      x-meshsdr-access: anonymous
+      summary: Check a first-admin setup link (AUTH-018)
+      description: |
+        Answers 200 while the hub has no admin and the token is the pending
+        one, 404 `setup_token_invalid` otherwise. Only from
+        `admin.allowed_networks` (403 `admin_network_denied`); throttled per
+        client address (429 `rate_limited` with `Retry-After`).
+      tags: [auth]
+      responses:
+        "200":
+          description: The link is valid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupInfo"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /auth/setup:
+    post:
+      operationId: completeSetup
+      x-meshsdr-access: anonymous
+      summary: Create the first admin with a setup link (AUTH-018)
+      description: |
+        Creates the first admin with a local password that follows the
+        password policy, consumes the token and signs the admin in (the
+        session cookie is set). Same network and rate limits as
+        `GET /auth/setup/{token}`; 404 `setup_token_invalid` for an unknown,
+        expired or used token, or once an admin exists.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupRequest"
+      responses:
+        "200":
+          description: The admin is created and signed in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionInfo"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
   /auth/password:
     post:
       operationId: changePassword
@@ -492,12 +582,14 @@ paths:
       tags: [settings]
       responses:
         "200":
-          description: Effective values of the public keys, by key
+          description: Effective values of the public keys, by key (null when unset)
           content:
             application/json:
               schema:
                 type: object
-                additionalProperties: {}
+                additionalProperties:
+                  nullable: true
+          x-go-type-skip-optional-pointer: true
         default:
           $ref: "#/components/responses/Problem"
   /config/effective:
@@ -908,6 +1000,30 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /auth/email/confirm:
+    post:
+      operationId: confirmEmail
+      x-meshsdr-access: anonymous
+      summary: Confirm a new e-mail address with the token of its link
+      description: |
+        The token of the link sent by `POST /me/email`. Single use: the
+        address applies, verified, and the previous address is told. A
+        dead link (expired, used, or whose address another account took
+        meanwhile) answers like an unknown one: 422 invalid_token.
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailConfirm"
+      responses:
+        "204":
+          description: Address confirmed
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
   /invitations:
     get:
       operationId: listInvitations
@@ -967,6 +1083,26 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
         "409":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /mail/test:
+    post:
+      operationId: sendTestMail
+      x-meshsdr-access: admin
+      summary: Send a test e-mail to the caller's own address
+      description: Checks the SMTP relay. 503 mail_disabled when mail is not configured; 422 when the caller has no address.
+      tags: [invitations]
+      responses:
+        "200":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailTest"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
@@ -1710,6 +1846,21 @@ components:
         pending:
           type: boolean
           description: True when a confirmation link was sent to the new address.
+    EmailConfirm:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          maxLength: 64
+    MailTest:
+      type: object
+      required: [to]
+      properties:
+        to:
+          type: string
+          description: Address the test message was sent to.
     SessionList:
       type: object
       required: [sessions]
@@ -1831,6 +1982,33 @@ components:
         last_heartbeat_at:
           type: string
           format: date-time
+    Features:
+      type: object
+      additionalProperties: false
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceFeatures"
+    DeviceFeatures:
+      type: object
+      additionalProperties: false
+      required: [id, node_id, name, online, modes]
+      properties:
+        id:
+          type: string
+        node_id:
+          type: string
+        name:
+          type: string
+        online:
+          type: boolean
+        modes:
+          type: array
+          description: Modes the device's node reports available, sorted.
+          items:
+            type: string
     DeviceList:
       type: object
       required: [items]
@@ -2148,6 +2326,33 @@ components:
         remember_me:
           type: boolean
           description: Keep the session for 30 days instead of 24 hours.
+    SetupInfo:
+      type: object
+      required: [min_password_length]
+      properties:
+        min_password_length:
+          type: integer
+          description: Minimum length of the new password (`auth.password_min_length`).
+    SetupRequest:
+      type: object
+      additionalProperties: false
+      required: [token, username, password]
+      properties:
+        token:
+          type: string
+          maxLength: 128
+        username:
+          type: string
+          maxLength: 254
+        email:
+          type: string
+          maxLength: 254
+        display_name:
+          type: string
+          maxLength: 254
+        password:
+          type: string
+          maxLength: 1024
     ChangePasswordRequest:
       type: object
       additionalProperties: false
@@ -2228,11 +2433,15 @@ components:
           example: ui.theme_mode
         value:
           description: Effective value. Absent for secrets.
+          nullable: true
+          x-go-type-skip-optional-pointer: true
         set:
           type: boolean
           description: Secrets only. Whether a value is set.
         default:
           description: Built-in default. Absent for secrets.
+          nullable: true
+          x-go-type-skip-optional-pointer: true
         source:
           type: string
           enum: [cfg, db, default]
@@ -2247,6 +2456,8 @@ components:
           description: Version of the DB value (0 when there is none), to send back on writes.
         shadowed_value:
           description: DB value hidden by a config value ("overridden by config"). Absent for secrets.
+          nullable: true
+          x-go-type-skip-optional-pointer: true
         secret:
           type: boolean
         public:
@@ -2266,7 +2477,10 @@ components:
         values:
           type: object
           description: New values by key; null resets a key to its default.
-          additionalProperties: {}
+          additionalProperties:
+            nullable: true
+            x-go-type-skip-optional-pointer: true
+          x-go-type-skip-optional-pointer: true
         versions:
           type: object
           description: Version last read, by key (0 when the key had no DB value).
@@ -2301,6 +2515,8 @@ components:
           description: cfg for config-only keys, db for settings (lockable).
         value:
           description: Effective value. Absent for secrets.
+          nullable: true
+          x-go-type-skip-optional-pointer: true
         set:
           type: boolean
           description: Secrets only.
