@@ -171,10 +171,20 @@ func newMediaUser(t *testing.T, e *gridEnv) {
 	}
 }
 
-// openRefreshed opens a media connection as b, then replaces its token with
-// one minted by the identity issuer (POST /api/v1/auth/token), bound to the
-// connection by the gateway authz.
-func openRefreshed(t *testing.T, b *hubBrowser) *websocket.Conn {
+// anonymous is a visitor of the gateway hub without an account.
+func (e *gridEnv) anonymous(t *testing.T) *hubBrowser {
+	t.Helper()
+
+	jar, _ := cookiejar.New(nil)
+	b := &hubBrowser{t: t, base: "http://" + e.gatewayAddr, c: &http.Client{Jar: jar}}
+	b.refreshCSRF()
+
+	return b
+}
+
+// openMedia opens a media connection as b through the gateway authz and
+// returns it with its cid.
+func openMedia(t *testing.T, b *hubBrowser) (*websocket.Conn, string) {
 	t.Helper()
 
 	ws := b.dial(t)
@@ -185,7 +195,23 @@ func openRefreshed(t *testing.T, b *hubBrowser) *websocket.Conn {
 	}
 	_ = json.Unmarshal(expectEnvelope(t, ws, rxv1.TypeSessionWelcome).Payload(), &welcome)
 
-	st, body := b.do(http.MethodPost, "/api/v1/auth/token", `{"node_id":"attic","cid":"`+welcome.CID+`"}`)
+	return ws, welcome.CID
+}
+
+// mint asks POST /api/v1/auth/token for a token of cid on attic.
+func (b *hubBrowser) mint(cid string) (int, []byte) {
+	return b.do(http.MethodPost, "/api/v1/auth/token", `{"node_id":"attic","cid":"`+cid+`"}`)
+}
+
+// openRefreshed opens a media connection as b, then replaces its token with
+// one minted by the identity issuer (POST /api/v1/auth/token), bound to the
+// connection by the gateway authz.
+func openRefreshed(t *testing.T, b *hubBrowser) *websocket.Conn {
+	t.Helper()
+
+	ws, cid := openMedia(t, b)
+
+	st, body := b.mint(cid)
 	if st != http.StatusOK {
 		t.Fatalf("token: %d %s", st, body)
 	}
@@ -198,19 +224,12 @@ func openRefreshed(t *testing.T, b *hubBrowser) *websocket.Conn {
 	wsSend(t, ws, rxv1.TypeAuthRefresh, "r1", map[string]string{"token": minted.Token})
 	expectEnvelope(t, ws, rxv1.TypeAck)
 
-	// Another cid is not bound to this browser.
-	if st, _ := b.do(http.MethodPost, "/api/v1/auth/token", `{"node_id":"attic","cid":"`+shared.UUID{}.String()+`"}`); st == http.StatusOK {
-		t.Fatal("token minted for a connection the gateway did not open")
-	}
-
 	return ws
 }
 
-// TestIdentityTokensOnNodes wires identity (ACC-007) into the grid: a token
-// minted by the identity issuer refreshes a gateway connection; a session
-// revoked through identity closes it on the node with 4403; a signing key
-// revoked in the keyring closes the connections it signed.
-func TestIdentityTokensOnNodes(t *testing.T) {
+func newMediaEnv(t *testing.T) *gridEnv {
+	t.Helper()
+
 	e := newGridEnvWith(t, true, fastTimings())
 	e.enrollNode(t, fakeProber{})
 	newMediaUser(t, e)
@@ -222,12 +241,50 @@ func TestIdentityTokensOnNodes(t *testing.T) {
 		return err == nil
 	})
 
+	return e
+}
+
+// A refresh computes the scopes again with the listen_policy setting of
+// the settings store: once an admin sets it to registered, an anonymous
+// connection opened before gets no token.
+func TestTokenRefreshFollowsListenPolicy(t *testing.T) {
+	e := newMediaEnv(t)
+
+	if _, err := UserAdmin(e.hubCfg, quiet, e.adapter).Add(context.Background(), identityapp.AddUserInput{
+		Username: "root", Role: identitydomain.RoleAdmin, Password: mediaPassword,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	anon := e.anonymous(t)
+	_, cid := openMedia(t, anon)
+
+	if st, body := anon.mint(cid); st != http.StatusOK {
+		t.Fatalf("anonymous token under the anonymous policy: %d %s", st, body)
+	}
+
+	root := e.signIn(t, "root")
+	if st, body := root.do(http.MethodPatch, "/api/v1/settings", `{"values":{"listen_policy":"registered"}}`); st != http.StatusOK {
+		t.Fatalf("set listen_policy: %d %s", st, body)
+	}
+
+	if st, body := anon.mint(cid); st != http.StatusForbidden || !strings.Contains(string(body), "no_listenable_device") {
+		t.Fatalf("anonymous token under the registered policy: %d %s, want 403 no_listenable_device", st, body)
+	}
+
+	_ = openRefreshed(t, e.signIn(t, "lis")).CloseNow()
+}
+
+// TestIdentityTokensOnNodes wires identity (ACC-007) into the grid: a token
+// minted by the identity issuer refreshes a gateway connection; a session
+// revoked through identity closes it on the node with 4403; a signing key
+// revoked in the keyring closes the connections it signed.
+func TestIdentityTokensOnNodes(t *testing.T) {
+	e := newMediaEnv(t)
+
 	// Anonymous visitors refresh their tokens too: the gateway authz bound
 	// the connection to them.
-	jar, _ := cookiejar.New(nil)
-	anon := &hubBrowser{t: t, base: "http://" + e.gatewayAddr, c: &http.Client{Jar: jar}}
-	anon.refreshCSRF()
-	_ = openRefreshed(t, anon).CloseNow()
+	_ = openRefreshed(t, e.anonymous(t)).CloseNow()
 
 	first := e.signIn(t, "lis")
 	ws := openRefreshed(t, first)

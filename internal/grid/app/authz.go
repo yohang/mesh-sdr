@@ -170,6 +170,9 @@ func (a *MediaAccess) Authorize(ctx context.Context, req AuthzRequest) (Grant, e
 	s := req.Subject
 	scopes := a.scopes(ctx, s, devices)
 
+	// A node with no device yet gets a connection with no scope: the node
+	// grants nothing outside scp, and every refresh (POST /auth/token)
+	// computes the scopes again with the current devices and listen policy.
 	if len(devices) > 0 && len(scopes) == 0 {
 		if s.IsAnonymous() {
 			return Grant{}, domain.ErrListenLoginNeeded
