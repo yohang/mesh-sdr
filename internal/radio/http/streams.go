@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/dsp"
@@ -105,8 +104,6 @@ type demodState struct {
 	device string
 	stream uint16
 	demod  app.Demod
-	// codec is the rx.v1 codec of the frames, changed by audio.configure.
-	codec *atomic.Uint32
 }
 
 func wireCodec(c app.AudioCodec) rxv1.Codec {
@@ -456,6 +453,11 @@ func (ss *session) configureStream(req rxv1.Envelope) {
 	}})
 }
 
+// configureAudio applies audio.configure to the connection and its
+// demodulators. pcm-s16le and adpcm-ima are provided; opus is answered
+// with adpcm-ima, which every client supports (§6.7 MUST, ADR 0015
+// decision 6: the ack names the codec in use); other codecs are refused.
+// The change applies to every demodulator or to none.
 func (ss *session) configureAudio(req rxv1.Envelope) {
 	p, err := decode[media.AudioConfigure](req)
 	if err != nil {
@@ -470,13 +472,20 @@ func (ss *session) configureAudio(req rxv1.Envelope) {
 		return
 	}
 
-	codec := app.CodecADPCM
-	if p.Codec == media.CodecPCM {
+	var codec app.AudioCodec
+
+	switch p.Codec {
+	case media.CodecPCM:
 		codec = app.CodecPCM
+	case media.CodecADPCM, media.CodecOpus:
+		codec = app.CodecADPCM
+	default:
+		ss.peer.Fail(req, rxv1.CodeOutOfRange, "codec: want pcm-s16le, adpcm-ima or opus")
+
+		return
 	}
 
 	ss.mu.Lock()
-	ss.audio = audioConfig{codec: codec, rate: p.SampleRate}
 	demods := make([]*demodState, 0, len(ss.demods))
 
 	for _, d := range ss.demods {
@@ -484,18 +493,37 @@ func (ss *session) configureAudio(req rxv1.Envelope) {
 	}
 	ss.mu.Unlock()
 
+	type change struct {
+		d   *demodState
+		old app.DemodParams
+	}
+
+	var done []change
+
 	for _, d := range demods {
-		params := d.demod.Params()
+		old := d.demod.Params()
+		params := old
 		params.Codec, params.OutputRate = codec, p.SampleRate
 
 		if err := d.demod.Set(params); err != nil {
+			for _, c := range done {
+				_ = c.d.demod.Set(c.old)
+			}
+
 			ss.fail(req, err)
 
 			return
 		}
 
-		d.codec.Store(uint32(wireCodec(codec)))
-		ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: d.stream, Codec: string(codec), SampleRate: p.SampleRate})
+		done = append(done, change{d: d, old: old})
+	}
+
+	ss.mu.Lock()
+	ss.audio = audioConfig{codec: codec, rate: p.SampleRate}
+	ss.mu.Unlock()
+
+	for _, c := range done {
+		ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: c.d.stream, Codec: string(codec), SampleRate: p.SampleRate})
 	}
 
 	ss.peer.Ack(req, media.AudioConfigure{Codec: string(codec), SampleRate: p.SampleRate})
@@ -556,9 +584,6 @@ func (ss *session) createDemod(req rxv1.Envelope) {
 		params.LowHz, params.HighHz = p.Bandpass.LowHz, p.Bandpass.HighHz
 	}
 
-	codecV := &atomic.Uint32{}
-	codecV.Store(uint32(wireCodec(audio.codec)))
-
 	meterKey := "meter:" + id
 
 	d, err := a.lease.NewDemod(params, func(out app.AudioOut) {
@@ -579,7 +604,9 @@ func (ss *session) createDemod(req rxv1.Envelope) {
 			f.Flags |= rxv1.FlagDiscontinuity
 		}
 
-		f.Codec = rxv1.Codec(codecV.Load())
+		// The codec of the framer that produced this frame: frames queued
+		// before an audio.configure keep their own label.
+		f.Codec = wireCodec(out.Codec)
 
 		_ = ss.q.PushAudio(f)
 	}, func(m app.Meter) {
@@ -594,7 +621,7 @@ func (ss *session) createDemod(req rxv1.Envelope) {
 	}
 
 	ss.mu.Lock()
-	ss.demods[id] = &demodState{id: id, device: p.DeviceID, stream: stream, demod: d, codec: codecV}
+	ss.demods[id] = &demodState{id: id, device: p.DeviceID, stream: stream, demod: d}
 	ss.mu.Unlock()
 
 	ss.peer.Send(rxv1.TypeStreamOpen, media.StreamOpen{

@@ -35,6 +35,14 @@ func validate(p app.DemodParams) error {
 	return nil
 }
 
+func appCodec(c rxv1.Codec) app.AudioCodec {
+	if c == rxv1.CodecADPCMIMA {
+		return app.CodecADPCM
+	}
+
+	return app.CodecPCM
+}
+
 func codecOf(c app.AudioCodec) rxv1.Codec {
 	if c == app.CodecADPCM {
 		return rxv1.CodecADPCMIMA
@@ -281,6 +289,7 @@ func (d *demod) run() {
 
 		framer.Push(res.Audio, meta.Time, !res.Open, func(f dsp.AudioFrame) {
 			d.audio(app.AudioOut{
+				Codec:   appCodec(f.Codec),
 				Payload: f.Payload, Samples: f.Samples, Duration: f.Duration(framer.Rate()),
 				TimestampUS: uint64(max(f.Time.UnixMicro(), 0)), Squelched: f.Squelched, Reset: f.Reset, Discontinuity: gap,
 			})
