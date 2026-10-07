@@ -19,7 +19,7 @@ const (
 // locks its key.
 type Configured struct {
 	Value  Value
-	Origin string // "hub.toml:42" or "env:MESHSDR_SETTINGS__…"
+	Origin string // "hub.toml" or "env:MESHSDR_SETTINGS__…"
 }
 
 // Effective is the effective value of one key, with where it comes from.
@@ -83,7 +83,7 @@ func (e Effective) Value() Value { return e.value }
 // Source returns the layer of the value.
 func (e Effective) Source() Source { return e.source }
 
-// Origin returns "hub.toml:42", "env:VAR", "db" or "default".
+// Origin returns "hub.toml", "env:VAR", "db" or "default".
 func (e Effective) Origin() string { return e.origin }
 
 // Locked reports whether the hub config sets the key.

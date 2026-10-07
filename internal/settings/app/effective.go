@@ -18,7 +18,7 @@ type BootstrapEntry struct {
 	Key    string
 	Value  json.RawMessage // null for secrets (see Set)
 	Set    bool            // secrets: whether a value is set
-	Origin string          // "hub.toml:42", "env:VAR" or "default"
+	Origin string          // "hub.toml", "env:VAR" or "default"
 	Locked bool            // set by a file or the env
 	Secret bool
 }

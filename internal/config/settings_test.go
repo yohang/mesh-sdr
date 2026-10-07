@@ -134,7 +134,7 @@ func TestSettingsSameValidatorForFileAndDB(t *testing.T) {
 	}
 
 	p := cerr.Problems[0]
-	if p.Key != "settings.retention.audit_log" || p.Origin != "hub.toml:6" {
+	if p.Key != "settings.retention.audit_log" || p.Origin != "hub.toml" {
 		t.Errorf("problem = %+v", p)
 	}
 
@@ -183,8 +183,8 @@ func TestSettingsCatalog(t *testing.T) {
 	}
 
 	for key, want := range map[string]settingsdomain.Configured{
-		"receiver.name": {Value: settingsdomain.MustValue(`"F4XYZ"`), Origin: "hub.toml:6"},
-		"receiver.gps":  {Value: settingsdomain.MustValue(`{"lat":50.5,"lon":3}`), Origin: "hub.toml:7"},
+		"receiver.name": {Value: settingsdomain.MustValue(`"F4XYZ"`), Origin: "hub.toml"},
+		"receiver.gps":  {Value: settingsdomain.MustValue(`{"lat":50.5,"lon":3}`), Origin: "hub.toml"},
 		"ui.theme_mode": {Value: settingsdomain.MustValue(`"dark"`), Origin: "env:MESHSDR_SETTINGS__UI__THEME_MODE"},
 	} {
 		got, ok := cat.Configured(settingsdomain.MustKey(key))

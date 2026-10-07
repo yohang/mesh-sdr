@@ -2716,7 +2716,7 @@ components:
           enum: [cfg, db, default]
         origin:
           type: string
-          description: '"hub.toml:42", "env:MESHSDR_…", "db" or "default".'
+          description: '"hub.toml", "env:MESHSDR_…", "db" or "default".'
         locked:
           type: boolean
         version:

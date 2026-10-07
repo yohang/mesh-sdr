@@ -324,7 +324,7 @@ func TestEffectiveConfigAPI(t *testing.T) {
 		byKey[e["key"].(string)] = e
 	}
 
-	if e := byKey["hub.url"]; e["class"] != "cfg" || e["origin"] != "hub.toml:3" || e["locked"] != true || e["value"] != "http://127.0.0.1" {
+	if e := byKey["hub.url"]; e["class"] != "cfg" || e["origin"] != "hub.toml" || e["locked"] != true || e["value"] != "http://127.0.0.1" {
 		t.Errorf("hub.url = %v", e)
 	}
 

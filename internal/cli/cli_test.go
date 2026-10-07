@@ -182,7 +182,7 @@ func TestInvalidConfigExitsWithEXCONFIG(t *testing.T) {
 
 	for _, args := range [][]string{{"hub"}, {"hub", "migrate"}, {"hub", "config", "check"}} {
 		r := run(t, context.Background(), map[string]string{}, append([]string{"-c", dir}, args...)...)
-		if r.code != ExitConfig || !strings.Contains(r.stderr, "hub.toml:2: bogus: unknown key") {
+		if r.code != ExitConfig || !strings.Contains(r.stderr, "hub.toml: bogus: unknown key") {
 			t.Errorf("%v = %+v", args, r)
 		}
 	}
@@ -204,7 +204,7 @@ func TestConfigCommands(t *testing.T) {
 		Origins map[string]string `json:"origins"`
 	}
 	if r.code != ExitOK || json.Unmarshal([]byte(r.stdout), &out) != nil || !out.Valid ||
-		out.Origins["log.level"] != "env:MESHSDR_LOG__LEVEL" || out.Origins["hub.url"] != "hub.toml:5" {
+		out.Origins["log.level"] != "env:MESHSDR_LOG__LEVEL" || out.Origins["hub.url"] != "hub.toml" {
 		t.Fatalf("config check = %+v (%+v)", r, out)
 	}
 
