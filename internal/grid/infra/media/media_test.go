@@ -17,10 +17,12 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/yohang/mesh-sdr/internal/grid/agent"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/media"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	mediapkg "github.com/yohang/mesh-sdr/internal/protocol/rxv1/media"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
 )
 
@@ -38,7 +40,7 @@ type env struct {
 	client *http.Client
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*media.Options)) *env {
 	t.Helper()
 
 	certPEM, keyPEM, err := pki.GenerateCA("test", time.Now())
@@ -65,10 +67,15 @@ func newEnv(t *testing.T) *env {
 
 	serverCert := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: nodeKey}
 
-	srv := media.NewServer(media.Options{
+	o := media.Options{
 		NodeID: "roof", Version: "1.0.0", GatewayIdentity: hubID, OwnSerial: func() string { return "AB" },
 		Now: time.Now, Logger: slog.New(slog.DiscardHandler),
-	})
+	}
+	for _, f := range opts {
+		f(&o)
+	}
+
+	srv := media.NewServer(o)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -450,5 +457,184 @@ func TestDemodScopeAndStrikes(t *testing.T) {
 
 	// The eleventh closes it.
 	send(t, ws, rxv1.TypeDeviceAttach, "f-last", map[string]any{"device_id": "vhf"})
+	expectClose(t, ws, websocket.StatusCode(rxv1.CloseForbidden))
+}
+
+// TestListenPolicyOnNode: the node re-checks the effective listen policy
+// (SRC-023) and the token scope: an anonymous token never acts on a
+// registered device, even when its scope names it, and never holds the
+// preset or retune permissions.
+func TestListenPolicyOnNode(t *testing.T) {
+	// The real desired state: node config overrides, global policy from
+	// the hub.
+	state := agent.NewDesiredState([]ctl.Device{{ID: "hf", ListenPolicy: "anonymous"}, {ID: "vhf", ListenPolicy: "registered"}})
+	state.Apply(ctl.StateApply{Revision: 1, Policy: ctl.StatePolicy{ListenPolicy: "anonymous"}})
+
+	e := newEnv(t, func(o *media.Options) { o.Policy = state })
+	e.installKeys(t, e.key)
+
+	exp := time.Now().Add(5 * time.Minute)
+	all := []string{token.PermListen, token.PermDemod, token.PermPreset, token.PermRetune}
+
+	cases := []struct {
+		name      string
+		anonymous bool
+		device    string
+		typ       rxv1.MessageType
+		forbidden bool
+	}{
+		{"anonymous attach on an anonymous device", true, "hf", rxv1.TypeDeviceAttach, false},
+		{"anonymous attach on a registered device", true, "vhf", rxv1.TypeDeviceAttach, true},
+		{"anonymous demod on a registered device", true, "vhf", rxv1.TypeDemodCreate, true},
+		{"anonymous preset select", true, "hf", rxv1.TypePresetSelect, true},
+		{"anonymous retune", true, "hf", rxv1.TypeDeviceRetune, true},
+		{"user attach on a registered device", false, "vhf", rxv1.TypeDeviceAttach, false},
+		{"user preset select on a registered device", false, "vhf", rxv1.TypePresetSelect, false},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cid := "p" + strconv.Itoa(i)
+			tok := e.token(t, cid, exp, func(c *token.Claims) {
+				if tc.anonymous {
+					// A token scoped by mistake: listen and demod on both
+					// devices, as the hub would never issue it.
+					c.Subject, c.SessionID, c.Roles = token.AnonymousSubject, "", nil
+					c.Scopes = []token.Scope{
+						{Device: "hf", Perms: []string{token.PermListen, token.PermDemod}},
+						{Device: "vhf", Perms: []string{token.PermListen, token.PermDemod}},
+					}
+
+					return
+				}
+
+				c.Scopes = []token.Scope{{Device: "hf", Perms: all}, {Device: "vhf", Perms: all}}
+			})
+
+			ws, st := e.dial(t, e.client, tok, cid, origin)
+			if st != http.StatusSwitchingProtocols {
+				t.Fatalf("status %d", st)
+			}
+
+			hello(t, ws)
+
+			payload := map[string]any{"device_id": tc.device}
+			switch tc.typ {
+			case rxv1.TypeDemodCreate:
+				payload["mode"], payload["offset_hz"] = "usb", 0
+			case rxv1.TypePresetSelect:
+				payload["preset_id"] = "p"
+			case rxv1.TypeDeviceRetune:
+				payload["center_freq"] = 14_000_000
+			}
+
+			send(t, ws, tc.typ, "m0", payload)
+
+			p := string(expectType(t, ws, rxv1.TypeError).Payload())
+			if got := strings.Contains(p, `"forbidden"`); got != tc.forbidden {
+				t.Fatalf("forbidden = %v, want %v: %s", got, tc.forbidden, p)
+			}
+		})
+	}
+}
+
+// anonToken makes the token of an anonymous visitor scoped to listen on
+// hf.
+func anonToken(c *token.Claims) {
+	c.Subject, c.SessionID, c.Roles = token.AnonymousSubject, "", nil
+	c.Scopes = []token.Scope{{Device: "hf", Perms: []string{token.PermListen, token.PermDemod}}}
+}
+
+// spyStreams records what the stream handler sees of the connection.
+type spyStreams struct {
+	handled      chan rxv1.MessageType
+	reauthorized chan token.Claims
+}
+
+func (s *spyStreams) Open(p mediapkg.Peer) mediapkg.StreamSession { return &spySession{s: s, p: p} }
+
+type spySession struct {
+	s *spyStreams
+	p mediapkg.Peer
+}
+
+func (ss *spySession) Handle(_ context.Context, req rxv1.Envelope) {
+	ss.s.handled <- req.Type()
+	ss.p.Ack(req, struct{}{})
+}
+
+func (ss *spySession) Reauthorize() { ss.s.reauthorized <- ss.p.Claims() }
+
+func (ss *spySession) Close() {}
+
+// TestListenPolicyChangeMidSession: a device that becomes registered while
+// an anonymous visitor listens is dropped at the next auth.refresh (the
+// stream handler's Reauthorize sees claims without it), and new messages
+// for it are refused at once.
+func TestListenPolicyChangeMidSession(t *testing.T) {
+	state := agent.NewDesiredState([]ctl.Device{{ID: "hf"}})
+	state.Apply(ctl.StateApply{Revision: 1, Policy: ctl.StatePolicy{ListenPolicy: "anonymous"}})
+
+	spy := &spyStreams{handled: make(chan rxv1.MessageType, 4), reauthorized: make(chan token.Claims, 4)}
+	e := newEnv(t, func(o *media.Options) { o.Policy, o.Streams = state, spy })
+	e.installKeys(t, e.key)
+
+	exp := time.Now().Add(5 * time.Minute)
+
+	ws, st := e.dial(t, e.client, e.token(t, "m1", exp, anonToken), "m1", origin)
+	if st != http.StatusSwitchingProtocols {
+		t.Fatalf("status %d", st)
+	}
+
+	hello(t, ws)
+
+	send(t, ws, rxv1.TypeDeviceAttach, "a0", map[string]any{"device_id": "hf"})
+	expectType(t, ws, rxv1.TypeAck)
+
+	if got := <-spy.handled; got != rxv1.TypeDeviceAttach {
+		t.Fatalf("handled %s", got)
+	}
+
+	// The hub switches the global policy to registered.
+	state.Apply(ctl.StateApply{Revision: 2, Policy: ctl.StatePolicy{ListenPolicy: "registered"}})
+
+	send(t, ws, rxv1.TypeAuthRefresh, "r1", map[string]string{"token": e.token(t, "m1", exp.Add(time.Minute), anonToken)})
+	expectType(t, ws, rxv1.TypeAck)
+
+	if c := <-spy.reauthorized; c.Allows("hf", token.PermListen) || len(c.Scopes) != 0 {
+		t.Fatalf("reauthorized with %+v", c.Scopes)
+	}
+
+	send(t, ws, rxv1.TypeDeviceAttach, "a1", map[string]any{"device_id": "hf"})
+
+	if p := string(expectType(t, ws, rxv1.TypeError).Payload()); !strings.Contains(p, `"forbidden"`) {
+		t.Fatalf("attach after the change: %s", p)
+	}
+}
+
+// TestListenPolicyRefusalsAreStrikes: refused anonymous attaches on a
+// registered device count like scope refusals; the eleventh in a minute
+// closes the connection with 4403.
+func TestListenPolicyRefusalsAreStrikes(t *testing.T) {
+	state := agent.NewDesiredState([]ctl.Device{{ID: "hf", ListenPolicy: "registered"}})
+	e := newEnv(t, func(o *media.Options) { o.Policy = state })
+	e.installKeys(t, e.key)
+
+	ws, st := e.dial(t, e.client, e.token(t, "s1", time.Now().Add(5*time.Minute), anonToken), "s1", origin)
+	if st != http.StatusSwitchingProtocols {
+		t.Fatalf("status %d", st)
+	}
+
+	hello(t, ws)
+
+	for i := range media.MaxForbiddenPerMinute {
+		send(t, ws, rxv1.TypeDeviceAttach, "f"+strconv.Itoa(i), map[string]any{"device_id": "hf"})
+
+		if p := string(expectType(t, ws, rxv1.TypeError).Payload()); !strings.Contains(p, "signed-in listener") {
+			t.Fatalf("refusal %d: %s", i, p)
+		}
+	}
+
+	send(t, ws, rxv1.TypeDeviceAttach, "f-last", map[string]any{"device_id": "hf"})
 	expectClose(t, ws, websocket.StatusCode(rxv1.CloseForbidden))
 }

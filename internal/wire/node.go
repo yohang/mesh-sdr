@@ -115,14 +115,16 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 		return nil, err
 	}
 
+	state := agent.NewDesiredState(o.devices())
+
 	mediaServer := media.NewServer(media.Options{
 		NodeID: id.String(), Version: version.String(), GatewayIdentity: cfg.HubTrust.HubIdentity,
-		OwnSerial: holder.Serial, Agent: ag, HeartbeatInterval: o.mediaHeartbeat, Streams: streams, Now: time.Now,
-		Logger: component(logger, "grid.infra.media"),
+		OwnSerial: holder.Serial, Agent: ag, HeartbeatInterval: o.mediaHeartbeat, Streams: streams, Policy: state,
+		Now: time.Now, Logger: component(logger, "grid.infra.media"),
 	})
 
 	ctlServer := control.NewNodeServer(control.NodeOptions{
-		Agent: ag, State: agent.NewDesiredState(o.devices()), Media: mediaServer, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
+		Agent: ag, State: state, Media: mediaServer, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
 		Renewer: &control.FileRenewer{NodeID: id.String(), CertFile: cfg.TLS.Cert, Roots: roots, Key: key, Holder: holder, Now: time.Now},
 		Now:     time.Now, Logger: component(logger, "grid.infra.control"),
 	})
