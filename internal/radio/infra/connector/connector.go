@@ -7,7 +7,9 @@ package connector
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -79,6 +81,24 @@ var connectorRules = []process.Rule{
 	{Pattern: regexp.MustCompile(`.`), Class: process.ClassInfo},
 }
 
+// maxInstanceID is the longest supervisor instance id (its workdir name).
+const maxInstanceID = 64
+
+// instanceID returns the supervisor instance id of a device: prefix-id, or,
+// when a long device id (up to 63 characters) would not fit, its head and
+// the first 8 hex digits of its SHA-256, which keeps ids distinct.
+func instanceID(prefix, id string) string {
+	s := prefix + "-" + id
+	if len(s) <= maxInstanceID {
+		return s
+	}
+
+	sum := sha256.Sum256([]byte(id))
+	head := maxInstanceID - len(prefix) - 1 - 9
+
+	return prefix + "-" + id[:head] + "-" + hex.EncodeToString(sum[:4])
+}
+
 // Options configure the sources.
 type Options struct {
 	Supervisor *process.Supervisor
@@ -127,7 +147,7 @@ func (s *Sources) Probe(ctx context.Context, p domain.DeviceParams) error {
 	}
 
 	in, err := s.o.Supervisor.NewInstance(process.Spec{
-		ID: "probe-" + p.ID.String(), Kind: "probe", Mode: process.Batch, Path: path, Args: []string{"--version"},
+		ID: instanceID("probe", p.ID.String()), Kind: "probe", Mode: process.Batch, Path: path, Args: []string{"--version"},
 		ToolDirs: s.o.Tools.Dirs, Timeouts: process.Timeouts{Job: ProbeTimeout, Stop: time.Second},
 	})
 	if err != nil {
@@ -183,7 +203,7 @@ func (src *source) Run(ctx context.Context, t domain.Tuning, sink app.IQSink, re
 
 	core := uint64(0)
 	in, err := src.s.o.Supervisor.NewInstance(process.Spec{
-		ID: "dev-" + src.p.ID.String(), Kind: "connector", Path: path, ToolDirs: src.s.o.Tools.Dirs,
+		ID: instanceID("dev", src.p.ID.String()), Kind: "connector", Path: path, ToolDirs: src.s.o.Tools.Dirs,
 		TouchOnly:   true,
 		PerRun:      func() (process.Run, error) { return src.perRun(t.Rate().PerSecond(), sink) },
 		StderrRules: connectorRules,
