@@ -6,9 +6,9 @@
 # Stages (ADR 0019):
 #   natives        csdr (libcsdr++) and owrx_connector from pinned tarballs
 #   base → dev     Go toolchain + C/C++ toolchain + natives (Air, linters)
-#   base → build   cgo binaries: meshsdr (hub, node, all) and meshsdr-node
+#   base → build   cgo binary: meshsdr (hub, node, all)
 #   runtime        Debian slim, nonroot (65532), runtime libraries + natives
-#   runtime → prod, prod-node
+#   runtime → prod the one image of every role (CMD all by default)
 #   sources        GPL sources of the bundled native components (OCI artifact)
 
 ARG GO_VERSION=1.26
@@ -166,19 +166,14 @@ RUN go mod download
 
 COPY . .
 
-# Two artifacts (ADR 0012), both cgo (ADR 0014): meshsdr with the embedded
-# gateway (hub, node, all) and meshsdr-node without it (-tags nogateway,
-# node role only). /etc/meshsdr/tls links to the data volume: the CA and
-# node certificates written by `meshsdr all` and `meshsdr node enroll`
-# survive the container. The licence texts of the Go modules linked into
-# the binaries are collected for the image notices.
+# One cgo binary (ADR 0014, ADR 0021) for the hub, node and all roles.
+# /etc/meshsdr/tls links to the data volume: the CA and node certificates
+# written by `meshsdr all` and `meshsdr node enroll` survive the container.
+# The licence texts of the Go modules linked into the binary are collected
+# for the image notices.
 RUN --mount=type=cache,target=/cache/go-build \
     go generate ./...; \
     go build -trimpath -ldflags="-s -w" -o /out/meshsdr ./cmd/meshsdr; \
-    go build -tags nogateway -trimpath -ldflags="-s -w" -o /out/meshsdr-node ./cmd/meshsdr; \
-    if go list -deps -tags nogateway ./cmd/meshsdr | grep -q caddyserver; then \
-      echo "the nogateway build links Caddy" >&2; exit 1; \
-    fi; \
     mkdir -p /out/var/lib/meshsdr/tls /out/etc/meshsdr /out/usr/share/doc/meshsdr; \
     ln -s /var/lib/meshsdr/tls /out/etc/meshsdr/tls; \
     go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}} {{.Dir}}{{end}}{{end}}' ./cmd/meshsdr | sort -u | \
@@ -219,10 +214,11 @@ COPY --from=build /out/usr/share/doc/meshsdr/go-modules.txt /usr/share/doc/meshs
 RUN ldconfig
 
 
-# Hub, node or all. Default: all (hub + local node). The gateway listens on
-# :443 with ACME for the host of hub.url (gateway.* keys to change it).
-# Run with `init: true` (docker run --init): the node supervises connector
-# processes (ADR 0017).
+# Every role from one image (ADR 0021). Default: all (hub + local node); the
+# gateway listens on :443 with ACME for the host of hub.url (gateway.* keys
+# to change it). A node-only container runs `node` (CMD ["node"], port
+# node.listen, 8074 by default). Run with `init: true` (docker run --init):
+# the node supervises connector processes (ADR 0017).
 FROM runtime AS prod
 
 COPY --from=build --chown=nonroot:nonroot /out/var/lib/meshsdr /var/lib/meshsdr
@@ -233,29 +229,12 @@ COPY --from=build /out/meshsdr /meshsdr
 USER nonroot
 
 VOLUME /var/lib/meshsdr
-# gateway.https_listen (gateway.http_listen when set, :80)
+# gateway.https_listen (gateway.http_listen when set, :80); a node exposes
+# node.listen (8074).
 EXPOSE 443
 
 ENTRYPOINT ["/meshsdr"]
 CMD ["all"]
-
-
-# Node only, without the gateway (published with the -node tag suffix).
-FROM runtime AS prod-node
-
-COPY --from=build --chown=nonroot:nonroot /out/var/lib/meshsdr /var/lib/meshsdr
-COPY .infra/docker/prod/etc/meshsdr /etc/meshsdr
-COPY --from=build /out/etc/meshsdr/ /etc/meshsdr/
-COPY --from=build /out/meshsdr-node /meshsdr
-
-USER nonroot
-
-VOLUME /var/lib/meshsdr
-# node.listen
-EXPOSE 8074
-
-ENTRYPOINT ["/meshsdr"]
-CMD ["node"]
 
 
 # Corresponding sources of the GPL components bundled in the images (§8.7

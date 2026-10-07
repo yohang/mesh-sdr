@@ -57,12 +57,12 @@ generate: ## Generate code (templ, sqlc, oapi-codegen, openapi.json) and CSS (ta
 	$(RUN) go generate ./...
 
 .PHONY: lint
-lint: generate ## Run golangci-lint (default and nogateway builds)
-	$(RUN) sh -c 'golangci-lint run && golangci-lint run --build-tags nogateway'
+lint: generate ## Run golangci-lint
+	$(RUN) golangci-lint run
 
 .PHONY: test
-test: generate ## Run tests (default and nogateway builds)
-	$(RUN) sh -c 'go test ./... && go test -tags nogateway ./...'
+test: generate ## Run tests
+	$(RUN) go test ./...
 
 .PHONY: a11y
 a11y: ## Run the accessibility checks (axe-core, CI-only container) against the production image
@@ -88,6 +88,5 @@ vendor-passwords: ## Download the common-password list (SECLISTS_COMMIT=..., SEC
 	$(RUN) go run ./internal/identity/infra/commonpw/vendor -commit $(SECLISTS_COMMIT) -sha256 $(SECLISTS_SHA256)
 
 .PHONY: build-prod
-build-prod: ## Build the production images (meshsdr, and meshsdr-node without the gateway)
+build-prod: ## Build the production image (every role; CMD all, or node)
 	docker build -f .infra/docker/Dockerfile --target prod -t $(IMAGE) .
-	docker build -f .infra/docker/Dockerfile --target prod-node -t $(IMAGE)-node .
