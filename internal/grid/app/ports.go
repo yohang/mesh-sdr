@@ -88,10 +88,13 @@ type Timings struct {
 // timingsCell holds the current Timings of a service: the heartbeat
 // interval and the offline delay are DB settings that change at run time
 // (ADR 0018).
-type timingsCell struct{ p atomic.Pointer[Timings] }
+type timingsCell struct {
+	p       atomic.Pointer[Timings]
+	changes chan struct{}
+}
 
 func newTimingsCell(t Timings) *timingsCell {
-	c := &timingsCell{}
+	c := &timingsCell{changes: make(chan struct{}, 1)}
 	c.p.Store(&t)
 
 	return c
@@ -99,7 +102,15 @@ func newTimingsCell(t Timings) *timingsCell {
 
 func (c *timingsCell) get() Timings { return *c.p.Load() }
 
-func (c *timingsCell) set(t Timings) { c.p.Store(&t) }
+// set stores t and wakes the service loop, which resets its ticker.
+func (c *timingsCell) set(t Timings) {
+	c.p.Store(&t)
+
+	select {
+	case c.changes <- struct{}{}:
+	default:
+	}
+}
 
 // DefaultTimings returns the defaults.
 func DefaultTimings() Timings {

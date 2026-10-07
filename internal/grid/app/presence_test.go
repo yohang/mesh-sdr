@@ -229,3 +229,46 @@ func TestPresenceLifecycleClosures(t *testing.T) {
 		t.Errorf("retention kept the row: %v", err)
 	}
 }
+
+// TestPresenceRunFollowsTimings: the reaper loop takes new timings at once,
+// without waiting for its old period (ADR 0018).
+func TestPresenceRunFollowsTimings(t *testing.T) {
+	e := newEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	repo := sqlite.NewConnectionRepository(e.db)
+	p := app.NewPresence(repo, sqlite.NewDeviceRepository(e.db), nil, app.DefaultTimings(), time.Now, discard)
+
+	id, _ := shared.NewUUIDv7(time.Now())
+	if err := p.Open(ctx, domain.ConnectionInfo{ID: id, Kind: domain.ConnectionEvents, IP: "192.0.2.1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+
+	go func() { p.Run(ctx); close(done) }()
+
+	defer func() { cancel(); <-done }()
+
+	fast := app.DefaultTimings()
+	fast.PresenceStale = 300 * time.Millisecond
+	p.SetTimings(fast)
+
+	deadline := time.Now().Add(5 * time.Second)
+
+	for {
+		c, err := repo.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, _, closed := c.Closed(); closed {
+			return
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatal("the reaper kept its old period")
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+}

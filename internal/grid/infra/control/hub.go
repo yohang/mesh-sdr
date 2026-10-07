@@ -586,13 +586,16 @@ type hubSession struct {
 func (s *hubSession) run(ctx context.Context, l *link) error {
 	o := s.m.o
 
+	interval := time.Duration(s.m.heartbeat.Load())
 	hello := ctl.Hello{
 		HubID: o.HubID, HubVersion: o.Control.HubVersion(), Protocols: []string{rxv1.ControlSubprotocol},
-		ServerTime: o.Now().UnixMilli(), HeartbeatIntervalMS: time.Duration(s.m.heartbeat.Load()).Milliseconds(),
+		ServerTime: o.Now().UnixMilli(), HeartbeatIntervalMS: interval.Milliseconds(),
 	}
 	if err := send(s.conn, rxv1.TypeCtlHello, rxv1.CorrelationID{}, hello); err != nil {
 		return err
 	}
+
+	o.Control.HelloSent(s.id, interval)
 
 	reads := reader(ctx, s.conn)
 

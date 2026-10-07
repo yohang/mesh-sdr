@@ -77,7 +77,13 @@ func (s *Status) Evaluate(n *domain.Node, link LinkState, known bool, now time.T
 	}
 
 	silent := now.Sub(last)
-	interval := s.timings.get().HeartbeatInterval
+
+	// The node heartbeats at the interval of its channel's ctl.hello, not
+	// at a setting changed since (ADR 0018).
+	interval := link.HeartbeatInterval
+	if interval <= 0 {
+		interval = s.timings.get().HeartbeatInterval
+	}
 
 	switch {
 	case silent >= s.timings.get().OfflineAfter:
@@ -185,8 +191,9 @@ func (s *Status) Sweep(ctx context.Context) {
 }
 
 // Run sweeps until ctx is done, at most every 5 s.
+// The period follows the heartbeat interval setting.
 func (s *Status) Run(ctx context.Context) {
-	every := min(5*time.Second, s.timings.get().HeartbeatInterval)
+	every := s.sweepEvery()
 	t := time.NewTicker(every)
 
 	defer t.Stop()
@@ -198,8 +205,18 @@ func (s *Status) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-s.timings.changes:
+		}
+
+		if e := s.sweepEvery(); e != every {
+			every = e
+			t.Reset(every)
 		}
 	}
+}
+
+func (s *Status) sweepEvery() time.Duration {
+	return max(min(5*time.Second, s.timings.get().HeartbeatInterval), 10*time.Millisecond)
 }
 
 // HeartbeatHandler applies node.heartbeat events (control ingestion).

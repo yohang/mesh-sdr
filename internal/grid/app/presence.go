@@ -157,7 +157,9 @@ func (s *Presence) Reap(ctx context.Context) {
 
 // Run reaps every 15 s (or every stale/3 when shorter) until ctx is done.
 func (s *Presence) Run(ctx context.Context) {
-	t := time.NewTicker(min(15*time.Second, s.timings.get().PresenceStale/3))
+	every := s.reapEvery()
+	t := time.NewTicker(every)
+
 	defer t.Stop()
 
 	for {
@@ -166,8 +168,19 @@ func (s *Presence) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			s.Reap(ctx)
+		case <-s.timings.changes:
+		}
+
+		// The period follows the timings (SetTimings).
+		if e := s.reapEvery(); e != every {
+			every = e
+			t.Reset(every)
 		}
 	}
+}
+
+func (s *Presence) reapEvery() time.Duration {
+	return max(min(15*time.Second, s.timings.get().PresenceStale/3), 10*time.Millisecond)
 }
 
 // NodeRestarted closes the rows of a node's previous boot (a BootHandler).

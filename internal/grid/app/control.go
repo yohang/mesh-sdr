@@ -102,6 +102,12 @@ func (c *Control) linkChanged(ctx context.Context, id domain.NodeID) {
 	}
 }
 
+// HelloSent records the heartbeat interval sent to a node in ctl.hello: its
+// status is evaluated against that interval until the node reconnects.
+func (c *Control) HelloSent(id domain.NodeID, interval time.Duration) {
+	c.links.HelloSent(id, interval)
+}
+
 // HubVersion returns the product version announced in ctl.hello.
 func (c *Control) HubVersion() string { return c.hubVersion }
 
