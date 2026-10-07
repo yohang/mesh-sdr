@@ -506,8 +506,8 @@ func TestRevokedSession(t *testing.T) {
 // TestExpiredSession: a session is re-read at its known expiry; an expired
 // one ends the socket.
 func TestExpiredSession(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{SessionCheck: time.Hour})
-	f.session.until = time.Now().Add(-time.Second) // re-read in about 1 s
+	f := newFixture(t, eventshttp.Timings{SessionCheck: time.Hour, MinSessionCheck: 200 * time.Millisecond})
+	f.session.until = time.Now().Add(-time.Second) // re-read at the floor
 
 	ws := open(t, f)
 
@@ -570,7 +570,7 @@ func TestRepeatedForbiddenCloses4403(t *testing.T) {
 	f := newFixture(t, eventshttp.Timings{})
 	ws := open(t, f)
 
-	// Spread under the message rate.
+	// Spread under the message rate: ten refusals keep the connection.
 	for i := range 10 {
 		send(t, ws, "sub", "f", map[string]any{"topics": []string{"admin.connections"}})
 
@@ -581,5 +581,33 @@ func TestRepeatedForbiddenCloses4403(t *testing.T) {
 		time.Sleep(110 * time.Millisecond)
 	}
 
+	send(t, ws, "sub", "ok", map[string]any{"topics": []string{"nodes"}})
+
+	if a := recv(t, ws); a.Type != "ack" {
+		t.Fatalf("after ten refusals = %+v", a)
+	}
+
+	// The eleventh closes it.
+	send(t, ws, "sub", "f", map[string]any{"topics": []string{"admin.connections"}})
+	recv(t, ws)
 	expectClose(t, ws, rxv1.CloseForbidden)
+}
+
+// TestSessionCheckFloor: a session whose known expiry is past is not
+// re-read in a loop: the checks keep the floor delay.
+func TestSessionCheckFloor(t *testing.T) {
+	f := newFixture(t, eventshttp.Timings{SessionCheck: time.Hour})
+	f.session.until = time.Now().Add(-time.Minute)
+
+	_ = open(t, f)
+
+	time.Sleep(time.Second)
+
+	f.session.mu.Lock()
+	checks := f.session.checks
+	f.session.mu.Unlock()
+
+	if checks > 1 {
+		t.Errorf("%d session checks in a second, want the first only", checks)
+	}
 }

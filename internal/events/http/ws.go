@@ -41,9 +41,10 @@ const (
 	// MaxQueueBytes bounds the pending outbound bytes of a connection
 	// (ADR 0016 decision 12): beyond it the socket closes with 4413.
 	MaxQueueBytes = 1 << 20
-	// strikeLimit is the number of strikes in strikeWindow that closes the
-	// connection (§6.2: 10 invalid_* in 60 s → 4400; §5.9: forbidden > 10/min
-	// → 4403; ADR 0016 decision 12: 10 rate_limited → 4429).
+	// strikeLimit is the number of strikes allowed in strikeWindow; one
+	// more closes the connection (§6.2 invalid_* → 4400; §5.9 forbidden
+	// > 10/min → 4403, as on the node; ADR 0016 decision 12 rate_limited →
+	// 4429).
 	strikeLimit  = 10
 	strikeWindow = time.Minute
 )
@@ -82,7 +83,10 @@ type Timings struct {
 	// SessionCheck bounds the delay between two session checks (5 min): a
 	// session also ends at its known expiry.
 	SessionCheck time.Duration
-	Ping         time.Duration // WS ping period, 20 s
+	// MinSessionCheck is the shortest delay between two session checks
+	// (5 s), even when the session's known expiry is closer or past.
+	MinSessionCheck time.Duration
+	Ping            time.Duration // WS ping period, 20 s
 	Pong         time.Duration // pong timeout, 30 s
 	Heartbeat    time.Duration // presence refresh of the live rows, 15 s
 }
@@ -94,6 +98,10 @@ func (t Timings) withDefaults() Timings {
 
 	if t.SessionCheck <= 0 {
 		t.SessionCheck = 5 * time.Minute
+	}
+
+	if t.MinSessionCheck <= 0 {
+		t.MinSessionCheck = 5 * time.Second
 	}
 
 	if t.Ping <= 0 {
@@ -418,7 +426,7 @@ func (cn *conn) watch(ctx context.Context, signedIn bool) {
 	schedule := func(until time.Time) {
 		d := cn.m.d.Timings.SessionCheck
 		if !until.IsZero() {
-			d = min(d, max(until.Sub(cn.m.d.Now()), 0)+time.Second)
+			d = min(d, max(until.Sub(cn.m.d.Now())+time.Second, cn.m.d.Timings.MinSessionCheck))
 		}
 
 		timer.Reset(d)
@@ -802,8 +810,8 @@ func (cn *conn) send(typ rxv1.MessageType, payload any) {
 	_ = cn.c.Send(env)
 }
 
-// strike counts a violation; strikeLimit strikes within strikeWindow close
-// the connection with code. Read loop only.
+// strike counts a violation; more than strikeLimit strikes within
+// strikeWindow close the connection with code. Read loop only.
 func (cn *conn) strike(code rxv1.CloseCode) {
 	s := cn.strikes[code]
 	if s == nil {
@@ -811,7 +819,7 @@ func (cn *conn) strike(code rxv1.CloseCode) {
 		cn.strikes[code] = s
 	}
 
-	if s.add(cn.m.d.Now()) >= strikeLimit {
+	if s.add(cn.m.d.Now()) > strikeLimit {
 		cn.logger.Warn("events ws closed after repeated violations", slog.Int("close_code", int(code)))
 		cn.c.Close(code, code.String())
 	}
