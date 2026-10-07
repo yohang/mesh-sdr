@@ -276,7 +276,7 @@ func (s *Presence) Handler() EventHandler {
 // ownedDevice returns id when it is a device of node, "" otherwise: a node
 // cannot attach its listeners to another node's device.
 func (s *Presence) ownedDevice(ctx context.Context, node domain.NodeID, id string) (string, error) {
-	did, err := domain.NewDeviceID(id)
+	did, err := shared.NewDeviceID(id)
 	if err != nil {
 		return "", nil //nolint:nilerr // absent or malformed: no device
 	}

@@ -2,6 +2,8 @@ package domain
 
 import (
 	"regexp"
+
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Role is one of the P3 roles (TECHNICAL_SPEC §5.1, `roles` seed). Its value
@@ -65,11 +67,11 @@ func (r Role) Includes(o Role) bool { return r >= o }
 // operator (global or device-scoped) or admin (always global).
 type RoleGrant struct {
 	role   Role
-	device DeviceID
+	device shared.DeviceID
 }
 
 // NewRoleGrant validates a grant. A zero device means "all devices".
-func NewRoleGrant(r Role, device DeviceID) (RoleGrant, error) {
+func NewRoleGrant(r Role, device shared.DeviceID) (RoleGrant, error) {
 	switch {
 	case r != RoleOperator && r != RoleAdmin:
 		return RoleGrant{}, ErrInvalidRole.WithDetail("only operator and admin are granted (listener is implicit)")
@@ -84,7 +86,7 @@ func NewRoleGrant(r Role, device DeviceID) (RoleGrant, error) {
 func (g RoleGrant) Role() Role { return g.role }
 
 // Device returns the device scope; zero means global.
-func (g RoleGrant) Device() DeviceID { return g.device }
+func (g RoleGrant) Device() shared.DeviceID { return g.device }
 
 // Global reports whether the grant applies to every device.
 func (g RoleGrant) Global() bool { return g.device.IsZero() }

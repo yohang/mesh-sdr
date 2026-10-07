@@ -12,6 +12,7 @@ import (
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // recordedEvents records the published events.
@@ -59,7 +60,7 @@ func TestEventAudiences(t *testing.T) {
 
 	for node, policy := range map[string]string{"open": "anonymous", "closed": ""} {
 		d, err := domain.NewReportedDevice(domain.MustNodeID(node), domain.DeviceSpec{
-			ID: domain.MustDeviceID(node + "-hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 1, FreqMax: 2,
+			ID: shared.MustDeviceID(node + "-hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 1, FreqMax: 2,
 			SampleRates: []int64{1}, ListenPolicy: policy,
 		}, 0, now)
 		if err != nil {
@@ -139,7 +140,7 @@ func TestEventAudiences(t *testing.T) {
 func mustDevice(t *testing.T, repo *gridsqlite.DeviceRepository, id string) *domain.Device {
 	t.Helper()
 
-	d, err := repo.Get(context.Background(), domain.MustDeviceID(id))
+	d, err := repo.Get(context.Background(), shared.MustDeviceID(id))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -453,7 +453,7 @@ func happyPaths(t *testing.T, h *contractHub) {
 	}
 
 	dev, err := domain.NewReportedDevice(domain.MustNodeID("attic"), domain.DeviceSpec{
-		ID: domain.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000,
+		ID: shared.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000,
 		SampleRates: []int64{2_048_000},
 	}, 0, now)
 	if err != nil {
@@ -529,7 +529,7 @@ func schedulingPaths(t *testing.T, h *contractHub, admin *apiClient, expect func
 	devices := gridsqlite.NewDeviceRepository(h.adapter)
 
 	vhf, err := domain.NewReportedDevice(domain.MustNodeID("attic"), domain.DeviceSpec{
-		ID: domain.MustDeviceID("vhf"), Name: "VHF", Type: "rtl_sdr", Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000,
+		ID: shared.MustDeviceID("vhf"), Name: "VHF", Type: "rtl_sdr", Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000,
 		SampleRates: []int64{2_048_000},
 	}, 1, time.Now())
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Listen policies of a device (§7.4 listen_policy).
@@ -25,7 +26,7 @@ type GlobalListenPolicy interface {
 // DeviceFeatures is the public feature summary of one device (API-001):
 // what it is, whether it is online and which modes it offers.
 type DeviceFeatures struct {
-	ID     domain.DeviceID
+	ID     shared.DeviceID
 	Node   domain.NodeID
 	Name   string
 	Online bool

@@ -27,6 +27,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/radio/app"
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Defaults.
@@ -45,7 +46,7 @@ type Factory struct {
 }
 
 // New implements app.Engines.
-func (f Factory) New(id domain.DeviceID) app.Engine {
+func (f Factory) New(id shared.DeviceID) app.Engine {
 	return New(f.Logger.With(slog.String("device_id", id.String())))
 }
 

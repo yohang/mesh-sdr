@@ -4,39 +4,11 @@
 package domain
 
 import (
-	"regexp"
 	"strconv"
 	"time"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
-
-var deviceIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
-
-// DeviceID is the hub-wide device slug a schedule drives.
-type DeviceID struct{ value string }
-
-// NewDeviceID validates s.
-func NewDeviceID(s string) (DeviceID, error) {
-	if !deviceIDPattern.MatchString(s) {
-		return DeviceID{}, ErrInvalidSchedule.WithViolations(shared.NewViolation("device_id", "invalid_device_id", "invalid device id"))
-	}
-
-	return DeviceID{value: s}, nil
-}
-
-// MustDeviceID is NewDeviceID that panics. Tests and constants only.
-func MustDeviceID(s string) DeviceID {
-	d, err := NewDeviceID(s)
-	if err != nil {
-		panic(err)
-	}
-
-	return d
-}
-
-// String returns the slug.
-func (d DeviceID) String() string { return d.value }
 
 // Kind is the kind of window of a schedule.
 type Kind string

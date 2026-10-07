@@ -20,23 +20,18 @@ func NewGuard(d Deps) *Guard { return &Guard{d: d} }
 
 // DevicesStale disables the schedules of devices their node no longer
 // reports.
-func (g *Guard) DevicesStale(ctx context.Context, devices []string) error {
+func (g *Guard) DevicesStale(ctx context.Context, devices []shared.DeviceID) error {
 	return g.disableAll(ctx, devices, domain.ReasonDeviceStale)
 }
 
 // DevicesRemoved disables the schedules of devices deleted from the
 // registry (forgotten, or removed with their node).
-func (g *Guard) DevicesRemoved(ctx context.Context, devices []string) error {
+func (g *Guard) DevicesRemoved(ctx context.Context, devices []shared.DeviceID) error {
 	return g.disableAll(ctx, devices, domain.ReasonDeviceRemoved)
 }
 
-func (g *Guard) disableAll(ctx context.Context, devices []string, reason domain.DisabledReason) error {
-	for _, d := range devices {
-		id, err := domain.NewDeviceID(d)
-		if err != nil {
-			continue
-		}
-
+func (g *Guard) disableAll(ctx context.Context, devices []shared.DeviceID, reason domain.DisabledReason) error {
+	for _, id := range devices {
 		list, err := g.d.Repo.ListByDevice(ctx, id)
 		if err != nil {
 			return err
@@ -56,7 +51,7 @@ func (g *Guard) disableAll(ctx context.Context, devices []string, reason domain.
 // reported (its limits may have changed): a preset that no longer fits
 // disables its schedules.
 func (g *Guard) DeviceReported(ctx context.Context, dev Device) error {
-	id, err := domain.NewDeviceID(dev.ID)
+	id, err := shared.NewDeviceID(dev.ID)
 	if err != nil {
 		return nil //nolint:nilerr // no schedule can name an invalid id
 	}

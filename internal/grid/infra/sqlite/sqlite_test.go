@@ -100,7 +100,7 @@ func TestDeviceActivePreset(t *testing.T) {
 	repo := sqlite.NewDeviceRepository(a)
 
 	d, err := domain.NewReportedDevice(node.ID(), domain.DeviceSpec{
-		ID: domain.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000,
+		ID: shared.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000,
 		SampleRates: []int64{2_048_000},
 	}, 0, now)
 	if err != nil {

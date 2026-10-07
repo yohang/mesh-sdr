@@ -10,6 +10,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // UsersPath is Admin › Users (ACC-008).
@@ -201,7 +202,7 @@ func parseGrants(role, devices string) ([]domain.RoleGrant, error) {
 	}
 
 	if r != domain.RoleListener {
-		g, err := domain.NewRoleGrant(r, domain.DeviceID{})
+		g, err := domain.NewRoleGrant(r, shared.DeviceID{})
 
 		return []domain.RoleGrant{g}, err
 	}
@@ -209,7 +210,7 @@ func parseGrants(role, devices string) ([]domain.RoleGrant, error) {
 	var grants []domain.RoleGrant
 
 	for _, d := range strings.FieldsFunc(devices, func(c rune) bool { return c == ',' || c == ' ' }) {
-		dev, err := domain.NewDeviceID(d)
+		dev, err := shared.NewDeviceID(d)
 		if err != nil {
 			return nil, err
 		}

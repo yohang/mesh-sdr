@@ -3,7 +3,6 @@ package domain
 import (
 	"context"
 	"encoding/json"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,33 +11,6 @@ import (
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
-
-var deviceIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
-
-// DeviceID is the hub-wide unique device slug (§7.1 "Slugs").
-type DeviceID struct{ value string }
-
-// NewDeviceID validates s.
-func NewDeviceID(s string) (DeviceID, error) {
-	if !deviceIDPattern.MatchString(s) {
-		return DeviceID{}, ErrInvalidDeviceID.WithDetail("invalid device id " + strconv.Quote(s))
-	}
-
-	return DeviceID{value: s}, nil
-}
-
-// MustDeviceID is NewDeviceID that panics. Tests and constants only.
-func MustDeviceID(s string) DeviceID {
-	id, err := NewDeviceID(s)
-	if err != nil {
-		panic(err)
-	}
-
-	return id
-}
-
-// String returns the slug.
-func (id DeviceID) String() string { return id.value }
 
 // RuntimeState is the last device state reported by its node (§7.1).
 type RuntimeState string
@@ -74,7 +46,7 @@ func ParseRuntimeState(s string) (RuntimeState, error) {
 
 // DeviceSpec is the device definition reported from the node config.
 type DeviceSpec struct {
-	ID                DeviceID
+	ID                shared.DeviceID
 	Name              string
 	Type              string
 	Enabled           bool
@@ -106,13 +78,13 @@ func cleanText(s string, max int) string {
 }
 
 func (s DeviceSpec) validate() error {
-	if s.ID.value == "" || strings.TrimSpace(s.Name) == "" || s.Type == "" || len(s.Type) > 48 ||
+	if s.ID.String() == "" || strings.TrimSpace(s.Name) == "" || s.Type == "" || len(s.Type) > 48 ||
 		s.FreqMin <= 0 || s.FreqMax <= s.FreqMin || len(s.SampleRates) == 0 {
-		return ErrInvalidDevice.WithDetail("invalid definition of device " + strconv.Quote(s.ID.value))
+		return ErrInvalidDevice.WithDetail("invalid definition of device " + strconv.Quote(s.ID.String()))
 	}
 
 	if s.ListenPolicy != "" && s.ListenPolicy != "anonymous" && s.ListenPolicy != "registered" {
-		return ErrInvalidDevice.WithDetail("invalid listen_policy of device " + strconv.Quote(s.ID.value))
+		return ErrInvalidDevice.WithDetail("invalid listen_policy of device " + strconv.Quote(s.ID.String()))
 	}
 
 	return nil
@@ -121,7 +93,7 @@ func (s DeviceSpec) validate() error {
 // Device is the read-only registry entry of a device, mirrored from its
 // node (§7.1 devices). It holds no device settings.
 type Device struct {
-	id          DeviceID
+	id          shared.DeviceID
 	node        NodeID
 	name        string
 	typ         string
@@ -167,11 +139,11 @@ func (d *Device) ApplySpec(node NodeID, spec DeviceSpec, sortOrder int, now time
 	}
 
 	if d.node != node {
-		return ErrDeviceIDConflict.WithDetail("device " + d.id.value + " belongs to node " + d.node.String())
+		return ErrDeviceIDConflict.WithDetail("device " + d.id.String() + " belongs to node " + d.node.String())
 	}
 
 	if d.typ != "" && d.typ != spec.Type {
-		return ErrDeviceIDConflict.WithDetail("device " + d.id.value + " is a " + d.typ + ", not a " + spec.Type)
+		return ErrDeviceIDConflict.WithDetail("device " + d.id.String() + " is a " + d.typ + ", not a " + spec.Type)
 	}
 
 	d.name = cleanText(spec.Name, 128)
@@ -243,7 +215,7 @@ func (d *Device) ApplyState(state RuntimeState, reason string, centerFreq *int64
 func (d *Device) SetOffline() { d.online = false }
 
 // ID returns the device id.
-func (d *Device) ID() DeviceID { return d.id }
+func (d *Device) ID() shared.DeviceID { return d.id }
 
 // Node returns the owning node.
 func (d *Device) Node() NodeID { return d.node }
@@ -300,7 +272,7 @@ type DeviceSnapshot struct {
 // Snapshot returns the persisted form.
 func (d *Device) Snapshot() DeviceSnapshot {
 	return DeviceSnapshot{
-		ID: d.id.value, Node: d.node.String(), Name: d.name, Type: d.typ, FreqMin: d.freqMin, FreqMax: d.freqMax,
+		ID: d.id.String(), Node: d.node.String(), Name: d.name, Type: d.typ, FreqMin: d.freqMin, FreqMax: d.freqMax,
 		SampleRates: slices.Clone(d.sampleRates), Flags: d.flags, Online: d.online, State: d.state, StateAt: d.stateAt,
 		Reason: d.reason, ActivePreset: d.preset, CenterFreq: d.centerFreq, SortOrder: d.sortOrder, ReportedAt: d.reportedAt,
 	}
@@ -308,7 +280,7 @@ func (d *Device) Snapshot() DeviceSnapshot {
 
 // RehydrateDevice rebuilds a Device from its persisted form.
 func RehydrateDevice(s DeviceSnapshot) (*Device, error) {
-	id, err := NewDeviceID(s.ID)
+	id, err := shared.NewDeviceID(s.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +306,7 @@ func (f DeviceFlags) MarshalFlags() ([]byte, error) { return json.Marshal(f) }
 
 // DeviceRepository persists the device registry.
 type DeviceRepository interface {
-	Get(ctx context.Context, id DeviceID) (*Device, error)
+	Get(ctx context.Context, id shared.DeviceID) (*Device, error)
 	List(ctx context.Context) ([]*Device, error)
 	ListByNode(ctx context.Context, node NodeID) ([]*Device, error)
 	Save(ctx context.Context, d *Device) error
@@ -342,5 +314,5 @@ type DeviceRepository interface {
 	SetNodeOffline(ctx context.Context, node NodeID) error
 	// DeleteMissing deletes the device only while it is missing (see
 	// Device.Missing) and reports whether it was deleted.
-	DeleteMissing(ctx context.Context, id DeviceID) (bool, error)
+	DeleteMissing(ctx context.Context, id shared.DeviceID) (bool, error)
 }

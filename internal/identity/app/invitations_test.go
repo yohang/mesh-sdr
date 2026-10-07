@@ -91,10 +91,10 @@ func TestInvitationLifecycle(t *testing.T) {
 	}
 }
 
-func mustDevice(t *testing.T, s string) domain.DeviceID {
+func mustDevice(t *testing.T, s string) shared.DeviceID {
 	t.Helper()
 
-	d, err := domain.NewDeviceID(s)
+	d, err := shared.NewDeviceID(s)
 	if err != nil {
 		t.Fatal(err)
 	}

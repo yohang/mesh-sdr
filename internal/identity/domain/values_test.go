@@ -228,7 +228,7 @@ func TestRoles(t *testing.T) {
 		t.Error("rank order wrong")
 	}
 
-	dev, _ := domain.NewDeviceID("rtl-1")
+	dev, _ := shared.NewDeviceID("rtl-1")
 
 	if _, err := domain.NewRoleGrant(domain.RoleOperator, dev); err != nil {
 		t.Error(err)
@@ -238,11 +238,11 @@ func TestRoles(t *testing.T) {
 		t.Error("device-scoped admin accepted")
 	}
 
-	if _, err := domain.NewRoleGrant(domain.RoleListener, domain.DeviceID{}); !errors.Is(err, domain.ErrInvalidRole) {
+	if _, err := domain.NewRoleGrant(domain.RoleListener, shared.DeviceID{}); !errors.Is(err, domain.ErrInvalidRole) {
 		t.Error("listener grant accepted")
 	}
 
-	if _, err := domain.NewDeviceID("Bad.Id"); !errors.Is(err, domain.ErrInvalidDevice) {
+	if _, err := shared.NewDeviceID("Bad.Id"); !errors.Is(err, shared.ErrInvalidDeviceID) {
 		t.Error("bad device id accepted")
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/radio/infra/connector"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Deps are the dependencies of the module.
@@ -114,7 +115,7 @@ func Devices(cfg config.Node) ([]*domain.Device, error) {
 }
 
 func device(id string, c config.DeviceConfig) (*domain.Device, error) {
-	did, err := domain.NewDeviceID(id)
+	did, err := shared.NewDeviceID(id)
 	if err != nil {
 		return nil, err
 	}

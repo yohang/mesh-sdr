@@ -17,9 +17,9 @@ type DeviceListener interface {
 	// DeviceReported runs for every device of a capability report.
 	DeviceReported(ctx context.Context, d *domain.Device) error
 	// DevicesStale runs for the devices a report no longer lists.
-	DevicesStale(ctx context.Context, ids []domain.DeviceID) error
+	DevicesStale(ctx context.Context, ids []shared.DeviceID) error
 	// DevicesRemoved runs for devices deleted from the registry.
-	DevicesRemoved(ctx context.Context, ids []domain.DeviceID) error
+	DevicesRemoved(ctx context.Context, ids []shared.DeviceID) error
 }
 
 // Devices mirrors node device definitions and states into the read-only
@@ -50,7 +50,7 @@ func (s *Devices) SetListener(l DeviceListener, tx Transactor) { s.listener, s.t
 
 // SpecOf converts a reported device.
 func SpecOf(d ctl.Device) (domain.DeviceSpec, error) {
-	id, err := domain.NewDeviceID(d.ID)
+	id, err := shared.NewDeviceID(d.ID)
 	if err != nil {
 		return domain.DeviceSpec{}, err
 	}
@@ -67,7 +67,7 @@ func SpecOf(d ctl.Device) (domain.DeviceSpec, error) {
 // refused (device_id_conflict), devices no longer reported become
 // unavailable.
 func (s *Devices) Sync(ctx context.Context, n *domain.Node, caps ctl.Capabilities, now time.Time) error {
-	reported := map[domain.DeviceID]bool{}
+	reported := map[shared.DeviceID]bool{}
 
 	for i, rd := range caps.Devices {
 		spec, err := SpecOf(rd)
@@ -112,7 +112,7 @@ func (s *Devices) Sync(ctx context.Context, n *domain.Node, caps ctl.Capabilitie
 		return err
 	}
 
-	var stale []domain.DeviceID
+	var stale []shared.DeviceID
 
 	for _, d := range known {
 		if !reported[d.ID()] && d.MarkUnavailable(now) {
@@ -151,7 +151,7 @@ func (s *Devices) StateHandler() EventHandler {
 			return nil //nolint:nilerr // a malformed event is skipped
 		}
 
-		id, err := domain.NewDeviceID(st.DeviceID)
+		id, err := shared.NewDeviceID(st.DeviceID)
 		if err != nil {
 			return nil //nolint:nilerr // a malformed event is skipped
 		}
@@ -224,7 +224,7 @@ func (s *Devices) Forget(ctx context.Context, actor, id string) error {
 		}
 
 		if s.listener != nil {
-			return s.listener.DevicesRemoved(ctx, []domain.DeviceID{d.ID()})
+			return s.listener.DevicesRemoved(ctx, []shared.DeviceID{d.ID()})
 		}
 
 		return nil
@@ -260,7 +260,7 @@ func (s *Devices) List(ctx context.Context) ([]*domain.Device, error) { return s
 
 // Get returns one device.
 func (s *Devices) Get(ctx context.Context, id string) (*domain.Device, error) {
-	did, err := domain.NewDeviceID(id)
+	did, err := shared.NewDeviceID(id)
 	if err != nil {
 		return nil, domain.ErrDeviceNotFound
 	}

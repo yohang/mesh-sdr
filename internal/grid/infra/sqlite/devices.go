@@ -10,6 +10,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite/sqlc"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // DeviceRepository implements domain.DeviceRepository.
@@ -21,7 +22,7 @@ func NewDeviceRepository(a *db.DB) *DeviceRepository { return &DeviceRepository{
 var _ domain.DeviceRepository = (*DeviceRepository)(nil)
 
 // Get implements domain.DeviceRepository.
-func (r *DeviceRepository) Get(ctx context.Context, id domain.DeviceID) (*domain.Device, error) {
+func (r *DeviceRepository) Get(ctx context.Context, id shared.DeviceID) (*domain.Device, error) {
 	row, err := sqlc.New(r.db.Reader(ctx)).GetDevice(ctx, id.String())
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.ErrDeviceNotFound
@@ -143,7 +144,7 @@ func deviceFromRow(row sqlc.Device) (*domain.Device, error) {
 
 // DeleteMissing implements domain.DeviceRepository: the condition is in the
 // statement, so a device reported again meanwhile is kept.
-func (r *DeviceRepository) DeleteMissing(ctx context.Context, id domain.DeviceID) (bool, error) {
+func (r *DeviceRepository) DeleteMissing(ctx context.Context, id shared.DeviceID) (bool, error) {
 	n, err := sqlc.New(r.db.Writer(ctx)).DeleteMissingDevice(ctx, id.String())
 	if err != nil {
 		return false, fmt.Errorf("delete device %s: %w", id, err)

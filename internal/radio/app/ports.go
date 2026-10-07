@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Errors returned by Source.Run.
@@ -148,7 +149,7 @@ type Engine interface {
 
 // Engines builds the engine of a device.
 type Engines interface {
-	New(id domain.DeviceID) Engine
+	New(id shared.DeviceID) Engine
 }
 
 // Reporter publishes device states (device.state over the control

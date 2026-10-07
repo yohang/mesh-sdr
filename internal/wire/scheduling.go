@@ -83,7 +83,7 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 
 	// Grid hooks (GRID-016, ADM-009): the guard joins the registry's
 	// transactions; the desired state reads the planner.
-	listener := deviceListener{guard: s.guard}
+	listener := deviceListener{s.guard}
 	g.devices.SetListener(listener, adapter)
 	g.nodes.OnDelete(func(ctx context.Context, id griddomain.NodeID) error {
 		list, err := g.deviceRepo.ListByNode(ctx, id)
@@ -91,7 +91,7 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 			return err
 		}
 
-		ids := make([]griddomain.DeviceID, len(list))
+		ids := make([]shared.DeviceID, len(list))
 		for i, d := range list {
 			ids[i] = d.ID()
 		}
@@ -149,7 +149,7 @@ func scheduleDevice(d *griddomain.Device) schedulesapp.Device {
 }
 
 func (a scheduleDevices) Device(ctx context.Context, id string) (schedulesapp.Device, bool, error) {
-	did, err := griddomain.NewDeviceID(id)
+	did, err := shared.NewDeviceID(id)
 	if err != nil {
 		return schedulesapp.Device{}, false, nil //nolint:nilerr // an invalid id is not in the registry
 	}
@@ -244,28 +244,12 @@ func (c *presetCatalog) Compatible(ctx context.Context, d schedulesapp.Device) (
 	return out, nil
 }
 
-// deviceListener adapts the schedule guard to grid/app.DeviceListener.
-type deviceListener struct{ guard *schedulesapp.Guard }
-
-func deviceIDs(ids []griddomain.DeviceID) []string {
-	out := make([]string, len(ids))
-	for i, id := range ids {
-		out[i] = id.String()
-	}
-
-	return out
-}
+// deviceListener adapts the schedule guard to grid/app.DeviceListener
+// (DevicesStale and DevicesRemoved are the guard's).
+type deviceListener struct{ *schedulesapp.Guard }
 
 func (l deviceListener) DeviceReported(ctx context.Context, d *griddomain.Device) error {
-	return l.guard.DeviceReported(ctx, scheduleDevice(d))
-}
-
-func (l deviceListener) DevicesStale(ctx context.Context, ids []griddomain.DeviceID) error {
-	return l.guard.DevicesStale(ctx, deviceIDs(ids))
-}
-
-func (l deviceListener) DevicesRemoved(ctx context.Context, ids []griddomain.DeviceID) error {
-	return l.guard.DevicesRemoved(ctx, deviceIDs(ids))
+	return l.Guard.DeviceReported(ctx, scheduleDevice(d))
 }
 
 // lazyDesired is the grid's desired-state source, filled in once the
@@ -378,7 +362,7 @@ func ctlPreset(p *presetsdomain.Preset) ctl.Preset {
 type deviceScope struct{}
 
 func (deviceScope) CanOperate(ctx context.Context, device string) bool {
-	id, err := identitydomain.NewDeviceID(device)
+	id, err := shared.NewDeviceID(device)
 	if err != nil {
 		return false
 	}

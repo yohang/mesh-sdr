@@ -11,6 +11,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 type fakeDesired struct{ st ctl.StateApply }
@@ -167,7 +168,7 @@ func (l *listenerSpy) DeviceReported(_ context.Context, d *domain.Device) error 
 	return nil
 }
 
-func (l *listenerSpy) DevicesStale(_ context.Context, ids []domain.DeviceID) error {
+func (l *listenerSpy) DevicesStale(_ context.Context, ids []shared.DeviceID) error {
 	for _, id := range ids {
 		l.stale = append(l.stale, id.String())
 	}
@@ -175,7 +176,7 @@ func (l *listenerSpy) DevicesStale(_ context.Context, ids []domain.DeviceID) err
 	return nil
 }
 
-func (l *listenerSpy) DevicesRemoved(_ context.Context, ids []domain.DeviceID) error {
+func (l *listenerSpy) DevicesRemoved(_ context.Context, ids []shared.DeviceID) error {
 	for _, id := range ids {
 		l.removed = append(l.removed, id.String())
 	}

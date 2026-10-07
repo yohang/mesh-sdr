@@ -24,7 +24,7 @@ type Draft struct {
 
 // Spec is a validated schedule definition.
 type Spec struct {
-	device   DeviceID
+	device   shared.DeviceID
 	preset   shared.UUID
 	window   Window
 	days     DaysOfWeek
@@ -49,8 +49,8 @@ func NewSpec(d Draft) (Spec, error) {
 
 	var err error
 
-	if s.device, err = NewDeviceID(d.DeviceID); err != nil {
-		collect(err)
+	if s.device, err = shared.NewDeviceID(d.DeviceID); err != nil {
+		bad = append(bad, shared.NewViolation("device_id", "invalid_device_id", "invalid device id"))
 	}
 
 	if s.preset, err = shared.ParseUUID(d.PresetID); err != nil {
@@ -103,7 +103,7 @@ func NewSpec(d Draft) (Spec, error) {
 }
 
 // Device returns the device of the spec.
-func (s Spec) Device() DeviceID { return s.device }
+func (s Spec) Device() shared.DeviceID { return s.device }
 
 // Preset returns the preset of the spec.
 func (s Spec) Preset() shared.UUID { return s.preset }
@@ -184,7 +184,7 @@ func (s *Schedule) touch(now time.Time) {
 func (s *Schedule) ID() shared.UUID { return s.id }
 
 // Device returns the device.
-func (s *Schedule) Device() DeviceID { return s.spec.device }
+func (s *Schedule) Device() shared.DeviceID { return s.spec.device }
 
 // Preset returns the preset.
 func (s *Schedule) Preset() shared.UUID { return s.spec.preset }
@@ -234,7 +234,7 @@ type Snapshot struct {
 // Snapshot returns the persisted form.
 func (s *Schedule) Snapshot() Snapshot {
 	out := Snapshot{
-		ID: s.id, Device: s.spec.device.value, Preset: s.spec.preset, Kind: s.spec.window.kind, Phase: s.spec.window.phase,
+		ID: s.id, Device: s.spec.device.String(), Preset: s.spec.preset, Kind: s.spec.window.kind, Phase: s.spec.window.phase,
 		Days: s.spec.days.mask, Priority: s.spec.priority.value, Enabled: s.spec.enabled, Reason: s.reason,
 		DisabledAt: s.disabledAt, CreatedAt: s.createdAt, UpdatedAt: s.updatedAt, Version: s.version,
 	}
@@ -249,7 +249,7 @@ func (s *Schedule) Snapshot() Snapshot {
 // Rehydrate rebuilds a stored schedule. Daylight rows (written by a later
 // version or the migration tool) are kept as they are.
 func Rehydrate(s Snapshot) (*Schedule, error) {
-	device, err := NewDeviceID(s.Device)
+	device, err := shared.NewDeviceID(s.Device)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +299,7 @@ type Repository interface {
 	Get(ctx context.Context, id shared.UUID) (*Schedule, error)
 	// List returns every schedule by device, then start.
 	List(ctx context.Context) ([]*Schedule, error)
-	ListByDevice(ctx context.Context, device DeviceID) ([]*Schedule, error)
+	ListByDevice(ctx context.Context, device shared.DeviceID) ([]*Schedule, error)
 	ListByPreset(ctx context.Context, preset shared.UUID) ([]*Schedule, error)
 	Create(ctx context.Context, s *Schedule) error
 	// Update writes s when the stored version is expectedVersion

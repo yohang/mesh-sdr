@@ -49,7 +49,7 @@ func testDevices(t *testing.T, r Repos) {
 		}
 	}
 
-	spec := domain.DeviceSpec{ID: domain.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 1, FreqMax: 2, SampleRates: []int64{48_000}}
+	spec := domain.DeviceSpec{ID: shared.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 1, FreqMax: 2, SampleRates: []int64{48_000}}
 	hf := must(domain.NewReportedDevice(attic, spec, 0, t0))
 
 	if err := r.Devices.Save(ctx, hf); err != nil {

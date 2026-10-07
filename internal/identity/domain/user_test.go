@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 var t0 = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
@@ -59,7 +60,7 @@ func TestNewLocalUser(t *testing.T) {
 		t.Errorf("user without password: %v", err)
 	}
 
-	admin, _ := domain.NewRoleGrant(domain.RoleAdmin, domain.DeviceID{})
+	admin, _ := domain.NewRoleGrant(domain.RoleAdmin, shared.DeviceID{})
 	if r := newUser(t, admin, admin).Role(); r != domain.RoleAdmin {
 		t.Errorf("admin role = %v", r)
 	}
@@ -203,8 +204,8 @@ func TestPrincipal(t *testing.T) {
 		t.Error("anonymous listen policy wrong")
 	}
 
-	dev, _ := domain.NewDeviceID("rtl-1")
-	other, _ := domain.NewDeviceID("rtl-2")
+	dev, _ := shared.NewDeviceID("rtl-1")
+	other, _ := shared.NewDeviceID("rtl-2")
 	op, _ := domain.NewRoleGrant(domain.RoleOperator, dev)
 	u := newUser(t, op)
 

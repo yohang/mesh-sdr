@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Invitations runs the invitations (ACC-002, TECHNICAL_SPEC §5.4): the only
@@ -91,13 +92,13 @@ type CreatedInvitation struct {
 // configured, the link is also e-mailed.
 func (s *Invitations) Create(ctx context.Context, by Actor, in CreateInvitationInput) (CreatedInvitation, error) {
 	var (
-		dev   domain.DeviceID
+		dev   shared.DeviceID
 		email domain.Email
 		err   error
 	)
 
 	if in.Device != "" {
-		if dev, err = domain.NewDeviceID(in.Device); err != nil {
+		if dev, err = shared.NewDeviceID(in.Device); err != nil {
 			return CreatedInvitation{}, err
 		}
 	}

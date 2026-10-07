@@ -239,7 +239,7 @@ func TestGuard(t *testing.T) {
 		t.Errorf("after report: %s %s", reason(hfA), reason(hfB))
 	}
 
-	if err := g.DevicesStale(ctx, []string{"hf"}); err != nil {
+	if err := g.DevicesStale(ctx, []shared.DeviceID{shared.MustDeviceID("hf")}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -47,7 +47,7 @@ func (s *Service) List(ctx context.Context) ([]*domain.Schedule, error) { return
 
 // ForDevice returns the schedules of a device.
 func (s *Service) ForDevice(ctx context.Context, device string) ([]*domain.Schedule, error) {
-	id, err := domain.NewDeviceID(device)
+	id, err := shared.NewDeviceID(device)
 	if err != nil {
 		return nil, nil //nolint:nilerr // an invalid id has no schedule
 	}

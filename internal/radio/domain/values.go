@@ -16,7 +16,6 @@ import (
 
 // Radio domain errors. Codes are part of the public API.
 var (
-	ErrInvalidDeviceID   = shared.NewError(shared.KindInvalid, "invalid_device_id", "device id must match ^[a-z0-9][a-z0-9_-]{0,62}$")
 	ErrInvalidFrequency  = shared.NewError(shared.KindInvalid, "invalid_frequency", "invalid frequency")
 	ErrInvalidSampleRate = shared.NewError(shared.KindInvalid, "invalid_sample_rate", "invalid sample rate")
 	ErrInvalidDeviceType = shared.NewError(shared.KindInvalid, "invalid_device_type", "invalid device type")
@@ -29,33 +28,6 @@ var (
 	ErrUnsupportedMode   = shared.NewError(shared.KindInvalid, "unsupported_mode", "demodulation mode not supported by this node")
 	ErrCapacityExceeded  = shared.NewError(shared.KindConflict, "capacity_exceeded", "demodulator capacity exceeded")
 )
-
-var deviceIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
-
-// DeviceID is the hub-wide unique device slug.
-type DeviceID struct{ value string }
-
-// NewDeviceID validates s.
-func NewDeviceID(s string) (DeviceID, error) {
-	if !deviceIDPattern.MatchString(s) {
-		return DeviceID{}, ErrInvalidDeviceID.WithDetail("invalid device id " + strconv.Quote(s))
-	}
-
-	return DeviceID{value: s}, nil
-}
-
-// MustDeviceID is NewDeviceID that panics. Tests and constants only.
-func MustDeviceID(s string) DeviceID {
-	id, err := NewDeviceID(s)
-	if err != nil {
-		panic(err)
-	}
-
-	return id
-}
-
-// String returns the slug.
-func (id DeviceID) String() string { return id.value }
 
 // MaxFrequency bounds frequencies (100 GHz).
 const MaxFrequency = 100_000_000_000

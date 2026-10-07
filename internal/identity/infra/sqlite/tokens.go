@@ -10,6 +10,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite/sqlc"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 func optUserID(b []byte) (domain.UserID, error) {
@@ -166,7 +167,7 @@ func rehydrateInvitation(row sqlc.Invitation) (*domain.Invitation, error) {
 	}
 
 	if row.DeviceID.Valid {
-		if s.Device, err = domain.NewDeviceID(row.DeviceID.String); err != nil {
+		if s.Device, err = shared.NewDeviceID(row.DeviceID.String); err != nil {
 			return nil, err
 		}
 	}

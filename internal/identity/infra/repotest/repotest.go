@@ -105,9 +105,9 @@ func NewUser(t *testing.T, name, email string, grants ...domain.RoleGrant) *doma
 // RunUsers checks the UserRepository contract.
 func RunUsers(t *testing.T, open Factory) {
 	ctx := context.Background()
-	dev, _ := domain.NewDeviceID("rtl-1")
+	dev, _ := shared.NewDeviceID("rtl-1")
 	op, _ := domain.NewRoleGrant(domain.RoleOperator, dev)
-	admin, _ := domain.NewRoleGrant(domain.RoleAdmin, domain.DeviceID{})
+	admin, _ := domain.NewRoleGrant(domain.RoleAdmin, shared.DeviceID{})
 
 	t.Run("add and load", func(t *testing.T) {
 		r := open(t).Users

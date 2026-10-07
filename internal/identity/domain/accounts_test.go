@@ -51,7 +51,7 @@ func TestLinkToken(t *testing.T) {
 }
 
 func TestInvitation(t *testing.T) {
-	dev, _ := domain.NewDeviceID("rtl-1")
+	dev, _ := shared.NewDeviceID("rtl-1")
 	mail, _ := domain.NewEmail("x@example.org")
 	ok := domain.NewInvitationParams{ID: newInvitationID(t), Role: domain.RoleOperator, Device: dev, Delivery: domain.DeliveryLink, Now: t0, TTL: time.Hour}
 
@@ -145,8 +145,8 @@ func TestOneTimeTokens(t *testing.T) {
 
 func TestUserProfileAndGrants(t *testing.T) {
 	u := newUser(t)
-	op, _ := domain.NewRoleGrant(domain.RoleOperator, domain.DeviceID{})
-	listener, _ := domain.NewRoleGrant(domain.RoleListener, domain.DeviceID{})
+	op, _ := domain.NewRoleGrant(domain.RoleOperator, shared.DeviceID{})
+	listener, _ := domain.NewRoleGrant(domain.RoleListener, shared.DeviceID{})
 	by := mustUserID(t, "018f3a2b-4c5d-7e6f-8091-a2b3c4d5e6f8")
 
 	if !u.ReplaceGrants([]domain.RoleGrant{op, listener, op}, by, t0) || len(u.Grants()) != 1 || u.Role() != domain.RoleOperator {

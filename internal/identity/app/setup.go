@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // SetupTTL is the validity of the first-admin setup link (AUTH-018).
@@ -258,7 +259,7 @@ func (s *Setup) newAdmin(ctx context.Context, in SetupInput) (*domain.User, erro
 		return nil, err
 	}
 
-	admin, err := domain.NewRoleGrant(domain.RoleAdmin, domain.DeviceID{})
+	admin, err := domain.NewRoleGrant(domain.RoleAdmin, shared.DeviceID{})
 	if err != nil {
 		return nil, err
 	}

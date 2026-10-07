@@ -49,7 +49,7 @@ func (r *Schedules) List(ctx context.Context) ([]*domain.Schedule, error) {
 }
 
 // ListByDevice implements domain.Repository.
-func (r *Schedules) ListByDevice(ctx context.Context, device domain.DeviceID) ([]*domain.Schedule, error) {
+func (r *Schedules) ListByDevice(ctx context.Context, device shared.DeviceID) ([]*domain.Schedule, error) {
 	rows, err := sqlc.New(r.db.Reader(ctx)).ListDeviceSchedules(ctx, device.String())
 	if err != nil {
 		return nil, fmt.Errorf("list schedules of %s: %w", device, err)

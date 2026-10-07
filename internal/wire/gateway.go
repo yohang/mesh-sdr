@@ -148,7 +148,7 @@ func (s subject) HasOnDevice(role, device string) bool {
 		return false
 	}
 
-	d, err := identitydomain.NewDeviceID(device)
+	d, err := shared.NewDeviceID(device)
 	if err != nil {
 		return false
 	}

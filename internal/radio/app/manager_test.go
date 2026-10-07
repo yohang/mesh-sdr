@@ -10,6 +10,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/radio/app"
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 type fakeSource struct {
@@ -82,7 +83,7 @@ func (e *fakeEngine) Close()                {}
 
 type fakeEngines struct{ e *fakeEngine }
 
-func (f fakeEngines) New(domain.DeviceID) app.Engine { return f.e }
+func (f fakeEngines) New(shared.DeviceID) app.Engine { return f.e }
 
 type reporter struct {
 	mu  sync.Mutex
@@ -129,7 +130,7 @@ func newDevice(t *testing.T, alwaysOn bool) *domain.Device {
 	r, _ := domain.NewFreqRange(domain.MustFrequency(24_000_000), domain.MustFrequency(1_766_000_000))
 
 	d, err := domain.NewDevice(domain.DeviceParams{
-		ID: domain.MustDeviceID("rtl"), Name: "RTL", Type: typ, Enabled: true, Range: r,
+		ID: shared.MustDeviceID("rtl"), Name: "RTL", Type: typ, Enabled: true, Range: r,
 		Rates: []domain.SampleRate{domain.MustSampleRate(2_400_000)}, AlwaysOn: alwaysOn, AutoRecover: true, Driver: drv,
 	})
 	if err != nil {
@@ -317,7 +318,7 @@ func TestDemodCaps(t *testing.T) {
 	r, _ := domain.NewFreqRange(domain.MustFrequency(24_000_000), domain.MustFrequency(1_766_000_000))
 	mk := func(id string, maxDemods int) *domain.Device {
 		d, err := domain.NewDevice(domain.DeviceParams{
-			ID: domain.MustDeviceID(id), Name: id, Type: typ, Enabled: true, Range: r,
+			ID: shared.MustDeviceID(id), Name: id, Type: typ, Enabled: true, Range: r,
 			Rates: []domain.SampleRate{domain.MustSampleRate(2_400_000)}, Driver: drv, MaxDemods: maxDemods,
 		})
 		if err != nil {

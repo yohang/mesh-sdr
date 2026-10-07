@@ -11,11 +11,12 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 type deviceList []*domain.Device
 
-func (l deviceList) Get(context.Context, domain.DeviceID) (*domain.Device, error) { return nil, nil }
+func (l deviceList) Get(context.Context, shared.DeviceID) (*domain.Device, error) { return nil, nil }
 func (l deviceList) List(context.Context) ([]*domain.Device, error)               { return l, nil }
 func (l deviceList) ListByNode(context.Context, domain.NodeID) ([]*domain.Device, error) {
 	return nil, nil
@@ -48,7 +49,7 @@ func TestFeatures(t *testing.T) {
 		t.Helper()
 
 		d, err := domain.NewReportedDevice(domain.MustNodeID(node), domain.DeviceSpec{
-			ID: domain.MustDeviceID(id), Name: id + " name", Type: typ, Enabled: enabled, FreqMin: 1, FreqMax: 2,
+			ID: shared.MustDeviceID(id), Name: id + " name", Type: typ, Enabled: enabled, FreqMin: 1, FreqMax: 2,
 			SampleRates: []int64{1}, ListenPolicy: policy,
 		}, 0, now)
 		if err != nil {
@@ -142,7 +143,7 @@ func TestListenPolicies(t *testing.T) {
 		t.Helper()
 
 		d, err := domain.NewReportedDevice(domain.MustNodeID("n1"), domain.DeviceSpec{
-			ID: domain.MustDeviceID(id), Name: id, Type: "rtl_sdr", Enabled: enabled, FreqMin: 1, FreqMax: 2,
+			ID: shared.MustDeviceID(id), Name: id, Type: "rtl_sdr", Enabled: enabled, FreqMin: 1, FreqMax: 2,
 			SampleRates: []int64{1}, ListenPolicy: policy,
 		}, 0, now)
 		if err != nil {

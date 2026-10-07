@@ -66,7 +66,7 @@ func Run(t *testing.T, open Factory) {
 		t.Errorf("stored = %+v", gs)
 	}
 
-	if list, err := repo.ListByDevice(ctx, domain.MustDeviceID("hf")); err != nil || len(list) != 2 || list[0].ID() != b.ID() {
+	if list, err := repo.ListByDevice(ctx, shared.MustDeviceID("hf")); err != nil || len(list) != 2 || list[0].ID() != b.ID() {
 		t.Errorf("by device = %v, %v", list, err)
 	}
 

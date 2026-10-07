@@ -71,7 +71,7 @@ func (p *Planner) Plan(ctx context.Context, node string, now time.Time) ([]Devic
 }
 
 func (p *Planner) timeline(ctx context.Context, dev Device, fits []shared.UUID, from, until time.Time) (domain.Timeline, error) {
-	id, err := domain.NewDeviceID(dev.ID)
+	id, err := shared.NewDeviceID(dev.ID)
 	if err != nil {
 		return domain.Evaluate(nil, from, until), nil //nolint:nilerr // no schedule names an invalid id
 	}

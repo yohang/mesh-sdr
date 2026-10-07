@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+)
 
 // Delivery tells how an invitation link reaches the invitee
 // (`invitations.delivery`).
@@ -32,7 +36,7 @@ type Invitation struct {
 	delivery       Delivery
 	email          Email
 	role           Role
-	device         DeviceID
+	device         shared.DeviceID
 	createdBy      UserID
 	createdAt      time.Time
 	expiresAt      time.Time
@@ -45,8 +49,8 @@ type Invitation struct {
 type NewInvitationParams struct {
 	ID        InvitationID
 	Role      Role
-	Device    DeviceID // optional, operator only
-	Email     Email    // optional
+	Device    shared.DeviceID // optional, operator only
+	Email     Email           // optional
 	Delivery  Delivery
 	CreatedBy UserID
 	Now       time.Time
@@ -93,7 +97,7 @@ type InvitationStateData struct {
 	Delivery       Delivery
 	Email          Email
 	Role           Role
-	Device         DeviceID
+	Device         shared.DeviceID
 	CreatedBy      UserID
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
@@ -132,7 +136,7 @@ func (i *Invitation) Email() Email { return i.email }
 func (i *Invitation) Role() Role { return i.role }
 
 // Device returns the device scope of the role (zero: global).
-func (i *Invitation) Device() DeviceID { return i.device }
+func (i *Invitation) Device() shared.DeviceID { return i.device }
 
 // CreatedBy returns the admin who created it (zero when deleted).
 func (i *Invitation) CreatedBy() UserID { return i.createdBy }

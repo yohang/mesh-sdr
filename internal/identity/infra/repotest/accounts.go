@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 func newID(t *testing.T) []byte {
@@ -59,9 +60,9 @@ func addUser(t *testing.T, r Repos, name, email string, grants ...domain.RoleGra
 // and audit search.
 func RunAccounts(t *testing.T, open Factory) {
 	ctx := context.Background()
-	admin, _ := domain.NewRoleGrant(domain.RoleAdmin, domain.DeviceID{})
-	op, _ := domain.NewRoleGrant(domain.RoleOperator, domain.DeviceID{})
-	dev, _ := domain.NewDeviceID("rtl-1")
+	admin, _ := domain.NewRoleGrant(domain.RoleAdmin, shared.DeviceID{})
+	op, _ := domain.NewRoleGrant(domain.RoleOperator, shared.DeviceID{})
+	dev, _ := shared.NewDeviceID("rtl-1")
 	opDev, _ := domain.NewRoleGrant(domain.RoleOperator, dev)
 
 	t.Run("grants change", func(t *testing.T) {
