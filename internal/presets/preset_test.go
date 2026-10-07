@@ -1,25 +1,25 @@
-package domain_test
+package presets_test
 
 import (
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/yohang/mesh-sdr/internal/presets/domain"
+	"github.com/yohang/mesh-sdr/internal/presets"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 var t0 = time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 
-func draft() domain.Draft {
-	return domain.Draft{Name: "20 m FT8", CenterFreq: 14_074_000, SampRate: 2_048_000, StartMod: "usb"}
+func draft() presets.Draft {
+	return presets.Draft{Name: "20 m FT8", CenterFreq: 14_074_000, SampRate: 2_048_000, StartMod: "usb"}
 }
 
 func violations(t *testing.T, err error) map[string]string {
 	t.Helper()
 
 	var de *shared.Error
-	if !errors.As(err, &de) || !errors.Is(err, domain.ErrInvalidPreset) {
+	if !errors.As(err, &de) || !errors.Is(err, presets.ErrInvalidPreset) {
 		t.Fatalf("error = %v, want invalid_preset", err)
 	}
 
@@ -35,12 +35,12 @@ func TestNewSpecDefaults(t *testing.T) {
 	d := draft()
 	d.StartMod = ""
 
-	spec, err := domain.NewSpec(d)
+	spec, err := presets.NewSpec(d)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	p, err := domain.NewPreset(shared.MustParseUUID("0192f2b4-0000-7000-8000-000000000001"), spec, 0, t0)
+	p, err := presets.NewPreset(shared.MustParseUUID("0192f2b4-0000-7000-8000-000000000001"), spec, 0, t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,13 +52,13 @@ func TestNewSpecDefaults(t *testing.T) {
 }
 
 func TestNewSpecViolations(t *testing.T) {
-	bad := domain.Draft{
+	bad := presets.Draft{
 		Slug: "Bad Slug", Name: " ", Tags: []string{"ok", "\x01"}, CenterFreq: 14_000_000, SampRate: 1_000_000,
 		StartFreq: new(int64(15_000_000)), StartMod: "USB!", TuningStep: new(int64(0)), InitialSquelchLevel: new(10),
 		InitialNRLevel: new(30), WaterfallLevels: &[2]int{-20, -40},
 	}
 
-	got := violations(t, func() error { _, err := domain.NewSpec(bad); return err }())
+	got := violations(t, func() error { _, err := presets.NewSpec(bad); return err }())
 
 	for path, code := range map[string]string{
 		"slug": "invalid_slug", "name": "required", "tags.1": "invalid_text", "start_freq": "outside_band", "start_mod": "invalid_mode",
@@ -71,7 +71,7 @@ func TestNewSpecViolations(t *testing.T) {
 	}
 
 	if got := violations(t, func() error {
-		_, err := domain.NewSpec(domain.Draft{Name: "x", CenterFreq: 0, SampRate: -1})
+		_, err := presets.NewSpec(presets.Draft{Name: "x", CenterFreq: 0, SampRate: -1})
 		return err
 	}()); got["center_freq"] != "out_of_range" || got["samp_rate"] != "out_of_range" {
 		t.Errorf("violations = %v", got)
@@ -79,37 +79,37 @@ func TestNewSpecViolations(t *testing.T) {
 }
 
 func TestFits(t *testing.T) {
-	spec, err := domain.NewSpec(draft())
+	spec, err := presets.NewSpec(draft())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	p, _ := domain.NewPreset(shared.MustParseUUID("0192f2b4-0000-7000-8000-000000000001"), spec, 0, t0)
-	hf := domain.DeviceLimits{FreqMin: 100_000, FreqMax: 30_000_000, SampleRates: []int64{1_024_000, 2_048_000}}
+	p, _ := presets.NewPreset(shared.MustParseUUID("0192f2b4-0000-7000-8000-000000000001"), spec, 0, t0)
+	hf := presets.DeviceLimits{FreqMin: 100_000, FreqMax: 30_000_000, SampleRates: []int64{1_024_000, 2_048_000}}
 
 	if err := p.Fits(hf); err != nil {
 		t.Errorf("fits hf: %v", err)
 	}
 
-	for name, l := range map[string]domain.DeviceLimits{
+	for name, l := range map[string]presets.DeviceLimits{
 		"range": {FreqMin: 14_000_000, FreqMax: 30_000_000, SampleRates: []int64{2_048_000}},
 		"rate":  {FreqMin: 100_000, FreqMax: 30_000_000, SampleRates: []int64{1_024_000}},
 	} {
-		if err := p.Fits(l); !errors.Is(err, domain.ErrPresetIncompatible) {
+		if err := p.Fits(l); !errors.Is(err, presets.ErrPresetIncompatible) {
 			t.Errorf("%s: %v, want preset_incompatible", name, err)
 		}
 	}
 }
 
 func TestReplace(t *testing.T) {
-	spec, _ := domain.NewSpec(draft())
-	p, _ := domain.NewPreset(shared.MustParseUUID("0192f2b4-0000-7000-8000-000000000001"), spec, 3, t0)
+	spec, _ := presets.NewSpec(draft())
+	p, _ := presets.NewPreset(shared.MustParseUUID("0192f2b4-0000-7000-8000-000000000001"), spec, 3, t0)
 
 	d := draft()
 	d.Name = "Renamed"
-	next, _ := domain.NewSpec(d)
+	next, _ := presets.NewSpec(d)
 
-	if err := p.Replace(next, 2, t0); !errors.Is(err, domain.ErrVersionConflict) {
+	if err := p.Replace(next, 2, t0); !errors.Is(err, presets.ErrVersionConflict) {
 		t.Errorf("stale version: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestReplace(t *testing.T) {
 		t.Errorf("replaced = %+v", p.Snapshot())
 	}
 
-	back, err := domain.Rehydrate(p.Snapshot())
+	back, err := presets.Rehydrate(p.Snapshot())
 	if err != nil || back.Snapshot().Name != "Renamed" || back.SortOrder() != 3 {
 		t.Errorf("rehydrated = %+v, %v", back, err)
 	}
@@ -130,12 +130,12 @@ func TestReplace(t *testing.T) {
 
 func TestSlugs(t *testing.T) {
 	for in, want := range map[string]string{"  Hello, World! ": "hello-world", "!!!": "preset", "Émetteur 2": "metteur-2"} {
-		if got := domain.Slugify(in).String(); got != want {
+		if got := presets.Slugify(in).String(); got != want {
 			t.Errorf("Slugify(%q) = %q, want %q", in, got, want)
 		}
 	}
 
-	long := domain.Slugify("a123456789b123456789c123456789d123456789e123456789f123456789g123")
+	long := presets.Slugify("a123456789b123456789c123456789d123456789e123456789f123456789g123")
 	if s := long.WithSuffix(12).String(); len(s) > 64 || s[len(s)-3:] != "-12" {
 		t.Errorf("suffixed = %q", s)
 	}

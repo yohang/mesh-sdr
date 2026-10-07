@@ -3,15 +3,15 @@ package api
 import (
 	"context"
 
-	schedulesdomain "github.com/yohang/mesh-sdr/internal/schedules/domain"
+	"github.com/yohang/mesh-sdr/internal/schedules"
 )
 
 // ScheduleService is the schedule use cases (ADR 0020).
 type ScheduleService interface {
-	List(ctx context.Context) ([]*schedulesdomain.Schedule, error)
-	Get(ctx context.Context, id string) (*schedulesdomain.Schedule, error)
-	Create(ctx context.Context, d schedulesdomain.Draft) (*schedulesdomain.Schedule, error)
-	Replace(ctx context.Context, id string, expectedVersion int, d schedulesdomain.Draft) (*schedulesdomain.Schedule, error)
+	List(ctx context.Context) ([]*schedules.Schedule, error)
+	Get(ctx context.Context, id string) (*schedules.Schedule, error)
+	Create(ctx context.Context, d schedules.Draft) (*schedules.Schedule, error)
+	Replace(ctx context.Context, id string, expectedVersion int, d schedules.Draft) (*schedules.Schedule, error)
 	Delete(ctx context.Context, id string) error
 }
 
@@ -32,7 +32,7 @@ func NewScheduleHandlers(schedules ScheduleService, scope DeviceScope) ScheduleH
 	return ScheduleHandlers{schedules: schedules, scope: scope}
 }
 
-func scheduleDTO(s *schedulesdomain.Schedule) Schedule {
+func scheduleDTO(s *schedules.Schedule) Schedule {
 	out := Schedule{
 		Id: apiUUID(s.ID()), DeviceId: s.Device().String(), PresetId: apiUUID(s.Preset()), Kind: ScheduleKind(s.Window().Kind()),
 		DaysOfWeek: s.Days().Mask(), Priority: s.Priority().Int(), Enabled: s.Enabled(), CreatedAt: s.CreatedAt(),
@@ -40,15 +40,15 @@ func scheduleDTO(s *schedulesdomain.Schedule) Schedule {
 	}
 
 	switch w := s.Window(); w.Kind() {
-	case schedulesdomain.KindStatic:
+	case schedules.KindStatic:
 		start, end := w.Minutes()
 		out.StartMinute, out.EndMinute = &start, &end
-	case schedulesdomain.KindDaylight:
+	case schedules.KindDaylight:
 		p := ScheduleDaylightPhase(w.Phase())
 		out.DaylightPhase = &p
 	}
 
-	if reason, at := s.DisabledReason(); reason != schedulesdomain.ReasonNone {
+	if reason, at := s.DisabledReason(); reason != schedules.ReasonNone {
 		r := ScheduleDisabledReason(reason)
 		out.DisabledReason, out.DisabledAt = &r, &at
 	}
@@ -56,8 +56,8 @@ func scheduleDTO(s *schedulesdomain.Schedule) Schedule {
 	return out
 }
 
-func scheduleDraft(device, preset string, kind *string, start, end, days *int, phase *string, priority *int, enabled *bool) schedulesdomain.Draft {
-	d := schedulesdomain.Draft{
+func scheduleDraft(device, preset string, kind *string, start, end, days *int, phase *string, priority *int, enabled *bool) schedules.Draft {
+	d := schedules.Draft{
 		DeviceID: device, PresetID: preset, StartMinute: start, EndMinute: end, DaysOfWeek: days, Priority: priority, Enabled: enabled,
 	}
 
@@ -127,7 +127,7 @@ func (h ScheduleHandlers) GetSchedule(ctx context.Context, req GetScheduleReques
 	}
 
 	if !h.scope.CanOperate(ctx, s.Device().String()) {
-		return nil, schedulesdomain.ErrScheduleNotFound
+		return nil, schedules.ErrScheduleNotFound
 	}
 
 	return GetSchedule200JSONResponse(scheduleDTO(s)), nil

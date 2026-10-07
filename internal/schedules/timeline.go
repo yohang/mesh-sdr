@@ -1,4 +1,4 @@
-package domain
+package schedules
 
 import (
 	"slices"

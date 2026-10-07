@@ -1,8 +1,4 @@
-// Package app holds the schedule use cases (ADR 0020): admin CRUD, the
-// guard that disables schedules whose device or preset no longer allows
-// them (GRID-016, ADM-009), and the planner that computes each device's
-// desired state for the control channel. Ports are declared here.
-package app
+package schedules
 
 import (
 	"context"

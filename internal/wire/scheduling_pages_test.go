@@ -7,10 +7,8 @@ import (
 	"testing"
 	"time"
 
-	presetsdomain "github.com/yohang/mesh-sdr/internal/presets/domain"
-	presetssqlite "github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
-	schedulesdomain "github.com/yohang/mesh-sdr/internal/schedules/domain"
-	schedulessqlite "github.com/yohang/mesh-sdr/internal/schedules/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/presets"
+	"github.com/yohang/mesh-sdr/internal/schedules"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -26,28 +24,28 @@ func TestDeviceSchedules(t *testing.T) {
 	ids := shared.NewUUIDv7Generator()
 
 	pid, _ := ids.New(now)
-	spec, _ := presetsdomain.NewSpec(presetsdomain.Draft{Name: "20 m FT8", CenterFreq: 14_074_000, SampRate: 2_048_000})
-	p, _ := presetsdomain.NewPreset(pid, spec, 0, now)
+	spec, _ := presets.NewSpec(presets.Draft{Name: "20 m FT8", CenterFreq: 14_074_000, SampRate: 2_048_000})
+	p, _ := presets.NewPreset(pid, spec, 0, now)
 
-	if err := presetssqlite.NewPresets(h.db).Create(ctx, p); err != nil {
+	if err := presets.NewPresets(h.db).Create(ctx, p); err != nil {
 		t.Fatal(err)
 	}
 
-	repo := schedulessqlite.NewSchedules(h.db)
+	repo := schedules.NewSchedules(h.db)
 
 	add := func(device string, start int) shared.UUID {
 		t.Helper()
 
 		id, _ := ids.New(now)
 
-		s, err := schedulesdomain.NewSpec(schedulesdomain.Draft{
+		s, err := schedules.NewSpec(schedules.Draft{
 			DeviceID: device, PresetID: pid.String(), StartMinute: &start, EndMinute: new(start + 60), DaysOfWeek: new(3),
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		sc, _ := schedulesdomain.NewSchedule(id, s, now)
+		sc, _ := schedules.NewSchedule(id, s, now)
 		if err := repo.Create(ctx, sc); err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +57,7 @@ func TestDeviceSchedules(t *testing.T) {
 	vhf := add("vhf", 0)
 
 	sc, _ := repo.Get(ctx, hf)
-	sc.Disable(schedulesdomain.ReasonPresetIncompatible, now)
+	sc.Disable(schedules.ReasonPresetIncompatible, now)
 
 	if err := repo.Update(ctx, sc, 1); err != nil {
 		t.Fatal(err)
@@ -85,7 +83,7 @@ func TestDeviceSchedules(t *testing.T) {
 	}
 
 	got, err := repo.Get(ctx, vhf)
-	if reason, _ := got.DisabledReason(); err != nil || got.Enabled() || reason != schedulesdomain.ReasonDeviceRemoved {
+	if reason, _ := got.DisabledReason(); err != nil || got.Enabled() || reason != schedules.ReasonDeviceRemoved {
 		t.Errorf("schedule of a forgotten device = %+v, %v", got.Snapshot(), err)
 	}
 }

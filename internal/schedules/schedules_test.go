@@ -1,4 +1,4 @@
-package sqlite_test
+package schedules_test
 
 import (
 	"context"
@@ -6,29 +6,26 @@ import (
 	"testing"
 	"time"
 
-	presetsdomain "github.com/yohang/mesh-sdr/internal/presets/domain"
-
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
-	presetssqlite "github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
-	"github.com/yohang/mesh-sdr/internal/schedules/domain"
-	"github.com/yohang/mesh-sdr/internal/schedules/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/presets"
+	"github.com/yohang/mesh-sdr/internal/schedules"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 func TestSchedules(t *testing.T) {
-	open := func(t *testing.T, presets ...shared.UUID) domain.Repository {
+	open := func(t *testing.T, presetIDs ...shared.UUID) schedules.Repository {
 		a := dbtest.NewSQLite(t)
-		repo := presetssqlite.NewPresets(a)
+		repo := presets.NewPresets(a)
 		now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 
-		for i, id := range presets {
+		for i, id := range presetIDs {
 			p := newPreset(t, id, "p"+string(rune(97+i)), i, now)
 			if err := repo.Create(context.Background(), p); err != nil {
 				t.Fatal(err)
 			}
 		}
 
-		return sqlite.NewSchedules(a)
+		return schedules.NewSchedules(a)
 	}
 
 	ctx := context.Background()
@@ -37,8 +34,8 @@ func TestSchedules(t *testing.T) {
 	presetB := shared.MustParseUUID("0192f2b4-0000-7000-8000-00000000000b")
 	repo := open(t, presetA, presetB)
 
-	newSchedule := func(id, device string, preset shared.UUID, start int) *domain.Schedule {
-		spec, err := domain.NewSpec(domain.Draft{
+	newSchedule := func(id, device string, preset shared.UUID, start int) *schedules.Schedule {
+		spec, err := schedules.NewSpec(schedules.Draft{
 			DeviceID: device, PresetID: preset.String(), StartMinute: &start, EndMinute: new(start + 30), DaysOfWeek: new(31),
 			Priority: new(-3),
 		})
@@ -46,7 +43,7 @@ func TestSchedules(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		s, err := domain.NewSchedule(shared.MustParseUUID(id), spec, t0)
+		s, err := schedules.NewSchedule(shared.MustParseUUID(id), spec, t0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,14 +55,14 @@ func TestSchedules(t *testing.T) {
 	b := newSchedule("0192f2b4-0000-7000-8000-000000000102", "hf", presetB, 60)
 	c := newSchedule("0192f2b4-0000-7000-8000-000000000103", "vhf", presetA, 0)
 
-	for _, s := range []*domain.Schedule{a, b, c} {
+	for _, s := range []*schedules.Schedule{a, b, c} {
 		if err := repo.Create(ctx, s); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	bad := newSchedule("0192f2b4-0000-7000-8000-000000000104", "hf", shared.MustParseUUID("0192f2b4-0000-7000-8000-0000000000ff"), 0)
-	if err := repo.Create(ctx, bad); !errors.Is(err, domain.ErrUnknownPreset) {
+	if err := repo.Create(ctx, bad); !errors.Is(err, schedules.ErrUnknownPreset) {
 		t.Errorf("unknown preset: %v", err)
 	}
 
@@ -91,18 +88,18 @@ func TestSchedules(t *testing.T) {
 		t.Errorf("all = %v, %v", list, err)
 	}
 
-	got.Disable(domain.ReasonPresetIncompatible, t0.Add(time.Hour))
+	got.Disable(schedules.ReasonPresetIncompatible, t0.Add(time.Hour))
 
 	if err := repo.Update(ctx, got, 1); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := repo.Update(ctx, got, 1); !errors.Is(err, domain.ErrVersionConflict) {
+	if err := repo.Update(ctx, got, 1); !errors.Is(err, schedules.ErrVersionConflict) {
 		t.Errorf("stale update: %v", err)
 	}
 
 	again, err := repo.Get(ctx, a.ID())
-	if r, at := again.DisabledReason(); err != nil || again.Enabled() || r != domain.ReasonPresetIncompatible || !at.Equal(t0.Add(time.Hour)) {
+	if r, at := again.DisabledReason(); err != nil || again.Enabled() || r != schedules.ReasonPresetIncompatible || !at.Equal(t0.Add(time.Hour)) {
 		t.Errorf("disabled = %+v, %v", again.Snapshot(), err)
 	}
 
@@ -110,30 +107,11 @@ func TestSchedules(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := repo.Get(ctx, a.ID()); !errors.Is(err, domain.ErrScheduleNotFound) {
+	if _, err := repo.Get(ctx, a.ID()); !errors.Is(err, schedules.ErrScheduleNotFound) {
 		t.Errorf("deleted: %v", err)
 	}
 
-	if err := repo.Delete(ctx, a.ID()); !errors.Is(err, domain.ErrScheduleNotFound) {
+	if err := repo.Delete(ctx, a.ID()); !errors.Is(err, schedules.ErrScheduleNotFound) {
 		t.Errorf("second delete: %v", err)
 	}
-}
-
-// newPreset builds a valid preset for tests.
-func newPreset(t *testing.T, id shared.UUID, slug string, order int, now time.Time) *presetsdomain.Preset {
-	t.Helper()
-
-	spec, err := presetsdomain.NewSpec(presetsdomain.Draft{
-		Slug: slug, Name: "Preset " + slug, CenterFreq: 14_074_000, SampRate: 2_048_000, StartMod: "usb",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	p, err := presetsdomain.NewPreset(id, spec, order, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return p
 }

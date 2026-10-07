@@ -1,4 +1,10 @@
-package app
+// Package schedules models schedules (TECHNICAL_SPEC §7.1 `schedules`,
+// §8.5, ADR 0020): (device, preset, time window) entries evaluated by the hub
+// into a per-device timeline. It holds the admin CRUD, the guard that
+// disables schedules whose device or preset no longer allows them (GRID-016,
+// ADM-009), the planner that computes each device's desired state for the
+// control channel, and the SQLite repository.
+package schedules
 
 import (
 	"context"
@@ -8,7 +14,6 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
-	"github.com/yohang/mesh-sdr/internal/schedules/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -16,7 +21,7 @@ import (
 // runs after every committed change (the desired state of the nodes is
 // pushed again).
 type Deps struct {
-	Repo    domain.Repository
+	Repo    Repository
 	Tx      Transactor
 	Devices Devices
 	Presets Presets
@@ -38,17 +43,17 @@ func NewService(d Deps) *Service { return &Service{d: d} }
 func ParseID(s string) (shared.UUID, error) {
 	id, err := shared.ParseUUID(s)
 	if err != nil {
-		return shared.UUID{}, domain.ErrScheduleNotFound
+		return shared.UUID{}, ErrScheduleNotFound
 	}
 
 	return id, nil
 }
 
 // List returns every schedule.
-func (s *Service) List(ctx context.Context) ([]*domain.Schedule, error) { return s.d.Repo.List(ctx) }
+func (s *Service) List(ctx context.Context) ([]*Schedule, error) { return s.d.Repo.List(ctx) }
 
 // ForDevice returns the schedules of a device.
-func (s *Service) ForDevice(ctx context.Context, device string) ([]*domain.Schedule, error) {
+func (s *Service) ForDevice(ctx context.Context, device string) ([]*Schedule, error) {
 	id, err := shared.NewDeviceID(device)
 	if err != nil {
 		return nil, nil //nolint:nilerr // an invalid id has no schedule
@@ -73,7 +78,7 @@ func (s *Service) SchedulesUsing(ctx context.Context, preset shared.UUID) ([]sha
 }
 
 // Get returns one schedule.
-func (s *Service) Get(ctx context.Context, id string) (*domain.Schedule, error) {
+func (s *Service) Get(ctx context.Context, id string) (*Schedule, error) {
 	sid, err := ParseID(id)
 	if err != nil {
 		return nil, err
@@ -83,8 +88,8 @@ func (s *Service) Get(ctx context.Context, id string) (*domain.Schedule, error) 
 }
 
 // Create validates and stores a schedule (§6.10 POST /schedules).
-func (s *Service) Create(ctx context.Context, d domain.Draft) (*domain.Schedule, error) {
-	spec, err := domain.NewSpec(d)
+func (s *Service) Create(ctx context.Context, d Draft) (*Schedule, error) {
+	spec, err := NewSpec(d)
 	if err != nil {
 		return nil, err
 	}
@@ -96,14 +101,14 @@ func (s *Service) Create(ctx context.Context, d domain.Draft) (*domain.Schedule,
 		return nil, fmt.Errorf("schedule id: %w", err)
 	}
 
-	var sc *domain.Schedule
+	var sc *Schedule
 
 	err = s.d.Tx.WithinTx(ctx, func(ctx context.Context) error {
 		if err := s.check(ctx, spec, nil); err != nil {
 			return err
 		}
 
-		if sc, err = domain.NewSchedule(id, spec, now); err != nil {
+		if sc, err = NewSchedule(id, spec, now); err != nil {
 			return err
 		}
 
@@ -124,18 +129,18 @@ func (s *Service) Create(ctx context.Context, d domain.Draft) (*domain.Schedule,
 
 // Replace replaces a schedule (PUT) when expectedVersion is current.
 // Enabling a schedule the hub disabled re-validates it.
-func (s *Service) Replace(ctx context.Context, id string, expectedVersion int, d domain.Draft) (*domain.Schedule, error) {
+func (s *Service) Replace(ctx context.Context, id string, expectedVersion int, d Draft) (*Schedule, error) {
 	sid, err := ParseID(id)
 	if err != nil {
 		return nil, err
 	}
 
-	spec, err := domain.NewSpec(d)
+	spec, err := NewSpec(d)
 	if err != nil {
 		return nil, err
 	}
 
-	var sc *domain.Schedule
+	var sc *Schedule
 
 	err = s.d.Tx.WithinTx(ctx, func(ctx context.Context) error {
 		if sc, err = s.d.Repo.Get(ctx, sid); err != nil {
@@ -201,7 +206,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 // write"). A schedule that stays disabled on its own device may be edited
 // after the device left the registry (current is the stored schedule, nil
 // on creation).
-func (s *Service) check(ctx context.Context, spec domain.Spec, current *domain.Schedule) error {
+func (s *Service) check(ctx context.Context, spec Spec, current *Schedule) error {
 	dev, ok, err := s.d.Devices.Device(ctx, spec.Device().String())
 	if err != nil {
 		return err
@@ -209,7 +214,7 @@ func (s *Service) check(ctx context.Context, spec domain.Spec, current *domain.S
 
 	if !ok {
 		if current == nil || spec.Enabled() || spec.Device() != current.Device() {
-			return domain.ErrUnknownDevice.WithDetail("no device " + strconv.Quote(spec.Device().String()) + " in the registry")
+			return ErrUnknownDevice.WithDetail("no device " + strconv.Quote(spec.Device().String()) + " in the registry")
 		}
 
 		dev = Device{ID: spec.Device().String()}
@@ -222,13 +227,13 @@ func (s *Service) check(ctx context.Context, spec domain.Spec, current *domain.S
 
 	switch {
 	case !fit.Exists:
-		return domain.ErrUnknownPreset
+		return ErrUnknownPreset
 	case !spec.Enabled():
 		return nil
 	case dev.Stale:
-		return domain.ErrDeviceUnavailable
+		return ErrDeviceUnavailable
 	case fit.Reason != "":
-		return domain.ErrPresetIncompatible.WithDetail(fit.Reason)
+		return ErrPresetIncompatible.WithDetail(fit.Reason)
 	}
 
 	return nil
@@ -241,7 +246,7 @@ func (s *Service) changed(ctx context.Context) {
 }
 
 // auditFields is the audited form of a schedule.
-func auditFields(sc *domain.Schedule) map[string]string {
+func auditFields(sc *Schedule) map[string]string {
 	reason, _ := sc.DisabledReason()
 
 	out := map[string]string{
@@ -250,7 +255,7 @@ func auditFields(sc *domain.Schedule) map[string]string {
 		"enabled": strconv.FormatBool(sc.Enabled()), "version": strconv.Itoa(sc.Version()),
 	}
 
-	if reason != domain.ReasonNone {
+	if reason != ReasonNone {
 		out["disabled_reason"] = string(reason)
 	}
 

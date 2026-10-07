@@ -1,6 +1,4 @@
-// Package sqlite implements the preset repository on the SQLite adapter
-// (ADR 0006).
-package sqlite
+package presets
 
 import (
 	"context"
@@ -13,23 +11,22 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite/sqlc"
-	"github.com/yohang/mesh-sdr/internal/presets/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
-// Presets implements domain.Repository.
+// Presets implements Repository.
 type Presets struct{ db *db.DB }
 
 // NewPresets returns the repository.
 func NewPresets(a *db.DB) *Presets { return &Presets{db: a} }
 
-var _ domain.Repository = (*Presets)(nil)
+var _ Repository = (*Presets)(nil)
 
-// Get implements domain.Repository.
-func (r *Presets) Get(ctx context.Context, id shared.UUID) (*domain.Preset, error) {
+// Get implements Repository.
+func (r *Presets) Get(ctx context.Context, id shared.UUID) (*Preset, error) {
 	row, err := sqlc.New(r.db.Reader(ctx)).GetPreset(ctx, id.Bytes())
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, domain.ErrPresetNotFound
+		return nil, ErrPresetNotFound
 	}
 
 	if err != nil {
@@ -39,14 +36,14 @@ func (r *Presets) Get(ctx context.Context, id shared.UUID) (*domain.Preset, erro
 	return fromRow(row)
 }
 
-// List implements domain.Repository.
-func (r *Presets) List(ctx context.Context) ([]*domain.Preset, error) {
+// List implements Repository.
+func (r *Presets) List(ctx context.Context) ([]*Preset, error) {
 	rows, err := sqlc.New(r.db.Reader(ctx)).ListPresets(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list presets: %w", err)
 	}
 
-	out := make([]*domain.Preset, 0, len(rows))
+	out := make([]*Preset, 0, len(rows))
 
 	for _, row := range rows {
 		p, err := fromRow(row)
@@ -60,8 +57,8 @@ func (r *Presets) List(ctx context.Context) ([]*domain.Preset, error) {
 	return out, nil
 }
 
-// SlugTaken implements domain.Repository.
-func (r *Presets) SlugTaken(ctx context.Context, slug domain.Slug, except shared.UUID) (bool, error) {
+// SlugTaken implements Repository.
+func (r *Presets) SlugTaken(ctx context.Context, slug Slug, except shared.UUID) (bool, error) {
 	id := []byte{}
 	if !except.IsZero() {
 		id = except.Bytes()
@@ -75,7 +72,7 @@ func (r *Presets) SlugTaken(ctx context.Context, slug domain.Slug, except shared
 	return n, nil
 }
 
-// NextSortOrder implements domain.Repository.
+// NextSortOrder implements Repository.
 func (r *Presets) NextSortOrder(ctx context.Context) (int, error) {
 	n, err := sqlc.New(r.db.Reader(ctx)).NextPresetSortOrder(ctx)
 	if err != nil {
@@ -85,8 +82,8 @@ func (r *Presets) NextSortOrder(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
-// Create implements domain.Repository.
-func (r *Presets) Create(ctx context.Context, p *domain.Preset) error {
+// Create implements Repository.
+func (r *Presets) Create(ctx context.Context, p *Preset) error {
 	s := p.Snapshot()
 
 	tags, waterfall, err := encode(s)
@@ -107,8 +104,8 @@ func (r *Presets) Create(ctx context.Context, p *domain.Preset) error {
 	return nil
 }
 
-// Update implements domain.Repository.
-func (r *Presets) Update(ctx context.Context, p *domain.Preset, expectedVersion int) error {
+// Update implements Repository.
+func (r *Presets) Update(ctx context.Context, p *Preset, expectedVersion int) error {
 	s := p.Snapshot()
 
 	tags, waterfall, err := encode(s)
@@ -132,13 +129,13 @@ func (r *Presets) Update(ctx context.Context, p *domain.Preset, expectedVersion 
 			return err
 		}
 
-		return domain.ErrVersionConflict
+		return ErrVersionConflict
 	}
 
 	return nil
 }
 
-// Delete implements domain.Repository.
+// Delete implements Repository.
 func (r *Presets) Delete(ctx context.Context, id shared.UUID) error {
 	n, err := sqlc.New(r.db.Writer(ctx)).DeletePreset(ctx, id.Bytes())
 	if err != nil {
@@ -146,7 +143,7 @@ func (r *Presets) Delete(ctx context.Context, id shared.UUID) error {
 	}
 
 	if n == 0 {
-		return domain.ErrPresetNotFound
+		return ErrPresetNotFound
 	}
 
 	return nil
@@ -157,15 +154,15 @@ func writeError(err error, op string, id shared.UUID) error {
 
 	switch {
 	case strings.Contains(msg, "presets.slug"):
-		return domain.ErrSlugTaken
+		return ErrSlugTaken
 	case strings.Contains(msg, "FOREIGN KEY constraint failed"):
-		return domain.ErrPresetInUse
+		return ErrPresetInUse
 	default:
 		return fmt.Errorf("%s preset %s: %w", op, id, err)
 	}
 }
 
-func encode(s domain.Snapshot) (string, sql.NullString, error) {
+func encode(s Snapshot) (string, sql.NullString, error) {
 	tags, err := json.Marshal(s.Tags)
 	if err != nil {
 		return "", sql.NullString{}, fmt.Errorf("encode preset tags: %w", err)
@@ -191,7 +188,7 @@ type levels struct {
 	Max int `json:"max"`
 }
 
-func fromRow(row sqlc.Preset) (*domain.Preset, error) {
+func fromRow(row sqlc.Preset) (*Preset, error) {
 	id, err := shared.UUIDFromBytes(row.ID)
 	if err != nil {
 		return nil, fmt.Errorf("preset id: %w", err)
@@ -202,7 +199,7 @@ func fromRow(row sqlc.Preset) (*domain.Preset, error) {
 		return nil, fmt.Errorf("preset %s tags: %w", id, err)
 	}
 
-	s := domain.Snapshot{
+	s := Snapshot{
 		ID: id, Slug: row.Slug, Name: row.Name, Description: row.Description.String, Tags: tags, CenterFreq: row.CenterFreq,
 		SampRate: row.SampRate, StartFreq: row.StartFreq, StartMod: row.StartMod, TuningStep: row.TuningStep,
 		Squelch: intOf(row.InitialSquelchLevel), NR: intOf(row.InitialNrLevel), SortOrder: int(row.SortOrder),
@@ -218,7 +215,7 @@ func fromRow(row sqlc.Preset) (*domain.Preset, error) {
 		s.Waterfall = &[2]int{l.Min, l.Max}
 	}
 
-	p, err := domain.Rehydrate(s)
+	p, err := Rehydrate(s)
 	if err != nil {
 		return nil, fmt.Errorf("stored preset %s: %w", id, err)
 	}

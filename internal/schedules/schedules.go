@@ -1,6 +1,4 @@
-// Package sqlite implements the schedule repository on the SQLite adapter
-// (ADR 0006).
-package sqlite
+package schedules
 
 import (
 	"context"
@@ -12,23 +10,22 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite/sqlc"
-	"github.com/yohang/mesh-sdr/internal/schedules/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
-// Schedules implements domain.Repository.
+// Schedules implements Repository.
 type Schedules struct{ db *db.DB }
 
 // NewSchedules returns the repository.
 func NewSchedules(a *db.DB) *Schedules { return &Schedules{db: a} }
 
-var _ domain.Repository = (*Schedules)(nil)
+var _ Repository = (*Schedules)(nil)
 
-// Get implements domain.Repository.
-func (r *Schedules) Get(ctx context.Context, id shared.UUID) (*domain.Schedule, error) {
+// Get implements Repository.
+func (r *Schedules) Get(ctx context.Context, id shared.UUID) (*Schedule, error) {
 	row, err := sqlc.New(r.db.Reader(ctx)).GetSchedule(ctx, id.Bytes())
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, domain.ErrScheduleNotFound
+		return nil, ErrScheduleNotFound
 	}
 
 	if err != nil {
@@ -38,8 +35,8 @@ func (r *Schedules) Get(ctx context.Context, id shared.UUID) (*domain.Schedule, 
 	return fromRow(row)
 }
 
-// List implements domain.Repository.
-func (r *Schedules) List(ctx context.Context) ([]*domain.Schedule, error) {
+// List implements Repository.
+func (r *Schedules) List(ctx context.Context) ([]*Schedule, error) {
 	rows, err := sqlc.New(r.db.Reader(ctx)).ListSchedules(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list schedules: %w", err)
@@ -48,8 +45,8 @@ func (r *Schedules) List(ctx context.Context) ([]*domain.Schedule, error) {
 	return fromRows(rows)
 }
 
-// ListByDevice implements domain.Repository.
-func (r *Schedules) ListByDevice(ctx context.Context, device shared.DeviceID) ([]*domain.Schedule, error) {
+// ListByDevice implements Repository.
+func (r *Schedules) ListByDevice(ctx context.Context, device shared.DeviceID) ([]*Schedule, error) {
 	rows, err := sqlc.New(r.db.Reader(ctx)).ListDeviceSchedules(ctx, device.String())
 	if err != nil {
 		return nil, fmt.Errorf("list schedules of %s: %w", device, err)
@@ -58,8 +55,8 @@ func (r *Schedules) ListByDevice(ctx context.Context, device shared.DeviceID) ([
 	return fromRows(rows)
 }
 
-// ListByPreset implements domain.Repository.
-func (r *Schedules) ListByPreset(ctx context.Context, preset shared.UUID) ([]*domain.Schedule, error) {
+// ListByPreset implements Repository.
+func (r *Schedules) ListByPreset(ctx context.Context, preset shared.UUID) ([]*Schedule, error) {
 	rows, err := sqlc.New(r.db.Reader(ctx)).ListPresetSchedules(ctx, preset.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("list schedules of preset %s: %w", preset, err)
@@ -68,8 +65,8 @@ func (r *Schedules) ListByPreset(ctx context.Context, preset shared.UUID) ([]*do
 	return fromRows(rows)
 }
 
-// Create implements domain.Repository.
-func (r *Schedules) Create(ctx context.Context, s *domain.Schedule) error {
+// Create implements Repository.
+func (r *Schedules) Create(ctx context.Context, s *Schedule) error {
 	v := s.Snapshot()
 
 	err := sqlc.New(r.db.Writer(ctx)).InsertSchedule(ctx, sqlc.InsertScheduleParams{
@@ -86,8 +83,8 @@ func (r *Schedules) Create(ctx context.Context, s *domain.Schedule) error {
 	return nil
 }
 
-// Update implements domain.Repository.
-func (r *Schedules) Update(ctx context.Context, s *domain.Schedule, expectedVersion int) error {
+// Update implements Repository.
+func (r *Schedules) Update(ctx context.Context, s *Schedule, expectedVersion int) error {
 	v := s.Snapshot()
 
 	n, err := sqlc.New(r.db.Writer(ctx)).UpdateSchedule(ctx, sqlc.UpdateScheduleParams{
@@ -106,13 +103,13 @@ func (r *Schedules) Update(ctx context.Context, s *domain.Schedule, expectedVers
 			return err
 		}
 
-		return domain.ErrVersionConflict
+		return ErrVersionConflict
 	}
 
 	return nil
 }
 
-// Delete implements domain.Repository.
+// Delete implements Repository.
 func (r *Schedules) Delete(ctx context.Context, id shared.UUID) error {
 	n, err := sqlc.New(r.db.Writer(ctx)).DeleteSchedule(ctx, id.Bytes())
 	if err != nil {
@@ -120,7 +117,7 @@ func (r *Schedules) Delete(ctx context.Context, id shared.UUID) error {
 	}
 
 	if n == 0 {
-		return domain.ErrScheduleNotFound
+		return ErrScheduleNotFound
 	}
 
 	return nil
@@ -128,14 +125,14 @@ func (r *Schedules) Delete(ctx context.Context, id shared.UUID) error {
 
 func writeError(err error, op string, id shared.UUID) error {
 	if strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
-		return domain.ErrUnknownPreset
+		return ErrUnknownPreset
 	}
 
 	return fmt.Errorf("%s schedule %s: %w", op, id, err)
 }
 
-func fromRows(rows []sqlc.Schedule) ([]*domain.Schedule, error) {
-	out := make([]*domain.Schedule, 0, len(rows))
+func fromRows(rows []sqlc.Schedule) ([]*Schedule, error) {
+	out := make([]*Schedule, 0, len(rows))
 
 	for _, row := range rows {
 		s, err := fromRow(row)
@@ -149,7 +146,7 @@ func fromRows(rows []sqlc.Schedule) ([]*domain.Schedule, error) {
 	return out, nil
 }
 
-func fromRow(row sqlc.Schedule) (*domain.Schedule, error) {
+func fromRow(row sqlc.Schedule) (*Schedule, error) {
 	id, err := shared.UUIDFromBytes(row.ID)
 	if err != nil {
 		return nil, fmt.Errorf("schedule id: %w", err)
@@ -160,14 +157,14 @@ func fromRow(row sqlc.Schedule) (*domain.Schedule, error) {
 		return nil, fmt.Errorf("schedule %s preset: %w", id, err)
 	}
 
-	reason, err := domain.ParseDisabledReason(row.DisabledReason.String)
+	reason, err := ParseDisabledReason(row.DisabledReason.String)
 	if err != nil {
 		return nil, fmt.Errorf("schedule %s: %w", id, err)
 	}
 
-	s, err := domain.Rehydrate(domain.Snapshot{
-		ID: id, Device: row.DeviceID, Preset: preset, Kind: domain.Kind(row.Kind), Start: intOf(row.StartMinute),
-		End: intOf(row.EndMinute), Phase: domain.Phase(row.DaylightPhase.String), Days: int(row.DaysOfWeek),
+	s, err := Rehydrate(Snapshot{
+		ID: id, Device: row.DeviceID, Preset: preset, Kind: Kind(row.Kind), Start: intOf(row.StartMinute),
+		End: intOf(row.EndMinute), Phase: Phase(row.DaylightPhase.String), Days: int(row.DaysOfWeek),
 		Priority: int(row.Priority), Enabled: row.Enabled != 0, Reason: reason, DisabledAt: fromNullMS(row.DisabledAt),
 		CreatedAt: time.UnixMilli(row.CreatedAt).UTC(), UpdatedAt: time.UnixMilli(row.UpdatedAt).UTC(), Version: int(row.Version),
 	})

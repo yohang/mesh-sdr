@@ -1,4 +1,4 @@
-package app_test
+package schedules_test
 
 import (
 	"context"
@@ -9,33 +9,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
-	presetsdomain "github.com/yohang/mesh-sdr/internal/presets/domain"
-	presetssqlite "github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
-	"github.com/yohang/mesh-sdr/internal/schedules/app"
-	"github.com/yohang/mesh-sdr/internal/schedules/domain"
-	"github.com/yohang/mesh-sdr/internal/schedules/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/schedules"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
-var (
-	t0      = time.Date(2026, 10, 5, 10, 30, 0, 0, time.UTC) // a Monday
-	presetA = shared.MustParseUUID("0192f2b4-0000-7000-8000-00000000000a")
-	presetB = shared.MustParseUUID("0192f2b4-0000-7000-8000-00000000000b")
-)
+// t0 is a Monday (presetA and presetB are declared in schedule_test.go).
+var t0 = time.Date(2026, 10, 5, 10, 30, 0, 0, time.UTC)
 
-type devices map[string]app.Device
+type devices map[string]schedules.Device
 
-func (d devices) Device(_ context.Context, id string) (app.Device, bool, error) {
+func (d devices) Device(_ context.Context, id string) (schedules.Device, bool, error) {
 	v, ok := d[id]
 
 	return v, ok, nil
 }
 
-func (d devices) NodeDevices(_ context.Context, node string) ([]app.Device, error) {
-	var out []app.Device
+func (d devices) NodeDevices(_ context.Context, node string) ([]schedules.Device, error) {
+	var out []schedules.Device
 
 	for _, id := range []string{"hf", "vhf"} {
 		if v, ok := d[id]; ok && v.Node == node {
@@ -46,8 +40,8 @@ func (d devices) NodeDevices(_ context.Context, node string) ([]app.Device, erro
 	return out, nil
 }
 
-func (d devices) All(context.Context) ([]app.Device, error) {
-	var out []app.Device
+func (d devices) All(context.Context) ([]schedules.Device, error) {
+	var out []schedules.Device
 	for _, v := range d {
 		out = append(out, v)
 	}
@@ -55,22 +49,22 @@ func (d devices) All(context.Context) ([]app.Device, error) {
 	return out, nil
 }
 
-// presets fit a device when listed in fits[device].
-type presets struct{ fits map[string][]shared.UUID }
+// fakePresets fit a device when listed in fits[device].
+type fakePresets struct{ fits map[string][]shared.UUID }
 
-func (p presets) Fit(_ context.Context, id shared.UUID, d app.Device) (app.Fit, error) {
+func (p fakePresets) Fit(_ context.Context, id shared.UUID, d schedules.Device) (schedules.Fit, error) {
 	if id != presetA && id != presetB {
-		return app.Fit{}, nil
+		return schedules.Fit{}, nil
 	}
 
 	if slices.Contains(p.fits[d.ID], id) {
-		return app.Fit{Exists: true}, nil
+		return schedules.Fit{Exists: true}, nil
 	}
 
-	return app.Fit{Exists: true, Reason: "frequency_range: outside"}, nil
+	return schedules.Fit{Exists: true, Reason: "frequency_range: outside"}, nil
 }
 
-func (p presets) Compatible(_ context.Context, d app.Device) ([]shared.UUID, error) {
+func (p fakePresets) Compatible(_ context.Context, d schedules.Device) ([]shared.UUID, error) {
 	return p.fits[d.ID], nil
 }
 
@@ -83,9 +77,9 @@ func (a *recorder) Append(_ context.Context, r audit.Record) error {
 }
 
 type env struct {
-	deps    app.Deps
+	deps    schedules.Deps
 	devices devices
-	presets *presets
+	presets *fakePresets
 	audit   *recorder
 	changed int
 }
@@ -94,7 +88,7 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 
 	a := dbtest.NewSQLite(t)
-	repo := presetssqlite.NewPresets(a)
+	repo := presets.NewPresets(a)
 
 	for i, id := range []shared.UUID{presetA, presetB} {
 		if err := repo.Create(context.Background(), newPreset(t, id, "p"+string(rune('a'+i)), i, t0)); err != nil {
@@ -107,12 +101,12 @@ func newEnv(t *testing.T) *env {
 			"hf":  {ID: "hf", Node: "attic", FreqMin: 100_000, FreqMax: 30_000_000, SampleRates: []int64{2_048_000}, SchedulerEnabled: true},
 			"vhf": {ID: "vhf", Node: "attic", FreqMin: 24_000_000, FreqMax: 1_700_000_000, SampleRates: []int64{2_048_000}},
 		},
-		presets: &presets{fits: map[string][]shared.UUID{"hf": {presetA, presetB}, "vhf": {presetB}}},
+		presets: &fakePresets{fits: map[string][]shared.UUID{"hf": {presetA, presetB}, "vhf": {presetB}}},
 		audit:   &recorder{},
 	}
 
-	e.deps = app.Deps{
-		Repo: sqlite.NewSchedules(a), Tx: a, Devices: e.devices, Presets: e.presets, Audit: e.audit, IDs: shared.NewUUIDv7Generator(),
+	e.deps = schedules.Deps{
+		Repo: schedules.NewSchedules(a), Tx: a, Devices: e.devices, Presets: e.presets, Audit: e.audit, IDs: shared.NewUUIDv7Generator(),
 		Now: func() time.Time { return t0 }, Changed: func(context.Context) { e.changed++ },
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -120,25 +114,25 @@ func newEnv(t *testing.T) *env {
 	return e
 }
 
-func draft(device string, preset shared.UUID, start, end int) domain.Draft {
-	return domain.Draft{DeviceID: device, PresetID: preset.String(), StartMinute: &start, EndMinute: &end}
+func draft(device string, preset shared.UUID, start, end int) schedules.Draft {
+	return schedules.Draft{DeviceID: device, PresetID: preset.String(), StartMinute: &start, EndMinute: &end}
 }
 
 func TestServiceChecks(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
-	s := app.NewService(e.deps)
+	s := schedules.NewService(e.deps)
 
-	e.devices["old"] = app.Device{ID: "old", Node: "attic", Stale: true}
+	e.devices["old"] = schedules.Device{ID: "old", Node: "attic", Stale: true}
 
 	for name, tt := range map[string]struct {
-		d    domain.Draft
+		d    schedules.Draft
 		want error
 	}{
-		"unknown device": {draft("nope", presetA, 0, 60), domain.ErrUnknownDevice},
-		"unknown preset": {draft("hf", shared.MustParseUUID("0192f2b4-0000-7000-8000-0000000000ff"), 0, 60), domain.ErrUnknownPreset},
-		"incompatible":   {draft("vhf", presetA, 0, 60), domain.ErrPresetIncompatible},
-		"stale device":   {draft("old", presetA, 0, 60), domain.ErrDeviceUnavailable},
+		"unknown device": {draft("nope", presetA, 0, 60), schedules.ErrUnknownDevice},
+		"unknown preset": {draft("hf", shared.MustParseUUID("0192f2b4-0000-7000-8000-0000000000ff"), 0, 60), schedules.ErrUnknownPreset},
+		"incompatible":   {draft("vhf", presetA, 0, 60), schedules.ErrPresetIncompatible},
+		"stale device":   {draft("old", presetA, 0, 60), schedules.ErrDeviceUnavailable},
 	} {
 		if _, err := s.Create(ctx, tt.d); !errors.Is(err, tt.want) {
 			t.Errorf("%s: %v, want %v", name, err, tt.want)
@@ -183,7 +177,7 @@ func TestServiceChecks(t *testing.T) {
 		t.Errorf("disabled edit of a removed device: %v", err)
 	}
 
-	if _, err := s.Replace(ctx, gone.ID().String(), 2, draft("vhf", presetB, 0, 90)); !errors.Is(err, domain.ErrUnknownDevice) {
+	if _, err := s.Replace(ctx, gone.ID().String(), 2, draft("vhf", presetB, 0, 90)); !errors.Is(err, schedules.ErrUnknownDevice) {
 		t.Errorf("enabling on a removed device: %v", err)
 	}
 
@@ -191,7 +185,7 @@ func TestServiceChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := s.Replace(ctx, sc.ID().String(), 2, draft("hf", presetB, 0, 60)); !errors.Is(err, domain.ErrVersionConflict) {
+	if _, err := s.Replace(ctx, sc.ID().String(), 2, draft("hf", presetB, 0, 60)); !errors.Is(err, schedules.ErrVersionConflict) {
 		t.Errorf("stale version: %v", err)
 	}
 
@@ -207,14 +201,14 @@ func TestServiceChecks(t *testing.T) {
 func TestGuard(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
-	s := app.NewService(e.deps)
-	g := app.NewGuard(e.deps)
+	s := schedules.NewService(e.deps)
+	g := schedules.NewGuard(e.deps)
 
 	hfA, _ := s.Create(ctx, draft("hf", presetA, 0, 60))
 	hfB, _ := s.Create(ctx, draft("hf", presetB, 60, 120))
 	vhf, _ := s.Create(ctx, draft("vhf", presetB, 0, 60))
 
-	reason := func(sc *domain.Schedule) domain.DisabledReason {
+	reason := func(sc *schedules.Schedule) schedules.DisabledReason {
 		t.Helper()
 
 		got, err := e.deps.Repo.Get(ctx, sc.ID())
@@ -224,7 +218,7 @@ func TestGuard(t *testing.T) {
 
 		r, _ := got.DisabledReason()
 
-		if r != domain.ReasonNone && got.Enabled() {
+		if r != schedules.ReasonNone && got.Enabled() {
 			t.Errorf("schedule %s is enabled with reason %s", sc.ID(), r)
 		}
 
@@ -237,7 +231,7 @@ func TestGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if reason(hfA) != domain.ReasonPresetIncompatible || reason(hfB) != domain.ReasonNone {
+	if reason(hfA) != schedules.ReasonPresetIncompatible || reason(hfB) != schedules.ReasonNone {
 		t.Errorf("after report: %s %s", reason(hfA), reason(hfB))
 	}
 
@@ -245,7 +239,7 @@ func TestGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if reason(hfB) != domain.ReasonDeviceStale || reason(hfA) != domain.ReasonPresetIncompatible {
+	if reason(hfB) != schedules.ReasonDeviceStale || reason(hfA) != schedules.ReasonPresetIncompatible {
 		t.Errorf("after stale: %s %s", reason(hfA), reason(hfB))
 	}
 
@@ -253,7 +247,7 @@ func TestGuard(t *testing.T) {
 	e.presets.fits["vhf"] = nil
 
 	disabled, err := g.PresetReplaced(ctx, presetB)
-	if err != nil || len(disabled) != 1 || disabled[0] != vhf.ID() || reason(vhf) != domain.ReasonPresetIncompatible {
+	if err != nil || len(disabled) != 1 || disabled[0] != vhf.ID() || reason(vhf) != schedules.ReasonPresetIncompatible {
 		t.Errorf("preset replaced = %v, %v", disabled, err)
 	}
 
@@ -265,14 +259,14 @@ func TestGuard(t *testing.T) {
 
 	delete(e.devices, "hf")
 
-	if n, err := g.Reconcile(ctx); err != nil || n != 1 || reason(fresh) != domain.ReasonDeviceRemoved {
+	if n, err := g.Reconcile(ctx); err != nil || n != 1 || reason(fresh) != schedules.ReasonDeviceRemoved {
 		t.Errorf("reconcile = %d, %v, %s", n, err, reason(fresh))
 	}
 
 	system := 0
 
 	for _, r := range e.audit.records {
-		if r.Actor == audit.System && r.Action == app.ActionDisable {
+		if r.Actor == audit.System && r.Action == schedules.ActionDisable {
 			system++
 		}
 	}
@@ -285,8 +279,8 @@ func TestGuard(t *testing.T) {
 func TestPlanner(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
-	s := app.NewService(e.deps)
-	p := app.NewPlanner(e.deps)
+	s := schedules.NewService(e.deps)
+	p := schedules.NewPlanner(e.deps)
 
 	if _, err := s.Create(ctx, draft("hf", presetB, 11*60, 12*60)); err != nil {
 		t.Fatal(err)
@@ -331,17 +325,17 @@ func TestPlanner(t *testing.T) {
 }
 
 // newPreset builds a valid preset for tests.
-func newPreset(t *testing.T, id shared.UUID, slug string, order int, now time.Time) *presetsdomain.Preset {
+func newPreset(t *testing.T, id shared.UUID, slug string, order int, now time.Time) *presets.Preset {
 	t.Helper()
 
-	spec, err := presetsdomain.NewSpec(presetsdomain.Draft{
+	spec, err := presets.NewSpec(presets.Draft{
 		Slug: slug, Name: "Preset " + slug, CenterFreq: 14_074_000, SampRate: 2_048_000, StartMod: "usb",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	p, err := presetsdomain.NewPreset(id, spec, order, now)
+	p, err := presets.NewPreset(id, spec, order, now)
 	if err != nil {
 		t.Fatal(err)
 	}

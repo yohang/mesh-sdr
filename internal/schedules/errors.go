@@ -1,4 +1,4 @@
-package domain
+package schedules
 
 import shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 

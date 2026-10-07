@@ -1,4 +1,4 @@
-package app
+package schedules
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
-	"github.com/yohang/mesh-sdr/internal/schedules/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -23,16 +22,16 @@ func NewGuard(d Deps) *Guard { return &Guard{d: d} }
 // DevicesStale disables the schedules of devices their node no longer
 // reports.
 func (g *Guard) DevicesStale(ctx context.Context, devices []shared.DeviceID) error {
-	return g.disableAll(ctx, devices, domain.ReasonDeviceStale)
+	return g.disableAll(ctx, devices, ReasonDeviceStale)
 }
 
 // DevicesRemoved disables the schedules of devices deleted from the
 // registry (forgotten, or removed with their node).
 func (g *Guard) DevicesRemoved(ctx context.Context, devices []shared.DeviceID) error {
-	return g.disableAll(ctx, devices, domain.ReasonDeviceRemoved)
+	return g.disableAll(ctx, devices, ReasonDeviceRemoved)
 }
 
-func (g *Guard) disableAll(ctx context.Context, devices []shared.DeviceID, reason domain.DisabledReason) error {
+func (g *Guard) disableAll(ctx context.Context, devices []shared.DeviceID, reason DisabledReason) error {
 	for _, id := range devices {
 		list, err := g.d.Repo.ListByDevice(ctx, id)
 		if err != nil {
@@ -95,7 +94,7 @@ func (g *Guard) PresetReplaced(ctx context.Context, preset shared.UUID) ([]share
 		var changed bool
 
 		if !ok {
-			changed, err = g.disable(ctx, sc, domain.ReasonDeviceRemoved, "")
+			changed, err = g.disable(ctx, sc, ReasonDeviceRemoved, "")
 		} else {
 			changed, err = g.recheck(ctx, sc, dev)
 		}
@@ -139,7 +138,7 @@ func (g *Guard) Reconcile(ctx context.Context) (int64, error) {
 			var changed bool
 
 			if !ok {
-				changed, err = g.disable(ctx, sc, domain.ReasonDeviceRemoved, "")
+				changed, err = g.disable(ctx, sc, ReasonDeviceRemoved, "")
 			} else {
 				changed, err = g.recheck(ctx, sc, dev)
 			}
@@ -161,13 +160,13 @@ func (g *Guard) Reconcile(ctx context.Context) (int64, error) {
 
 // recheck disables an enabled schedule whose device is stale or whose
 // preset does not fit the device any more.
-func (g *Guard) recheck(ctx context.Context, sc *domain.Schedule, dev Device) (bool, error) {
+func (g *Guard) recheck(ctx context.Context, sc *Schedule, dev Device) (bool, error) {
 	if !sc.Enabled() {
 		return false, nil
 	}
 
 	if dev.Stale {
-		return g.disable(ctx, sc, domain.ReasonDeviceStale, "")
+		return g.disable(ctx, sc, ReasonDeviceStale, "")
 	}
 
 	fit, err := g.d.Presets.Fit(ctx, sc.Preset(), dev)
@@ -176,13 +175,13 @@ func (g *Guard) recheck(ctx context.Context, sc *domain.Schedule, dev Device) (b
 	}
 
 	if !fit.Exists || fit.Reason != "" {
-		return g.disable(ctx, sc, domain.ReasonPresetIncompatible, fit.Reason)
+		return g.disable(ctx, sc, ReasonPresetIncompatible, fit.Reason)
 	}
 
 	return false, nil
 }
 
-func (g *Guard) disable(ctx context.Context, sc *domain.Schedule, reason domain.DisabledReason, detail string) (bool, error) {
+func (g *Guard) disable(ctx context.Context, sc *Schedule, reason DisabledReason, detail string) (bool, error) {
 	v := sc.Version()
 	before := auditFields(sc)
 

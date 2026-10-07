@@ -1,4 +1,4 @@
-package app
+package schedules
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/yohang/mesh-sdr/internal/schedules/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -20,7 +19,7 @@ type DevicePlan struct {
 	// Start is the device's active preset when it still fits, otherwise
 	// the first compatible preset (§7.1); zero when none fits.
 	Start    shared.UUID
-	Timeline domain.Timeline
+	Timeline Timeline
 }
 
 // Planner computes the desired state of the devices of a node. Schedules
@@ -40,12 +39,12 @@ func (p *Planner) Plan(ctx context.Context, node string, now time.Time) ([]Devic
 		return nil, err
 	}
 
-	from := domain.TimelineStart(now)
-	until := from.Add(domain.Horizon)
+	from := TimelineStart(now)
+	until := from.Add(Horizon)
 	out := make([]DevicePlan, 0, len(devices))
 
 	for _, dev := range devices {
-		plan := DevicePlan{Device: dev, Timeline: domain.Evaluate(nil, from, until)}
+		plan := DevicePlan{Device: dev, Timeline: Evaluate(nil, from, until)}
 
 		if plan.Presets, err = p.d.Presets.Compatible(ctx, dev); err != nil {
 			return nil, err
@@ -70,15 +69,15 @@ func (p *Planner) Plan(ctx context.Context, node string, now time.Time) ([]Devic
 	return out, nil
 }
 
-func (p *Planner) timeline(ctx context.Context, dev Device, fits []shared.UUID, from, until time.Time) (domain.Timeline, error) {
+func (p *Planner) timeline(ctx context.Context, dev Device, fits []shared.UUID, from, until time.Time) (Timeline, error) {
 	id, err := shared.NewDeviceID(dev.ID)
 	if err != nil {
-		return domain.Evaluate(nil, from, until), nil //nolint:nilerr // no schedule names an invalid id
+		return Evaluate(nil, from, until), nil //nolint:nilerr // no schedule names an invalid id
 	}
 
 	list, err := p.d.Repo.ListByDevice(ctx, id)
 	if err != nil {
-		return domain.Timeline{}, err
+		return Timeline{}, err
 	}
 
 	usable := list[:0:0]
@@ -98,5 +97,5 @@ func (p *Planner) timeline(ctx context.Context, dev Device, fits []shared.UUID, 
 		usable = append(usable, sc)
 	}
 
-	return domain.Evaluate(usable, from, until), nil
+	return Evaluate(usable, from, until), nil
 }

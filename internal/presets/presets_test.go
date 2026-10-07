@@ -1,4 +1,4 @@
-package sqlite_test
+package presets_test
 
 import (
 	"context"
@@ -7,16 +7,15 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
-	"github.com/yohang/mesh-sdr/internal/presets/domain"
-	"github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/presets"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // NewPreset builds a valid preset for tests.
-func NewPreset(t *testing.T, id shared.UUID, slug string, order int, now time.Time) *domain.Preset {
+func NewPreset(t *testing.T, id shared.UUID, slug string, order int, now time.Time) *presets.Preset {
 	t.Helper()
 
-	spec, err := domain.NewSpec(domain.Draft{
+	spec, err := presets.NewSpec(presets.Draft{
 		Slug: slug, Name: "Preset " + slug, Description: "desc", Tags: []string{"b", "a"}, CenterFreq: 14_074_000, SampRate: 2_048_000,
 		StartMod: "usb", InitialSquelchLevel: new(-60), WaterfallLevels: &[2]int{-110, -30},
 	})
@@ -24,7 +23,7 @@ func NewPreset(t *testing.T, id shared.UUID, slug string, order int, now time.Ti
 		t.Fatal(err)
 	}
 
-	p, err := domain.NewPreset(id, spec, order, now)
+	p, err := presets.NewPreset(id, spec, order, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +35,7 @@ func TestPresets(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 	ids := shared.NewUUIDv7Generator()
-	repo := sqlite.NewPresets(dbtest.NewSQLite(t))
+	repo := presets.NewPresets(dbtest.NewSQLite(t))
 
 	newID := func() shared.UUID {
 		id, err := ids.New(t0)
@@ -53,13 +52,13 @@ func TestPresets(t *testing.T) {
 
 	a, b := NewPreset(t, newID(), "aaa", 1, t0), NewPreset(t, newID(), "bbb", 0, t0)
 
-	for _, p := range []*domain.Preset{a, b} {
+	for _, p := range []*presets.Preset{a, b} {
 		if err := repo.Create(ctx, p); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	if err := repo.Create(ctx, NewPreset(t, newID(), "aaa", 2, t0)); !errors.Is(err, domain.ErrSlugTaken) {
+	if err := repo.Create(ctx, NewPreset(t, newID(), "aaa", 2, t0)); !errors.Is(err, presets.ErrSlugTaken) {
 		t.Errorf("duplicate slug: %v", err)
 	}
 
@@ -90,7 +89,7 @@ func TestPresets(t *testing.T) {
 		t.Errorf("next order = %d, %v", n, err)
 	}
 
-	spec, _ := domain.NewSpec(domain.Draft{Slug: "aaa", Name: "Renamed", CenterFreq: 7_074_000, SampRate: 2_048_000})
+	spec, _ := presets.NewSpec(presets.Draft{Slug: "aaa", Name: "Renamed", CenterFreq: 7_074_000, SampRate: 2_048_000})
 	if err := got.Replace(spec, 1, t0.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +98,7 @@ func TestPresets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := repo.Update(ctx, got, 1); !errors.Is(err, domain.ErrVersionConflict) {
+	if err := repo.Update(ctx, got, 1); !errors.Is(err, presets.ErrVersionConflict) {
 		t.Errorf("stale update: %v", err)
 	}
 
@@ -111,11 +110,11 @@ func TestPresets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := repo.Delete(ctx, a.ID()); !errors.Is(err, domain.ErrPresetNotFound) {
+	if err := repo.Delete(ctx, a.ID()); !errors.Is(err, presets.ErrPresetNotFound) {
 		t.Errorf("second delete: %v", err)
 	}
 
-	if _, err := repo.Get(ctx, a.ID()); !errors.Is(err, domain.ErrPresetNotFound) {
+	if _, err := repo.Get(ctx, a.ID()); !errors.Is(err, presets.ErrPresetNotFound) {
 		t.Errorf("get deleted: %v", err)
 	}
 }

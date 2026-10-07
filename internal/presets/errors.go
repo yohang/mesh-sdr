@@ -1,4 +1,4 @@
-package domain
+package presets
 
 import shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 

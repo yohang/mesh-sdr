@@ -1,7 +1,4 @@
-// Package domain models presets (TECHNICAL_SPEC §7.1 `presets`, ADR 0020):
-// device-independent tuning data, validated against a device's reported
-// limits when it is applied.
-package domain
+package presets
 
 import (
 	"regexp"

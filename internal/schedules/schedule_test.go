@@ -1,11 +1,11 @@
-package domain_test
+package schedules_test
 
 import (
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/yohang/mesh-sdr/internal/schedules/domain"
+	"github.com/yohang/mesh-sdr/internal/schedules"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -17,10 +17,10 @@ var (
 	presetB = shared.MustParseUUID("0192f2b4-0000-7000-8000-00000000000b")
 )
 
-func static(t *testing.T, n int, preset shared.UUID, start, end, days, prio int) *domain.Schedule {
+func static(t *testing.T, n int, preset shared.UUID, start, end, days, prio int) *schedules.Schedule {
 	t.Helper()
 
-	spec, err := domain.NewSpec(domain.Draft{
+	spec, err := schedules.NewSpec(schedules.Draft{
 		DeviceID: "hf", PresetID: preset.String(), StartMinute: &start, EndMinute: &end, DaysOfWeek: &days, Priority: &prio,
 	})
 	if err != nil {
@@ -29,7 +29,7 @@ func static(t *testing.T, n int, preset shared.UUID, start, end, days, prio int)
 
 	id := shared.MustParseUUID("0192f2b4-0000-7000-8000-00000000010" + string(rune('0'+n)))
 
-	s, err := domain.NewSchedule(id, spec, monday)
+	s, err := schedules.NewSchedule(id, spec, monday)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,14 +38,14 @@ func static(t *testing.T, n int, preset shared.UUID, start, end, days, prio int)
 }
 
 func TestNewSpec(t *testing.T) {
-	if _, err := domain.NewSpec(domain.Draft{DeviceID: "hf", PresetID: presetA.String(), Kind: "daylight", DaylightPhase: "day"}); !errors.Is(err, domain.ErrKindUnsupported) {
+	if _, err := schedules.NewSpec(schedules.Draft{DeviceID: "hf", PresetID: presetA.String(), Kind: "daylight", DaylightPhase: "day"}); !errors.Is(err, schedules.ErrKindUnsupported) {
 		t.Errorf("daylight: %v", err)
 	}
 
-	_, err := domain.NewSpec(domain.Draft{DeviceID: "HF!", PresetID: "x", StartMinute: new(10), EndMinute: new(1440), DaysOfWeek: new(0)})
+	_, err := schedules.NewSpec(schedules.Draft{DeviceID: "HF!", PresetID: "x", StartMinute: new(10), EndMinute: new(1440), DaysOfWeek: new(0)})
 
 	var de *shared.Error
-	if !errors.As(err, &de) || !errors.Is(err, domain.ErrInvalidSchedule) {
+	if !errors.As(err, &de) || !errors.Is(err, schedules.ErrInvalidSchedule) {
 		t.Fatalf("error = %v", err)
 	}
 
@@ -60,39 +60,39 @@ func TestNewSpec(t *testing.T) {
 		}
 	}
 
-	if _, err := domain.NewSpec(domain.Draft{DeviceID: "hf", PresetID: presetA.String()}); !errors.Is(err, domain.ErrInvalidSchedule) {
+	if _, err := schedules.NewSpec(schedules.Draft{DeviceID: "hf", PresetID: presetA.String()}); !errors.Is(err, schedules.ErrInvalidSchedule) {
 		t.Errorf("static without minutes: %v", err)
 	}
 }
 
 func TestDisableAndReplace(t *testing.T) {
-	s := static(t, 1, presetA, 60, 120, domain.EveryDay, 0)
+	s := static(t, 1, presetA, 60, 120, schedules.EveryDay, 0)
 
-	if !s.Disable(domain.ReasonDeviceStale, monday) || s.Enabled() || s.Version() != 2 {
+	if !s.Disable(schedules.ReasonDeviceStale, monday) || s.Enabled() || s.Version() != 2 {
 		t.Fatalf("disabled = %+v", s.Snapshot())
 	}
 
-	if s.Disable(domain.ReasonPresetIncompatible, monday) {
+	if s.Disable(schedules.ReasonPresetIncompatible, monday) {
 		t.Error("a disabled schedule was disabled again")
 	}
 
 	// Removal wins over staleness.
-	if !s.Disable(domain.ReasonDeviceRemoved, monday) || s.Version() != 3 {
+	if !s.Disable(schedules.ReasonDeviceRemoved, monday) || s.Version() != 3 {
 		t.Errorf("removed = %+v", s.Snapshot())
 	}
 
 	// Kept disabled by an edit: still flagged.
-	spec, _ := domain.NewSpec(domain.Draft{DeviceID: "hf", PresetID: presetA.String(), StartMinute: new(0), EndMinute: new(30), Enabled: new(false)})
+	spec, _ := schedules.NewSpec(schedules.Draft{DeviceID: "hf", PresetID: presetA.String(), StartMinute: new(0), EndMinute: new(30), Enabled: new(false)})
 	if err := s.Replace(spec, 3, monday); err != nil {
 		t.Fatal(err)
 	}
 
-	if r, _ := s.DisabledReason(); r != domain.ReasonDeviceRemoved {
+	if r, _ := s.DisabledReason(); r != schedules.ReasonDeviceRemoved {
 		t.Errorf("reason after a disabled edit = %q", r)
 	}
 
-	spec, _ = domain.NewSpec(domain.Draft{DeviceID: "hf", PresetID: presetA.String(), StartMinute: new(0), EndMinute: new(30)})
-	if err := s.Replace(spec, 1, monday); !errors.Is(err, domain.ErrVersionConflict) {
+	spec, _ = schedules.NewSpec(schedules.Draft{DeviceID: "hf", PresetID: presetA.String(), StartMinute: new(0), EndMinute: new(30)})
+	if err := s.Replace(spec, 1, monday); !errors.Is(err, schedules.ErrVersionConflict) {
 		t.Errorf("stale version: %v", err)
 	}
 
@@ -100,11 +100,11 @@ func TestDisableAndReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if r, at := s.DisabledReason(); !s.Enabled() || r != domain.ReasonNone || !at.IsZero() {
+	if r, at := s.DisabledReason(); !s.Enabled() || r != schedules.ReasonNone || !at.IsZero() {
 		t.Errorf("re-enabled = %+v", s.Snapshot())
 	}
 
-	back, err := domain.Rehydrate(s.Snapshot())
+	back, err := schedules.Rehydrate(s.Snapshot())
 	if err != nil || back.Window().String() != "0000-0030 UTC" {
 		t.Errorf("rehydrated = %v, %v", back, err)
 	}
@@ -115,7 +115,7 @@ type slot struct {
 	preset      shared.UUID
 }
 
-func check(t *testing.T, tl domain.Timeline, want []slot) {
+func check(t *testing.T, tl schedules.Timeline, want []slot) {
 	t.Helper()
 
 	got := tl.Slots()
@@ -137,12 +137,12 @@ func TestEvaluate(t *testing.T) {
 	t.Run("overnight wrap belongs to its start day", func(t *testing.T) {
 		// 22:00–06:00 on Mondays only (bit 0).
 		s := static(t, 1, presetA, 22*60, 6*60, 1, 0)
-		check(t, domain.Evaluate([]*domain.Schedule{s}, monday.Add(-12*h), monday.Add(48*h)), []slot{{22 * h, 30 * h, presetA}})
+		check(t, schedules.Evaluate([]*schedules.Schedule{s}, monday.Add(-12*h), monday.Add(48*h)), []slot{{22 * h, 30 * h, presetA}})
 	})
 
 	t.Run("clipped to the horizon", func(t *testing.T) {
-		s := static(t, 1, presetA, 0, 2*60, domain.EveryDay, 0)
-		tl := domain.Evaluate([]*domain.Schedule{s}, monday.Add(h), monday.Add(25*h))
+		s := static(t, 1, presetA, 0, 2*60, schedules.EveryDay, 0)
+		tl := schedules.Evaluate([]*schedules.Schedule{s}, monday.Add(h), monday.Add(25*h))
 		check(t, tl, []slot{{h, 2 * h, presetA}, {24 * h, 25 * h, presetA}})
 
 		if !tl.From().Equal(monday.Add(h)) || !tl.Until().Equal(monday.Add(25*h)) {
@@ -151,28 +151,28 @@ func TestEvaluate(t *testing.T) {
 	})
 
 	t.Run("priority then earliest start", func(t *testing.T) {
-		low := static(t, 1, presetA, 1*60, 5*60, domain.EveryDay, 0)
-		high := static(t, 2, presetB, 2*60, 3*60, domain.EveryDay, 1)
-		check(t, domain.Evaluate([]*domain.Schedule{low, high}, monday, monday.Add(6*h)), []slot{
+		low := static(t, 1, presetA, 1*60, 5*60, schedules.EveryDay, 0)
+		high := static(t, 2, presetB, 2*60, 3*60, schedules.EveryDay, 1)
+		check(t, schedules.Evaluate([]*schedules.Schedule{low, high}, monday, monday.Add(6*h)), []slot{
 			{1 * h, 2 * h, presetA}, {2 * h, 3 * h, presetB}, {3 * h, 5 * h, presetA},
 		})
 
-		early := static(t, 3, presetA, 1*60, 4*60, domain.EveryDay, 0)
-		late := static(t, 4, presetB, 2*60, 5*60, domain.EveryDay, 0)
-		check(t, domain.Evaluate([]*domain.Schedule{late, early}, monday, monday.Add(6*h)), []slot{
+		early := static(t, 3, presetA, 1*60, 4*60, schedules.EveryDay, 0)
+		late := static(t, 4, presetB, 2*60, 5*60, schedules.EveryDay, 0)
+		check(t, schedules.Evaluate([]*schedules.Schedule{late, early}, monday, monday.Add(6*h)), []slot{
 			{1 * h, 4 * h, presetA}, {4 * h, 5 * h, presetB},
 		})
 	})
 
 	t.Run("disabled schedules and empty horizon", func(t *testing.T) {
-		s := static(t, 1, presetA, 0, 60, domain.EveryDay, 0)
-		s.Disable(domain.ReasonDeviceStale, monday)
+		s := static(t, 1, presetA, 0, 60, schedules.EveryDay, 0)
+		s.Disable(schedules.ReasonDeviceStale, monday)
 
-		if got := domain.Evaluate([]*domain.Schedule{s}, monday, monday.Add(24*h)).Slots(); len(got) != 0 {
+		if got := schedules.Evaluate([]*schedules.Schedule{s}, monday, monday.Add(24*h)).Slots(); len(got) != 0 {
 			t.Errorf("slots = %v", got)
 		}
 
-		if got := domain.Evaluate(nil, monday, monday).Slots(); len(got) != 0 {
+		if got := schedules.Evaluate(nil, monday, monday).Slots(); len(got) != 0 {
 			t.Errorf("empty horizon = %v", got)
 		}
 	})
@@ -180,7 +180,7 @@ func TestEvaluate(t *testing.T) {
 	t.Run("start = end is the whole day", func(t *testing.T) {
 		// Mondays and Tuesdays from 06:00 for 24 h each: one slot.
 		s := static(t, 1, presetA, 6*60, 6*60, 3, 0)
-		check(t, domain.Evaluate([]*domain.Schedule{s}, monday, monday.Add(72*h)), []slot{{6 * h, 54 * h, presetA}})
+		check(t, schedules.Evaluate([]*schedules.Schedule{s}, monday, monday.Add(72*h)), []slot{{6 * h, 54 * h, presetA}})
 
 		if got := s.Window().String(); got != "24 h from 0600 UTC" {
 			t.Errorf("window = %q", got)
@@ -190,10 +190,10 @@ func TestEvaluate(t *testing.T) {
 	t.Run("week days", func(t *testing.T) {
 		// Sundays only (bit 6): the Sunday before monday.
 		s := static(t, 1, presetA, 12*60, 13*60, 64, 0)
-		check(t, domain.Evaluate([]*domain.Schedule{s}, monday.Add(-24*h), monday.Add(6*24*h)), []slot{{-12 * h, -11 * h, presetA}})
+		check(t, schedules.Evaluate([]*schedules.Schedule{s}, monday.Add(-24*h), monday.Add(6*24*h)), []slot{{-12 * h, -11 * h, presetA}})
 	})
 
-	if got := domain.TimelineStart(monday.Add(90 * time.Minute)); !got.Equal(monday.Add(h)) {
+	if got := schedules.TimelineStart(monday.Add(90 * time.Minute)); !got.Equal(monday.Add(h)) {
 		t.Errorf("timeline start = %v", got)
 	}
 }

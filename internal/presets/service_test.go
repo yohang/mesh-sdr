@@ -1,4 +1,4 @@
-package app_test
+package presets_test
 
 import (
 	"context"
@@ -11,9 +11,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
-	"github.com/yohang/mesh-sdr/internal/presets/app"
-	"github.com/yohang/mesh-sdr/internal/presets/domain"
-	"github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/presets"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -41,15 +39,15 @@ func (s *schedules) PresetReplaced(_ context.Context, id shared.UUID) ([]shared.
 	return s.disabled, nil
 }
 
-func newService(t *testing.T) (*app.Service, *recorder, *schedules, *int) {
+func newService(t *testing.T) (*presets.Service, *recorder, *schedules, *int) {
 	t.Helper()
 
 	a := dbtest.NewSQLite(t)
 	au, sc, changed := &recorder{}, &schedules{}, new(0)
 	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 
-	return app.NewService(app.Deps{
-		Repo: sqlite.NewPresets(a), Tx: a, Audit: au, IDs: shared.NewUUIDv7Generator(), Now: func() time.Time { return now },
+	return presets.NewService(presets.Deps{
+		Repo: presets.NewPresets(a), Tx: a, Audit: au, IDs: shared.NewUUIDv7Generator(), Now: func() time.Time { return now },
 		Usage: sc, Listener: sc, Changed: func(context.Context) { *changed++ }, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}), au, sc, changed
 }
@@ -58,7 +56,7 @@ func TestCreateReplaceDelete(t *testing.T) {
 	ctx := context.Background()
 	s, au, sc, changed := newService(t)
 
-	d := domain.Draft{Name: "Air band", CenterFreq: 125_000_000, SampRate: 2_400_000}
+	d := presets.Draft{Name: "Air band", CenterFreq: 125_000_000, SampRate: 2_400_000}
 
 	a, err := s.Create(ctx, d)
 	if err != nil {
@@ -76,13 +74,13 @@ func TestCreateReplaceDelete(t *testing.T) {
 	}
 
 	d.Slug = "air-band"
-	if _, err := s.Create(ctx, d); !errors.Is(err, domain.ErrSlugTaken) {
+	if _, err := s.Create(ctx, d); !errors.Is(err, presets.ErrSlugTaken) {
 		t.Errorf("explicit duplicate slug: %v", err)
 	}
 
 	sc.disabled = []shared.UUID{shared.MustParseUUID("0192f2b4-0000-7000-8000-0000000000aa")}
 
-	r, err := s.Replace(ctx, a.ID().String(), 1, domain.Draft{Name: "Airband", CenterFreq: 120_000_000, SampRate: 2_400_000})
+	r, err := s.Replace(ctx, a.ID().String(), 1, presets.Draft{Name: "Airband", CenterFreq: 120_000_000, SampRate: 2_400_000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,12 +89,12 @@ func TestCreateReplaceDelete(t *testing.T) {
 		t.Errorf("replaced = %+v, listener %v", r, sc.replaced)
 	}
 
-	if _, err := s.Replace(ctx, a.ID().String(), 1, d); !errors.Is(err, domain.ErrVersionConflict) {
+	if _, err := s.Replace(ctx, a.ID().String(), 1, d); !errors.Is(err, presets.ErrVersionConflict) {
 		t.Errorf("stale replace: %v", err)
 	}
 
 	sc.using = []shared.UUID{sc.disabled[0]}
-	if err := s.Delete(ctx, a.ID().String()); !errors.Is(err, domain.ErrPresetInUse) {
+	if err := s.Delete(ctx, a.ID().String()); !errors.Is(err, presets.ErrPresetInUse) {
 		t.Errorf("delete in use: %v", err)
 	}
 
@@ -105,7 +103,7 @@ func TestCreateReplaceDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := s.Get(ctx, "not-a-uuid"); !errors.Is(err, domain.ErrPresetNotFound) {
+	if _, err := s.Get(ctx, "not-a-uuid"); !errors.Is(err, presets.ErrPresetNotFound) {
 		t.Errorf("invalid id: %v", err)
 	}
 
@@ -114,8 +112,8 @@ func TestCreateReplaceDelete(t *testing.T) {
 		actions = append(actions, r.Action)
 	}
 
-	if len(actions) != 4 || actions[2] != app.ActionUpdate || au.records[2].Before["name"] != "Air band" ||
-		au.records[2].After["name"] != "Airband" || actions[3] != app.ActionDelete {
+	if len(actions) != 4 || actions[2] != presets.ActionUpdate || au.records[2].Before["name"] != "Air band" ||
+		au.records[2].After["name"] != "Airband" || actions[3] != presets.ActionDelete {
 		t.Errorf("audit = %+v", au.records)
 	}
 
@@ -128,12 +126,12 @@ func TestCompatibleAndCheck(t *testing.T) {
 	ctx := context.Background()
 	s, _, _, _ := newService(t)
 
-	hf, _ := s.Create(ctx, domain.Draft{Name: "HF", CenterFreq: 14_074_000, SampRate: 2_048_000})
-	if _, err := s.Create(ctx, domain.Draft{Name: "VHF", CenterFreq: 144_800_000, SampRate: 2_048_000}); err != nil {
+	hf, _ := s.Create(ctx, presets.Draft{Name: "HF", CenterFreq: 14_074_000, SampRate: 2_048_000})
+	if _, err := s.Create(ctx, presets.Draft{Name: "VHF", CenterFreq: 144_800_000, SampRate: 2_048_000}); err != nil {
 		t.Fatal(err)
 	}
 
-	limits := domain.DeviceLimits{FreqMin: 100_000, FreqMax: 30_000_000, SampleRates: []int64{2_048_000}}
+	limits := presets.DeviceLimits{FreqMin: 100_000, FreqMax: 30_000_000, SampleRates: []int64{2_048_000}}
 
 	list, err := s.Compatible(ctx, limits)
 	if err != nil || len(list) != 1 || list[0].ID() != hf.ID() {

@@ -1,7 +1,9 @@
-// Package app holds the preset use cases (ADR 0020): admin CRUD with
-// optimistic concurrency and audit, and the compatibility queries used to
-// apply presets to devices. Ports are declared here.
-package app
+// Package presets models presets (TECHNICAL_SPEC §7.1 `presets`, ADR 0020):
+// device-independent tuning data, validated against a device's reported
+// limits when it is applied. It holds the admin CRUD with optimistic
+// concurrency and audit, the compatibility queries used to apply presets to
+// devices, and the SQLite repository.
+package presets
 
 import (
 	"context"
@@ -14,7 +16,6 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
-	"github.com/yohang/mesh-sdr/internal/presets/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -54,7 +55,7 @@ type ChangeListener interface {
 // optional; Changed, when set, runs after every committed change (the
 // desired state of the nodes is pushed again).
 type Deps struct {
-	Repo     domain.Repository
+	Repo     Repository
 	Tx       Transactor
 	Audit    audit.Appender
 	IDs      IDs
@@ -75,17 +76,17 @@ func NewService(d Deps) *Service { return &Service{d: d} }
 func ParseID(s string) (shared.UUID, error) {
 	id, err := shared.ParseUUID(s)
 	if err != nil {
-		return shared.UUID{}, domain.ErrPresetNotFound
+		return shared.UUID{}, ErrPresetNotFound
 	}
 
 	return id, nil
 }
 
 // List returns every preset, by sort order.
-func (s *Service) List(ctx context.Context) ([]*domain.Preset, error) { return s.d.Repo.List(ctx) }
+func (s *Service) List(ctx context.Context) ([]*Preset, error) { return s.d.Repo.List(ctx) }
 
 // Get returns one preset.
-func (s *Service) Get(ctx context.Context, id string) (*domain.Preset, error) {
+func (s *Service) Get(ctx context.Context, id string) (*Preset, error) {
 	pid, err := ParseID(id)
 	if err != nil {
 		return nil, err
@@ -96,8 +97,8 @@ func (s *Service) Get(ctx context.Context, id string) (*domain.Preset, error) {
 
 // Create validates and stores a new preset at the end of the list. A slug
 // derived from the name is made unique with a numeric suffix.
-func (s *Service) Create(ctx context.Context, d domain.Draft) (*domain.Preset, error) {
-	spec, err := domain.NewSpec(d)
+func (s *Service) Create(ctx context.Context, d Draft) (*Preset, error) {
+	spec, err := NewSpec(d)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +110,7 @@ func (s *Service) Create(ctx context.Context, d domain.Draft) (*domain.Preset, e
 		return nil, fmt.Errorf("preset id: %w", err)
 	}
 
-	var p *domain.Preset
+	var p *Preset
 
 	err = s.d.Tx.WithinTx(ctx, func(ctx context.Context) error {
 		spec, err := s.uniqueSlug(ctx, spec, shared.UUID{})
@@ -122,7 +123,7 @@ func (s *Service) Create(ctx context.Context, d domain.Draft) (*domain.Preset, e
 			return err
 		}
 
-		if p, err = domain.NewPreset(id, spec, order, now); err != nil {
+		if p, err = NewPreset(id, spec, order, now); err != nil {
 			return err
 		}
 
@@ -143,22 +144,22 @@ func (s *Service) Create(ctx context.Context, d domain.Draft) (*domain.Preset, e
 
 // uniqueSlug checks the slug of spec, or finds a free one when it was
 // derived from the name.
-func (s *Service) uniqueSlug(ctx context.Context, spec domain.Spec, except shared.UUID) (domain.Spec, error) {
+func (s *Service) uniqueSlug(ctx context.Context, spec Spec, except shared.UUID) (Spec, error) {
 	slug, derived := spec.Slug()
 
 	for n := 2; ; n++ {
 		taken, err := s.d.Repo.SlugTaken(ctx, slug, except)
 		if err != nil {
-			return domain.Spec{}, err
+			return Spec{}, err
 		}
 
 		switch {
 		case !taken:
 			return spec.WithSlug(slug), nil
 		case !derived:
-			return domain.Spec{}, domain.ErrSlugTaken
+			return Spec{}, ErrSlugTaken
 		case n > 1000:
-			return domain.Spec{}, domain.ErrSlugTaken
+			return Spec{}, ErrSlugTaken
 		}
 
 		base, _ := spec.Slug()
@@ -169,19 +170,19 @@ func (s *Service) uniqueSlug(ctx context.Context, spec domain.Spec, except share
 // Replaced is the outcome of a preset update: the preset, and the schedules
 // disabled because it no longer fits their device.
 type Replaced struct {
-	Preset   *domain.Preset
+	Preset   *Preset
 	Disabled []shared.UUID
 }
 
 // Replace replaces a preset (PUT) when expectedVersion is current. The
 // schedules it no longer fits are disabled in the same transaction.
-func (s *Service) Replace(ctx context.Context, id string, expectedVersion int, d domain.Draft) (Replaced, error) {
+func (s *Service) Replace(ctx context.Context, id string, expectedVersion int, d Draft) (Replaced, error) {
 	pid, err := ParseID(id)
 	if err != nil {
 		return Replaced{}, err
 	}
 
-	spec, err := domain.NewSpec(d)
+	spec, err := NewSpec(d)
 	if err != nil {
 		return Replaced{}, err
 	}
@@ -257,7 +258,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 					ids[i] = u.String()
 				}
 
-				return domain.ErrPresetInUse.WithDetail("fix or delete the schedules that use this preset first: " + strings.Join(ids, ", "))
+				return ErrPresetInUse.WithDetail("fix or delete the schedules that use this preset first: " + strings.Join(ids, ", "))
 			}
 		}
 
@@ -284,13 +285,13 @@ func (s *Service) changed(ctx context.Context) {
 
 // Compatible returns the presets that fit a device, by sort order (§6.10
 // `GET /presets?device_id=`).
-func (s *Service) Compatible(ctx context.Context, limits domain.DeviceLimits) ([]*domain.Preset, error) {
+func (s *Service) Compatible(ctx context.Context, limits DeviceLimits) ([]*Preset, error) {
 	all, err := s.d.Repo.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]*domain.Preset, 0, len(all))
+	out := make([]*Preset, 0, len(all))
 
 	for _, p := range all {
 		if p.Fits(limits) == nil {
@@ -302,8 +303,8 @@ func (s *Service) Compatible(ctx context.Context, limits domain.DeviceLimits) ([
 }
 
 // Check reports whether a preset exists and fits a device: nil,
-// domain.ErrPresetNotFound or domain.ErrPresetIncompatible.
-func (s *Service) Check(ctx context.Context, id shared.UUID, limits domain.DeviceLimits) error {
+// ErrPresetNotFound or ErrPresetIncompatible.
+func (s *Service) Check(ctx context.Context, id shared.UUID, limits DeviceLimits) error {
 	p, err := s.d.Repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -317,7 +318,7 @@ func (s *Service) Exists(ctx context.Context, id shared.UUID) (bool, error) {
 	_, err := s.d.Repo.Get(ctx, id)
 
 	switch {
-	case errors.Is(err, domain.ErrPresetNotFound):
+	case errors.Is(err, ErrPresetNotFound):
 		return false, nil
 	case err != nil:
 		return false, err
@@ -327,7 +328,7 @@ func (s *Service) Exists(ctx context.Context, id shared.UUID) (bool, error) {
 }
 
 // auditFields is the audited form of a preset.
-func auditFields(p *domain.Preset) map[string]string {
+func auditFields(p *Preset) map[string]string {
 	s := p.Snapshot()
 	i64 := func(v int64) string { return strconv.FormatInt(v, 10) }
 

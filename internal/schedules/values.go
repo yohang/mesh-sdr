@@ -1,7 +1,4 @@
-// Package domain models schedules (TECHNICAL_SPEC §7.1 `schedules`, §8.5,
-// ADR 0020): (device, preset, time window) entries evaluated by the hub
-// into a per-device timeline.
-package domain
+package schedules
 
 import (
 	"strconv"
