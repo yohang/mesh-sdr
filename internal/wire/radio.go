@@ -22,7 +22,7 @@ import (
 // the node refuses to start on a shared or foreign directory) and sweeps
 // the workdirs left by a previous run.
 func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter) (*radioapp.Manager, *radiohttp.Streams, error) {
-	devices, err := radioDevices(cfg)
+	devices, err := radioDevices(cfg, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -80,13 +80,27 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter) 
 }
 
 // radioDevices builds the devices of the node configuration, ordered by id.
-func radioDevices(cfg config.Node) ([]*radiodomain.Device, error) {
+// A device whose driver or tuning keys are invalid is logged and reported
+// failed (invalid_config) instead of stopping the node (SRC-002); the keys
+// the hub registry needs (id, name, type, range, rates) are checked with
+// the config.
+func radioDevices(cfg config.Node, logger *slog.Logger) ([]*radiodomain.Device, error) {
 	out := make([]*radiodomain.Device, 0, len(cfg.Devices))
 
 	for _, id := range slices.Sorted(maps.Keys(cfg.Devices)) {
-		dev, err := radioDevice(id, cfg.Devices[id])
+		c := cfg.Devices[id]
+
+		dev, err := radioDevice(id, c)
 		if err != nil {
-			return nil, fmt.Errorf("devices.%s: %w", id, err)
+			did, idErr := shared.NewDeviceID(id)
+			if idErr != nil {
+				return nil, fmt.Errorf("devices.%s: %w", id, idErr)
+			}
+
+			logger.Error("invalid device configuration: the device is reported failed",
+				slog.String("device_id", id), slog.Any("error", err))
+
+			dev = radiodomain.NewInvalidDevice(did, c.Name)
 		}
 
 		out = append(out, dev)
@@ -132,24 +146,49 @@ func radioDevice(id string, c config.DeviceConfig) (*radiodomain.Device, error) 
 		rates = append(rates, sr)
 	}
 
-	var drv radiodomain.Driver
+	p := radiodomain.DeviceParams{
+		ID: did, Name: c.Name, Type: typ, Enabled: c.Enabled == nil || *c.Enabled, Range: rng, Rates: rates,
+		AlwaysOn: c.AlwaysOn, OperatorCanRetune: c.OperatorCanRetune, AutoRecover: c.AutoRecover == nil || *c.AutoRecover,
+		MaxDemods: c.MaxDemods,
+	}
 
-	if typ.Supported() {
-		gain := radiodomain.AutoGain()
-		if !c.Driver.RFGain.Auto() {
-			if gain, err = radiodomain.NewGain(c.Driver.RFGain.DB()); err != nil {
-				return nil, err
-			}
-		}
-
-		if drv, err = radiodomain.NewDriver(typ, c.Driver.Device, c.Driver.PPM, gain, c.Driver.IQSwap); err != nil {
+	if hz := c.CenterFreq.Hz(); hz != 0 {
+		if p.Center, err = radiodomain.NewFrequency(hz); err != nil {
 			return nil, err
 		}
 	}
 
-	return radiodomain.NewDevice(radiodomain.DeviceParams{
-		ID: did, Name: c.Name, Type: typ, Enabled: c.Enabled == nil || *c.Enabled, Range: rng, Rates: rates,
-		AlwaysOn: c.AlwaysOn, OperatorCanRetune: c.OperatorCanRetune, AutoRecover: c.AutoRecover == nil || *c.AutoRecover,
-		Driver: drv, MaxDemods: c.MaxDemods,
+	if c.SampleRate != 0 {
+		if p.Rate, err = radiodomain.NewSampleRate(c.SampleRate); err != nil {
+			return nil, err
+		}
+	}
+
+	if typ.Supported() {
+		if p.Driver, err = radioDriver(typ, c.Driver); err != nil {
+			return nil, err
+		}
+	}
+
+	return radiodomain.NewDevice(p)
+}
+
+func radioDriver(typ radiodomain.DeviceType, c config.Driver) (radiodomain.Driver, error) {
+	gain := radiodomain.AutoGain()
+
+	if !c.RFGain.Auto() {
+		var err error
+		if gain, err = radiodomain.NewGain(c.RFGain.DB()); err != nil {
+			return radiodomain.Driver{}, err
+		}
+	}
+
+	ds, err := radiodomain.ParseDirectSampling(c.DirectSampling)
+	if err != nil {
+		return radiodomain.Driver{}, err
+	}
+
+	return radiodomain.NewDriver(typ, radiodomain.DriverSettings{
+		Device: c.Device, PPM: c.PPM, Gain: gain, IQSwap: c.IQSwap, BiasTee: c.BiasTee, DirectSampling: ds, LFOOffset: c.LFOOffset,
 	})
 }

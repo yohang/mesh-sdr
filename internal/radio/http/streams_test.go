@@ -127,7 +127,7 @@ func runManager(t *testing.T) *app.Manager {
 	t.Helper()
 
 	typ, _ := domain.NewDeviceType(domain.TypeRTLSDR)
-	drv, _ := domain.NewDriver(typ, "0", 0, domain.AutoGain(), false)
+	drv, _ := domain.NewDriver(typ, domain.DriverSettings{Device: "0", Gain: domain.AutoGain()})
 	r, _ := domain.NewFreqRange(domain.MustFrequency(144_000_000), domain.MustFrequency(146_000_000))
 	dev, _ := domain.NewDevice(domain.DeviceParams{
 		ID: shared.MustDeviceID("vhf"), Name: "VHF", Type: typ, Enabled: true, Range: r,

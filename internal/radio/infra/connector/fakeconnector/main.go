@@ -38,6 +38,8 @@ func main() {
 	flag.String("g", "auto", "gain")
 	flag.Float64("P", 0, "ppm")
 	flag.Bool("i", false, "iq swap")
+	flag.Bool("b", false, "bias-tee")
+	flag.Int("e", 0, "direct sampling input")
 	version := flag.Bool("v", false, "print the version")
 	flag.BoolVar(version, "version", false, "print the version")
 	flag.Parse()

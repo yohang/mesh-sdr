@@ -169,50 +169,105 @@ func (g Gain) String() string {
 	return strconv.FormatFloat(g.db, 'f', -1, 64)
 }
 
-// Driver is the validated driver table of a device (devices.<id>.driver).
-type Driver struct {
-	device string
-	ppm    int
-	gain   Gain
-	iqSwap bool
+// DirectSampling is the direct sampling input of an RTL-SDR (off, I or Q
+// branch), for HF reception without an upconverter.
+type DirectSampling int
+
+// Direct sampling inputs, in the connector numbering (-e 0|1|2).
+const (
+	DirectSamplingOff DirectSampling = iota
+	DirectSamplingI
+	DirectSamplingQ
+)
+
+// ParseDirectSampling parses "off" (or ""), "i" or "q".
+func ParseDirectSampling(s string) (DirectSampling, error) {
+	switch s {
+	case "", "off":
+		return DirectSamplingOff, nil
+	case "i":
+		return DirectSamplingI, nil
+	case "q":
+		return DirectSamplingQ, nil
+	default:
+		return 0, ErrInvalidDriver.WithDetail("driver.direct_sampling: want off, i or q")
+	}
 }
 
-// NewDriver validates the driver settings. device is the connector device
-// (rtl_sdr: index or serial; rtl_tcp: host:port).
-func NewDriver(t DeviceType, device string, ppm int, gain Gain, iqSwap bool) (Driver, error) {
-	if device == "" && t.value == TypeRTLSDR {
-		device = "0"
+// DriverSettings are the raw driver keys of a device (devices.<id>.driver).
+type DriverSettings struct {
+	// Device is the connector device (rtl_sdr: index or serial, default 0;
+	// rtl_tcp: host:port).
+	Device         string
+	PPM            int
+	Gain           Gain
+	IQSwap         bool
+	BiasTee        bool
+	DirectSampling DirectSampling
+	// LFOOffset is added to the centre frequency to tune the hardware (Hz,
+	// signed): the local oscillator of an up- or downconverter.
+	LFOOffset int64
+}
+
+// Driver is the validated driver table of a device (devices.<id>.driver).
+type Driver struct{ s DriverSettings }
+
+// NewDriver validates the driver settings of a device of type t.
+func NewDriver(t DeviceType, s DriverSettings) (Driver, error) {
+	if s.Device == "" && t.value == TypeRTLSDR {
+		s.Device = "0"
 	}
 
-	if !driverDevicePattern.MatchString(device) {
+	if !driverDevicePattern.MatchString(s.Device) {
 		return Driver{}, ErrInvalidDriver.WithDetail("driver.device: want 1..64 characters of [A-Za-z0-9._:=-]")
 	}
 
 	if t.value == TypeRTLTCP {
-		host, port, ok := strings.Cut(device, ":")
+		host, port, ok := strings.Cut(s.Device, ":")
 		if p, err := strconv.Atoi(port); !ok || host == "" || err != nil || p < 1 || p > 65535 {
 			return Driver{}, ErrInvalidDriver.WithDetail("driver.device: rtl_tcp needs host:port")
 		}
 	}
 
-	if ppm < -1000 || ppm > 1000 {
+	if s.PPM < -1000 || s.PPM > 1000 {
 		return Driver{}, ErrInvalidDriver.WithDetail("driver.ppm: want -1000..1000")
 	}
 
-	return Driver{device: device, ppm: ppm, gain: gain, iqSwap: iqSwap}, nil
+	if s.DirectSampling < DirectSamplingOff || s.DirectSampling > DirectSamplingQ {
+		return Driver{}, ErrInvalidDriver.WithDetail("driver.direct_sampling: want off, i or q")
+	}
+
+	if s.LFOOffset < -MaxFrequency || s.LFOOffset > MaxFrequency {
+		return Driver{}, ErrInvalidDriver.WithDetail("driver.lfo_offset: want -100 GHz..100 GHz")
+	}
+
+	return Driver{s: s}, nil
 }
 
 // Device returns the connector device string.
-func (d Driver) Device() string { return d.device }
+func (d Driver) Device() string { return d.s.Device }
 
 // PPM returns the frequency correction.
-func (d Driver) PPM() int { return d.ppm }
+func (d Driver) PPM() int { return d.s.PPM }
 
 // Gain returns the RF gain.
-func (d Driver) Gain() Gain { return d.gain }
+func (d Driver) Gain() Gain { return d.s.Gain }
 
 // IQSwap reports whether I and Q are swapped.
-func (d Driver) IQSwap() bool { return d.iqSwap }
+func (d Driver) IQSwap() bool { return d.s.IQSwap }
+
+// BiasTee reports whether the bias-tee is powered.
+func (d Driver) BiasTee() bool { return d.s.BiasTee }
+
+// DirectSampling returns the direct sampling input.
+func (d Driver) DirectSampling() DirectSampling { return d.s.DirectSampling }
+
+// LFOOffset returns the converter local oscillator offset in Hz.
+func (d Driver) LFOOffset() int64 { return d.s.LFOOffset }
+
+// HardwareHz returns the frequency the hardware tunes to for a centre
+// frequency: centre + lfo_offset.
+func (d Driver) HardwareHz(center int64) int64 { return center + d.s.LFOOffset }
 
 // Tuning is the capture band of a running device.
 type Tuning struct {
@@ -240,19 +295,27 @@ func (t Tuning) ContainsOffset(offsetHz int64) bool {
 	return offsetHz >= -half && offsetHz <= half
 }
 
-// defaultTuning derives the tuning of a device without preset: the first
-// sample rate, centred so that the capture band starts at the bottom of
-// the range (ADR 0019, until presets come from the hub).
-func defaultTuning(r FreqRange, rates []SampleRate) Tuning {
-	rate := rates[0]
-	half := int64(rate.v) / 2
-	center := r.min.hz + half
-
-	if r.max.hz-r.min.hz < 2*half || center > r.max.hz {
-		center = r.min.hz + (r.max.hz-r.min.hz)/2
+// initialTuning is the tuning of a device at start, until presets come
+// from the hub: the configured centre and sample rate, otherwise the first
+// sample rate with the capture band at the bottom of the range (centred
+// when the range is narrower, ADR 0019).
+func initialTuning(r FreqRange, rates []SampleRate, center Frequency, rate SampleRate) Tuning {
+	if rate.v == 0 {
+		rate = rates[0]
 	}
 
-	return Tuning{center: Frequency{hz: center}, rate: rate}
+	if center.hz != 0 {
+		return Tuning{center: center, rate: rate}
+	}
+
+	half := int64(rate.v) / 2
+	hz := r.min.hz + half
+
+	if r.max.hz-r.min.hz < 2*half || hz > r.max.hz {
+		hz = r.min.hz + (r.max.hz-r.min.hz)/2
+	}
+
+	return Tuning{center: Frequency{hz: hz}, rate: rate}
 }
 
 func containsRate(rates []SampleRate, r SampleRate) bool {

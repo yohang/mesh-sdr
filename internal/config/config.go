@@ -188,6 +188,8 @@ type DeviceConfig struct {
 	Enabled           *bool     `toml:"enabled" env:"-" jsonschema:"description=Whether the device is used (default true)."`
 	FreqRange         FreqRange `toml:"freq_range" env:"-" jsonschema:"description=Required. Tunable frequency range."`
 	SampleRates       []int64   `toml:"sample_rates" env:"-" jsonschema:"description=Required. Supported sample rates (S/s)."`
+	CenterFreq        Frequency `toml:"center_freq" env:"-" jsonschema:"description=Centre frequency at start\\, within freq_range (default: the capture band starts at the bottom of freq_range)."`
+	SampleRate        int64     `toml:"sample_rate" env:"-" jsonschema:"minimum=0,description=Sample rate at start\\, one of sample_rates (default: the first one)."`
 	ListenPolicy      string    `toml:"listen_policy" env:"-" jsonschema:"enum=,enum=anonymous,enum=registered,description=Overrides the global listen policy for this device."`
 	OperatorCanRetune bool      `toml:"operator_can_retune" env:"-" jsonschema:"description=Operators may retune the device."`
 	AlwaysOn          bool      `toml:"always_on" env:"-" jsonschema:"description=Keep the device running without listeners."`
@@ -199,10 +201,13 @@ type DeviceConfig struct {
 
 // Driver is the [devices.<id>.driver] table (§7.4 example).
 type Driver struct {
-	Device string `toml:"device" env:"-" jsonschema:"description=rtl_sdr: device index or serial (default 0); rtl_tcp: host:port of the rtl_tcp server."`
-	PPM    int    `toml:"ppm" env:"-" jsonschema:"minimum=-1000,maximum=1000,description=Frequency correction in ppm."`
-	RFGain Gain   `toml:"rf_gain" env:"-" jsonschema:"description=RF gain: auto (default) or a value in dB."`
-	IQSwap bool   `toml:"iqswap" env:"-" jsonschema:"description=Swap I and Q (reversed spectrum)."`
+	Device         string `toml:"device" env:"-" jsonschema:"description=rtl_sdr: device index or serial (default 0); rtl_tcp: host:port of the rtl_tcp server."`
+	PPM            int    `toml:"ppm" env:"-" jsonschema:"minimum=-1000,maximum=1000,description=Frequency correction in ppm."`
+	RFGain         Gain   `toml:"rf_gain" env:"-" jsonschema:"description=RF gain: auto (default) or a value in dB."`
+	IQSwap         bool   `toml:"iqswap" env:"-" jsonschema:"description=Swap I and Q (reversed spectrum)."`
+	BiasTee        bool   `toml:"bias_tee" env:"-" jsonschema:"description=Power the bias-tee (active antenna or LNA)\\, if the hardware has one."`
+	DirectSampling string `toml:"direct_sampling" env:"-" jsonschema:"enum=,enum=off,enum=i,enum=q,description=Direct sampling input for HF without upconverter: off (default)\\, i or q."`
+	LFOOffset      int64  `toml:"lfo_offset" env:"-" jsonschema:"description=Local oscillator offset of an up- or downconverter in Hz (signed): the hardware tunes to the centre frequency + lfo_offset."`
 }
 
 // FreqRange is a frequency range.

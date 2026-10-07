@@ -186,6 +186,12 @@ func (n *Node) Health() string {
 	return string(n.runtime.Status)
 }
 
+// Up reports whether the node is active and reachable (online or
+// degraded): its devices can run.
+func (n *Node) Up() bool {
+	return n.Active() && (n.runtime.Status == StatusOnline || n.runtime.Status == StatusDegraded)
+}
+
 // Active reports whether the hub keeps a control channel to the node.
 func (n *Node) Active() bool { return n.enrollment == EnrollmentEnrolled && !n.disabled }
 

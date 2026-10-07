@@ -65,7 +65,7 @@ func device(t *testing.T, id, driverDevice string, alwaysOn bool) *domain.Device
 
 	typ, _ := domain.NewDeviceType(domain.TypeRTLSDR)
 
-	drv, err := domain.NewDriver(typ, driverDevice, 0, domain.AutoGain(), false)
+	drv, err := domain.NewDriver(typ, domain.DriverSettings{Device: driverDevice, Gain: domain.AutoGain()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestStartTimeoutAndMissingTool(t *testing.T) {
 	dev := device(t, "noiq", "noiq", true)
 
 	typ, _ := domain.NewDeviceType(domain.TypeRTLTCP)
-	drv, _ := domain.NewDriver(typ, "127.0.0.1:1234", 0, domain.AutoGain(), false)
+	drv, _ := domain.NewDriver(typ, domain.DriverSettings{Device: "127.0.0.1:1234", Gain: domain.AutoGain()})
 	r, _ := domain.NewFreqRange(domain.MustFrequency(24_000_000), domain.MustFrequency(1_766_000_000))
 	tcp, _ := domain.NewDevice(domain.DeviceParams{
 		ID: shared.MustDeviceID("tcp"), Name: "tcp", Type: typ, Enabled: true, Range: r,

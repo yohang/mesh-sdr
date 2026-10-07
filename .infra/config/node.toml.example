@@ -78,9 +78,11 @@ dirs = ["/usr/local/bin", "/usr/bin"]
 # override. This node runs rtl_sdr and rtl_tcp devices; other types are
 # reported as unavailable. A device starts when a listener attaches (or
 # with always_on) and stops 10 s after the last one leaves. Without
-# presets, it tunes to its first sample rate with the capture band at the
-# bottom of freq_range; operators (operator_can_retune) and admins retune
-# it from the receiver.
+# presets, it starts at center_freq and sample_rate (default: the first
+# sample rate, with the capture band at the bottom of freq_range);
+# operators (operator_can_retune) and admins retune it from the receiver.
+# A device whose driver, center_freq or sample_rate keys are invalid does
+# not stop the node: it is logged and reported failed (invalid_config).
 # [devices.hf-sdrplay]
 # name = "SDRplay RSPdx (HF)"        # required
 # type = "soapy:sdrplay"             # required: driver type
@@ -99,9 +101,17 @@ dirs = ["/usr/local/bin", "/usr/bin"]
 # type = "rtl_sdr"                   # rtl_sdr (USB) | rtl_tcp (remote rtl_tcp server)
 # freq_range = { min = "24MHz", max = "1766MHz" }
 # sample_rates = [2_400_000, 1_024_000]
+# center_freq = "145MHz"             # start tuning, within freq_range
+# sample_rate = 2_400_000            # start rate, one of sample_rates
 # listen_policy = "anonymous"
-# # rtl_sdr: device index or serial (default 0); rtl_tcp: host:port.
-# driver = { device = "0", ppm = 1, rf_gain = 29.7 }   # rf_gain: auto | dB; iqswap = false
+# [devices.vhf-rtl.driver]
+# device = "0"                       # rtl_sdr: device index or serial (default 0); rtl_tcp: host:port
+# ppm = 1                            # frequency correction (-1000..1000)
+# rf_gain = 29.7                     # auto (AGC, default) | dB
+# iqswap = false                     # swap I and Q (reversed spectrum)
+# bias_tee = false                   # power an active antenna or LNA
+# direct_sampling = "off"            # off | i | q (HF without upconverter)
+# lfo_offset = 0                     # converter LO in Hz, signed: the hardware tunes to centre + lfo_offset
 
 [log]
 # debug | info | warn | error. --debug overrides it.

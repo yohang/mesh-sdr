@@ -126,7 +126,7 @@ func newDevice(t *testing.T, alwaysOn bool) *domain.Device {
 	t.Helper()
 
 	typ, _ := domain.NewDeviceType(domain.TypeRTLSDR)
-	drv, _ := domain.NewDriver(typ, "0", 0, domain.AutoGain(), false)
+	drv, _ := domain.NewDriver(typ, domain.DriverSettings{Device: "0", Gain: domain.AutoGain()})
 	r, _ := domain.NewFreqRange(domain.MustFrequency(24_000_000), domain.MustFrequency(1_766_000_000))
 
 	d, err := domain.NewDevice(domain.DeviceParams{
@@ -271,6 +271,30 @@ func TestProbeFailureMakesUnavailable(t *testing.T) {
 	}
 }
 
+func TestInvalidDeviceIsReportedFailedAndNeverStarts(t *testing.T) {
+	src, eng, rep := &fakeSource{}, &fakeEngine{}, &reporter{}
+	m := run(t, src, eng, rep, domain.NewInvalidDevice(shared.MustDeviceID("rtl"), "RTL"))
+
+	eventually(t, "failed", func() bool {
+		return rep.has(func(s domain.Snapshot) bool {
+			return s.State == domain.StateFailed && s.Reason == domain.ReasonInvalidConfig
+		})
+	})
+
+	if _, err := m.Attach("rtl"); !errors.Is(err, domain.ErrDeviceUnavailable) {
+		t.Fatal(err)
+	}
+
+	time.Sleep(150 * time.Millisecond) // longer than the test auto-recover
+
+	src.mu.Lock()
+	defer src.mu.Unlock()
+
+	if src.runs != 0 {
+		t.Fatal("invalid device started")
+	}
+}
+
 func TestWatch(t *testing.T) {
 	src, eng, rep := &fakeSource{}, &fakeEngine{}, &reporter{}
 	m := run(t, src, eng, rep, newDevice(t, false))
@@ -314,7 +338,7 @@ func TestDemodCaps(t *testing.T) {
 	src, eng, rep := &fakeSource{}, &fakeEngine{}, &reporter{}
 
 	typ, _ := domain.NewDeviceType(domain.TypeRTLSDR)
-	drv, _ := domain.NewDriver(typ, "0", 0, domain.AutoGain(), false)
+	drv, _ := domain.NewDriver(typ, domain.DriverSettings{Device: "0", Gain: domain.AutoGain()})
 	r, _ := domain.NewFreqRange(domain.MustFrequency(24_000_000), domain.MustFrequency(1_766_000_000))
 	mk := func(id string, maxDemods int) *domain.Device {
 		d, err := domain.NewDevice(domain.DeviceParams{

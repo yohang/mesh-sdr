@@ -144,12 +144,18 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 type deviceReporter struct{ ag *agent.Agent }
 
 func (r deviceReporter) DeviceState(s radiodomain.Snapshot) {
-	center, rate := s.CenterHz, int64(s.RateHz)
+	var center, rate *int64
+
+	// A device with an invalid configuration has no tuning.
+	if s.RateHz > 0 {
+		c, r := s.CenterHz, int64(s.RateHz)
+		center, rate = &c, &r
+	}
 
 	r.ag.Emit(rxv1.TypeDeviceState, "device:"+s.ID, agent.ClassState, func(seq int64) any {
 		return ctl.DeviceState{
 			Seq: seq, DeviceID: s.ID, State: string(s.State), Reason: s.Reason,
-			CenterFreq: &center, SampleRate: &rate, Listeners: s.Listeners,
+			CenterFreq: center, SampleRate: rate, Listeners: s.Listeners,
 		}
 	})
 }
