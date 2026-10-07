@@ -97,7 +97,7 @@ func (s *Service) Create(ctx context.Context, d domain.Draft) (*domain.Schedule,
 	var sc *domain.Schedule
 
 	err = s.d.Tx.WithinTx(ctx, func(ctx context.Context) error {
-		if err := s.check(ctx, spec); err != nil {
+		if err := s.check(ctx, spec, nil); err != nil {
 			return err
 		}
 
@@ -142,7 +142,7 @@ func (s *Service) Replace(ctx context.Context, id string, expectedVersion int, d
 
 		before := auditFields(sc)
 
-		if err := s.check(ctx, spec); err != nil {
+		if err := s.check(ctx, spec, sc); err != nil {
 			return err
 		}
 
@@ -196,15 +196,21 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 // check validates a spec against the registry and the presets: the device
 // and the preset exist; an enabled schedule also needs a device its node
 // still reports and a preset that fits it (§7.1: "the check also runs on
-// write").
-func (s *Service) check(ctx context.Context, spec domain.Spec) error {
+// write"). A schedule that stays disabled on its own device may be edited
+// after the device left the registry (current is the stored schedule, nil
+// on creation).
+func (s *Service) check(ctx context.Context, spec domain.Spec, current *domain.Schedule) error {
 	dev, ok, err := s.d.Devices.Device(ctx, spec.Device().String())
 	if err != nil {
 		return err
 	}
 
 	if !ok {
-		return domain.ErrUnknownDevice.WithDetail("no device " + strconv.Quote(spec.Device().String()) + " in the registry")
+		if current == nil || spec.Enabled() || spec.Device() != current.Device() {
+			return domain.ErrUnknownDevice.WithDetail("no device " + strconv.Quote(spec.Device().String()) + " in the registry")
+		}
+
+		dev = Device{ID: spec.Device().String()}
 	}
 
 	fit, err := s.d.Presets.Fit(ctx, spec.Preset(), dev)

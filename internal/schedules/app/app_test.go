@@ -165,11 +165,39 @@ func TestServiceChecks(t *testing.T) {
 		t.Errorf("using B = %v, %v", ids, err)
 	}
 
+	// A schedule kept disabled on its own device can be edited after the
+	// device left the registry; enabling it, or moving it, cannot.
+	gone, err := s.Create(ctx, draft("vhf", presetB, 0, 60))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	delete(e.devices, "vhf")
+
+	off = draft("vhf", presetB, 0, 90)
+	off.Enabled = new(false)
+
+	if _, err := s.Replace(ctx, gone.ID().String(), 1, off); err != nil {
+		t.Errorf("disabled edit of a removed device: %v", err)
+	}
+
+	if _, err := s.Replace(ctx, gone.ID().String(), 2, draft("vhf", presetB, 0, 90)); !errors.Is(err, domain.ErrUnknownDevice) {
+		t.Errorf("enabling on a removed device: %v", err)
+	}
+
+	if _, err := s.Replace(ctx, sc.ID().String(), 2, draft("hf", presetB, 0, 60)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.Replace(ctx, sc.ID().String(), 2, draft("hf", presetB, 0, 60)); !errors.Is(err, domain.ErrVersionConflict) {
+		t.Errorf("stale version: %v", err)
+	}
+
 	if err := s.Delete(ctx, sc.ID().String()); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(e.audit.records) != 4 || e.audit.records[0].System || e.changed != 4 {
+	if len(e.audit.records) != 7 || e.audit.records[0].System || e.changed != 7 {
 		t.Errorf("audit = %+v, changed %d", e.audit.records, e.changed)
 	}
 }
