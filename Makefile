@@ -7,7 +7,7 @@ export GID := $(shell id -g)
 COMPOSE ?= docker compose
 RUN     := $(COMPOSE) run --rm --no-deps app
 A11Y    := $(COMPOSE) -f .infra/a11y/compose.yaml
-A11Y_HUBS := hub-auto hub-light hub-dark
+A11Y_HUB := hub
 
 HTMX_VERSION ?= 4.0.0
 # Common-password list (ACC-011): SecLists commit and SHA-256 of the list.
@@ -67,7 +67,7 @@ test: generate ## Run tests
 .PHONY: a11y
 a11y: ## Run the accessibility checks (axe-core, CI-only container) against the production image
 	trap '$(A11Y) down -v' EXIT; \
-	$(A11Y) up -d --build --wait $(A11Y_HUBS) && \
+	$(A11Y) up -d --build --wait $(A11Y_HUB) && \
 	$(A11Y) run --rm --build --no-deps a11y
 
 .PHONY: migrate

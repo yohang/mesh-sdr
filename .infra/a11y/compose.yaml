@@ -1,11 +1,12 @@
-# Accessibility job: the production image of the hub, migrated, served in each
-# theme mode (auto, light, dark) and checked by the axe-core container.
-# `make a11y` (and the CI job a11y) runs, from the repository root:
-#   docker compose -f .infra/a11y/compose.yaml up -d --build --wait hub-auto hub-light hub-dark
+# Accessibility job: the production image of the hub, migrated, served with
+# the theme mode auto and checked by the axe-core container in the light and
+# dark OS color schemes.
+# `make a11y` (and the nightly CI job a11y) runs, from the repository root:
+#   docker compose -f .infra/a11y/compose.yaml up -d --build --wait hub
 #   docker compose -f .infra/a11y/compose.yaml run --rm --build --no-deps a11y
 #   docker compose -f .infra/a11y/compose.yaml down -v
-# The three hubs share one migrated SQLite database with one seeded admin
-# (pages marked signed-in in urls.txt), a hub CA and one config-declared node
+# The hub has a migrated SQLite database with one seeded admin (pages marked
+# signed-in in urls.txt), a hub CA and one config-declared node
 # (hub.d/grid.toml).
 name: meshsdr-a11y
 
@@ -18,12 +19,12 @@ x-hub: &hub
   # overwrite each other's image.
   image: ${COMPOSE_PROJECT_NAME:-meshsdr-a11y}-hub
   environment: &hub-env
-    MESHSDR_HUB__URL: http://hub-auto:8073
+    MESHSDR_HUB__URL: http://hub:8073
     MESHSDR_HUB__ALLOW_INSECURE_URL: "true"
-    # A help link on a page every hub serves, so the H shortcut can be
+    # A help link on a page the hub serves, so the H shortcut can be
     # checked without leaving the compose network.
-    MESHSDR_SETTINGS__RECEIVER__HELP_URL: http://hub-auto:8073/about
-    # The checker signs in several times per hub from one address.
+    MESHSDR_SETTINGS__RECEIVER__HELP_URL: http://hub:8073/about
+    # The checker signs in several times from one address.
     MESHSDR_SETTINGS__AUTH__LOGIN_RATE_LIMIT: 100/1m
     # Plain HTTP on 8073 inside the compose network (the gateway's TLS is
     # covered by the Go tests).
@@ -32,13 +33,6 @@ x-hub: &hub
   volumes:
     - data:/var/lib/meshsdr
     - ./hub.d:/etc/meshsdr/hub.d:ro
-
-x-served: &served
-  <<: *hub
-  command: ["hub"]
-  depends_on:
-    seed:
-      condition: service_completed_successfully
 
 x-account: &account
   A11Y_USER: a11y
@@ -66,31 +60,21 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  hub-auto:
-    <<: *served
+  hub:
+    <<: *hub
+    command: ["hub"]
     environment:
       <<: *hub-env
       MESHSDR_SETTINGS__UI__THEME_MODE: auto
-
-  hub-light:
-    <<: *served
-    environment:
-      <<: *hub-env
-      MESHSDR_HUB__URL: http://hub-light:8073
-      MESHSDR_SETTINGS__UI__THEME_MODE: light
-
-  hub-dark:
-    <<: *served
-    environment:
-      <<: *hub-env
-      MESHSDR_HUB__URL: http://hub-dark:8073
-      MESHSDR_SETTINGS__UI__THEME_MODE: dark
+    depends_on:
+      seed:
+        condition: service_completed_successfully
 
   a11y:
     build: .
     environment:
       <<: *account
-      HUBS: auto=http://hub-auto:8073 light=http://hub-light:8073 dark=http://hub-dark:8073
+      HUB_URL: http://hub:8073
 
 volumes:
   data:

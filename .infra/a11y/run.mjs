@@ -1,26 +1,21 @@
 // Accessibility check of the running hub (UI-009, ADR 0007): axe-core with the
-// WCAG 2.0/2.1 A and AA rules on every page of urls.txt, for each theme mode
-// (one hub per mode: auto, light, dark), in the light and dark OS color
-// schemes, at a phone and a desktop viewport. It also checks that the theme
-// mode is applied, and fails on any Content Security Policy or
+// WCAG 2.0/2.1 A and AA rules on every page of urls.txt, with the theme mode
+// auto, in the light and dark OS color schemes (so both token sets), at a
+// phone and a desktop viewport. It also checks that the theme mode is
+// applied, and fails on any Content Security Policy or
 // Permissions-Policy console message, page error, failed request or
 // subresource answering >= 400. Finally it checks the shell's boosted
 // navigation (same document, focus on #main, announcement, title), and a
 // rejected admin form (inline errors and summary) once signed in.
 //
-// Usage: HUBS="auto=http://hub-auto:8073 light=http://hub-light:8073" node run.mjs
+// Usage: HUB_URL=http://hub:8073 node run.mjs
 
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright";
 import { AxeBuilder } from "@axe-core/playwright";
 
-const hubs = (process.env.HUBS ?? "auto=http://hub-auto:8073")
-  .split(/\s+/)
-  .filter(Boolean)
-  .map((h) => {
-    const [mode, url] = h.split("=");
-    return { mode, url };
-  });
+// One hub, theme mode auto: the OS schemes below cover both token sets.
+const hubs = [{ mode: "auto", url: process.env.HUB_URL ?? "http://hub:8073" }];
 const tags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const schemes = ["light", "dark"];
 const viewports = {
@@ -289,5 +284,5 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log(
-  `accessibility: ${pages.length} pages × ${hubs.length} theme modes × ${schemes.length} OS schemes × ${Object.keys(viewports).length} viewports passed`,
+  `accessibility: ${pages.length} pages × ${schemes.length} OS schemes × ${Object.keys(viewports).length} viewports passed`,
 );
