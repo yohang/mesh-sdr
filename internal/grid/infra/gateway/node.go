@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 )
 
 // nodePath matches the node media route (node id slug, §4.1).
@@ -154,7 +156,8 @@ func (g *Gateway) authorize(w http.ResponseWriter, r *http.Request, id string) (
 // allowed headers, plus the token, cid and node id set by the authz.
 func rewrite(pr *httputil.ProxyRequest, gr grant) {
 	pr.Out.URL = &url.URL{Scheme: "https", Host: gr.upstream, Path: "/ws", RawQuery: pr.In.URL.RawQuery}
-	pr.Out.Host = pr.In.Host
+	// The node's own name, never the client-supplied Host.
+	pr.Out.Host = pki.NodeServerName(gr.node)
 
 	h := http.Header{}
 

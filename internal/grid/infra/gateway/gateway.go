@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,6 +29,8 @@ const (
 	gracePeriod = 10 * time.Second
 	// defaultDialTimeout bounds the connection to a node.
 	defaultDialTimeout = 3 * time.Second
+	// bodyReadTimeout bounds the upload of a request body to the hub.
+	bodyReadTimeout = 60 * time.Second
 )
 
 // Gateway is the public front of the hub: one server on HTTPSListen (or
@@ -119,7 +122,72 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limitBodyRead(w, r)
 	g.o.Hub.ServeHTTP(w, r)
+}
+
+// limitBodyRead gives a request with a body bodyReadTimeout to send it
+// (slow uploads). The deadline is cleared once the body is read or
+// closed, so it never cuts a slow response; requests without a body (the
+// WebSocket upgrades among them) are left alone, ReadHeaderTimeout
+// covers them.
+func limitBodyRead(w http.ResponseWriter, r *http.Request) {
+	if r.Body == nil || r.Body == http.NoBody || r.ContentLength == 0 {
+		return
+	}
+
+	rc := http.NewResponseController(w)
+	if err := rc.SetReadDeadline(time.Now().Add(bodyReadTimeout)); err != nil {
+		return
+	}
+
+	r.Body = &deadlineBody{ReadCloser: r.Body, clear: func() { _ = rc.SetReadDeadline(time.Time{}) }}
+}
+
+// deadlineBody clears the read deadline at the end of the body.
+type deadlineBody struct {
+	io.ReadCloser
+	clear func()
+	once  sync.Once
+}
+
+func (b *deadlineBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil {
+		b.once.Do(b.clear)
+	}
+
+	return n, err
+}
+
+func (b *deadlineBody) Close() error {
+	b.once.Do(b.clear)
+
+	return b.ReadCloser.Close()
+}
+
+// privateDir creates dir 0700, or restricts an existing one to its owner.
+func privateDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+
+	if !info.IsDir() {
+		return errors.New("not a directory")
+	}
+
+	if info.Mode().Perm() != 0o700 {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return fmt.Errorf("restrict to 0700: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // reserved reports whether p is under /nodes/ or /internal/, whatever its
@@ -138,7 +206,18 @@ func reserved(p string) bool {
 
 // redirect sends plain HTTP requests to the public URL.
 func (g *Gateway) redirect(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Location", g.public.Scheme+"://"+g.public.Host+r.URL.RequestURI())
+	// From the path and query only: a request target such as "*" or an
+	// absolute URI never shapes the Location.
+	p := r.URL.EscapedPath()
+	if !strings.HasPrefix(p, "/") {
+		p = "/"
+	}
+
+	if r.URL.RawQuery != "" {
+		p += "?" + r.URL.RawQuery
+	}
+
+	w.Header().Set("Location", g.public.Scheme+"://"+g.public.Host+p)
 	w.WriteHeader(http.StatusPermanentRedirect)
 }
 
@@ -154,7 +233,7 @@ func (g *Gateway) Start(ctx context.Context) error {
 	}
 
 	if g.acme != nil {
-		if err := os.MkdirAll(g.o.Config.StorageDir, 0o700); err != nil {
+		if err := privateDir(g.o.Config.StorageDir); err != nil {
 			return fmt.Errorf("gateway storage %s: %w", g.o.Config.StorageDir, err)
 		}
 	}

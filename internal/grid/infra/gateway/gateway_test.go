@@ -128,6 +128,7 @@ func newFixture(t *testing.T) *fixture {
 			"forged": r.Header.Get("X-Rx-Forged"), "upstream": r.Header.Get(gateway.HeaderUpstream),
 			"cookie": r.Header.Get("Cookie"), "authorization": r.Header.Get("Authorization"),
 			"referer": r.Header.Get("Referer"), "origin": r.Header.Get("Origin"), "headers": strings.Join(names, ","),
+			"host": r.Host,
 		})
 
 		ctx := r.Context()
@@ -161,6 +162,7 @@ func hostOf(s *httptest.Server) string { return strings.TrimPrefix(s.URL, "https
 func (f *fixture) hub() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "hub") })
+	mux.HandleFunc("POST /echo", func(w http.ResponseWriter, r *http.Request) { _, _ = io.Copy(w, r.Body) })
 	mux.HandleFunc(gateway.AuthzPath, func(w http.ResponseWriter, r *http.Request) {
 		refuse := func(status int, code string) {
 			w.Header().Set("Content-Type", "application/problem+json")
@@ -296,6 +298,19 @@ func TestGatewayPlainHTTP(t *testing.T) {
 		t.Fatalf("hub: %d %q server=%q", resp.StatusCode, body, resp.Header.Get("Server"))
 	}
 
+	// Request bodies reach the hub (under the body read deadline).
+	resp, err := http.Post(base+"/echo", "text/plain", strings.NewReader("payload")) //nolint:noctx // test
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if string(b) != "payload" {
+		t.Fatalf("POST body: %q", b)
+	}
+
 	// The authz route and every other path under /nodes/ and /internal/
 	// answer 404 from outside, whatever their case and dot segments.
 	for _, path := range []string{
@@ -395,6 +410,7 @@ func TestGatewayPlainHTTP(t *testing.T) {
 	want := map[string]string{
 		"path": "/ws", "query": "v=1", "peer": "gateway:hub.example.org", "token": "minted", "cid": "c1", "node": "roof",
 		"forged": "", "upstream": "", "cookie": "", "authorization": "", "referer": "", "origin": "http://" + addr,
+		"host": "roof.nodes.rx.internal",
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -427,7 +443,7 @@ func TestGatewayPlainHTTP(t *testing.T) {
 		t.Fatalf("evil node: %v %v", err, resp)
 	}
 
-	b, _ := io.ReadAll(resp.Body)
+	b, _ = io.ReadAll(resp.Body)
 
 	if len(resp.Header.Values("Set-Cookie")) != 0 || strings.Contains(string(b), "script") || !strings.Contains(string(b), "node_refused") ||
 		resp.Header.Get("Content-Type") != "application/problem+json" || resp.Header.Get("X-Content-Type-Options") != "nosniff" ||
@@ -619,6 +635,21 @@ func TestGatewayOperatorCertificate(t *testing.T) {
 		t.Fatalf("redirect: %d %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
 
+	// An absolute-form request target never shapes the Location: only its
+	// path and query are kept.
+	conn, err := net.Dial("tcp", plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _ = io.WriteString(conn, "GET http://evil.example/x?y=1 HTTP/1.1\r\nHost: evil.example\r\nConnection: close\r\n\r\n")
+	raw, _ := io.ReadAll(conn)
+	_ = conn.Close()
+
+	if !strings.Contains(string(raw), "Location: "+public+"/x?y=1\r\n") {
+		t.Fatalf("absolute-form redirect: %q", raw)
+	}
+
 	// WebSockets go over HTTP/1.1.
 	wsClient := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConf}}
 	h := http.Header{}
@@ -649,7 +680,11 @@ func TestGatewayACME(t *testing.T) {
 		t.Fatal("unknown TLS mode accepted")
 	}
 
+	// An existing storage directory is restricted to its owner.
 	storage := filepath.Join(t.TempDir(), "acme")
+	if err := os.Mkdir(storage, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	addr, plain := freeAddr(t), freeAddr(t)
 	f.start(t, gateway.Config{
 		TLSMode: gateway.TLSACME, HTTPSListen: addr, HTTPListen: plain, PublicURL: "https://sdr.example.org",
