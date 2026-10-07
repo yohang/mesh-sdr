@@ -68,9 +68,17 @@ type fakeEngine struct {
 func (e *fakeEngine) Samples(uint64, time.Time, []complex64) { e.mu.Lock(); e.samples++; e.mu.Unlock() }
 func (e *fakeEngine) Start(domain.Tuning)                    { e.mu.Lock(); e.starts++; e.mu.Unlock() }
 func (e *fakeEngine) SetTuning(domain.Tuning)                {}
-func (e *fakeEngine) Stop()                                  { e.mu.Lock(); e.stops++; e.mu.Unlock() }
-func (e *fakeEngine) Retuned(domain.Tuning)                  { e.mu.Lock(); e.tunes++; e.mu.Unlock() }
-func (e *fakeEngine) Close()                                 {}
+
+type fakeDemod struct{ app.Demod }
+
+func (fakeDemod) Close() {}
+
+func (e *fakeEngine) NewDemod(app.DemodParams, func(app.AudioOut), func(app.Meter)) (app.Demod, error) {
+	return fakeDemod{}, nil
+}
+func (e *fakeEngine) Stop()                 { e.mu.Lock(); e.stops++; e.mu.Unlock() }
+func (e *fakeEngine) Retuned(domain.Tuning) { e.mu.Lock(); e.tunes++; e.mu.Unlock() }
+func (e *fakeEngine) Close()                {}
 
 type fakeEngines struct{ e *fakeEngine }
 
@@ -298,5 +306,61 @@ func TestWatch(t *testing.T) {
 
 	if len(m.Devices()) != 1 {
 		t.Fatal("devices")
+	}
+}
+
+func TestDemodCaps(t *testing.T) {
+	src, eng, rep := &fakeSource{}, &fakeEngine{}, &reporter{}
+
+	typ, _ := domain.NewDeviceType(domain.TypeRTLSDR)
+	drv, _ := domain.NewDriver(typ, "0", 0, domain.AutoGain(), false)
+	r, _ := domain.NewFreqRange(domain.MustFrequency(24_000_000), domain.MustFrequency(1_766_000_000))
+	mk := func(id string, maxDemods int) *domain.Device {
+		d, err := domain.NewDevice(domain.DeviceParams{
+			ID: domain.MustDeviceID(id), Name: id, Type: typ, Enabled: true, Range: r,
+			Rates: []domain.SampleRate{domain.MustSampleRate(2_400_000)}, Driver: drv, MaxDemods: maxDemods,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return d
+	}
+
+	m, err := app.NewManager(app.Options{
+		Devices: []*domain.Device{mk("a", 1), mk("b", 0)}, Sources: fakeSources{src}, Engines: fakeEngines{eng}, Reporter: rep,
+		Logger: slog.New(slog.DiscardHandler), MaxDemods: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	la, _ := m.Attach("a")
+	lb, _ := m.Attach("b")
+	p := app.DemodParams{}
+
+	d1, err := la.NewDemod(p, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Per-device cap of a, then the node cap.
+	if _, err := la.NewDemod(p, nil, nil); !errors.Is(err, domain.ErrCapacityExceeded) {
+		t.Fatalf("device cap: %v", err)
+	}
+
+	if _, err := lb.NewDemod(p, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := lb.NewDemod(p, nil, nil); !errors.Is(err, domain.ErrCapacityExceeded) {
+		t.Fatalf("node cap: %v", err)
+	}
+
+	d1.Close()
+	d1.Close()
+
+	if _, err := lb.NewDemod(p, nil, nil); err != nil {
+		t.Fatalf("capacity not released: %v", err)
 	}
 }

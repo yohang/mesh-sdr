@@ -195,6 +195,7 @@ type DeviceConfig struct {
 	OperatorCanRetune bool      `toml:"operator_can_retune" env:"-" jsonschema:"description=Operators may retune the device."`
 	AlwaysOn          bool      `toml:"always_on" env:"-" jsonschema:"description=Keep the device running without listeners."`
 	SchedulerEnabled  bool      `toml:"scheduler_enabled" env:"-" jsonschema:"description=The hub scheduler may switch presets on this device."`
+	MaxDemods         int       `toml:"max_demods" env:"-" jsonschema:"minimum=0,maximum=1000,description=Demodulators the device runs at once (0: interim default 16)."`
 	AutoRecover       *bool     `toml:"auto_recover" env:"-" jsonschema:"description=Restart a failed device every 15 minutes (default true)."`
 	Driver            Driver    `toml:"driver" env:"-" jsonschema:"description=Connector settings (rtl_sdr\\, rtl_tcp)."`
 }
@@ -256,6 +257,7 @@ type NodeSection struct {
 	RuntimeDir  string      `toml:"runtime_dir" env:"RUNTIME_DIR" jsonschema:"description=Private runtime directory (absolute\\, mode 0700\\, owned by the node user): the per-tool workdirs live in sessions/ under it. The only place the node writes."`
 	// IPCPortRange is "lo-hi".
 	IPCPortRange   string `toml:"ipc_port_range" env:"IPC_PORT_RANGE" jsonschema:"pattern=^[0-9]{4\\,5}-[0-9]{4\\,5}$,description=Loopback ports for the connector IQ and control sockets (lo-hi)."`
+	MaxDemods      int    `toml:"max_demods" env:"MAX_DEMODS" jsonschema:"minimum=1,maximum=1000,description=Demodulators the node runs at once\\, all devices together (interim default 32)."`
 	WSNotSentLowat Size   `toml:"ws_notsent_lowat" env:"WS_NOTSENT_LOWAT" jsonschema:"description=TCP_NOTSENT_LOWAT of the node API sockets: bounds the kernel send buffering of media WebSockets (ADR 0004)."`
 }
 
@@ -290,7 +292,7 @@ func DefaultNode() Node {
 	return Node{
 		Node: NodeSection{
 			Listen: "0.0.0.0:8074", EventBuffer: EventBuffer{MaxEvents: 10000, MaxBytes: MustSize("16MiB")},
-			RuntimeDir: "/run/meshsdr-node", IPCPortRange: "40000-40999", WSNotSentLowat: MustSize("16KiB"),
+			RuntimeDir: "/run/meshsdr-node", IPCPortRange: "40000-40999", WSNotSentLowat: MustSize("16KiB"), MaxDemods: 32,
 		},
 		Tools: Tools{Dirs: []string{"/usr/local/bin", "/usr/bin"}},
 		Log:   defaultLog(),

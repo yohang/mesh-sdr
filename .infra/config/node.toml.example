@@ -29,6 +29,9 @@ ipc_port_range = "40000-40999"
 # buffering of media WebSockets so that slow listeners lose FFT frames
 # instead of accumulating latency (ADR 0004).
 ws_notsent_lowat = "16KiB"
+# Demodulators the node runs at once, all devices together (interim
+# default; devices.<id>.max_demods caps each device, default 16).
+max_demods = 32
 
 # RAM buffer of node events while the hub is unreachable; on overflow the
 # node drops diagnostics, then map updates, then decodes (oldest first).
@@ -83,6 +86,7 @@ dirs = ["/usr/local/bin", "/usr/bin"]
 # always_on = true
 # scheduler_enabled = true
 # auto_recover = true                # restart a failed device every 15 min
+# max_demods = 16                    # demodulators of this device at once
 #
 # [devices.vhf-rtl]
 # name = "RTL-SDR (2 m)"

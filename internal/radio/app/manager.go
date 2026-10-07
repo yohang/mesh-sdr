@@ -32,13 +32,21 @@ type Options struct {
 	// AutoRecover restarts a failed device (default 15 min) when the
 	// device enables it.
 	AutoRecover time.Duration
+	// MaxDemods caps the demodulators of the node (default 32).
+	MaxDemods int
 }
+
+// DefaultMaxDemods is the interim node-wide demodulator cap (ADR 0019).
+const DefaultMaxDemods = 32
 
 // Manager runs the devices of the node, one goroutine each.
 type Manager struct {
 	o       Options
 	runners map[string]*runner
 	order   []string
+
+	demodMu sync.Mutex
+	demods  int
 }
 
 // NewManager builds the sources and engines of the devices.
@@ -49,6 +57,10 @@ func NewManager(o Options) (*Manager, error) {
 
 	if o.AutoRecover <= 0 {
 		o.AutoRecover = DefaultAutoRecover
+	}
+
+	if o.MaxDemods <= 0 {
+		o.MaxDemods = DefaultMaxDemods
 	}
 
 	m := &Manager{o: o, runners: map[string]*runner{}}
@@ -154,6 +166,60 @@ func (l *Lease) Engine() Engine { return l.r.engine }
 // Snapshot returns the device status.
 func (l *Lease) Snapshot() domain.Snapshot { return l.r.snapshot() }
 
+// NewDemod starts a demodulator on the device within the node-wide and
+// per-device caps (capacity_exceeded beyond them).
+func (l *Lease) NewDemod(p DemodParams, audio func(AudioOut), meter func(Meter)) (Demod, error) {
+	m, r := l.r.m, l.r
+
+	m.demodMu.Lock()
+	r.mu.Lock()
+	perDevice := r.dev.Params().MaxDemods
+	full := m.demods >= m.o.MaxDemods || r.demods >= perDevice
+
+	if !full {
+		m.demods++
+		r.demods++
+	}
+	r.mu.Unlock()
+	m.demodMu.Unlock()
+
+	if full {
+		return nil, domain.ErrCapacityExceeded.WithDetail("the node or the device runs its maximum number of demodulators")
+	}
+
+	d, err := r.engine.NewDemod(p, audio, meter)
+	if err != nil {
+		m.releaseDemod(r)
+
+		return nil, err
+	}
+
+	return &countedDemod{Demod: d, release: func() { m.releaseDemod(r) }}, nil
+}
+
+func (m *Manager) releaseDemod(r *runner) {
+	m.demodMu.Lock()
+	r.mu.Lock()
+	m.demods--
+	r.demods--
+	r.mu.Unlock()
+	m.demodMu.Unlock()
+}
+
+// countedDemod releases its capacity once on Close.
+type countedDemod struct {
+	Demod
+	once    sync.Once
+	release func()
+}
+
+func (d *countedDemod) Close() {
+	d.once.Do(func() {
+		d.Demod.Close()
+		d.release()
+	})
+}
+
 // Release removes the demand. It is safe to call twice.
 func (l *Lease) Release() {
 	l.once.Do(func() {
@@ -248,6 +314,7 @@ type runner struct {
 	dev       *domain.Device
 	active    bool
 	stopping  bool
+	demods    int
 	watchers  map[int]func(domain.Snapshot)
 	nextWatch int
 }

@@ -51,7 +51,12 @@ type DeviceParams struct {
 	OperatorCanRetune bool
 	AutoRecover       bool
 	Driver            Driver
+	// MaxDemods caps the demodulators of the device (0: DefaultMaxDemods).
+	MaxDemods int
 }
+
+// DefaultMaxDemods is the interim per-device demodulator cap (ADR 0019).
+const DefaultMaxDemods = 16
 
 // Device is one SDR device of the node: its configuration (immutable for
 // the life of the process) and its runtime state.
@@ -76,6 +81,10 @@ func NewDevice(p DeviceParams) (*Device, error) {
 		return nil, ErrInvalidDevice.WithDetail("device " + p.ID.String() + ": at least one sample rate")
 	case p.ID == DeviceID{} || p.Type == DeviceType{}:
 		return nil, ErrInvalidDevice.WithDetail("device id and type are required")
+	}
+
+	if p.MaxDemods <= 0 {
+		p.MaxDemods = DefaultMaxDemods
 	}
 
 	d := &Device{p: p, state: StateStopped}
