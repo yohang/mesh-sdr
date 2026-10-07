@@ -119,7 +119,7 @@ func (a *app) newUserCmd() *cobra.Command {
 
 // withUserAdmin opens the hub database, checks its schema and calls fn.
 func (a *app) withUserAdmin(ctx context.Context, fn func(*identityapp.UserAdmin) error) error {
-	cfg, _, logger, err := a.loadHub(ctx)
+	cfg, _, logger, err := a.loadHub(ctx, true)
 	if err != nil {
 		return err
 	}

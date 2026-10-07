@@ -31,7 +31,7 @@ type Hub struct {
 	AllowInlineSecrets bool `toml:"allow_inline_secrets" env:"-" jsonschema:"description=Accept inline secret values in this file (startup warning). Applies only to the file that sets it."`
 
 	Hub     HubSection            `toml:"hub" envPrefix:"HUB__" jsonschema:"description=Hub bootstrap."`
-	Gateway Gateway               `toml:"gateway" envPrefix:"GATEWAY__" jsonschema:"description=Embedded gateway (Caddy): the public listeners\\, TLS and the node media routes (ADR 0002\\, ADR 0012)."`
+	Gateway Gateway               `toml:"gateway" envPrefix:"GATEWAY__" jsonschema:"description=Gateway: the public listeners\\, TLS and the node media routes (ADR 0002\\, ADR 0012\\, ADR 0021)."`
 	DB      DB                    `toml:"db" envPrefix:"DB__" jsonschema:"description=Database (through the DB adapter)."`
 	TLS     HubTLS                `toml:"tls" envPrefix:"TLS__" jsonschema:"description=Hub internal CA for hub <-> node mTLS (ADR 0008). Without it the grid is disabled."`
 	Nodes   map[string]ConfigNode `toml:"nodes" env:"-" jsonschema:"description=Nodes declared in the hub config\\, keyed by node id. They are locked in Admin > Nodes. File-only (no env override)."`
@@ -112,27 +112,24 @@ type HubSection struct {
 
 // Gateway TLS modes (INT-001).
 const (
-	TLSModeACME     = "acme"
-	TLSModeFiles    = "files"
-	TLSModeInternal = "internal"
-	TLSModeOff      = "off"
+	TLSModeACME  = "acme"
+	TLSModeFiles = "files"
+	TLSModeOff   = "off"
 )
 
-// Gateway is the [gateway] table: the embedded Caddy gateway, the only
-// public listener of the hub (ADR 0002, ADR 0012).
+// Gateway is the [gateway] table: the hub gateway, the only public
+// listener of the hub (ADR 0002, ADR 0012, ADR 0021).
 type Gateway struct {
-	Mode             string   `toml:"mode" env:"MODE" jsonschema:"enum=embedded,description=Gateway mode. Only embedded (Caddy linked in the hub) is implemented; sidecar is deferred (ADR 0002)."`
-	HTTPSListen      string   `toml:"https_listen" env:"HTTPS_LISTEN" jsonschema:"description=HTTPS listen address (host:port) of the gateway\\, used unless gateway.tls_mode is off."`
-	HTTPListen       string   `toml:"http_listen" env:"HTTP_LISTEN" jsonschema:"description=Plain HTTP listen address (host:port). With TLS it redirects to https and answers ACME HTTP-01 challenges; with gateway.tls_mode = off it serves the hub. Empty: no plain listener."`
-	TLSMode          string   `toml:"tls_mode" env:"TLS_MODE" jsonschema:"enum=acme,enum=files,enum=internal,enum=off,description=Public TLS: acme (certificate from an ACME CA for the host of hub.url)\\, files (gateway.tls_cert and gateway.tls_key)\\, internal (certificate from a local CA\\, LAN use) or off (plain HTTP on gateway.http_listen\\, behind a TLS-terminating proxy or for development)."`
-	TLSCert          string   `toml:"tls_cert" env:"TLS_CERT" jsonschema:"description=PEM certificate chain of the public listener (tls_mode = files). Relative paths are resolved against the config dir."`
-	TLSKey           string   `toml:"tls_key" env:"TLS_KEY" jsonschema:"description=PEM private key of the public listener (tls_mode = files\\, mode 0600). Relative paths are resolved against the config dir."`
-	ACMEEmail        string   `toml:"acme_email" env:"ACME_EMAIL" jsonschema:"description=Contact e-mail of the ACME account (tls_mode = acme)."`
-	ACMECA           string   `toml:"acme_ca" env:"ACME_CA" jsonschema:"format=uri,description=ACME directory URL (tls_mode = acme). Empty: Let's Encrypt production."`
-	StorageDir       string   `toml:"storage_dir" env:"STORAGE_DIR" jsonschema:"description=Directory of the gateway state: ACME account\\, managed certificates and the internal-issuer CA. On the data volume."`
-	StreamCloseDelay Duration `toml:"stream_close_delay" env:"STREAM_CLOSE_DELAY" jsonschema:"description=Delay before proxied WebSockets are closed by a gateway reload (§4.6 rule 3)."`
-	StreamTimeout    Duration `toml:"stream_timeout" env:"STREAM_TIMEOUT" jsonschema:"description=Maximum lifetime of a proxied WebSocket (§4.6 rule 3)."`
-	MaxBody          Size     `toml:"max_body" env:"MAX_BODY" jsonschema:"description=Request body limit of the hub API (§4.6)."`
+	HTTPSListen   string   `toml:"https_listen" env:"HTTPS_LISTEN" jsonschema:"description=HTTPS listen address (host:port) of the gateway\\, used unless gateway.tls_mode is off."`
+	HTTPListen    string   `toml:"http_listen" env:"HTTP_LISTEN" jsonschema:"description=Plain HTTP listen address (host:port). With TLS it redirects to https and answers ACME HTTP-01 challenges; with gateway.tls_mode = off it serves the hub. Empty: no plain listener."`
+	TLSMode       string   `toml:"tls_mode" env:"TLS_MODE" jsonschema:"enum=acme,enum=files,enum=off,description=Public TLS: acme (certificate from an ACME CA for the host of hub.url)\\, files (gateway.tls_cert and gateway.tls_key)\\, or off (plain HTTP on gateway.http_listen\\, behind a TLS-terminating proxy or for development)."`
+	TLSCert       string   `toml:"tls_cert" env:"TLS_CERT" jsonschema:"description=PEM certificate chain of the public listener (tls_mode = files). Relative paths are resolved against the config dir."`
+	TLSKey        string   `toml:"tls_key" env:"TLS_KEY" jsonschema:"description=PEM private key of the public listener (tls_mode = files\\, mode 0600). Relative paths are resolved against the config dir."`
+	ACMEEmail     string   `toml:"acme_email" env:"ACME_EMAIL" jsonschema:"description=Contact e-mail of the ACME account (tls_mode = acme)."`
+	ACMECA        string   `toml:"acme_ca" env:"ACME_CA" jsonschema:"format=uri,description=ACME directory URL (tls_mode = acme). Empty: Let's Encrypt production."`
+	StorageDir    string   `toml:"storage_dir" env:"STORAGE_DIR" jsonschema:"description=Directory of the ACME account and certificates (tls_mode = acme). On the data volume."`
+	StreamTimeout Duration `toml:"stream_timeout" env:"STREAM_TIMEOUT" jsonschema:"description=Maximum lifetime of a proxied WebSocket (§4.6 rule 3)."`
+	MaxBody       Size     `toml:"max_body" env:"MAX_BODY" jsonschema:"description=Request body limit of the hub API (§4.6)."`
 }
 
 // DB is the [db] table.
@@ -271,8 +268,8 @@ type EventBuffer struct {
 func DefaultHub() Hub {
 	return Hub{
 		Gateway: Gateway{
-			Mode: "embedded", HTTPSListen: ":443", TLSMode: TLSModeACME, StorageDir: "/var/lib/meshsdr/caddy",
-			StreamCloseDelay: MustDuration("2h"), StreamTimeout: MustDuration("24h"), MaxBody: MustSize("1MiB"),
+			HTTPSListen: ":443", TLSMode: TLSModeACME, StorageDir: "/var/lib/meshsdr/acme",
+			StreamTimeout: MustDuration("24h"), MaxBody: MustSize("1MiB"),
 		},
 		DB:       DB{DSN: "sqlite:///var/lib/meshsdr/hub.db", MaxReadConnections: 4},
 		Log:      defaultLog(),

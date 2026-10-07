@@ -21,10 +21,6 @@ type allEnv struct {
 func newAllEnv(t *testing.T) *allEnv {
 	t.Helper()
 
-	if !GatewayAvailable() {
-		t.Skip("the all role needs the gateway (nogateway build)")
-	}
-
 	dir := t.TempDir()
 	gw := freePort(t)
 
@@ -35,7 +31,7 @@ allow_insecure_url = true
 [gateway]
 tls_mode = "off"
 http_listen = "`+gw+`"
-storage_dir = "`+filepath.Join(dir, "caddy")+`"
+storage_dir = "`+filepath.Join(dir, "acme")+`"
 [db]
 dsn = "sqlite://`+filepath.Join(dir, "hub.db")+`"
 [auth]

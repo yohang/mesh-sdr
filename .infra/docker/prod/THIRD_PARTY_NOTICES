@@ -53,7 +53,8 @@ Go modules
 
 The licence texts of every Go module linked into meshsdr are reproduced in
 /usr/share/doc/meshsdr/go-modules.txt (among them gonum, BSD-3-Clause;
-coder/websocket, ISC; Caddy, Apache-2.0; modernc.org/sqlite, BSD-3-Clause).
+coder/websocket, ISC; golang.org/x/crypto, BSD-3-Clause; modernc.org/sqlite,
+BSD-3-Clause).
 
 Combined work
 -------------

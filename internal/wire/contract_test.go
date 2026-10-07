@@ -56,10 +56,6 @@ type contractHub struct {
 func newContractHub(t *testing.T, v *apitest.Validator, users map[string]identitydomain.Role) *contractHub {
 	t.Helper()
 
-	if !GatewayAvailable() {
-		t.Skip("the hub needs the gateway (nogateway build)")
-	}
-
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -78,7 +74,7 @@ allow_insecure_url = true
 [gateway]
 tls_mode = "off"
 http_listen = "127.0.0.1:0"
-storage_dir = "`+filepath.Join(dir, "caddy")+`"
+storage_dir = "`+filepath.Join(dir, "acme")+`"
 [db]
 dsn = "sqlite://`+filepath.Join(dir, "hub.db")+`"
 [tls]

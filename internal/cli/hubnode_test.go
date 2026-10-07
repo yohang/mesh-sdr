@@ -25,7 +25,8 @@ func TestHubNodeCommands(t *testing.T) {
 		t.Fatalf("ca init = %+v", r)
 	}
 
-	appendFile(t, dir, "hub.toml", "\n[tls]\nca_cert = \"tls/ca.pem\"\nca_key = { file = \"tls/ca.key\" }\n")
+	// The admin subcommands take the CA files of the all role
+	// (tls/ca.pem, tls/ca.key) without a [tls] table.
 
 	r := run(t, ctx, env, "--json", "hub", "node", "add", "attic", "--url", "https://10.0.0.1:8074")
 

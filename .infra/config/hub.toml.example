@@ -25,16 +25,14 @@ url = "https://sdr.example.org"
 allow_insecure_url = false
 
 [gateway]
-# The embedded gateway (Caddy) owns every public port of the hub: it
-# terminates TLS, serves the web UI and the API, and proxies the node media
-# WebSockets (/nodes/<id>/ws) to the nodes over mTLS (ADR 0002, ADR 0012).
-# Only embedded is implemented.
-mode = "embedded"
+# The gateway owns every public port of the hub: it terminates TLS (HTTP/1.1
+# and HTTP/2), serves the web UI and the API, and proxies the node media
+# WebSockets (/nodes/<id>/ws) to the nodes over mTLS (ADR 0012, ADR 0021).
 # Public TLS: acme (certificate for the host of hub.url from an ACME CA; the
 # host must be a public DNS name reaching this gateway), files (tls_cert and
-# tls_key below), internal (certificate from a local CA kept in storage_dir,
-# for a LAN) or off (plain HTTP on http_listen, behind a TLS-terminating
-# proxy or for development).
+# tls_key below) or off (plain HTTP on http_listen, behind a TLS-terminating
+# proxy or for development). On a LAN without a public name, use files with
+# your own certificate, or off behind a reverse proxy that terminates TLS.
 tls_mode = "acme"
 # HTTPS listen address (unused with tls_mode = off). Binding :443 as a
 # non-root user needs CAP_NET_BIND_SERVICE, or
@@ -54,14 +52,13 @@ https_listen = ":443"
 # Let's Encrypt production.
 # acme_email = "admin@example.org"
 # acme_ca = "https://acme-staging-v02.api.letsencrypt.org/directory"
-# Gateway state: ACME account, managed certificates, internal CA. Keep it on
-# the data volume.
-storage_dir = "/var/lib/meshsdr/caddy"
-# Proxied WebSockets survive a gateway reload for stream_close_delay and live
-# at most stream_timeout. Node changes never reload the gateway.
-stream_close_delay = "2h"
+# ACME account and certificates (tls_mode = acme). Keep it on the data
+# volume.
+storage_dir = "/var/lib/meshsdr/acme"
+# Maximum lifetime of a proxied node WebSocket. Node changes never restart
+# the gateway.
 stream_timeout = "24h"
-# Request body limit of the API.
+# Request body limit of the API and of the node route.
 max_body = "1MiB"
 
 [db]

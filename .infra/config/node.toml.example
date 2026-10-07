@@ -40,15 +40,16 @@ max_events = 10000
 max_bytes = "16MiB"
 
 # Node certificate and key, written by `meshsdr node enroll` (key 0600) and
-# rewritten when the hub renews the certificate.
-# [tls]
-# cert = "tls/node.pem"
-# key = "tls/node.key"
+# rewritten when the hub renews the certificate. Relative to the config dir
+# (in the image, /etc/meshsdr/tls is on the data volume).
+[tls]
+cert = "tls/node.pem"
+key = "tls/node.key"
 
 # Trust in the hub.
-# [hub_trust]
+[hub_trust]
 # Hub CA certificate, written by `meshsdr node enroll`.
-# ca_cert = "tls/ca.pem"
+ca_cert = "tls/ca.pem"
 # SHA-256 fingerprint of the hub CA, shown by the hub with the token.
 # ca_fingerprint = "AB:CD:…"
 # Expected hub id (host of the hub's hub.url); empty accepts any hub

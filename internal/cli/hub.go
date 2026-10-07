@@ -17,10 +17,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/wire"
 )
 
-// errNoGateway fails the hub and all roles fast in a nogateway build.
-var errNoGateway = errors.New("this meshsdr binary was built without the gateway (-tags nogateway): " +
-	"it can only run the node role; use the full binary for the hub and all roles")
-
 func (a *app) newHubCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hub",
@@ -36,9 +32,14 @@ func (a *app) newHubCmd() *cobra.Command {
 	return cmd
 }
 
-// loadHub loads the hub config and builds the logger.
-func (a *app) loadHub(ctx context.Context) (config.Hub, config.Meta, *slog.Logger, error) {
-	cfg, meta, err := config.LoadHub(a.configOptions())
+// loadHub loads the hub config and builds the logger. The admin
+// subcommands (caDefaults) take the CA files of the all role when they
+// exist (config.Options.CADefaults).
+func (a *app) loadHub(ctx context.Context, caDefaults bool) (config.Hub, config.Meta, *slog.Logger, error) {
+	opts := a.configOptions()
+	opts.CADefaults = caDefaults
+
+	cfg, meta, err := config.LoadHub(opts)
 	if err != nil {
 		return config.Hub{}, meta, nil, err
 	}
@@ -57,13 +58,9 @@ func (a *app) runHub(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, meta, logger, err := a.loadHub(ctx)
+	cfg, meta, logger, err := a.loadHub(ctx, false)
 	if err != nil {
 		return err
-	}
-
-	if !wire.GatewayAvailable() {
-		return errNoGateway
 	}
 
 	adapter, err := wire.OpenDB(ctx, cfg.DB, logger)
@@ -141,7 +138,7 @@ func (a *app) newMigrateCmd() *cobra.Command {
 
 // withMigrator opens the hub database and calls fn with its migrator.
 func (a *app) withMigrator(ctx context.Context, fn func(*db.Migrator, *slog.Logger) error) error {
-	cfg, _, logger, err := a.loadHub(ctx)
+	cfg, _, logger, err := a.loadHub(ctx, true)
 	if err != nil {
 		return err
 	}

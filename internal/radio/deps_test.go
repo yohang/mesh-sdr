@@ -40,16 +40,9 @@ func TestNoDatabase(t *testing.T) {
 
 // Only internal/dsp/csdr uses cgo in the whole module (ADR 0014, ADR 0019).
 func TestCgoBoundary(t *testing.T) {
-	for _, tags := range []string{"", "nogateway"} {
-		patterns := []string{"github.com/yohang/mesh-sdr/..."}
-		if tags != "" {
-			patterns = append([]string{"-tags", tags}, patterns...)
-		}
-
-		for _, p := range goList(t, patterns...) {
-			if strings.HasPrefix(p[0], "github.com/yohang/mesh-sdr/") && p[1] != "0" && p[0] != "github.com/yohang/mesh-sdr/internal/dsp/csdr" {
-				t.Errorf("%s uses cgo outside internal/dsp/csdr (tags %q)", p[0], tags)
-			}
+	for _, p := range goList(t, "github.com/yohang/mesh-sdr/...") {
+		if strings.HasPrefix(p[0], "github.com/yohang/mesh-sdr/") && p[1] != "0" && p[0] != "github.com/yohang/mesh-sdr/internal/dsp/csdr" {
+			t.Errorf("%s uses cgo outside internal/dsp/csdr", p[0])
 		}
 	}
 }

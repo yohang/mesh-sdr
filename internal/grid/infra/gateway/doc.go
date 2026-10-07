@@ -1,34 +1,24 @@
-// Package gateway embeds Caddy as the hub gateway (ADR 0002, option C; ADR
-// 0012): the only public listener of the hub. It terminates TLS (ACME,
-// operator files, internal CA or off), serves the hub router in-process and
-// proxies /nodes/{nodeId}/ws to the node over mTLS through one static route:
+// Package gateway is the hub gateway (ADR 0002, ADR 0012, ADR 0021): the
+// only public listener of the hub, built on net/http. It terminates TLS
+// (ACME, operator files or off), serves the hub router
+// in-process and proxies /nodes/{nodeId}/ws to the node over mTLS:
 //
 //  1. delete every client-supplied X-Rx-* header;
 //  2. forward auth, in-process: the hub router answers a sub-request to
 //     AuthzPath; a non-2xx answer goes back to the browser as is, a 2xx one
-//     sets X-Rx-Access-Token and X-Rx-Cid on the request and names the node
-//     address (HeaderUpstream);
-//  3. rewrite the path to /ws;
-//  4. reverse proxy to that address with the gateway client certificate
-//     (NodeTLS), no buffering.
+//     gives the access token, the cid and the node address
+//     (HeaderUpstream);
+//  3. reverse proxy to that address at /ws with the gateway client
+//     certificate (NodeTLS), no buffering, keeping only an allow-list of
+//     headers each way.
 //
-// Node enrollment, removal and address changes never touch the Caddy
-// config: the upstream is resolved per request by the hub authz.
-//
-// Caddy builds its modules from JSON and cannot receive constructor
-// dependencies, so the custom modules find theirs in a package-level
-// binding table filled by New: the documented exception to the "no globals"
-// rule (ADR 0002 decision 5), confined to this package. Caddy is a process
-// singleton: one Gateway runs at a time.
-//
-// Builds with the nogateway tag leave Caddy out (node-only binary): New then
-// returns ErrUnavailable.
+// Node enrollment, removal and address changes never touch the gateway:
+// the upstream is resolved per request by the hub authz.
 package gateway
 
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -51,15 +41,10 @@ const (
 
 // TLS modes of the public listener.
 const (
-	TLSACME     = "acme"
-	TLSFiles    = "files"
-	TLSInternal = "internal"
-	TLSOff      = "off"
+	TLSACME  = "acme"
+	TLSFiles = "files"
+	TLSOff   = "off"
 )
-
-// ErrUnavailable is returned by New in a nogateway build.
-var ErrUnavailable = errors.New("this meshsdr binary was built without the gateway (-tags nogateway): " +
-	"it can only run the node role; use the full binary for the hub and all roles")
 
 // Config is the gateway configuration.
 type Config struct {
@@ -71,19 +56,22 @@ type Config struct {
 	TLSMode    string
 	// CertFile and KeyFile are the operator certificate (TLSFiles).
 	CertFile, KeyFile string
-	// PublicURL is hub.url: its host is certified (TLSACME, TLSInternal)
-	// and redirects go to it.
+	// PublicURL is hub.url: its host is certified (TLSACME) and redirects
+	// go to it.
 	PublicURL string
 	ACMEEmail string
-	ACMECA    string
-	// StorageDir holds the ACME account, managed certificates and the
-	// internal CA.
-	StorageDir       string
-	StreamCloseDelay time.Duration
-	StreamTimeout    time.Duration
-	DialTimeout      time.Duration
-	// LogLevel is log.level (debug, info, warn, error).
-	LogLevel string
+	// ACMECA is the ACME directory URL; empty: Let's Encrypt production.
+	ACMECA string
+	// StorageDir holds the ACME account and certificates (TLSACME).
+	StorageDir string
+	// StreamTimeout bounds the lifetime of a proxied node connection; zero
+	// means no bound.
+	StreamTimeout time.Duration
+	// DialTimeout bounds the connection to a node (default 3 s).
+	DialTimeout time.Duration
+	// MaxBody caps the request body of the node route (gateway.max_body);
+	// the hub router caps its own.
+	MaxBody int64
 }
 
 // Options are the dependencies of a Gateway.
