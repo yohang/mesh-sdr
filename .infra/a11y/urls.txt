@@ -10,6 +10,7 @@
 /no-such-page 404
 /login 200
 /setup/not-a-valid-token 404
+/ 200 signed-in
 /files 200 signed-in
 /account/password 200 signed-in
 /admin 200 signed-in

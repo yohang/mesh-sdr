@@ -80,13 +80,14 @@ func TestNavigation(t *testing.T) {
 	}
 }
 
-// TestSectionPages covers the placeholder pages of the sections whose
-// modules come later: in the shell, in their section, with GET and HEAD.
+// TestSectionPages covers the section entry pages (the receiver island, and
+// the placeholders of the sections whose modules come later): in the shell,
+// in their section, with GET and HEAD.
 func TestSectionPages(t *testing.T) {
 	h := navRouter(false)
 
 	tests := []struct{ path, title, section, text string }{
-		{"/", "<title>MeshSDR</title>", "receiver", "Live listening is not available yet."},
+		{"/", "<title>MeshSDR</title>", "receiver", `<script id="msdr-receiver-config" type="application/json"`},
 		{"/map", "<title>Map · MeshSDR</title>", "map", "The live map is not available yet."},
 		{"/decodes", "<title>Decodes · MeshSDR</title>", "decodes", "Decoded messages are not available yet."},
 		{"/files", "<title>Files · MeshSDR</title>", "files", "Received files are not available yet."},

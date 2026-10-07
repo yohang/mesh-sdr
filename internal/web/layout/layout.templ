@@ -72,6 +72,9 @@ templ Document(s Shell, p Page, content templ.Component) {
 						@userMenu(s)
 					</div>
 				</div>
+				// Audio controls of the receiver engine (static/js/receiver/dock.js),
+				// outside #main so audio survives navigation; shown while listening.
+				<msdr-audio-dock class="block border-t border-border" hidden></msdr-audio-dock>
 			</header>
 			<div id="msdr-session-ended" class="border-b border-warning bg-surface px-4 py-2" role="alert" hidden>
 				<p class="mx-auto max-w-screen-2xl">

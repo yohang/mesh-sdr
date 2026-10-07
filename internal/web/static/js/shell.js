@@ -15,6 +15,10 @@ import "./download.js";
 import { installNavigation } from "./navigation.js";
 import { installShortcuts } from "./shortcuts.js";
 import { installEvents } from "./events.js";
+// Receiver island and shell audio dock (ADR 0015): they share the engine, a
+// module singleton outside #main, so audio survives boosted navigation.
+import "./receiver/dock.js";
+import "./receiver/island.js";
 
 installNavigation();
 installShortcuts();
