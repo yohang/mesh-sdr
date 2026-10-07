@@ -32,9 +32,8 @@ func NewSettings(a *db.DB, schemaVersion int) *Settings {
 }
 
 func rehydrate(key string, value sql.NullString, by []byte, at, version int64) (*domain.Setting, error) {
-	k, err := domain.NewKey(key)
-	if err != nil {
-		return nil, fmt.Errorf("setting row %q: %w", key, err)
+	if !domain.ValidKey(key) {
+		return nil, fmt.Errorf("setting row %q: %w", key, domain.ErrInvalidKey)
 	}
 
 	v, err := domain.NewValue([]byte(value.String))
@@ -49,7 +48,7 @@ func rehydrate(key string, value sql.NullString, by []byte, at, version int64) (
 		}
 	}
 
-	s, err := domain.NewSetting(k, v, version, author, time.UnixMilli(at).UTC())
+	s, err := domain.NewSetting(key, v, version, author, time.UnixMilli(at).UTC())
 	if err != nil {
 		return nil, fmt.Errorf("setting row %q: %w", key, err)
 	}
@@ -80,8 +79,8 @@ func (r *Settings) List(ctx context.Context) ([]*domain.Setting, error) {
 }
 
 // Get implements domain.Repository.
-func (r *Settings) Get(ctx context.Context, key domain.Key) (*domain.Setting, error) {
-	row, err := sqlc.New(r.db.Reader(ctx)).GetSetting(ctx, key.String())
+func (r *Settings) Get(ctx context.Context, key string) (*domain.Setting, error) {
+	row, err := sqlc.New(r.db.Reader(ctx)).GetSetting(ctx, key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil //nolint:nilnil // no row is not an error
 	}
@@ -101,7 +100,7 @@ func (r *Settings) Save(ctx context.Context, s *domain.Setting) error {
 	}
 
 	err := sqlc.New(r.db.Writer(ctx)).UpsertSetting(ctx, sqlc.UpsertSettingParams{
-		Key:           s.Key().String(),
+		Key:           s.Key(),
 		Value:         sql.NullString{String: s.Value().String(), Valid: true},
 		SchemaVersion: r.schemaVersion,
 		UpdatedBy:     by,
@@ -116,8 +115,8 @@ func (r *Settings) Save(ctx context.Context, s *domain.Setting) error {
 }
 
 // Delete implements domain.Repository.
-func (r *Settings) Delete(ctx context.Context, key domain.Key) error {
-	if err := sqlc.New(r.db.Writer(ctx)).DeleteSetting(ctx, key.String()); err != nil {
+func (r *Settings) Delete(ctx context.Context, key string) error {
+	if err := sqlc.New(r.db.Writer(ctx)).DeleteSetting(ctx, key); err != nil {
 		return fmt.Errorf("delete setting %s: %w", key, err)
 	}
 

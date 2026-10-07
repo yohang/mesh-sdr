@@ -32,21 +32,8 @@ var (
 	modePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,23}$`)
 )
 
-// Slug is the unique, URL-safe handle of a preset.
-type Slug struct{ value string }
-
-// NewSlug validates s.
-func NewSlug(s string) (Slug, error) {
-	if !slugPattern.MatchString(s) {
-		return Slug{}, ErrInvalidPreset.WithViolations(shared.NewViolation("slug", "invalid_slug",
-			"lower-case letters, digits and hyphens, 1 to 64 characters, starting with a letter or a digit"))
-	}
-
-	return Slug{value: s}, nil
-}
-
 // Slugify derives a slug from a name ("preset" when nothing remains).
-func Slugify(name string) Slug {
+func Slugify(name string) string {
 	var b strings.Builder
 
 	dash := false
@@ -73,23 +60,19 @@ func Slugify(name string) Slug {
 		s = "preset"
 	}
 
-	return Slug{value: s}
+	return s
 }
 
-// WithSuffix returns the slug followed by "-n", kept within 64 characters.
-func (s Slug) WithSuffix(n int) Slug {
+// SlugWithSuffix returns slug followed by "-n", kept within 64 characters.
+func SlugWithSuffix(slug string, n int) string {
 	suffix := "-" + strconv.Itoa(n)
-	base := s.value
 
-	if len(base)+len(suffix) > 64 {
-		base = strings.TrimRight(base[:64-len(suffix)], "-")
+	if len(slug)+len(suffix) > 64 {
+		slug = strings.TrimRight(slug[:64-len(suffix)], "-")
 	}
 
-	return Slug{value: base + suffix}
+	return slug + suffix
 }
-
-// String returns the slug.
-func (s Slug) String() string { return s.value }
 
 // plainText checks a plain-text field: valid UTF-8, no control characters,
 // at most max characters.
@@ -114,40 +97,6 @@ func plainText(path, s string, maxLen int, required bool) (string, *shared.Viola
 	return s, nil
 }
 
-// Name is the display name of a preset.
-type Name struct{ value string }
-
-// NewName validates a plain-text name of 1 to 128 characters.
-func NewName(s string) (Name, error) {
-	v, bad := plainText("name", s, MaxNameLength, true)
-	if bad != nil {
-		return Name{}, ErrInvalidPreset.WithViolations(*bad)
-	}
-
-	return Name{value: v}, nil
-}
-
-// String returns the name.
-func (n Name) String() string { return n.value }
-
-// ModeID is a mode of the mode catalogue (§7.1 presets.start_mod). Only its
-// syntax is checked: the catalogue comes with the demodulation epics (ADR
-// 0020 Q9).
-type ModeID struct{ value string }
-
-// NewModeID validates a mode id.
-func NewModeID(s string) (ModeID, error) {
-	if !modePattern.MatchString(s) {
-		return ModeID{}, ErrInvalidPreset.WithViolations(shared.NewViolation("start_mod", "invalid_mode",
-			"a mode id: lower-case letters, digits, '_' and '-', 1 to 24 characters"))
-	}
-
-	return ModeID{value: s}, nil
-}
-
-// String returns the mode id.
-func (m ModeID) String() string { return m.value }
-
 // WaterfallLevels are the waterfall levels of a preset, in dB.
 type WaterfallLevels struct{ min, max int }
 
@@ -167,13 +116,11 @@ func (w WaterfallLevels) Min() int { return w.min }
 // Max returns the upper level.
 func (w WaterfallLevels) Max() int { return w.max }
 
-// Tags are the filter tags of a preset: plain text, unique, sorted.
-type Tags struct{ values []string }
-
-// NewTags validates up to 32 tags of 1 to 32 characters.
-func NewTags(tags []string) (Tags, error) {
+// checkTags validates up to 32 plain-text tags of 1 to 32 characters and
+// returns them unique and sorted.
+func checkTags(tags []string) ([]string, []shared.Violation) {
 	if len(tags) > MaxTags {
-		return Tags{}, ErrInvalidPreset.WithViolations(shared.NewViolation("tags", "too_many", "at most 32 tags"))
+		return nil, []shared.Violation{shared.NewViolation("tags", "too_many", "at most 32 tags")}
 	}
 
 	out := make([]string, 0, len(tags))
@@ -181,7 +128,7 @@ func NewTags(tags []string) (Tags, error) {
 	for i, t := range tags {
 		v, bad := plainText("tags."+strconv.Itoa(i), t, MaxTagLength, true)
 		if bad != nil {
-			return Tags{}, ErrInvalidPreset.WithViolations(*bad)
+			return nil, []shared.Violation{*bad}
 		}
 
 		if !slices.Contains(out, v) {
@@ -191,8 +138,5 @@ func NewTags(tags []string) (Tags, error) {
 
 	slices.Sort(out)
 
-	return Tags{values: out}, nil
+	return out, nil
 }
-
-// Values returns the tags.
-func (t Tags) Values() []string { return slices.Clone(t.values) }

@@ -35,15 +35,15 @@ const (
 
 // Spec is a validated preset definition (every field but the identity).
 type Spec struct {
-	slug        Slug
+	slug        string
 	derivedSlug bool
-	name        Name
+	name        string
 	description string
-	tags        Tags
+	tags        []string
 	centerFreq  int64
 	sampRate    int64
 	startFreq   int64
-	startMod    ModeID
+	startMod    string
 	tuningStep  int64
 	squelch     *int
 	nr          *int
@@ -58,24 +58,22 @@ func NewSpec(d Draft) (Spec, error) {
 		bad []shared.Violation
 	)
 
-	collect := func(err error) {
-		var de *shared.Error
-		if errors.As(err, &de) {
-			bad = append(bad, de.Violations()...)
-		}
-	}
-
-	var err error
-
-	if d.Slug == "" {
+	switch {
+	case d.Slug == "":
 		s.slug, s.derivedSlug = Slugify(d.Name), true
-	} else if s.slug, err = NewSlug(d.Slug); err != nil {
-		collect(err)
+	case !slugPattern.MatchString(d.Slug):
+		bad = append(bad, shared.NewViolation("slug", "invalid_slug",
+			"lower-case letters, digits and hyphens, 1 to 64 characters, starting with a letter or a digit"))
+	default:
+		s.slug = d.Slug
 	}
 
-	if s.name, err = NewName(d.Name); err != nil {
-		collect(err)
+	name, v := plainText("name", d.Name, MaxNameLength, true)
+	if v != nil {
+		bad = append(bad, *v)
 	}
+
+	s.name = name
 
 	desc, v := plainText("description", d.Description, MaxDescriptionLength, false)
 	if v != nil {
@@ -84,9 +82,9 @@ func NewSpec(d Draft) (Spec, error) {
 
 	s.description = desc
 
-	if s.tags, err = NewTags(d.Tags); err != nil {
-		collect(err)
-	}
+	tags, tagErrs := checkTags(d.Tags)
+	bad = append(bad, tagErrs...)
+	s.tags = tags
 
 	if d.CenterFreq <= 0 || d.CenterFreq > MaxFrequency {
 		bad = append(bad, shared.NewViolation("center_freq", "out_of_range", "a frequency in Hz between 1 and 300 GHz"))
@@ -115,9 +113,12 @@ func NewSpec(d Draft) (Spec, error) {
 		mod = DefaultStartMod
 	}
 
-	if s.startMod, err = NewModeID(mod); err != nil {
-		collect(err)
+	if !modePattern.MatchString(mod) {
+		bad = append(bad, shared.NewViolation("start_mod", "invalid_mode",
+			"a mode id: lower-case letters, digits, '_' and '-', 1 to 24 characters"))
 	}
+
+	s.startMod = mod
 
 	s.tuningStep = DefaultTuningStep
 	if d.TuningStep != nil {
@@ -146,8 +147,8 @@ func NewSpec(d Draft) (Spec, error) {
 
 	if w := d.WaterfallLevels; w != nil {
 		levels, err := NewWaterfallLevels(w[0], w[1])
-		if err != nil {
-			collect(err)
+		if de := (*shared.Error)(nil); errors.As(err, &de) {
+			bad = append(bad, de.Violations()...)
 		} else {
 			s.waterfall = &levels
 		}
@@ -169,10 +170,10 @@ func abs(v int64) int64 {
 }
 
 // Slug returns the slug, and whether it was derived from the name.
-func (s Spec) Slug() (Slug, bool) { return s.slug, s.derivedSlug }
+func (s Spec) Slug() (string, bool) { return s.slug, s.derivedSlug }
 
 // WithSlug returns the spec with another slug (a derived slug made unique).
-func (s Spec) WithSlug(slug Slug) Spec {
+func (s Spec) WithSlug(slug string) Spec {
 	s.slug = slug
 
 	return s
@@ -249,16 +250,16 @@ func (p *Preset) Fits(l DeviceLimits) error {
 func (p *Preset) ID() shared.UUID { return p.id }
 
 // Slug returns the slug.
-func (p *Preset) Slug() Slug { return p.spec.slug }
+func (p *Preset) Slug() string { return p.spec.slug }
 
 // Name returns the name.
-func (p *Preset) Name() Name { return p.spec.name }
+func (p *Preset) Name() string { return p.spec.name }
 
 // Description returns the description (empty when none).
 func (p *Preset) Description() string { return p.spec.description }
 
 // Tags returns the tags.
-func (p *Preset) Tags() Tags { return p.spec.tags }
+func (p *Preset) Tags() []string { return slices.Clone(p.spec.tags) }
 
 // CenterFreq returns the centre frequency in Hz.
 func (p *Preset) CenterFreq() int64 { return p.spec.centerFreq }
@@ -270,7 +271,7 @@ func (p *Preset) SampRate() int64 { return p.spec.sampRate }
 func (p *Preset) StartFreq() int64 { return p.spec.startFreq }
 
 // StartMod returns the initial mode.
-func (p *Preset) StartMod() ModeID { return p.spec.startMod }
+func (p *Preset) StartMod() string { return p.spec.startMod }
 
 // TuningStep returns the tuning step in Hz.
 func (p *Preset) TuningStep() int64 { return p.spec.tuningStep }
@@ -330,8 +331,8 @@ type Snapshot struct {
 // Snapshot returns the persisted form.
 func (p *Preset) Snapshot() Snapshot {
 	s := Snapshot{
-		ID: p.id, Slug: p.spec.slug.value, Name: p.spec.name.value, Description: p.spec.description, Tags: p.spec.tags.Values(),
-		CenterFreq: p.spec.centerFreq, SampRate: p.spec.sampRate, StartFreq: p.spec.startFreq, StartMod: p.spec.startMod.value,
+		ID: p.id, Slug: p.spec.slug, Name: p.spec.name, Description: p.spec.description, Tags: slices.Clone(p.spec.tags),
+		CenterFreq: p.spec.centerFreq, SampRate: p.spec.sampRate, StartFreq: p.spec.startFreq, StartMod: p.spec.startMod,
 		TuningStep: p.spec.tuningStep, Squelch: p.spec.squelch, NR: p.spec.nr, SortOrder: p.sortOrder,
 		CreatedAt: p.createdAt, UpdatedAt: p.updatedAt, Version: p.version,
 	}
@@ -367,7 +368,7 @@ type Repository interface {
 	// List returns every preset by sort order, then name.
 	List(ctx context.Context) ([]*Preset, error)
 	// SlugTaken reports whether another preset than except has slug.
-	SlugTaken(ctx context.Context, slug Slug, except shared.UUID) (bool, error)
+	SlugTaken(ctx context.Context, slug string, except shared.UUID) (bool, error)
 	// NextSortOrder returns the position after the last preset.
 	NextSortOrder(ctx context.Context) (int, error)
 	// Create inserts a preset (ErrSlugTaken on a duplicate slug).

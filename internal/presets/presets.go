@@ -58,13 +58,13 @@ func (r *Presets) List(ctx context.Context) ([]*Preset, error) {
 }
 
 // SlugTaken implements Repository.
-func (r *Presets) SlugTaken(ctx context.Context, slug Slug, except shared.UUID) (bool, error) {
+func (r *Presets) SlugTaken(ctx context.Context, slug string, except shared.UUID) (bool, error) {
 	id := []byte{}
 	if !except.IsZero() {
 		id = except.Bytes()
 	}
 
-	n, err := sqlc.New(r.db.Reader(ctx)).PresetSlugTaken(ctx, sqlc.PresetSlugTakenParams{Slug: slug.String(), ID: id})
+	n, err := sqlc.New(r.db.Reader(ctx)).PresetSlugTaken(ctx, sqlc.PresetSlugTakenParams{Slug: slug, ID: id})
 	if err != nil {
 		return false, fmt.Errorf("check preset slug: %w", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -36,7 +37,7 @@ type Transactor interface {
 type Clock func() time.Time
 
 type scheduled struct {
-	name  Name
+	name  string
 	job   Job
 	every time.Duration
 	lock  *sync.Mutex
@@ -63,16 +64,16 @@ func NewScheduler(repo Repository, tx Transactor, now Clock, logger *slog.Logger
 // Register adds a job run every period. It panics on an invalid or
 // duplicate name (a wiring defect).
 func (s *Scheduler) Register(job Job, every time.Duration) {
-	name := MustName(job.Name())
+	name := job.Name()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, dup := s.jobs[name.String()]; dup || every <= 0 {
+	if _, dup := s.jobs[name]; dup || every <= 0 || !validJobName(name) {
 		panic(fmt.Sprintf("jobs: invalid registration of %s", name))
 	}
 
-	s.jobs[name.String()] = scheduled{name: name, job: job, every: every, lock: &sync.Mutex{}}
+	s.jobs[name] = scheduled{name: name, job: job, every: every, lock: &sync.Mutex{}}
 }
 
 // Run runs every job at start, then on its period, until ctx is done. It is
@@ -88,7 +89,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 	for _, j := range jobs {
 		if err := s.abandon(ctx, j.name); err != nil {
-			s.logger.ErrorContext(ctx, "end interrupted job run", slog.String("job", j.name.String()), slog.Any("error", err))
+			s.logger.ErrorContext(ctx, "end interrupted job run", slog.String("job", j.name), slog.Any("error", err))
 		}
 	}
 
@@ -102,7 +103,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 			for {
 				_, err := s.run(ctx, j)
 				if err != nil && !errors.Is(err, ErrJobRunning) && ctx.Err() == nil {
-					s.logger.ErrorContext(ctx, "job failed", slog.String("job", j.name.String()), slog.Any("error", err))
+					s.logger.ErrorContext(ctx, "job failed", slog.String("job", j.name), slog.Any("error", err))
 				}
 
 				select {
@@ -135,18 +136,17 @@ func (s *Scheduler) RunNow(ctx context.Context, name string) (int64, error) {
 // LastRun returns the bookkeeping of a job (a run that never happened when
 // the job never ran).
 func (s *Scheduler) LastRun(ctx context.Context, name string) (*Run, error) {
-	n, err := NewName(name)
-	if err != nil {
-		return nil, err
+	if !validJobName(name) {
+		return nil, ErrInvalidJobName.WithDetail("invalid job name " + strconv.Quote(name))
 	}
 
-	r, err := s.repo.Get(ctx, n)
+	r, err := s.repo.Get(ctx, name)
 	if err != nil {
 		return nil, err
 	}
 
 	if r == nil {
-		r = NewRun(n)
+		r = NewRun(name)
 	}
 
 	return r, nil
@@ -154,14 +154,14 @@ func (s *Scheduler) LastRun(ctx context.Context, name string) (*Run, error) {
 
 // abandon ends the run of a job left in progress by a previous hub process
 // (the hub is the only process running jobs).
-func (s *Scheduler) abandon(ctx context.Context, name Name) error {
+func (s *Scheduler) abandon(ctx context.Context, name string) error {
 	return s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		r, err := s.repo.Get(ctx, name)
 		if err != nil || r == nil || !r.Abandon(s.now()) {
 			return err
 		}
 
-		s.logger.WarnContext(ctx, "job run interrupted by a hub stop", slog.String("job", name.String()))
+		s.logger.WarnContext(ctx, "job run interrupted by a hub stop", slog.String("job", name))
 
 		return s.repo.Save(ctx, r)
 	})
@@ -170,9 +170,9 @@ func (s *Scheduler) abandon(ctx context.Context, name Name) error {
 // run takes the job's run atomically, runs it and records the outcome.
 func (s *Scheduler) run(ctx context.Context, j scheduled) (int64, error) {
 	if !j.lock.TryLock() {
-		s.logger.DebugContext(ctx, "job already running, skipped", slog.String("job", j.name.String()))
+		s.logger.DebugContext(ctx, "job already running, skipped", slog.String("job", j.name))
 
-		return 0, ErrJobRunning.WithDetail("job " + j.name.String() + " is already running")
+		return 0, ErrJobRunning.WithDetail("job " + j.name + " is already running")
 	}
 	defer j.lock.Unlock()
 
@@ -197,7 +197,7 @@ func (s *Scheduler) run(ctx context.Context, j scheduled) (int64, error) {
 		return s.repo.Save(ctx, r)
 	})
 	if errors.Is(err, ErrJobRunning) {
-		s.logger.DebugContext(ctx, "job already running, skipped", slog.String("job", j.name.String()))
+		s.logger.DebugContext(ctx, "job already running, skipped", slog.String("job", j.name))
 
 		return 0, err
 	}
@@ -225,7 +225,7 @@ func (s *Scheduler) run(ctx context.Context, j scheduled) (int64, error) {
 		level = slog.LevelInfo
 	}
 
-	s.logger.LogAttrs(ctx, level, "job done", slog.String("job", j.name.String()),
+	s.logger.LogAttrs(ctx, level, "job done", slog.String("job", j.name),
 		slog.Int64("rows", rows), slog.Duration("duration", s.now().Sub(start)))
 
 	return rows, nil

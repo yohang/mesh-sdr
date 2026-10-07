@@ -160,7 +160,7 @@ func TestSchedulerEndsInterruptedRuns(t *testing.T) {
 	c := &clock{now: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)}
 	repo := jobs.NewRuns(a)
 
-	r := jobs.NewRun(jobs.MustName("test.start"))
+	r := jobs.NewRun("test.start")
 	_ = r.Start(c.Now(), time.Hour)
 	_ = repo.Save(ctx, r)
 

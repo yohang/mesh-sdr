@@ -44,9 +44,9 @@ func apiUUID(u shared.UUID) openapi_types.UUID {
 
 func presetDTO(p *presets.Preset) Preset {
 	out := Preset{
-		Id: apiUUID(p.ID()), Slug: p.Slug().String(), Name: p.Name().String(), Description: optString(p.Description()),
-		Tags: p.Tags().Values(), CenterFreq: p.CenterFreq(), SampRate: p.SampRate(), StartFreq: p.StartFreq(),
-		StartMod: p.StartMod().String(), TuningStep: p.TuningStep(), SortOrder: p.SortOrder(), CreatedAt: p.CreatedAt(),
+		Id: apiUUID(p.ID()), Slug: p.Slug(), Name: p.Name(), Description: optString(p.Description()),
+		Tags: p.Tags(), CenterFreq: p.CenterFreq(), SampRate: p.SampRate(), StartFreq: p.StartFreq(),
+		StartMod: p.StartMod(), TuningStep: p.TuningStep(), SortOrder: p.SortOrder(), CreatedAt: p.CreatedAt(),
 		UpdatedAt: p.UpdatedAt(), Version: p.Version(),
 	}
 

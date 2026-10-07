@@ -35,7 +35,7 @@ func Run(t *testing.T, open Factory) {
 			t.Fatalf("list = %v, %v", rows, err)
 		}
 
-		got, err := f.Settings.Get(ctx, domain.MustKey("ui.theme_mode"))
+		got, err := f.Settings.Get(ctx, "ui.theme_mode")
 		if err != nil || got != nil {
 			t.Fatalf("get = %v, %v", got, err)
 		}
@@ -48,7 +48,7 @@ func Run(t *testing.T, open Factory) {
 	t.Run("save, replace, delete", func(t *testing.T) {
 		f := open(t)
 		ctx := context.Background()
-		key := domain.MustKey("receiver.gps")
+		key := "receiver.gps"
 
 		rev, err := f.Settings.NextRevision(ctx)
 		if err != nil || rev != 1 {
@@ -114,7 +114,7 @@ func Run(t *testing.T, open Factory) {
 				t.Fatal(err)
 			}
 
-			s, _ := domain.NewSetting(domain.MustKey("listen_policy"), domain.MustValue(`"registered"`), rev, shared.UUID{}, t0)
+			s, _ := domain.NewSetting("listen_policy", domain.MustValue(`"registered"`), rev, shared.UUID{}, t0)
 			if err := f.Settings.Save(ctx, s); err != nil {
 				t.Fatal(err)
 			}

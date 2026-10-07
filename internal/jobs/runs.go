@@ -39,8 +39,8 @@ func nullString(s string) sql.NullString { return sql.NullString{String: s, Vali
 
 // Get implements Repository. It reads through the writer inside a
 // transaction (the start of a run is a read-modify-write).
-func (r *Runs) Get(ctx context.Context, name Name) (*Run, error) {
-	row, err := sqlc.New(r.db.Reader(ctx)).GetJobRun(ctx, name.String())
+func (r *Runs) Get(ctx context.Context, name string) (*Run, error) {
+	row, err := sqlc.New(r.db.Reader(ctx)).GetJobRun(ctx, name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil //nolint:nilnil // never ran
 	}
@@ -63,7 +63,7 @@ func (r *Runs) Get(ctx context.Context, name Name) (*Run, error) {
 // Save implements Repository.
 func (r *Runs) Save(ctx context.Context, run *Run) error {
 	err := sqlc.New(r.db.Writer(ctx)).UpsertJobRun(ctx, sqlc.UpsertJobRunParams{
-		Job:            run.Name().String(),
+		Job:            run.Name(),
 		RunningSince:   nullMS(run.RunningSince()),
 		LastStartedAt:  nullMS(run.LastStarted()),
 		LastFinishedAt: nullMS(run.LastFinished()),

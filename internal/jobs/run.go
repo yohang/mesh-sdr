@@ -19,30 +19,9 @@ var (
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
 
-// Name is a job name: a dotted verb such as "sessions.reap".
-type Name struct{ value string }
-
-// NewName validates a name (at most 64 characters, `job_runs.job`).
-func NewName(s string) (Name, error) {
-	if len(s) > 64 || !namePattern.MatchString(s) {
-		return Name{}, ErrInvalidJobName.WithDetail("invalid job name " + strconv.Quote(s))
-	}
-
-	return Name{value: s}, nil
-}
-
-// MustName is NewName that panics. Constants and tests only.
-func MustName(s string) Name {
-	n, err := NewName(s)
-	if err != nil {
-		panic(err)
-	}
-
-	return n
-}
-
-// String returns the name.
-func (n Name) String() string { return n.value }
+// validJobName reports whether s is a job name: a dotted verb such as
+// "sessions.reap", at most 64 characters (`job_runs.job`).
+func validJobName(s string) bool { return len(s) <= 64 && namePattern.MatchString(s) }
 
 // Status is the outcome of the last finished run.
 type Status string
@@ -60,7 +39,7 @@ const maxErrorLength = 512
 // Run is the bookkeeping of one job (a `job_runs` row): whether it runs
 // now, and the outcome of its last run.
 type Run struct {
-	name         Name
+	name         string
 	runningSince time.Time
 	lastStarted  time.Time
 	lastFinished time.Time
@@ -70,7 +49,7 @@ type Run struct {
 }
 
 // NewRun returns the bookkeeping of a job that never ran.
-func NewRun(name Name) *Run { return &Run{name: name} }
+func NewRun(name string) *Run { return &Run{name: name} }
 
 // RunState holds the persisted fields of a run (rehydration).
 type RunState struct {
@@ -81,7 +60,7 @@ type RunState struct {
 }
 
 // RehydrateRun rebuilds a run from its persisted state.
-func RehydrateRun(name Name, s RunState) (*Run, error) {
+func RehydrateRun(name string, s RunState) (*Run, error) {
 	if s.Status != StatusNone && s.Status != StatusOK && s.Status != StatusError {
 		return nil, ErrInvalidJobRun.WithDetail("invalid status " + strconv.Quote(string(s.Status)))
 	}
@@ -97,7 +76,7 @@ func RehydrateRun(name Name, s RunState) (*Run, error) {
 // (the process stopped during the run).
 func (r *Run) Start(now time.Time, staleAfter time.Duration) error {
 	if !r.runningSince.IsZero() && now.Sub(r.runningSince) < staleAfter {
-		return ErrJobRunning.WithDetail("job " + r.name.value + " is already running")
+		return ErrJobRunning.WithDetail("job " + r.name + " is already running")
 	}
 
 	r.runningSince, r.lastStarted = now.UTC(), now.UTC()
@@ -144,7 +123,7 @@ func truncate(s string, n int) string {
 }
 
 // Name returns the job name.
-func (r *Run) Name() Name { return r.name }
+func (r *Run) Name() string { return r.name }
 
 // Running reports whether a run is in progress.
 func (r *Run) Running() bool { return !r.runningSince.IsZero() }
@@ -170,6 +149,6 @@ func (r *Run) Rows() int64 { return r.rows }
 // Repository persists runs. Writes join the caller's transaction.
 type Repository interface {
 	// Get returns the run of name, or nil when the job never ran.
-	Get(ctx context.Context, name Name) (*Run, error)
+	Get(ctx context.Context, name string) (*Run, error)
 	Save(ctx context.Context, r *Run) error
 }

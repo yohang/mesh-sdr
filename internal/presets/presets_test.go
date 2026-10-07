@@ -102,7 +102,7 @@ func TestPresets(t *testing.T) {
 		t.Errorf("stale update: %v", err)
 	}
 
-	if again, err := repo.Get(ctx, a.ID()); err != nil || again.Name().String() != "Renamed" || again.Version() != 2 {
+	if again, err := repo.Get(ctx, a.ID()); err != nil || again.Name() != "Renamed" || again.Version() != 2 {
 		t.Errorf("updated = %v, %v", again, err)
 	}
 

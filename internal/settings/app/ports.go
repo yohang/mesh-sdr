@@ -20,10 +20,10 @@ import (
 // config sets (locked) and the shared validator.
 type Catalog interface {
 	Definitions() []domain.Definition
-	Configured(key domain.Key) (domain.Configured, bool)
+	Configured(key string) (domain.Configured, bool)
 	// Validate checks a value of key and returns its Go value, or an error
 	// matching domain.ErrUnknownSetting or domain.ErrInvalidSetting.
-	Validate(key domain.Key, v domain.Value) (any, error)
+	Validate(key string, v domain.Value) (any, error)
 	// Check runs the checks across keys on effective Go values.
 	Check(get func(key string) (any, bool)) []shared.Violation
 	// Schema returns the JSON Schema of the settings namespace.

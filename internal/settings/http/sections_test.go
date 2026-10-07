@@ -28,11 +28,11 @@ func TestEverySettingHasASection(t *testing.T) {
 	}
 
 	for _, d := range cat.Definitions() {
-		if _, ok := seen[d.Key().String()]; !ok {
+		if _, ok := seen[d.Key()]; !ok {
 			t.Errorf("setting %s is on no admin page", d.Key())
 		}
 
-		delete(seen, d.Key().String())
+		delete(seen, d.Key())
 	}
 
 	for k := range seen {

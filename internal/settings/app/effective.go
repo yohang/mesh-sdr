@@ -83,7 +83,7 @@ func (c *EffectiveConfig) View() ConfigView {
 
 	for _, s := range snap.All() {
 		d := s.Definition()
-		e := ConfigEntry{Key: s.Key().ConfigKey(), Class: ClassDB, Source: s.Source(), Origin: s.Origin(), Locked: s.Locked(), Secret: d.Secret()}
+		e := ConfigEntry{Key: domain.ConfigKey(s.Key()), Class: ClassDB, Source: s.Source(), Origin: s.Origin(), Locked: s.Locked(), Secret: d.Secret()}
 
 		if d.Secret() {
 			e.Set = s.IsSet()

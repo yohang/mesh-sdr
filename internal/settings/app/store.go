@@ -88,15 +88,15 @@ func (s *Store) Load(ctx context.Context) error {
 
 	for _, ig := range ignored {
 		if errors.Is(ig.err, domain.ErrUnknownSetting) {
-			s.logger.WarnContext(ctx, "DB setting with an unknown key ignored", slog.String("key", ig.row.Key().String()))
+			s.logger.WarnContext(ctx, "DB setting with an unknown key ignored", slog.String("key", ig.row.Key()))
 
 			continue
 		}
 
 		s.logger.WarnContext(ctx, "invalid DB setting ignored, the default applies",
-			slog.String("key", ig.row.Key().String()), slog.Any("error", ig.err))
+			slog.String("key", ig.row.Key()), slog.Any("error", ig.err))
 
-		rec := record(ActionIgnored, ig.row.Key().String(), audit.ResultOK, ig.row.Value().String(), "")
+		rec := record(ActionIgnored, ig.row.Key(), audit.ResultOK, ig.row.Value().String(), "")
 		rec.Actor = audit.System
 
 		if err := s.audit.Append(ctx, rec); err != nil {
@@ -137,13 +137,13 @@ func (s *Store) read(ctx context.Context) (*Snapshot, []ignoredRow, error) {
 			continue
 		}
 
-		valid[r.Key().String()] = r
+		valid[r.Key()] = r
 	}
 
 	invalid := func() map[string]*domain.Setting {
 		m := map[string]*domain.Setting{}
 		for _, ig := range ignored {
-			m[ig.row.Key().String()] = ig.row
+			m[ig.row.Key()] = ig.row
 		}
 
 		return m
@@ -184,15 +184,15 @@ func (s *Store) resolve(rev int64, rows, ignored map[string]*domain.Setting) *Sn
 			cfg = &c
 		}
 
-		e := domain.Resolve(d, cfg, rows[d.Key().String()])
-		if ig, ok := ignored[d.Key().String()]; ok && rows[d.Key().String()] == nil {
+		e := domain.Resolve(d, cfg, rows[d.Key()])
+		if ig, ok := ignored[d.Key()]; ok && rows[d.Key()] == nil {
 			e = domain.ResolveIgnoring(d, cfg, ig)
 		}
 		entries = append(entries, e)
 
 		if !e.Value().IsNull() {
 			if v, err := s.catalog.Validate(d.Key(), e.Value()); err == nil {
-				typed[d.Key().String()] = v
+				typed[d.Key()] = v
 			}
 		}
 	}
@@ -228,8 +228,8 @@ func (s *Store) apply(ctx context.Context, by shared.UUID, set domain.ChangeSet)
 
 	prospective := map[string]any{}
 	for _, e := range cur.All() {
-		if t := cur.Typed(e.Key().String()); t != nil {
-			prospective[e.Key().String()] = t
+		if t := cur.Typed(e.Key()); t != nil {
+			prospective[e.Key()] = t
 		}
 	}
 
@@ -239,7 +239,7 @@ func (s *Store) apply(ctx context.Context, by shared.UUID, set domain.ChangeSet)
 	)
 
 	for _, c := range changes {
-		key := c.Key().String()
+		key := c.Key()
 
 		e, ok := cur.Get(key)
 		if !ok {
@@ -302,7 +302,7 @@ func (s *Store) apply(ctx context.Context, by shared.UUID, set domain.ChangeSet)
 	}
 
 	for _, ig := range ignored {
-		s.logger.WarnContext(ctx, "invalid DB setting ignored", slog.String("key", ig.row.Key().String()), slog.Any("error", ig.err))
+		s.logger.WarnContext(ctx, "invalid DB setting ignored", slog.String("key", ig.row.Key()), slog.Any("error", ig.err))
 	}
 
 	s.snap.Store(snap)
@@ -327,13 +327,13 @@ func violationsOf(key string, err error) []shared.Violation {
 func (s *Store) denyLocked(ctx context.Context, changes []domain.Change, locked []domain.Effective) error {
 	byKey := map[string]domain.Change{}
 	for _, c := range changes {
-		byKey[c.Key().String()] = c
+		byKey[c.Key()] = c
 	}
 
 	var origins []string
 
 	for _, e := range locked {
-		c := byKey[e.Key().String()]
+		c := byKey[e.Key()]
 		action, after := ActionUpdate, ""
 
 		if v, ok := c.Value(); ok {
@@ -342,12 +342,12 @@ func (s *Store) denyLocked(ctx context.Context, changes []domain.Change, locked 
 			action = ActionReset
 		}
 
-		rec := record(action, e.Key().String(), audit.ResultDenied, mask(e.Definition(), e.Value()), after)
+		rec := record(action, e.Key(), audit.ResultDenied, mask(e.Definition(), e.Value()), after)
 		if err := s.audit.Append(ctx, rec); err != nil {
 			return fmt.Errorf("audit denied setting write: %w", err)
 		}
 
-		origins = append(origins, e.Key().String()+" is set in "+e.Origin())
+		origins = append(origins, e.Key()+" is set in "+e.Origin())
 	}
 
 	return domain.ErrSettingLocked.WithDetail(strings.Join(origins, "; "))
@@ -380,7 +380,7 @@ func (s *Store) write(ctx context.Context, by shared.UUID, cur *Snapshot, change
 		}
 
 		if have != c.Expected() {
-			conflicts = append(conflicts, shared.NewViolation(c.Key().String(), domain.ErrVersionConflict.Code(),
+			conflicts = append(conflicts, shared.NewViolation(c.Key(), domain.ErrVersionConflict.Code(),
 				"current version "+strconv.FormatInt(have, 10)))
 		}
 
@@ -400,7 +400,7 @@ func (s *Store) write(ctx context.Context, by shared.UUID, cur *Snapshot, change
 
 	for i, c := range changes {
 		row := rows[i]
-		e, _ := cur.Get(c.Key().String())
+		e, _ := cur.Get(c.Key())
 		def := e.Definition()
 
 		var before, after, action string
@@ -439,7 +439,7 @@ func (s *Store) write(ctx context.Context, by shared.UUID, cur *Snapshot, change
 			action, after = ActionUpdate, mask(def, v)
 		}
 
-		if err := s.audit.Append(ctx, record(action, c.Key().String(), audit.ResultOK, before, after)); err != nil {
+		if err := s.audit.Append(ctx, record(action, c.Key(), audit.ResultOK, before, after)); err != nil {
 			return fmt.Errorf("audit setting %s: %w", c.Key(), err)
 		}
 	}

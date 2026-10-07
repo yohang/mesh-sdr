@@ -13,7 +13,7 @@ import (
 func TestRuns(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	name := jobs.MustName("sessions.reap")
+	name := "sessions.reap"
 
 	repo := jobs.NewRuns(dbtest.NewSQLite(t))
 

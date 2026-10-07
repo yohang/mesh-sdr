@@ -29,7 +29,7 @@ func TestSettingsDefaultsAreValid(t *testing.T) {
 			t.Errorf("default of %s (%s): %v", d.Key(), d.Default(), err)
 		}
 
-		values[d.Key().String()] = v
+		values[d.Key()] = v
 	}
 
 	if vs := cat.Check(func(k string) (any, bool) { v, ok := values[k]; return v, ok }); len(vs) > 0 {
@@ -180,19 +180,19 @@ func TestSettingsCatalog(t *testing.T) {
 		"receiver.gps":  {Value: settingsdomain.MustValue(`{"lat":50.5,"lon":3}`), Origin: "hub.toml"},
 		"ui.theme_mode": {Value: settingsdomain.MustValue(`"dark"`), Origin: "env:MESHSDR_SETTINGS__UI__THEME_MODE"},
 	} {
-		got, ok := cat.Configured(settingsdomain.MustKey(key))
+		got, ok := cat.Configured(key)
 		if !ok || !got.Value.Equal(want.Value) || got.Origin != want.Origin {
 			t.Errorf("%s = %+v %v, want %+v", key, got, ok, want)
 		}
 	}
 
-	if _, ok := cat.Configured(settingsdomain.MustKey("ui.shortcut_set")); ok {
+	if _, ok := cat.Configured("ui.shortcut_set"); ok {
 		t.Error("ui.shortcut_set is not set in the config")
 	}
 
 	kinds := map[string]settingsdomain.InputKind{}
 	for _, d := range cat.Definitions() {
-		kinds[d.Key().String()] = d.Input().Kind
+		kinds[d.Key()] = d.Input().Kind
 	}
 
 	for key, want := range map[string]settingsdomain.InputKind{

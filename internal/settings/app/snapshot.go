@@ -19,7 +19,7 @@ type Snapshot struct {
 func newSnapshot(revision int64, entries []domain.Effective, typed map[string]any) *Snapshot {
 	s := &Snapshot{revision: revision, entries: entries, index: make(map[string]int, len(entries)), typed: typed}
 	for i, e := range entries {
-		s.index[e.Key().String()] = i
+		s.index[e.Key()] = i
 	}
 
 	return s

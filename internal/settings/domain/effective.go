@@ -74,7 +74,7 @@ func ResolveIgnoring(def Definition, cfg *Configured, ignored *Setting) Effectiv
 func (e Effective) Definition() Definition { return e.def }
 
 // Key returns the key.
-func (e Effective) Key() Key { return e.def.Key() }
+func (e Effective) Key() string { return e.def.Key() }
 
 // Value returns the effective value. Callers that expose it must mask
 // secrets (Definition.Secret).
@@ -108,21 +108,21 @@ func (e Effective) IsSet() bool { return !e.value.IsNull() }
 // Change is one key of a write: a new value, or a reset to the default
 // (nil value), with the version the writer last saw (0: no DB row).
 type Change struct {
-	key      Key
+	key      string
 	value    *Value
 	expected int64
 }
 
 // SetTo returns a change writing value.
-func SetTo(key Key, value Value, expected int64) Change {
+func SetTo(key string, value Value, expected int64) Change {
 	return Change{key: key, value: &value, expected: expected}
 }
 
 // ResetTo returns a change deleting the DB value of key.
-func ResetTo(key Key, expected int64) Change { return Change{key: key, expected: expected} }
+func ResetTo(key string, expected int64) Change { return Change{key: key, expected: expected} }
 
 // Key returns the key.
-func (c Change) Key() Key { return c.key }
+func (c Change) Key() string { return c.key }
 
 // Value returns the new value; ok is false for a reset.
 func (c Change) Value() (Value, bool) {
@@ -151,15 +151,15 @@ func NewChangeSet(changes ...Change) (ChangeSet, error) {
 	seen := map[string]bool{}
 
 	for _, c := range changes {
-		if c.key.IsZero() || c.expected < 0 {
+		if c.key == "" || c.expected < 0 {
 			return ChangeSet{}, ErrInvalidSetting.WithDetail("invalid change")
 		}
 
-		if seen[c.key.String()] {
-			return ChangeSet{}, ErrInvalidSetting.WithDetail("duplicate key " + strconv.Quote(c.key.String()))
+		if seen[c.key] {
+			return ChangeSet{}, ErrInvalidSetting.WithDetail("duplicate key " + strconv.Quote(c.key))
 		}
 
-		seen[c.key.String()] = true
+		seen[c.key] = true
 	}
 
 	return ChangeSet{changes: slices.Clone(changes)}, nil

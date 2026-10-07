@@ -103,7 +103,7 @@ func newField(e domain.Effective) field {
 	in := d.Input()
 
 	f := field{
-		Key: e.Key().String(), ID: fieldID(e.Key().String()), Label: d.Label(), Help: d.Description(),
+		Key: e.Key(), ID: fieldID(e.Key()), Label: d.Label(), Help: d.Description(),
 		Kind: in.Kind, Options: in.Options, MaxLen: in.MaxLength, MinText: in.MinText,
 		Version: e.Version(), Locked: e.Locked(), Origin: e.Origin(), Source: e.Source(),
 		Secret: d.Secret(), Set: e.IsSet(),
@@ -277,8 +277,8 @@ func parseSection(view sectionView, snap *app.Snapshot, form url.Values) (sectio
 
 		e, _ := snap.Get(f.Key)
 
-		key, err := domain.NewKey(f.Key)
-		if err != nil {
+		key := f.Key
+		if !domain.ValidKey(key) {
 			continue
 		}
 

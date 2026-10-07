@@ -45,7 +45,7 @@ func TestNewSpecDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if p.StartFreq() != 14_074_000 || p.StartMod().String() != "nfm" || p.TuningStep() != 1000 || p.Slug().String() != "20-m-ft8" ||
+	if p.StartFreq() != 14_074_000 || p.StartMod() != "nfm" || p.TuningStep() != 1000 || p.Slug() != "20-m-ft8" ||
 		p.Version() != 1 {
 		t.Errorf("preset = %+v", p.Snapshot())
 	}
@@ -118,7 +118,7 @@ func TestReplace(t *testing.T) {
 	}
 
 	// A derived slug never changes the URL of an existing preset.
-	if p.Name().String() != "Renamed" || p.Slug().String() != "20-m-ft8" || p.Version() != 2 || !p.UpdatedAt().Equal(t0.Add(time.Minute)) {
+	if p.Name() != "Renamed" || p.Slug() != "20-m-ft8" || p.Version() != 2 || !p.UpdatedAt().Equal(t0.Add(time.Minute)) {
 		t.Errorf("replaced = %+v", p.Snapshot())
 	}
 
@@ -130,13 +130,13 @@ func TestReplace(t *testing.T) {
 
 func TestSlugs(t *testing.T) {
 	for in, want := range map[string]string{"  Hello, World! ": "hello-world", "!!!": "preset", "Émetteur 2": "metteur-2"} {
-		if got := presets.Slugify(in).String(); got != want {
+		if got := presets.Slugify(in); got != want {
 			t.Errorf("Slugify(%q) = %q, want %q", in, got, want)
 		}
 	}
 
 	long := presets.Slugify("a123456789b123456789c123456789d123456789e123456789f123456789g123")
-	if s := long.WithSuffix(12).String(); len(s) > 64 || s[len(s)-3:] != "-12" {
+	if s := presets.SlugWithSuffix(long, 12); len(s) > 64 || s[len(s)-3:] != "-12" {
 		t.Errorf("suffixed = %q", s)
 	}
 }

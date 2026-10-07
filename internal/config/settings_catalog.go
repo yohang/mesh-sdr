@@ -74,10 +74,7 @@ func NewSettingsCatalog(cfg Hub, origins Origins) (*SettingsCatalog, error) {
 }
 
 func definition(sl *settingLeaf, def any) (settingsdomain.Definition, error) {
-	key, err := settingsdomain.NewKey(sl.key)
-	if err != nil {
-		return settingsdomain.Definition{}, err
-	}
+	key := sl.key
 
 	dv, err := settingsdomain.ValueOf(def)
 	if err != nil {
@@ -183,15 +180,15 @@ func (c *SettingsCatalog) Definitions() []settingsdomain.Definition { return sli
 
 // Configured returns the value the hub config sets for key, if any (a
 // secret's value stays empty).
-func (c *SettingsCatalog) Configured(key settingsdomain.Key) (settingsdomain.Configured, bool) {
-	v, ok := c.configured[key.String()]
+func (c *SettingsCatalog) Configured(key string) (settingsdomain.Configured, bool) {
+	v, ok := c.configured[key]
 
 	return v, ok
 }
 
 // Validate checks a value of key (ValidateSetting) and returns its Go value.
-func (c *SettingsCatalog) Validate(key settingsdomain.Key, v settingsdomain.Value) (any, error) {
-	return ValidateSetting(key.String(), v.JSON())
+func (c *SettingsCatalog) Validate(key string, v settingsdomain.Value) (any, error) {
+	return ValidateSetting(key, v.JSON())
 }
 
 // Check runs the checks across keys on the effective Go values.

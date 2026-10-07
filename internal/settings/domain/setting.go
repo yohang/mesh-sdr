@@ -12,7 +12,7 @@ import (
 // revision of its last write, so a version is never reused, even after the
 // key was reset (the row deleted) and written again.
 type Setting struct {
-	key       Key
+	key       string
 	value     Value
 	version   int64
 	updatedBy shared.UUID
@@ -21,8 +21,8 @@ type Setting struct {
 
 // NewSetting returns a setting written at revision by a user (zero UUID when
 // unknown).
-func NewSetting(key Key, value Value, revision int64, by shared.UUID, at time.Time) (*Setting, error) {
-	if key.IsZero() || value.IsNull() || revision < 1 || at.IsZero() {
+func NewSetting(key string, value Value, revision int64, by shared.UUID, at time.Time) (*Setting, error) {
+	if !ValidKey(key) || value.IsNull() || revision < 1 || at.IsZero() {
 		return nil, ErrInvalidSettingRow
 	}
 
@@ -41,7 +41,7 @@ func (s *Setting) Replace(value Value, revision int64, by shared.UUID, at time.T
 }
 
 // Key returns the key.
-func (s *Setting) Key() Key { return s.key }
+func (s *Setting) Key() string { return s.key }
 
 // Value returns the stored value.
 func (s *Setting) Value() Value { return s.value }
@@ -60,11 +60,11 @@ type Repository interface {
 	// List returns every row, keys the schema no longer defines included.
 	List(ctx context.Context) ([]*Setting, error)
 	// Get returns the row of key, or nil when there is none.
-	Get(ctx context.Context, key Key) (*Setting, error)
+	Get(ctx context.Context, key string) (*Setting, error)
 	// Save inserts or replaces the row of s.
 	Save(ctx context.Context, s *Setting) error
 	// Delete removes the row of key (no error when there is none).
-	Delete(ctx context.Context, key Key) error
+	Delete(ctx context.Context, key string) error
 	// NextRevision increments and returns the settings revision.
 	NextRevision(ctx context.Context) (int64, error)
 	// Revision returns the current settings revision.

@@ -163,7 +163,7 @@ func (s *Service) uniqueSlug(ctx context.Context, spec Spec, except shared.UUID)
 		}
 
 		base, _ := spec.Slug()
-		slug = base.WithSuffix(n)
+		slug = SlugWithSuffix(base, n)
 	}
 }
 

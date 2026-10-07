@@ -40,8 +40,8 @@ func (r *memRepo) List(context.Context) ([]*domain.Setting, error) {
 	return out, nil
 }
 
-func (r *memRepo) Get(_ context.Context, k domain.Key) (*domain.Setting, error) {
-	s, ok := r.rows[k.String()]
+func (r *memRepo) Get(_ context.Context, k string) (*domain.Setting, error) {
+	s, ok := r.rows[k]
 	if !ok {
 		return nil, nil //nolint:nilnil // no row
 	}
@@ -53,13 +53,13 @@ func (r *memRepo) Get(_ context.Context, k domain.Key) (*domain.Setting, error) 
 
 func (r *memRepo) Save(_ context.Context, s *domain.Setting) error {
 	c := *s
-	r.rows[s.Key().String()] = &c
+	r.rows[s.Key()] = &c
 
 	return nil
 }
 
-func (r *memRepo) Delete(_ context.Context, k domain.Key) error {
-	delete(r.rows, k.String())
+func (r *memRepo) Delete(_ context.Context, k string) error {
+	delete(r.rows, k)
 
 	return nil
 }
@@ -149,7 +149,7 @@ func set(t *testing.T, kv ...any) domain.ChangeSet {
 	var changes []domain.Change
 
 	for i := 0; i < len(kv); i += 3 {
-		k := domain.MustKey(kv[i].(string))
+		k := kv[i].(string)
 		version := int64(kv[i+2].(int))
 
 		if kv[i+1] == nil {
@@ -379,7 +379,7 @@ func TestStoreLoadIgnoresInvalidRows(t *testing.T) {
 		"retired.key":              `true`,
 		"auth.password_min_length": `12`,
 	} {
-		s, _ := domain.NewSetting(domain.MustKey(key), domain.MustValue(raw), 1, shared.UUID{}, t0)
+		s, _ := domain.NewSetting(key, domain.MustValue(raw), 1, shared.UUID{}, t0)
 		_ = f.repo.Save(ctx, s)
 	}
 
@@ -419,7 +419,7 @@ func TestStoreFixesAnIgnoredRow(t *testing.T) {
 	f := newFixture(t, nil)
 	ctx := context.Background()
 
-	row, _ := domain.NewSetting(domain.MustKey("ui.shortcut_set"), domain.MustValue(`"vim"`), 4, shared.UUID{}, t0)
+	row, _ := domain.NewSetting("ui.shortcut_set", domain.MustValue(`"vim"`), 4, shared.UUID{}, t0)
 	_ = f.repo.Save(ctx, row)
 	f.repo.rev = 4
 
@@ -441,7 +441,7 @@ func TestStoreFixesAnIgnoredRow(t *testing.T) {
 		t.Errorf("after the fix = %s %s", e.Value(), e.Source())
 	}
 
-	row, _ = domain.NewSetting(domain.MustKey("ui.theme_mode"), domain.MustValue(`"sepia"`), 6, shared.UUID{}, t0)
+	row, _ = domain.NewSetting("ui.theme_mode", domain.MustValue(`"sepia"`), 6, shared.UUID{}, t0)
 	_ = f.repo.Save(ctx, row)
 	f.repo.rev = 6
 	_ = f.store.Load(ctx)

@@ -69,7 +69,7 @@ func TestCreateReplaceDelete(t *testing.T) {
 	}
 
 	// A derived slug is made unique; an explicit one is refused.
-	if a.Slug().String() != "air-band" || b.Slug().String() != "air-band-2" || b.SortOrder() != 1 {
+	if a.Slug() != "air-band" || b.Slug() != "air-band-2" || b.SortOrder() != 1 {
 		t.Errorf("slugs = %s %s, order %d", a.Slug(), b.Slug(), b.SortOrder())
 	}
 

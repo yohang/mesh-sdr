@@ -57,7 +57,7 @@ type Input struct {
 
 // Definition is a key of the settings schema: its default, flags and input.
 type Definition struct {
-	key         Key
+	key         string
 	def         Value
 	label       string
 	description string
@@ -69,7 +69,7 @@ type Definition struct {
 
 // DefinitionSpec holds the fields of a definition.
 type DefinitionSpec struct {
-	Key         Key
+	Key         string
 	Default     Value
 	Label       string
 	Description string
@@ -82,12 +82,12 @@ type DefinitionSpec struct {
 // NewDefinition validates a definition. A secret key is never public.
 func NewDefinition(s DefinitionSpec) (Definition, error) {
 	invalid := func(why string) (Definition, error) {
-		return Definition{}, ErrInvalidKey.WithDetail("definition of " + strconv.Quote(s.Key.String()) + ": " + why)
+		return Definition{}, ErrInvalidKey.WithDetail("definition of " + strconv.Quote(s.Key) + ": " + why)
 	}
 
 	switch {
-	case s.Key.IsZero():
-		return invalid("no key")
+	case !ValidKey(s.Key):
+		return invalid("invalid key")
 	case s.Apply != ApplyLive && s.Apply != ApplyRestart:
 		return invalid("invalid x-apply " + strconv.Quote(string(s.Apply)))
 	case !slices.Contains(inputKinds, s.Input.Kind):
@@ -100,7 +100,7 @@ func NewDefinition(s DefinitionSpec) (Definition, error) {
 
 	label := s.Label
 	if label == "" {
-		label = s.Key.String()
+		label = s.Key
 	}
 
 	in := s.Input
@@ -113,7 +113,7 @@ func NewDefinition(s DefinitionSpec) (Definition, error) {
 }
 
 // Key returns the key.
-func (d Definition) Key() Key { return d.key }
+func (d Definition) Key() string { return d.key }
 
 // Default returns the built-in default (JSON null for an optional key).
 func (d Definition) Default() Value { return d.def }

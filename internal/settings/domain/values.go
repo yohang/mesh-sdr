@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"regexp"
-	"strconv"
 )
 
 // MaxKeyLength bounds a key (`settings.key` is STRING(160)).
@@ -12,37 +11,13 @@ const MaxKeyLength = 160
 
 var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`)
 
-// Key is a setting key: the dotted path of the settings schema without the
-// `settings.` prefix of hub.toml ("ui.theme_mode", "listen_policy").
-type Key struct{ value string }
-
-// NewKey validates a key.
-func NewKey(s string) (Key, error) {
-	if len(s) > MaxKeyLength || !keyPattern.MatchString(s) {
-		return Key{}, ErrInvalidKey.WithDetail("invalid setting key " + strconv.Quote(s))
-	}
-
-	return Key{value: s}, nil
-}
-
-// MustKey is NewKey that panics. Constants and tests only.
-func MustKey(s string) Key {
-	k, err := NewKey(s)
-	if err != nil {
-		panic(err)
-	}
-
-	return k
-}
-
-// String returns the dotted key.
-func (k Key) String() string { return k.value }
+// ValidKey reports whether s is a setting key: the dotted path of the
+// settings schema without the `settings.` prefix of hub.toml
+// ("ui.theme_mode", "listen_policy"), at most MaxKeyLength characters.
+func ValidKey(s string) bool { return len(s) <= MaxKeyLength && keyPattern.MatchString(s) }
 
 // ConfigKey returns the key in hub.toml ("settings.ui.theme_mode").
-func (k Key) ConfigKey() string { return "settings." + k.value }
-
-// IsZero reports whether k is the zero value.
-func (k Key) IsZero() bool { return k.value == "" }
+func ConfigKey(key string) string { return "settings." + key }
 
 // Value is a setting value: compact JSON. It holds the value as written
 // (durations keep their units, "30d"), not a re-encoding of the Go type.

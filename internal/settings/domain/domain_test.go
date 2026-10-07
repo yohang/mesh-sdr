@@ -11,19 +11,19 @@ import (
 
 func TestKey(t *testing.T) {
 	for _, ok := range []string{"listen_policy", "ui.theme_mode", "auth.lockout.lock_for"} {
-		if _, err := domain.NewKey(ok); err != nil {
-			t.Errorf("%q rejected: %v", ok, err)
+		if !domain.ValidKey(ok) {
+			t.Errorf("%q rejected", ok)
 		}
 	}
 
 	for _, bad := range []string{"", "UI.theme", "ui..x", ".ui", "ui.", "1ui", "ui.theme-mode", string(make([]byte, 161))} {
-		if _, err := domain.NewKey(bad); !errors.Is(err, domain.ErrInvalidKey) {
-			t.Errorf("%q: err = %v", bad, err)
+		if domain.ValidKey(bad) {
+			t.Errorf("%q accepted", bad)
 		}
 	}
 
-	if k := domain.MustKey("ui.theme_mode"); k.ConfigKey() != "settings.ui.theme_mode" {
-		t.Errorf("config key = %s", k.ConfigKey())
+	if k := domain.ConfigKey("ui.theme_mode"); k != "settings.ui.theme_mode" {
+		t.Errorf("config key = %s", k)
 	}
 }
 
@@ -50,7 +50,7 @@ func definition(t *testing.T) domain.Definition {
 	t.Helper()
 
 	d, err := domain.NewDefinition(domain.DefinitionSpec{
-		Key: domain.MustKey("ui.theme_mode"), Default: domain.MustValue(`"auto"`), Apply: domain.ApplyLive,
+		Key: "ui.theme_mode", Default: domain.MustValue(`"auto"`), Apply: domain.ApplyLive,
 		Input: domain.Input{Kind: domain.InputEnum, Options: []string{"light", "dark", "auto"}},
 	})
 	if err != nil {
@@ -67,10 +67,10 @@ func TestDefinition(t *testing.T) {
 	}
 
 	bad := []domain.DefinitionSpec{
-		{Key: domain.MustKey("a"), Apply: "later", Input: domain.Input{Kind: domain.InputText}},
-		{Key: domain.MustKey("a"), Apply: domain.ApplyLive, Input: domain.Input{Kind: "slider"}},
-		{Key: domain.MustKey("a"), Apply: domain.ApplyLive, Input: domain.Input{Kind: domain.InputEnum}},
-		{Key: domain.MustKey("a"), Apply: domain.ApplyLive, Secret: true, Public: true, Input: domain.Input{Kind: domain.InputText}},
+		{Key: "a", Apply: "later", Input: domain.Input{Kind: domain.InputText}},
+		{Key: "a", Apply: domain.ApplyLive, Input: domain.Input{Kind: "slider"}},
+		{Key: "a", Apply: domain.ApplyLive, Input: domain.Input{Kind: domain.InputEnum}},
+		{Key: "a", Apply: domain.ApplyLive, Secret: true, Public: true, Input: domain.Input{Kind: domain.InputText}},
 		{Apply: domain.ApplyLive, Input: domain.Input{Kind: domain.InputText}},
 	}
 
@@ -84,7 +84,7 @@ func TestDefinition(t *testing.T) {
 var t0 = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 
 func TestSetting(t *testing.T) {
-	k := domain.MustKey("ui.theme_mode")
+	k := "ui.theme_mode"
 
 	s, err := domain.NewSetting(k, domain.MustValue(`"dark"`), 3, shared.UUID{}, t0)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestSetting(t *testing.T) {
 
 	for _, bad := range []func() error{
 		func() error {
-			_, err := domain.NewSetting(domain.Key{}, domain.MustValue("1"), 1, shared.UUID{}, t0)
+			_, err := domain.NewSetting("", domain.MustValue("1"), 1, shared.UUID{}, t0)
 			return err
 		},
 		func() error {
@@ -160,7 +160,7 @@ func TestResolve(t *testing.T) {
 }
 
 func TestChangeSet(t *testing.T) {
-	k := domain.MustKey("ui.theme_mode")
+	k := "ui.theme_mode"
 
 	if _, err := domain.NewChangeSet(); !errors.Is(err, domain.ErrInvalidSetting) {
 		t.Errorf("empty: %v", err)
@@ -170,7 +170,7 @@ func TestChangeSet(t *testing.T) {
 		t.Errorf("duplicate: %v", err)
 	}
 
-	s, err := domain.NewChangeSet(domain.SetTo(k, domain.MustValue(`"dark"`), 2), domain.ResetTo(domain.MustKey("listen_policy"), 0))
+	s, err := domain.NewChangeSet(domain.SetTo(k, domain.MustValue(`"dark"`), 2), domain.ResetTo("listen_policy", 0))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -333,8 +333,8 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 
 func ctlPreset(p *presets.Preset) ctl.Preset {
 	out := ctl.Preset{
-		Name: p.Name().String(), CenterFreq: p.CenterFreq(), SampRate: p.SampRate(), StartFreq: p.StartFreq(),
-		StartMod: p.StartMod().String(), TuningStep: p.TuningStep(),
+		Name: p.Name(), CenterFreq: p.CenterFreq(), SampRate: p.SampRate(), StartFreq: p.StartFreq(),
+		StartMod: p.StartMod(), TuningStep: p.TuningStep(),
 	}
 
 	if v, ok := p.InitialSquelchLevel(); ok {
@@ -387,7 +387,7 @@ func (a deviceSchedules) ForDevice(ctx context.Context, device string) ([]gridht
 		}
 
 		if p, err := a.presets.Get(ctx, s.Preset().String()); err == nil {
-			row.Preset = p.Name().String()
+			row.Preset = p.Name()
 		}
 
 		if reason, at := s.DisabledReason(); reason != schedules.ReasonNone {
