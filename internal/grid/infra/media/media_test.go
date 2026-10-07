@@ -38,7 +38,7 @@ type env struct {
 	client *http.Client
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*media.Options)) *env {
 	t.Helper()
 
 	certPEM, keyPEM, err := pki.GenerateCA("test", time.Now())
@@ -65,10 +65,15 @@ func newEnv(t *testing.T) *env {
 
 	serverCert := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: nodeKey}
 
-	srv := media.NewServer(media.Options{
+	o := media.Options{
 		NodeID: "roof", Version: "1.0.0", GatewayIdentity: hubID, OwnSerial: func() string { return "AB" },
 		Now: time.Now, Logger: slog.New(slog.DiscardHandler),
-	})
+	}
+	for _, f := range opts {
+		f(&o)
+	}
+
+	srv := media.NewServer(o)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -451,4 +456,83 @@ func TestDemodScopeAndStrikes(t *testing.T) {
 	// The eleventh closes it.
 	send(t, ws, rxv1.TypeDeviceAttach, "f-last", map[string]any{"device_id": "vhf"})
 	expectClose(t, ws, websocket.StatusCode(rxv1.CloseForbidden))
+}
+
+type policies map[string]string
+
+func (p policies) ListenPolicy(device string) string { return p[device] }
+
+// TestListenPolicyOnNode: the node re-checks the effective listen policy
+// (SRC-023) and the token scope: an anonymous token never acts on a
+// registered device, even when its scope names it, and never holds the
+// preset or retune permissions.
+func TestListenPolicyOnNode(t *testing.T) {
+	e := newEnv(t, func(o *media.Options) {
+		o.Policy = policies{"hf": "anonymous", "vhf": "registered"}
+	})
+	e.installKeys(t, e.key)
+
+	exp := time.Now().Add(5 * time.Minute)
+	all := []string{token.PermListen, token.PermDemod, token.PermPreset, token.PermRetune}
+
+	cases := []struct {
+		name      string
+		anonymous bool
+		device    string
+		typ       rxv1.MessageType
+		forbidden bool
+	}{
+		{"anonymous attach on an anonymous device", true, "hf", rxv1.TypeDeviceAttach, false},
+		{"anonymous attach on a registered device", true, "vhf", rxv1.TypeDeviceAttach, true},
+		{"anonymous demod on a registered device", true, "vhf", rxv1.TypeDemodCreate, true},
+		{"anonymous preset select", true, "hf", rxv1.TypePresetSelect, true},
+		{"anonymous retune", true, "hf", rxv1.TypeDeviceRetune, true},
+		{"user attach on a registered device", false, "vhf", rxv1.TypeDeviceAttach, false},
+		{"user preset select on a registered device", false, "vhf", rxv1.TypePresetSelect, false},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cid := "p" + strconv.Itoa(i)
+			tok := e.token(t, cid, exp, func(c *token.Claims) {
+				if tc.anonymous {
+					// A token scoped by mistake: listen and demod on both
+					// devices, as the hub would never issue it.
+					c.Subject, c.SessionID, c.Roles = token.AnonymousSubject, "", nil
+					c.Scopes = []token.Scope{
+						{Device: "hf", Perms: []string{token.PermListen, token.PermDemod}},
+						{Device: "vhf", Perms: []string{token.PermListen, token.PermDemod}},
+					}
+
+					return
+				}
+
+				c.Scopes = []token.Scope{{Device: "hf", Perms: all}, {Device: "vhf", Perms: all}}
+			})
+
+			ws, st := e.dial(t, e.client, tok, cid, origin)
+			if st != http.StatusSwitchingProtocols {
+				t.Fatalf("status %d", st)
+			}
+
+			hello(t, ws)
+
+			payload := map[string]any{"device_id": tc.device}
+			switch tc.typ {
+			case rxv1.TypeDemodCreate:
+				payload["mode"], payload["offset_hz"] = "usb", 0
+			case rxv1.TypePresetSelect:
+				payload["preset_id"] = "p"
+			case rxv1.TypeDeviceRetune:
+				payload["center_freq"] = 14_000_000
+			}
+
+			send(t, ws, tc.typ, "m0", payload)
+
+			p := string(expectType(t, ws, rxv1.TypeError).Payload())
+			if got := strings.Contains(p, `"forbidden"`); got != tc.forbidden {
+				t.Fatalf("forbidden = %v, want %v: %s", got, tc.forbidden, p)
+			}
+		})
+	}
 }

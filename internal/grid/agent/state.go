@@ -79,6 +79,25 @@ func (s *DesiredState) Policy() ctl.StatePolicy {
 	return s.policy
 }
 
+// ListenPolicy returns the effective listen policy of a device (SRC-023):
+// its node config override, else the global policy of the last accepted
+// desired state. Without either (no state received yet, unknown device) it
+// fails closed to registered.
+func (s *DesiredState) ListenPolicy(device string) string {
+	if cfg, ok := s.config[device]; ok && (cfg.ListenPolicy == "anonymous" || cfg.ListenPolicy == "registered") {
+		return cfg.ListenPolicy
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.config[device]; ok && s.policy.ListenPolicy == "anonymous" {
+		return "anonymous"
+	}
+
+	return "registered"
+}
+
 // Apply checks and installs a desired state and returns the answer to the
 // hub.
 func (s *DesiredState) Apply(st ctl.StateApply) ctl.StateApplied {

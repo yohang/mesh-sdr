@@ -89,3 +89,31 @@ func TestDesiredState(t *testing.T) {
 		t.Errorf("ok = %+v, revision %d", ok, s.Revision())
 	}
 }
+
+func TestDesiredStateListenPolicy(t *testing.T) {
+	s := agent.NewDesiredState([]ctl.Device{
+		{ID: "open", ListenPolicy: "anonymous"},
+		{ID: "closed", ListenPolicy: "registered"},
+		{ID: "inherit"},
+	})
+
+	// Before the first desired state the global policy is unknown: a device
+	// without an override fails closed.
+	want := map[string]string{"open": "anonymous", "closed": "registered", "inherit": "registered", "ghost": "registered"}
+	for d, p := range want {
+		if got := s.ListenPolicy(d); got != p {
+			t.Errorf("before any state: %s = %q, want %q", d, got, p)
+		}
+	}
+
+	for _, global := range []string{"anonymous", "registered"} {
+		s.Apply(ctl.StateApply{Revision: 1, Policy: ctl.StatePolicy{ListenPolicy: global}})
+
+		want := map[string]string{"open": "anonymous", "closed": "registered", "inherit": global, "ghost": "registered"}
+		for d, p := range want {
+			if got := s.ListenPolicy(d); got != p {
+				t.Errorf("global %s: %s = %q, want %q", global, d, got, p)
+			}
+		}
+	}
+}

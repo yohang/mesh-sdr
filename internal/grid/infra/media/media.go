@@ -5,10 +5,12 @@
 // in-band token refresh and the expiry, and closes connections revoked by
 // the hub.
 //
-// Device-scoped messages are checked against the token scope, then handed
-// to the device stream handler (Options.Streams, the radio module), which
-// serves the spectrum, the demodulators and their binary frames through
-// the §6.8 send queue of the connection. Without a handler they are
+// Device-scoped messages are checked against the token scope and, for an
+// anonymous token, against the device's effective listen policy
+// (Options.Policy, SRC-023), then handed to the device stream handler
+// (Options.Streams, the radio module), which serves the spectrum, the
+// demodulators and their binary frames through the §6.8 send queue of the
+// connection. Without a handler they are
 // answered unsupported_type. More than MaxForbiddenPerMinute scope
 // refusals in a minute close the connection with 4403 (§5.9).
 package media
@@ -82,8 +84,24 @@ type Options struct {
 	HeartbeatInterval time.Duration
 	// Streams serves the device messages; nil answers unsupported_type.
 	Streams media.Streams
-	Now     func() time.Time
-	Logger  *slog.Logger
+	// Policy gives the effective listen policy of a device (the node config
+	// override, else the global policy of the hub's desired state). An
+	// anonymous token is refused on a device whose policy is not
+	// anonymous (SRC-023). Nil leaves the check to the token scope alone.
+	Policy ListenPolicies
+	Now    func() time.Time
+	Logger *slog.Logger
+}
+
+// ListenPolicies gives the effective listen policy of a device
+// (agent.DesiredState).
+type ListenPolicies interface {
+	ListenPolicy(device string) string
+}
+
+// anonymousAllowed reports whether anonymous listeners may use a device.
+func (s *Server) anonymousAllowed(device string) bool {
+	return s.o.Policy == nil || s.o.Policy.ListenPolicy(device) == "anonymous"
 }
 
 func (s *Server) heartbeatInterval() time.Duration {

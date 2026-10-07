@@ -384,8 +384,20 @@ func (ss *session) scoped(ctx context.Context, env rxv1.Envelope, perm string) {
 		return
 	}
 
-	if !ss.claims().Allows(ref.DeviceID, perm) {
-		ss.reply(env, rxv1.CodeForbidden, "the access token does not grant "+perm+" on this device")
+	reason := ""
+
+	switch c := ss.claims(); {
+	case !c.Allows(ref.DeviceID, perm):
+		reason = "the access token does not grant " + perm + " on this device"
+	case c.Subject == token.AnonymousSubject && !ss.s.anonymousAllowed(ref.DeviceID):
+		// SRC-023: the node re-checks the listen policy itself, so an
+		// anonymous token scoped by mistake grants nothing on a device
+		// that requires registration.
+		reason = "this device requires a signed-in listener"
+	}
+
+	if reason != "" {
+		ss.reply(env, rxv1.CodeForbidden, reason)
 
 		// §5.9: repeated violations (more than 10 per minute) close 4403.
 		if ss.forbidden.add(ss.s.o.Now()) > MaxForbiddenPerMinute {
