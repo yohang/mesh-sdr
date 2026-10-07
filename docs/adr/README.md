@@ -21,4 +21,5 @@ ADRs are written with Status `Proposed` (spikes) and switch to `Accepted` once t
 | [0015](0015-receiver-js-island.md) | Receiver JS island (waterfall, spectrum, audio) | Accepted |
 | [0016](0016-events-websocket-htmx-bridge.md) | Events WebSocket to htmx bridge | Accepted |
 | [0017](0017-process-supervision.md) | Process supervision of external tools (node) | Accepted |
+| [0018](0018-events-websocket-and-admin-nodes.md) | Hub events WebSocket, presence registry and Admin › Nodes | Accepted |
 | [0020](0020-presets-schedules-reporting.md) | Presets, schedules, desired state and the reporting engine | Accepted |
