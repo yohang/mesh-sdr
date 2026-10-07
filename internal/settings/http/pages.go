@@ -65,7 +65,9 @@ var formPages = []formPage{
 		Section: "retention", Title: "Data & retention", Path: "/admin/retention",
 		Intro: "How long each DB-backed store keeps its rows (ADM-011). Retention jobs apply the policies hourly or daily.",
 		Forms: []sectionSpec{
-			{ID: "retention", Title: "Retention policies", Keys: []string{"retention.sessions", "retention.audit_log"}},
+			{ID: "retention", Title: "Retention policies", Keys: []string{
+				"retention.sessions", "retention.audit_log", "retention.reporting_outbox.sent", "retention.reporting_outbox.dead",
+			}},
 		},
 	},
 }
