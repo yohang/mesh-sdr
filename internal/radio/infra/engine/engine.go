@@ -1,8 +1,9 @@
 // Package engine is the DSP runtime of a device (TECHNICAL_SPEC §8.3, ADR
 // 0014, ADR 0019), built on internal/dsp:
 //
-//   - the device front-end writes the connector samples into an IQ ring
-//     (250 ms) with their sample index and time;
+//   - the device front-end cuts the connector samples into 10 ms blocks
+//     and writes them into an IQ ring (250 ms) with their sample index
+//     and time;
 //   - the shared spectrum, one goroutine per device while it has
 //     subscribers, encodes each line once (FFT u8 dB) for every subscriber;
 //   - the shared FFT channelizer, one goroutine per device while it has
@@ -35,7 +36,7 @@ import (
 const (
 	// RingDuration is the depth of the IQ and channel rings (§8.3).
 	RingDuration = 250 * time.Millisecond
-	// MaxBlock is the largest IQ block the front-end receives.
+	// MaxBlock is the largest IQ ring block.
 	MaxBlock = 16384
 	// MeterInterval paces demod.meter (≤ 10 Hz, §6.5).
 	MeterInterval = 100 * time.Millisecond
@@ -91,6 +92,7 @@ type epoch struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	rate   int
+	front  *frontEnd
 	iq     *dsp.Ring[complex64]
 	plan   dsp.ChannelPlan
 
@@ -117,7 +119,8 @@ func (e *Engine) Start(t domain.Tuning) {
 
 	rate := t.Rate().PerSecond()
 	ctx, cancel := context.WithCancel(context.Background())
-	ep := &epoch{ctx: ctx, cancel: cancel, rate: rate, iq: dsp.NewRing[complex64](ringSlots(rate, MaxBlock), MaxBlock)}
+	front := newFrontEnd(rate)
+	ep := &epoch{ctx: ctx, cancel: cancel, rate: rate, front: front, iq: front.ring}
 
 	plan, err := dsp.NewChannelPlan(rate, dsp.NarrowChannelRate)
 	if err != nil {
@@ -222,7 +225,7 @@ func (e *Engine) Samples(index uint64, t time.Time, iq []complex64) {
 	e.mu.Unlock()
 
 	if ep != nil {
-		ep.iq.Push(index, len(iq), t, iq)
+		ep.front.push(index, t, iq)
 	}
 }
 
