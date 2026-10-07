@@ -15,7 +15,9 @@ MeshSDR: Go web application for Software Defined Radio (SDR) with Mesh capabilit
 - HTTP: `net/http` + `github.com/go-chi/chi/v5`
 - Templates: `github.com/a-h/templ`
 - Frontend: htmx 4 (vendored in `internal/web/static/vendor/`), Tailwind CSS v4 (standalone CLI, no Node)
-- Database: SQLite via `modernc.org/sqlite` (pure Go, `CGO_ENABLED=0`)
+- Database: SQLite via `modernc.org/sqlite` (pure Go)
+- Build: `CGO_ENABLED=1` for every binary (ADR 0014, ADR 0019); cgo only in `internal/dsp/csdr` (libcsdr++ C ABI shim, checked by a test)
+- DSP: libcsdr++ (luarvique/csdr 0.18.41, built from source) through cgo, `gonum.org/v1/gonum/dsp/fourier` for the channelizer; SDR connectors are owrx_connector 0.6.5 processes
 - Queries: `sqlc`; migrations: `goose` (embedded, per dialect, checksummed, applied by `meshsdr hub migrate`)
 - Config: TOML files (`github.com/BurntSushi/toml`) + env overrides (`github.com/caarlos0/env/v11`); JSON Schema generated from the config structs (`github.com/invopop/jsonschema`)
 - Logging: `log/slog`; CLI: `github.com/spf13/cobra`
@@ -45,6 +47,9 @@ internal/web/           embedded static assets (tokens CSS, ES modules, vendored
 internal/web/layout/    app shell templates (document, #main, error page), shared by every module
 internal/web/render/    render helper: full page vs htmx fragment, HTML headers, shell error pages
 internal/web/icongen/   icon generator (go:generate, golang.org/x/image/vector)
+internal/dsp/           node DSP: rings with gap markers, shared spectrum, FFT channelizer, NFM chain, audio framing (no I/O, no goroutines)
+internal/dsp/csdr/      cgo shim over libcsdr++ (the only cgo package)
+internal/protocol/rxv1/ rx.v1 codec, payloads (ctl, media), tokens, wsconn adapter, sendq (§6.8 media send queue)
 internal/wire/          composition root (hand-written IoC)
 internal/shared/domain/ shared kernel (common VOs, domain error type)
 internal/<module>/      one bounded context / module, see Architecture
@@ -61,6 +66,7 @@ Modules (bounded contexts):
 - `identity`: users, roles, sessions, passwords, invitations, access tokens, CSRF, audit log
 - `settings`: DB settings store, config locking/precedence, retention
 - `shell`: app shell UI (layout, navigation, theming, static pages)
+- `radio`: node devices (ADR 0019): device lifecycle and manager, owrx connectors under the process supervisor (`infra/process`, ADR 0017), DSP engine (`infra/engine`), media stream handler (`http`); wired by `internal/radio/wire.go`
 
 ## Architecture (light DDD)
 
@@ -150,7 +156,7 @@ Everything runs in Docker; no local Go toolchain required. Run `make help` for t
 - `make vendor [HTMX_VERSION=x.y.z]` — refresh vendored htmx
 - `make sh` — shell in dev container
 - `make a11y` — axe-core WCAG 2.1 AA checks of the production image (CI-only container; Node never enters the app or dev image)
-- `make build-prod` — production images (distroless, nonroot; `-f .infra/docker/Dockerfile`; config dir `/etc/meshsdr` with `tls/` linked to the volume `/var/lib/meshsdr`): target `prod` (`meshsdr`, port 443, `CMD ["all"]`) and target `prod-node` (`meshsdr-node`, `-tags nogateway`, port 8074, `CMD ["node"]`, published with a `-node` tag suffix)
+- `make build-prod` — production images (Debian slim, nonroot 65532, run with `init: true`; `-f .infra/docker/Dockerfile`; config dir `/etc/meshsdr` with `tls/` linked to the volume `/var/lib/meshsdr`): target `prod` (`meshsdr`, port 443, `CMD ["all"]`) and target `prod-node` (`meshsdr-node`, `-tags nogateway`, port 8074, `CMD ["node"]`, published with a `-node` tag suffix)
 
 VS Code: "Reopen in Container" (`.devcontainer/`) attaches to the compose `app` service (Air keeps running). The dev image ships gopls, dlv, golangci-lint and the go.mod tools (templ, sqlc, goose, air, oapi-codegen) on `PATH`; rebuild the image after bumping tool versions.
 
@@ -169,7 +175,7 @@ Dev containers are rootless: the `dev` stage creates an `app` user with the host
 - Dependencies: stdlib and `golang.org/x/*` are fine; any other third-party dependency requires the owner's approval.
 - REST: every `/api/v1` endpoint is declared in `internal/http/api/openapi.yaml` first, then generated (oapi-codegen strict chi server); module handler structs are embedded in `api.Server`. One JSON error format: RFC 9457 `application/problem+json` with a stable `code` (`internal/http/problem`).
 - Git: one branch + PR per epic (`epic/<area>-<n>`), split into ordered parts when another epic needs a subset first; PR body lists `Closes #<n>` per ticket; spikes get `spike/<key>-<topic>` branches. No AI attribution in commits or PRs.
-- Dockerfile (`.infra/docker/Dockerfile`, built from the repository root) stages: `base` → `dev` (Air) / `build` → `prod` and `prod-node` (`gcr.io/distroless/static-debian13:nonroot`).
+- Dockerfile (`.infra/docker/Dockerfile`, built from the repository root) stages: `natives` (csdr + owrx_connector from pinned tarballs) → `base` (Go + C/C++ toolchain, cgo) → `dev` (Air) / `build` → `runtime` (`debian:trixie-slim` by digest, pinned apt packages, nonroot 65532, licence notices) → `prod` and `prod-node`; `sources` (GPL sources, `-sources` tag). Rebuild the dev image after changing a native or apt pin.
 - `.infra/docker/Dockerfile.dockerignore` whitelists: ignore everything, then `!` what the build needs.
 
 ## UI
