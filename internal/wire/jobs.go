@@ -22,7 +22,7 @@ import (
 
 // jobs builds the hub's jobs scheduler with the retention jobs, and the
 // retention view (ADM-011, ADR 0010).
-func jobs(adapter db.Adapter, idm *identity.Module, sch *scheduling, values jobsapp.RetentionValues, audit identitydomain.AuditLog,
+func jobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobsapp.RetentionValues, audit identitydomain.AuditLog,
 	logger *slog.Logger,
 ) (*jobsapp.Scheduler, *jobsapp.Retention, error) {
 	sched := jobsapp.NewScheduler(jobssqlite.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.app.scheduler"))

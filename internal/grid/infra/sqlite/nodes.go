@@ -17,10 +17,10 @@ import (
 )
 
 // NodeRepository implements domain.NodeRepository.
-type NodeRepository struct{ db db.Adapter }
+type NodeRepository struct{ db *db.DB }
 
 // NewNodeRepository returns the repository.
-func NewNodeRepository(a db.Adapter) *NodeRepository { return &NodeRepository{db: a} }
+func NewNodeRepository(a *db.DB) *NodeRepository { return &NodeRepository{db: a} }
 
 var _ domain.NodeRepository = (*NodeRepository)(nil)
 
@@ -289,10 +289,10 @@ func nodeFromRow(row sqlc.Node) (*domain.Node, error) {
 }
 
 // RevocationRepository implements domain.RevocationRepository.
-type RevocationRepository struct{ db db.Adapter }
+type RevocationRepository struct{ db *db.DB }
 
 // NewRevocationRepository returns the repository.
-func NewRevocationRepository(a db.Adapter) *RevocationRepository { return &RevocationRepository{db: a} }
+func NewRevocationRepository(a *db.DB) *RevocationRepository { return &RevocationRepository{db: a} }
 
 var _ domain.RevocationRepository = (*RevocationRepository)(nil)
 

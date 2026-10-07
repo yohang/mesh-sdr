@@ -13,10 +13,10 @@ import (
 )
 
 // CapabilityRepository implements domain.CapabilityRepository.
-type CapabilityRepository struct{ db db.Adapter }
+type CapabilityRepository struct{ db *db.DB }
 
 // NewCapabilityRepository returns the repository.
-func NewCapabilityRepository(a db.Adapter) *CapabilityRepository { return &CapabilityRepository{db: a} }
+func NewCapabilityRepository(a *db.DB) *CapabilityRepository { return &CapabilityRepository{db: a} }
 
 var _ domain.CapabilityRepository = (*CapabilityRepository)(nil)
 

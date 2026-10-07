@@ -45,7 +45,7 @@ type settingsReader interface {
 
 // newScheduling builds the modules. g.states may be nil (grid disabled):
 // nothing is pushed then.
-func newScheduling(adapter db.Adapter, g *hubGrid, values settingsReader, audit auditAppender, now func() time.Time,
+func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit auditAppender, now func() time.Time,
 	logger *slog.Logger,
 ) *scheduling {
 	ids := shared.NewUUIDv7Generator()

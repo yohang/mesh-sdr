@@ -109,8 +109,8 @@ func (a *app) newMigrateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Apply pending database migrations (same as `migrate up`)",
-		Long: "Manage the database schema. Migrations are forward-only and checksummed;\n" +
-			"run them while the hub is stopped.",
+		Long: "Manage the database schema. Migrations are forward-only;\n" +
+			"run them while the hub is stopped, one at a time.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return a.migrateUp(cmd.Context()) },
 	}
@@ -140,7 +140,7 @@ func (a *app) newMigrateCmd() *cobra.Command {
 }
 
 // withMigrator opens the hub database and calls fn with its migrator.
-func (a *app) withMigrator(ctx context.Context, fn func(db.Migrator, *slog.Logger) error) error {
+func (a *app) withMigrator(ctx context.Context, fn func(*db.Migrator, *slog.Logger) error) error {
 	cfg, _, logger, err := a.loadHub(ctx)
 	if err != nil {
 		return err
@@ -165,7 +165,7 @@ type migrationJSON struct {
 }
 
 func (a *app) migrateUp(ctx context.Context) error {
-	return a.withMigrator(ctx, func(m db.Migrator, logger *slog.Logger) error {
+	return a.withMigrator(ctx, func(m *db.Migrator, logger *slog.Logger) error {
 		results, err := m.Up(ctx)
 
 		out := make([]migrationJSON, 0, len(results))
@@ -195,7 +195,7 @@ func (a *app) migrateUp(ctx context.Context) error {
 }
 
 func (a *app) migrateDown(ctx context.Context) error {
-	return a.withMigrator(ctx, func(m db.Migrator, logger *slog.Logger) error {
+	return a.withMigrator(ctx, func(m *db.Migrator, logger *slog.Logger) error {
 		r, err := m.Down(ctx)
 		if errors.Is(err, db.ErrNoMigration) {
 			a.print("no migration to roll back")
@@ -220,7 +220,7 @@ func (a *app) migrateDown(ctx context.Context) error {
 }
 
 func (a *app) migrateStatus(ctx context.Context) error {
-	return a.withMigrator(ctx, func(m db.Migrator, _ *slog.Logger) error {
+	return a.withMigrator(ctx, func(m *db.Migrator, _ *slog.Logger) error {
 		statuses, err := m.Status(ctx)
 		if err != nil {
 			return err

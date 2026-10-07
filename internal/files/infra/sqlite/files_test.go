@@ -11,7 +11,7 @@ import (
 )
 
 func TestFiles(t *testing.T) {
-	repotest.Run(t, func(t *testing.T) (domain.Repository, db.Adapter) {
+	repotest.Run(t, func(t *testing.T) (domain.Repository, *db.DB) {
 		a := dbtest.NewSQLite(t)
 
 		return sqlite.NewFiles(a), a

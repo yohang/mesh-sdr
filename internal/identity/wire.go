@@ -54,7 +54,7 @@ const (
 type Deps struct {
 	Config config.Hub
 	Logger *slog.Logger
-	DB     db.Adapter
+	DB     *db.DB
 	IDs    *shared.UUIDv7Generator
 	Now    func() time.Time
 	// Settings reads the identity policies from the settings store. Nil

@@ -67,7 +67,7 @@ type AllProcess struct {
 }
 
 // All builds the all role. The hub CA must exist (EnsureCA).
-func All(ctx context.Context, hubCfg config.Hub, origins config.Origins, nodeCfg config.Node, logger *slog.Logger, adapter db.Adapter) (*AllProcess, error) {
+func All(ctx context.Context, hubCfg config.Hub, origins config.Origins, nodeCfg config.Node, logger *slog.Logger, adapter *db.DB) (*AllProcess, error) {
 	id, err := griddomain.NewNodeID(nodeCfg.Node.ID)
 	if err != nil {
 		return nil, fmt.Errorf("node.id: %w", err)

@@ -17,10 +17,10 @@ import (
 )
 
 // Schedules implements domain.Repository.
-type Schedules struct{ db db.Adapter }
+type Schedules struct{ db *db.DB }
 
 // NewSchedules returns the repository.
-func NewSchedules(a db.Adapter) *Schedules { return &Schedules{db: a} }
+func NewSchedules(a *db.DB) *Schedules { return &Schedules{db: a} }
 
 var _ domain.Repository = (*Schedules)(nil)
 

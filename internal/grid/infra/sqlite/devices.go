@@ -13,10 +13,10 @@ import (
 )
 
 // DeviceRepository implements domain.DeviceRepository.
-type DeviceRepository struct{ db db.Adapter }
+type DeviceRepository struct{ db *db.DB }
 
 // NewDeviceRepository returns the repository.
-func NewDeviceRepository(a db.Adapter) *DeviceRepository { return &DeviceRepository{db: a} }
+func NewDeviceRepository(a *db.DB) *DeviceRepository { return &DeviceRepository{db: a} }
 
 var _ domain.DeviceRepository = (*DeviceRepository)(nil)
 

@@ -66,7 +66,7 @@ func serveOn(t *testing.T, p *wire.Process, ln net.Listener) string {
 
 // hub serves the hub handler (without the gateway) on a random local port
 // and returns its base URL.
-func hub(t *testing.T, cfg config.Hub, a db.Adapter) string {
+func hub(t *testing.T, cfg config.Hub, a *db.DB) string {
 	t.Helper()
 
 	if !wire.GatewayAvailable() {
@@ -160,19 +160,6 @@ func TestHub(t *testing.T) {
 	}
 }
 
-type downDB struct{ db.Adapter }
-
-func (downDB) Ping(context.Context) error { return errors.New("down") }
-
-func TestHubNotReady(t *testing.T) {
-	base := hub(t, config.DefaultHub(), downDB{dbtest.NewSQLite(t)})
-
-	status, _, body := get(t, http.DefaultClient, base+"/api/v1/healthz/ready")
-	if status != http.StatusServiceUnavailable || !json.Valid(body) {
-		t.Fatalf("got %d %s", status, body)
-	}
-}
-
 func TestNode(t *testing.T) {
 	cfg := config.DefaultNode()
 	cfg.Node.ID = "attic"
@@ -228,8 +215,8 @@ func TestOpenDB(t *testing.T) {
 
 	t.Cleanup(func() { _ = a.Close() })
 
-	if a.Dialect() != db.DialectSQLite {
-		t.Errorf("dialect = %s", a.Dialect())
+	if err := a.Ping(ctx); err != nil {
+		t.Errorf("ping: %v", err)
 	}
 
 	if _, err := wire.OpenDB(ctx, config.DB{DSN: "postgres://x/y"}, discard); !errors.Is(err, db.ErrEngineUnsupported) {

@@ -15,12 +15,12 @@ import (
 )
 
 // Runs is the SQLite job_runs repository.
-type Runs struct{ db db.Adapter }
+type Runs struct{ db *db.DB }
 
 var _ domain.Repository = (*Runs)(nil)
 
 // NewRuns returns the repository.
-func NewRuns(a db.Adapter) *Runs { return &Runs{db: a} }
+func NewRuns(a *db.DB) *Runs { return &Runs{db: a} }
 
 func fromMS(v sql.NullInt64) time.Time {
 	if !v.Valid {

@@ -95,7 +95,7 @@ func (b rawJSON) VisitGetOpenAPIResponse(w http.ResponseWriter) error {
 	return err
 }
 
-// Pinger checks a backing service (the database adapter).
+// Pinger checks a backing service (the database).
 type Pinger interface {
 	Ping(ctx context.Context) error
 }

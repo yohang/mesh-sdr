@@ -17,12 +17,12 @@ import (
 )
 
 // Files is the SQLite files repository.
-type Files struct{ db db.Adapter }
+type Files struct{ db *db.DB }
 
 var _ domain.Repository = (*Files)(nil)
 
 // NewFiles returns the repository.
-func NewFiles(a db.Adapter) *Files { return &Files{db: a} }
+func NewFiles(a *db.DB) *Files { return &Files{db: a} }
 
 func nullInt(v int) sql.NullInt64 { return sql.NullInt64{Int64: int64(v), Valid: v > 0} }
 

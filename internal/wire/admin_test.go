@@ -28,7 +28,7 @@ const testPassword = "correct horse battery"
 type adminHub struct {
 	t    *testing.T
 	base string
-	db   db.Adapter
+	db   *db.DB
 }
 
 // newAdminHub serves a hub whose config sets env (locked settings).

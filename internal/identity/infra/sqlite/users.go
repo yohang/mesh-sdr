@@ -21,14 +21,14 @@ type IDGenerator interface {
 
 // Users is the SQLite UserRepository.
 type Users struct {
-	db  db.Adapter
+	db  *db.DB
 	ids IDGenerator
 }
 
 var _ domain.UserRepository = (*Users)(nil)
 
 // NewUsers returns the repository.
-func NewUsers(a db.Adapter, ids IDGenerator) *Users { return &Users{db: a, ids: ids} }
+func NewUsers(a *db.DB, ids IDGenerator) *Users { return &Users{db: a, ids: ids} }
 
 // Add inserts the user, its identities and its role grants in one
 // transaction.

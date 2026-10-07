@@ -153,7 +153,7 @@ func freePort(t *testing.T) string {
 type gridEnv struct {
 	hubCfg   config.Hub
 	nodeCfg  config.Node
-	adapter  db.Adapter
+	adapter  *db.DB
 	g        *hubGrid
 	nodeAddr string
 	ca       *pki.CA

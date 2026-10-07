@@ -47,7 +47,7 @@ type contractHub struct {
 	t       *testing.T
 	handler http.Handler
 	url     string
-	adapter db.Adapter
+	adapter *db.DB
 	setup   string
 }
 

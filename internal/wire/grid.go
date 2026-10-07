@@ -142,7 +142,7 @@ func DeclaredNodes(cfg map[string]config.ConfigNode) ([]app.DeclaredNode, error)
 	return out, nil
 }
 
-func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now func() time.Time, timings app.Timings,
+func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter *db.DB, now func() time.Time, timings app.Timings,
 	tweaks ...func(*control.HubOptions),
 ) (*hubGrid, error) {
 	ca, err := LoadCA(cfg.TLS)
@@ -266,7 +266,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 }
 
 // HubNodes builds the node registry service for the admin CLI.
-func HubNodes(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) (*app.Nodes, error) {
+func HubNodes(cfg config.Hub, logger *slog.Logger, adapter *db.DB) (*app.Nodes, error) {
 	ca, err := LoadCA(cfg.TLS)
 	if err != nil {
 		return nil, err
@@ -279,7 +279,7 @@ func HubNodes(cfg config.Hub, logger *slog.Logger, adapter db.Adapter) (*app.Nod
 }
 
 // newGridAuditor writes grid audit records to the identity audit_log.
-func newGridAuditor(adapter db.Adapter, now func() time.Time, logger *slog.Logger) gridAuditor {
+func newGridAuditor(adapter *db.DB, now func() time.Time, logger *slog.Logger) gridAuditor {
 	return gridAuditor{log: identitysqlite.NewAuditLog(adapter), now: now, logger: component(logger, "grid.audit")}
 }
 

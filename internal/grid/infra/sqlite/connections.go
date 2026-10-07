@@ -14,10 +14,10 @@ import (
 )
 
 // ConnectionRepository implements domain.ConnectionRepository.
-type ConnectionRepository struct{ db db.Adapter }
+type ConnectionRepository struct{ db *db.DB }
 
 // NewConnectionRepository returns the repository.
-func NewConnectionRepository(a db.Adapter) *ConnectionRepository { return &ConnectionRepository{db: a} }
+func NewConnectionRepository(a *db.DB) *ConnectionRepository { return &ConnectionRepository{db: a} }
 
 var _ domain.ConnectionRepository = (*ConnectionRepository)(nil)
 

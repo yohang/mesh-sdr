@@ -13,12 +13,12 @@ import (
 )
 
 // Sessions is the SQLite SessionRepository.
-type Sessions struct{ db db.Adapter }
+type Sessions struct{ db *db.DB }
 
 var _ domain.SessionRepository = (*Sessions)(nil)
 
 // NewSessions returns the repository.
-func NewSessions(a db.Adapter) *Sessions { return &Sessions{db: a} }
+func NewSessions(a *db.DB) *Sessions { return &Sessions{db: a} }
 
 // Add inserts a session.
 func (r *Sessions) Add(ctx context.Context, s *domain.Session) error {

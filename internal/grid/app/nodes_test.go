@@ -64,7 +64,7 @@ func (c *clock) advance(d time.Duration) {
 }
 
 type env struct {
-	db    db.Adapter
+	db    *db.DB
 	nodes *sqlite.NodeRepository
 	revs  *sqlite.RevocationRepository
 	audit *auditSpy

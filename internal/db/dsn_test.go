@@ -29,7 +29,7 @@ func TestParseDSN(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
-			d, err := db.ParseDSN(tt.in)
+			path, err := db.ParseDSN(tt.in)
 			if tt.err != nil {
 				if !errors.Is(err, tt.err) {
 					t.Fatalf("err = %v, want %v", err, tt.err)
@@ -42,8 +42,8 @@ func TestParseDSN(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if d.Dialect() != db.DialectSQLite || d.Path() != tt.path {
-				t.Fatalf("got %s %q", d.Dialect(), d.Path())
+			if path != tt.path {
+				t.Fatalf("path = %q, want %q", path, tt.path)
 			}
 		})
 	}
