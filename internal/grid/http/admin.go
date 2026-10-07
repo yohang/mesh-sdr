@@ -14,6 +14,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
@@ -59,11 +60,13 @@ type AdminDeps struct {
 	Users        UserNames
 	// Schedules lists the schedules of a device; nil shows none.
 	Schedules DeviceSchedules
-	Operator  func(http.Handler) http.Handler // operator role (identity)
-	Admin     func(http.Handler) http.Handler // admin role and network (identity)
-	IsAdmin   func(r *http.Request) bool
-	Now       func() time.Time
-	Logger    *slog.Logger
+	// PresetName names a preset ("" when unknown); nil shows the id.
+	PresetName func(ctx context.Context, id shared.UUID) string
+	Operator   func(http.Handler) http.Handler // operator role (identity)
+	Admin      func(http.Handler) http.Handler // admin role and network (identity)
+	IsAdmin    func(r *http.Request) bool
+	Now        func() time.Time
+	Logger     *slog.Logger
 }
 
 // AdminModule serves the grid pages of the admin area: the read-only device
@@ -152,6 +155,9 @@ type deviceView struct {
 	CanAdmin  bool
 	Failure   string
 	Schedules []ScheduleRow
+	// ActivePreset names the preset the node last switched the device to
+	// (empty: none).
+	ActivePreset string
 	// SchedulesUnavailable is set when the schedules could not be read.
 	SchedulesUnavailable bool
 }
@@ -169,6 +175,16 @@ func (m *AdminModule) view(r *http.Request) (deviceView, int) {
 	}
 
 	v := deviceView{Device: d, NodeName: d.Node().String(), CanAdmin: m.d.IsAdmin(r)}
+
+	if id := d.ActivePreset(); !id.IsZero() {
+		v.ActivePreset = id.String()
+
+		if m.d.PresetName != nil {
+			if name := m.d.PresetName(r.Context(), id); name != "" {
+				v.ActivePreset = name
+			}
+		}
+	}
 
 	if n, err := m.d.Nodes.Get(r.Context(), d.Node().String()); err == nil {
 		v.NodeName = n.Name().String()

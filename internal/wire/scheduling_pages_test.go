@@ -3,10 +3,13 @@ package wire_test
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/schedules"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -63,7 +66,25 @@ func TestDeviceSchedules(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The node reports its active preset (device.state).
+	devices := gridsqlite.NewDeviceRepository(h.db)
+
+	dev, err := devices.Get(ctx, shared.MustDeviceID("hf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dev.ApplyState(griddomain.StateRunning, "", nil, pid, now)
+
+	if err := devices.Save(ctx, dev); err != nil {
+		t.Fatal(err)
+	}
+
 	op := h.browser("op")
+
+	if _, body := op.do(http.MethodGet, "/admin/devices/hf", "", "", nil); !regexp.MustCompile(`Active preset</dt>\s*<dd>\s*20 m FT8`).Match(body) {
+		t.Errorf("hf page lacks its active preset: %s", body)
+	}
 
 	_, body := op.do(http.MethodGet, "/admin/devices/hf", "", "", nil)
 	for _, want := range []string{"Schedules", "2200-2300 UTC", "Mon, Tue", "20 m FT8", "its preset no longer fits this device"} {

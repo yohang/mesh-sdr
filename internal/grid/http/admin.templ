@@ -126,6 +126,14 @@ templ devicePage(v deviceView) {
 				<dt class="font-medium">Centre frequency</dt>
 				<dd>{ frequency(*f) }</dd>
 			}
+			<dt class="font-medium">Active preset</dt>
+			<dd>
+				if v.ActivePreset != "" {
+					{ v.ActivePreset }
+				} else {
+					None
+				}
+			</dd>
 			<dt class="font-medium">Last report</dt>
 			<dd>{ utc(v.Device.ReportedAt()) }</dd>
 			<dt class="font-medium">Position in the node config</dt>

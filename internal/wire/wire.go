@@ -437,8 +437,8 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		gridhttp.NewAdminModule(gridhttp.AdminDeps{
 			Render: shellModule.Renderer, Devices: g.devices, Nodes: g.nodes, History: g.history, Capabilities: g.caps,
 			Connections: g.presence, Users: userNames{users: identitysqlite.NewUsers(adapter, shared.NewUUIDv7Generator())},
-			Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets},
-			Operator:  idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
+			Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets}, PresetName: sch.presetName,
+			Operator: idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
 			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Now: now,
 			Logger: component(logger, "grid.http.admin"),
 		}),
