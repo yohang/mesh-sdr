@@ -112,15 +112,13 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	revoked := pki.NewRevokedSet()
 
 	// The desired state pushed by the hub carries the WFM de-emphasis the
-	// engines apply.
+	// engines apply and the listen policy the media server enforces.
 	state := agent.NewDesiredState(o.devices())
 
 	manager, streams, err := newRadio(cfg, logger, deviceReporter{ag}, func() int { return state.Policy().WFMDeemphasis })
 	if err != nil {
 		return nil, err
 	}
-
-	state := agent.NewDesiredState(o.devices())
 
 	mediaServer := media.NewServer(media.Options{
 		NodeID: id.String(), Version: version.String(), GatewayIdentity: cfg.HubTrust.HubIdentity,
