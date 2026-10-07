@@ -1,17 +1,17 @@
-package sqlite_test
+package jobs_test
 
 import (
 	"context"
 	"testing"
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
-	"github.com/yohang/mesh-sdr/internal/jobs/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/jobs"
 )
 
 func TestTableStats(t *testing.T) {
 	a := dbtest.NewSQLite(t)
 
-	s, err := sqlite.NewTableStats(a, "roles")
+	s, err := jobs.NewTableStats(a, "roles")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestTableStats(t *testing.T) {
 
 	t.Logf("dbstat available: %v (%d bytes)", sized, bytes)
 
-	if _, err := sqlite.NewTableStats(a, "roles; DROP TABLE users"); err == nil {
+	if _, err := jobs.NewTableStats(a, "roles; DROP TABLE users"); err == nil {
 		t.Error("invalid table name accepted")
 	}
 }

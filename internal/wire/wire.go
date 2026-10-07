@@ -19,7 +19,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
-	fileshttp "github.com/yohang/mesh-sdr/internal/files/http"
+	"github.com/yohang/mesh-sdr/internal/files"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
@@ -389,12 +389,12 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	ge := g.publishEvents(broker, policies, now, logger)
 	workers = append(workers, events.Run, ge.runPresence)
 
-	scheduler, retention, err := jobs(adapter, idm, sch, settingsModule.Store, auditLog, logger)
+	scheduler, retention, err := newJobs(adapter, idm, sch, settingsModule.Store, auditLog, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jobs: %w", err)
 	}
 
-	imagesHTTP := fileshttp.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), currentUser,
+	imagesHTTP := files.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), currentUser,
 		shellModule.Renderer.Error, component(logger, "files.http"))
 	access, err := g.mediaAccess(cfg, listenPolicy{settingsrc.New(settingsModule.Store, component(logger, "grid.infra.settings"))}, logger)
 	if err != nil {

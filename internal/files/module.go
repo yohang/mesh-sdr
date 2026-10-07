@@ -1,4 +1,4 @@
-package http
+package files
 
 import (
 	"context"
@@ -10,22 +10,14 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/yohang/mesh-sdr/internal/files/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 //go:generate go tool templ generate
 
-// Branding is the receiver images use case.
-type Branding interface {
-	Upload(ctx context.Context, by shared.UUID, slot domain.Slot, data []byte) (*domain.File, error)
-	Remove(ctx context.Context, slot domain.Slot) (bool, error)
-	Current(ctx context.Context, slot domain.Slot) (*domain.File, error)
-}
-
 // Module serves the images section actions of the admin Site page.
 type Module struct {
-	branding Branding
+	branding *Branding
 	guard    func(http.Handler) http.Handler
 	user     func(ctx context.Context) shared.UUID
 	errorPg  func(w http.ResponseWriter, r *http.Request, status int)
@@ -35,7 +27,7 @@ type Module struct {
 // New returns the module. guard checks the admin role and network; user
 // returns the signed-in user of a request; errorPage writes the shell error
 // page.
-func New(branding Branding, guard func(http.Handler) http.Handler, user func(ctx context.Context) shared.UUID,
+func New(branding *Branding, guard func(http.Handler) http.Handler, user func(ctx context.Context) shared.UUID,
 	errorPage func(w http.ResponseWriter, r *http.Request, status int), logger *slog.Logger,
 ) *Module {
 	return &Module{branding: branding, guard: guard, user: user, errorPg: errorPage, logger: logger}
@@ -56,7 +48,7 @@ func (m *Module) Section(r *http.Request) templ.Component {
 }
 
 type slotView struct {
-	Slot     domain.Slot
+	Slot     Slot
 	Label    string
 	Limit    string
 	Set      bool
@@ -69,9 +61,9 @@ type slotView struct {
 func (m *Module) views(ctx context.Context) []slotView {
 	var out []slotView
 
-	for _, s := range domain.Slots() {
+	for _, s := range Slots() {
 		v := slotView{Slot: s, Label: "Avatar", Limit: "250 KiB"}
-		if s == domain.SlotPanorama {
+		if s == SlotPanorama {
 			v.Label, v.Limit = "Panorama", "2 MiB"
 		}
 
@@ -82,7 +74,7 @@ func (m *Module) views(ctx context.Context) []slotView {
 			sum := f.SHA256()
 			v.Set, v.Width, v.Height, v.FileName = true, f.Width(), f.Height(), f.Name()
 			v.Src = "/api/v1/branding/" + s.Name() + "?v=" + hex.EncodeToString(sum[:6])
-		case !errors.Is(err, domain.ErrImageNotSet):
+		case !errors.Is(err, ErrImageNotSet):
 			m.logger.WarnContext(ctx, "receiver image unavailable", slog.String("slot", s.Name()), slog.Any("error", err))
 		}
 
@@ -111,13 +103,13 @@ func (m *Module) respond(w http.ResponseWriter, r *http.Request, status int, not
 }
 
 func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
-	if err := CheckDeclaredSize(r, domain.SlotPanorama); err != nil {
+	if err := CheckDeclaredSize(r, SlotPanorama); err != nil {
 		m.respond(w, r, http.StatusRequestEntityTooLarge, "", "The image is too large: the avatar must not exceed 250 KiB and the panorama 2 MiB.")
 
 		return
 	}
 
-	LimitBody(w, r, domain.SlotPanorama)
+	LimitBody(w, r, SlotPanorama)
 
 	mr, err := r.MultipartReader()
 	if err != nil {
@@ -126,14 +118,14 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slot, data, err := ReadUpload(mr, func(fields map[string]string) (domain.Slot, error) { return domain.ParseSlot(fields["slot"]) })
+	slot, data, err := ReadUpload(mr, func(fields map[string]string) (Slot, error) { return ParseSlot(fields["slot"]) })
 
 	switch {
 	case errors.Is(err, ErrTooLarge):
 		m.respond(w, r, http.StatusRequestEntityTooLarge, "", "The "+slot.Name()+" is too large.")
 
 		return
-	case errors.Is(err, domain.ErrUnknownImageSlot):
+	case errors.Is(err, ErrUnknownImageSlot):
 		m.errorPg(w, r, http.StatusNotFound)
 
 		return
@@ -168,7 +160,7 @@ func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slot, err := domain.ParseSlot(r.PostForm.Get("slot"))
+	slot, err := ParseSlot(r.PostForm.Get("slot"))
 	if err != nil {
 		m.errorPg(w, r, http.StatusNotFound)
 

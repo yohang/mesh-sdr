@@ -1,4 +1,4 @@
-package app_test
+package jobs_test
 
 import (
 	"context"
@@ -11,9 +11,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
-	"github.com/yohang/mesh-sdr/internal/jobs/app"
-	"github.com/yohang/mesh-sdr/internal/jobs/domain"
-	"github.com/yohang/mesh-sdr/internal/jobs/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/jobs"
 )
 
 type clock struct {
@@ -58,13 +56,13 @@ func (j *fakeJob) Run(context.Context) (int64, error) {
 	return j.rows, j.err
 }
 
-func newScheduler(t *testing.T) (*app.Scheduler, *clock) {
+func newScheduler(t *testing.T) (*jobs.Scheduler, *clock) {
 	t.Helper()
 
 	a := dbtest.NewSQLite(t)
 	c := &clock{now: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)}
 
-	return app.NewScheduler(sqlite.NewRuns(a), a, c.Now, slog.New(slog.DiscardHandler)), c
+	return jobs.NewScheduler(jobs.NewRuns(a), a, c.Now, slog.New(slog.DiscardHandler)), c
 }
 
 func TestRunNowRecordsRuns(t *testing.T) {
@@ -77,7 +75,7 @@ func TestRunNowRecordsRuns(t *testing.T) {
 	s.Register(ok, time.Hour)
 	s.Register(bad, time.Hour)
 
-	if run, err := s.LastRun(ctx, "test.ok"); err != nil || !run.LastStarted().IsZero() || run.Status() != domain.StatusNone {
+	if run, err := s.LastRun(ctx, "test.ok"); err != nil || !run.LastStarted().IsZero() || run.Status() != jobs.StatusNone {
 		t.Fatalf("never ran: %+v %v", run, err)
 	}
 
@@ -86,7 +84,7 @@ func TestRunNowRecordsRuns(t *testing.T) {
 	}
 
 	run, _ := s.LastRun(ctx, "test.ok")
-	if run.Running() || run.Status() != domain.StatusOK || run.Rows() != 42 || !run.LastFinished().Equal(c.Now()) {
+	if run.Running() || run.Status() != jobs.StatusOK || run.Rows() != 42 || !run.LastFinished().Equal(c.Now()) {
 		t.Errorf("run = %+v", run)
 	}
 
@@ -95,11 +93,11 @@ func TestRunNowRecordsRuns(t *testing.T) {
 	}
 
 	run, _ = s.LastRun(ctx, "test.bad")
-	if run.Status() != domain.StatusError || run.LastError() != "disk full" || run.Running() {
+	if run.Status() != jobs.StatusError || run.LastError() != "disk full" || run.Running() {
 		t.Errorf("failed run = %+v", run)
 	}
 
-	if _, err := s.RunNow(ctx, "test.nope"); !errors.Is(err, domain.ErrUnknownJob) {
+	if _, err := s.RunNow(ctx, "test.nope"); !errors.Is(err, jobs.ErrUnknownJob) {
 		t.Errorf("unknown job: %v", err)
 	}
 }
@@ -120,7 +118,7 @@ func TestJobNeverOverlaps(t *testing.T) {
 
 	<-j.started
 
-	if _, err := s.RunNow(ctx, "test.slow"); !errors.Is(err, domain.ErrJobRunning) {
+	if _, err := s.RunNow(ctx, "test.slow"); !errors.Is(err, jobs.ErrJobRunning) {
 		t.Errorf("overlapping run: %v", err)
 	}
 
@@ -142,9 +140,9 @@ func TestJobNeverOverlaps(t *testing.T) {
 	}()
 
 	<-j2.started
-	c.Advance(2 * app.StaleAfter)
+	c.Advance(2 * jobs.StaleAfter)
 
-	if _, err := s.RunNow(ctx, "test.long"); !errors.Is(err, domain.ErrJobRunning) {
+	if _, err := s.RunNow(ctx, "test.long"); !errors.Is(err, jobs.ErrJobRunning) {
 		t.Errorf("overlap after StaleAfter: %v", err)
 	}
 
@@ -160,13 +158,13 @@ func TestSchedulerEndsInterruptedRuns(t *testing.T) {
 	ctx := context.Background()
 	a := dbtest.NewSQLite(t)
 	c := &clock{now: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)}
-	repo := sqlite.NewRuns(a)
+	repo := jobs.NewRuns(a)
 
-	r := domain.NewRun(domain.MustName("test.start"))
+	r := jobs.NewRun(jobs.MustName("test.start"))
 	_ = r.Start(c.Now(), time.Hour)
 	_ = repo.Save(ctx, r)
 
-	s := app.NewScheduler(repo, a, c.Now, slog.New(slog.DiscardHandler))
+	s := jobs.NewScheduler(repo, a, c.Now, slog.New(slog.DiscardHandler))
 	j := &fakeJob{name: "test.start", started: make(chan struct{}, 1), release: make(chan struct{})}
 	s.Register(j, time.Hour)
 
@@ -182,7 +180,7 @@ func TestSchedulerEndsInterruptedRuns(t *testing.T) {
 	<-done
 
 	got, _ := s.LastRun(ctx, "test.start")
-	if got.Running() || got.Status() != domain.StatusOK {
+	if got.Running() || got.Status() != jobs.StatusOK {
 		t.Errorf("run = %+v", got)
 	}
 }
@@ -203,7 +201,7 @@ func TestSchedulerRunsAtStart(t *testing.T) {
 	<-done
 
 	run, err := s.LastRun(context.Background(), "test.start")
-	if err != nil || run.Status() != domain.StatusOK {
+	if err != nil || run.Status() != jobs.StatusOK {
 		t.Errorf("run at start = %+v %v", run, err)
 	}
 }
@@ -211,7 +209,7 @@ func TestSchedulerRunsAtStart(t *testing.T) {
 func TestBatched(t *testing.T) {
 	left := 25
 
-	n, err := app.Batched(context.Background(), 10, func(_ context.Context, batch int) (int, error) {
+	n, err := jobs.Batched(context.Background(), 10, func(_ context.Context, batch int) (int, error) {
 		k := min(batch, left)
 		left -= k
 
@@ -236,11 +234,11 @@ func TestRetention(t *testing.T) {
 	s.Register(&fakeJob{name: "sessions.reap", rows: 3}, time.Hour)
 
 	au := &audit.Records{}
-	r := app.NewRetention([]app.Store{{Name: "sessions", Label: "Sessions", SettingKey: "retention.sessions", Job: "sessions.reap", Stats: stats{rows: 7}}},
+	r := jobs.NewRetention([]jobs.Store{{Name: "sessions", Label: "Sessions", SettingKey: "retention.sessions", Job: "sessions.reap", Stats: stats{rows: 7}}},
 		s, values{}, au)
 
 	views, err := r.List(ctx)
-	if err != nil || len(views) != 1 || views[0].Rows != 7 || views[0].Retention != 30*24*time.Hour || views[0].LastRun.Status() != domain.StatusNone {
+	if err != nil || len(views) != 1 || views[0].Rows != 7 || views[0].Retention != 30*24*time.Hour || views[0].LastRun.Status() != jobs.StatusNone {
 		t.Fatalf("list = %+v, %v", views, err)
 	}
 
@@ -252,7 +250,7 @@ func TestRetention(t *testing.T) {
 		t.Errorf("audit = %+v", *au)
 	}
 
-	if _, err := r.Purge(ctx, "files"); !errors.Is(err, app.ErrUnknownStore) {
+	if _, err := r.Purge(ctx, "files"); !errors.Is(err, jobs.ErrUnknownStore) {
 		t.Errorf("unknown store: %v", err)
 	}
 }

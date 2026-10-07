@@ -1,6 +1,11 @@
-// Package app holds the files use cases. This part has the receiver images
-// (ADM-004, ADR 0010): upload, restore default, read.
-package app
+// Package files is the files module (TECHNICAL_SPEC §7.1 `files`,
+// `file_blobs`, ADR 0010). This part has the admin-uploaded receiver images
+// (ADM-004): the use case (upload, restore default, read), the SQLite
+// repository (metadata in files, content in file_blobs chunks of at most
+// 1 MiB), the image re-encoder and the images section of the admin Site
+// page. The images themselves are served by GET /api/v1/branding/{slot}
+// (internal/http/api). The files epic (FIL) adds decoder and recording files.
+package files
 
 import (
 	"context"
@@ -10,14 +15,13 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
-	"github.com/yohang/mesh-sdr/internal/files/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // Image is a decoded and re-encoded image.
 type Image struct {
 	Data          []byte
-	MIME          domain.MIMEType
+	MIME          MIMEType
 	Width, Height int
 }
 
@@ -25,7 +29,7 @@ type Image struct {
 // model, at most maxPixels pixels, read before decoding) and re-encodes it
 // to out, dropping its metadata.
 type ImageProcessor interface {
-	Reencode(ctx context.Context, data []byte, out domain.MIMEType, maxPixels int) (Image, error)
+	Reencode(ctx context.Context, data []byte, out MIMEType, maxPixels int) (Image, error)
 }
 
 // Transactor runs a unit of work in one write transaction.
@@ -49,7 +53,7 @@ const (
 
 // Branding manages the receiver images.
 type Branding struct {
-	repo  domain.Repository
+	repo  Repository
 	tx    Transactor
 	proc  ImageProcessor
 	ids   IDGenerator
@@ -59,7 +63,7 @@ type Branding struct {
 
 // BrandingDeps are the dependencies of Branding.
 type BrandingDeps struct {
-	Repo      domain.Repository
+	Repo      Repository
 	Tx        Transactor
 	Processor ImageProcessor
 	IDs       IDGenerator
@@ -75,9 +79,9 @@ func NewBranding(d BrandingDeps) *Branding {
 // Upload validates, re-encodes and stores an image for slot, replacing the
 // previous one in the same transaction. The caller bounds data to
 // slot.MaxUpload() before reading it; a larger upload is refused here too.
-func (b *Branding) Upload(ctx context.Context, by shared.UUID, slot domain.Slot, data []byte) (*domain.File, error) {
+func (b *Branding) Upload(ctx context.Context, by shared.UUID, slot Slot, data []byte) (*File, error) {
 	if int64(len(data)) > slot.MaxUpload() {
-		return nil, domain.ErrImageTooLarge.WithDetail(fmt.Sprintf("the %s must not exceed %d KiB", slot.Name(), slot.MaxUpload()>>10))
+		return nil, ErrImageTooLarge.WithDetail(fmt.Sprintf("the %s must not exceed %d KiB", slot.Name(), slot.MaxUpload()>>10))
 	}
 
 	img, err := b.proc.Reencode(ctx, data, slot.Output(), slot.MaxPixels())
@@ -85,8 +89,8 @@ func (b *Branding) Upload(ctx context.Context, by shared.UUID, slot domain.Slot,
 		return nil, err
 	}
 
-	if len(img.Data) > domain.MaxStoredImage {
-		return nil, domain.ErrImageTooLarge.WithDetail("the re-encoded image exceeds 2 MiB; upload a smaller image")
+	if len(img.Data) > MaxStoredImage {
+		return nil, ErrImageTooLarge.WithDetail("the re-encoded image exceeds 2 MiB; upload a smaller image")
 	}
 
 	now := b.now()
@@ -96,7 +100,7 @@ func (b *Branding) Upload(ctx context.Context, by shared.UUID, slot domain.Slot,
 		return nil, fmt.Errorf("file id: %w", err)
 	}
 
-	f, err := domain.NewImage(domain.ImageSpec{
+	f, err := NewImage(ImageSpec{
 		ID: id, Kind: slot.Kind(), MIME: img.MIME, Content: img.Data, Width: img.Width, Height: img.Height,
 		UploadedBy: by, At: now,
 	})
@@ -127,7 +131,7 @@ func (b *Branding) Upload(ctx context.Context, by shared.UUID, slot domain.Slot,
 
 // Remove restores the default of slot (no image) and reports whether an
 // image was removed.
-func (b *Branding) Remove(ctx context.Context, slot domain.Slot) (bool, error) {
+func (b *Branding) Remove(ctx context.Context, slot Slot) (bool, error) {
 	removed := false
 
 	err := b.tx.WithinTx(ctx, func(ctx context.Context) error {
@@ -144,18 +148,18 @@ func (b *Branding) Remove(ctx context.Context, slot domain.Slot) (bool, error) {
 	return removed, err
 }
 
-// Current returns the image of slot, or domain.ErrImageNotSet.
-func (b *Branding) Current(ctx context.Context, slot domain.Slot) (*domain.File, error) {
+// Current returns the image of slot, or ErrImageNotSet.
+func (b *Branding) Current(ctx context.Context, slot Slot) (*File, error) {
 	f, err := b.repo.LatestOfKind(ctx, slot.Kind())
-	if errors.Is(err, domain.ErrFileNotFound) {
-		return nil, domain.ErrImageNotSet
+	if errors.Is(err, ErrFileNotFound) {
+		return nil, ErrImageNotSet
 	}
 
 	return f, err
 }
 
 // Content returns the image of slot with its content.
-func (b *Branding) Content(ctx context.Context, slot domain.Slot) (*domain.File, []byte, error) {
+func (b *Branding) Content(ctx context.Context, slot Slot) (*File, []byte, error) {
 	f, err := b.Current(ctx, slot)
 	if err != nil {
 		return nil, nil, err

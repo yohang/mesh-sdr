@@ -1,6 +1,4 @@
-// Package repotest holds the contract suite of the job_runs repository
-// (ADR 0006): every dialect adapter runs it against a migrated database.
-package repotest
+package jobs_test
 
 import (
 	"context"
@@ -8,25 +6,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yohang/mesh-sdr/internal/jobs/domain"
+	"github.com/yohang/mesh-sdr/internal/db/dbtest"
+	"github.com/yohang/mesh-sdr/internal/jobs"
 )
 
-// Factory opens a fresh repository on a migrated database.
-type Factory func(t *testing.T) domain.Repository
-
-// Run runs the repository contract.
-func Run(t *testing.T, open Factory) {
+func TestRuns(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	name := domain.MustName("sessions.reap")
+	name := jobs.MustName("sessions.reap")
 
-	repo := open(t)
+	repo := jobs.NewRuns(dbtest.NewSQLite(t))
 
 	if r, err := repo.Get(ctx, name); err != nil || r != nil {
 		t.Fatalf("never ran: %v, %v", r, err)
 	}
 
-	r := domain.NewRun(name)
+	r := jobs.NewRun(name)
 	if err := r.Start(t0, time.Hour); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +42,7 @@ func Run(t *testing.T, open Factory) {
 	}
 
 	got, err = repo.Get(ctx, name)
-	if err != nil || got.Running() || got.Status() != domain.StatusError || got.LastError() != "boom" || got.Rows() != 12 ||
+	if err != nil || got.Running() || got.Status() != jobs.StatusError || got.LastError() != "boom" || got.Rows() != 12 ||
 		!got.LastFinished().Equal(t0.Add(time.Second)) {
 		t.Errorf("finished = %+v, %v", got, err)
 	}

@@ -1,7 +1,4 @@
-// Package domain is the periodic jobs domain (TECHNICAL_SPEC §7.3
-// "Retention jobs", §7.1 `job_runs`): job names and the run bookkeeping
-// that keeps a job from overlapping itself (ADR 0010).
-package domain
+package jobs
 
 import (
 	"context"

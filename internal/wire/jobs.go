@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/jobs"
+
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	"github.com/yohang/mesh-sdr/internal/db"
@@ -12,18 +14,15 @@ import (
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
-	jobsapp "github.com/yohang/mesh-sdr/internal/jobs/app"
-	jobsdomain "github.com/yohang/mesh-sdr/internal/jobs/domain"
-	jobssqlite "github.com/yohang/mesh-sdr/internal/jobs/infra/sqlite"
 	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 )
 
-// jobs builds the hub's jobs scheduler with the retention jobs, and the
+// newJobs builds the hub's jobs scheduler with the retention jobs, and the
 // retention view (ADM-011, ADR 0010).
-func jobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobsapp.RetentionValues, audit audit.Appender,
+func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobs.RetentionValues, audit audit.Appender,
 	logger *slog.Logger,
-) (*jobsapp.Scheduler, *jobsapp.Retention, error) {
-	sched := jobsapp.NewScheduler(jobssqlite.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.app.scheduler"))
+) (*jobs.Scheduler, *jobs.Retention, error) {
+	sched := jobs.NewScheduler(jobs.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.app.scheduler"))
 	sched.Register(idm.Reaper, identityapp.SessionReapEvery)
 	sched.Register(idm.AuditPurger, identityapp.AuditPurgeEvery)
 	// ADR 0020: the schedules' safety net and hourly push.
@@ -37,32 +36,32 @@ func jobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobsapp.
 		sched.Register(j, identityapp.LinkPurgeEvery)
 	}
 
-	sessions, err := jobssqlite.NewTableStats(adapter, "sessions")
+	sessions, err := jobs.NewTableStats(adapter, "sessions")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	auditLog, err := jobssqlite.NewTableStats(adapter, "audit_log")
+	auditLog, err := jobs.NewTableStats(adapter, "audit_log")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	connections, err := jobssqlite.NewTableStats(adapter, "connections")
+	connections, err := jobs.NewTableStats(adapter, "connections")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	stores := []jobsapp.Store{
+	stores := []jobs.Store{
 		{Name: "sessions", Label: "Ended sessions", SettingKey: "retention.sessions", Job: identityapp.JobSessionsReap, Stats: sessions},
 		{Name: "audit_log", Label: "Audit log", SettingKey: "retention.audit_log", Job: identityapp.JobAuditPurge, Stats: auditLog},
 		{Name: "connections", Label: "Connections", SettingKey: "retention.connections", Job: gridapp.JobConnectionsPurge, Stats: connections},
 	}
 
-	return sched, jobsapp.NewRetention(stores, sched, values, audit), nil
+	return sched, jobs.NewRetention(stores, sched, values, audit), nil
 }
 
 // retentionRows adapts the retention view to the admin pages.
-type retentionRows struct{ r *jobsapp.Retention }
+type retentionRows struct{ r *jobs.Retention }
 
 // Stores implements settingshttp.Retention.
 func (a retentionRows) Stores(ctx context.Context) ([]settingshttp.RetentionRow, error) {
@@ -77,7 +76,7 @@ func (a retentionRows) Stores(ctx context.Context) ([]settingshttp.RetentionRow,
 		out = append(out, settingshttp.RetentionRow{
 			Store: v.Store.Name, Label: v.Store.Label, SettingKey: v.Store.SettingKey, Retention: v.Retention,
 			Rows: v.Rows, Bytes: v.Bytes, Sized: v.Sized, Running: v.LastRun.Running(), LastFinished: v.LastRun.LastFinished(),
-			LastFailed: v.LastRun.Status() == jobsdomain.StatusError, LastError: v.LastRun.LastError(), LastRows: v.LastRun.Rows(),
+			LastFailed: v.LastRun.Status() == jobs.StatusError, LastError: v.LastRun.LastError(), LastRows: v.LastRun.Rows(),
 		})
 	}
 

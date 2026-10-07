@@ -12,7 +12,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
-	presetsrepotest "github.com/yohang/mesh-sdr/internal/presets/infra/repotest"
+	presetsdomain "github.com/yohang/mesh-sdr/internal/presets/domain"
 	presetssqlite "github.com/yohang/mesh-sdr/internal/presets/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/schedules/app"
 	"github.com/yohang/mesh-sdr/internal/schedules/domain"
@@ -97,7 +97,7 @@ func newEnv(t *testing.T) *env {
 	repo := presetssqlite.NewPresets(a)
 
 	for i, id := range []shared.UUID{presetA, presetB} {
-		if err := repo.Create(context.Background(), presetsrepotest.NewPreset(t, id, "p"+string(rune('a'+i)), i, t0)); err != nil {
+		if err := repo.Create(context.Background(), newPreset(t, id, "p"+string(rune('a'+i)), i, t0)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -328,4 +328,23 @@ func TestPlanner(t *testing.T) {
 	if plans, _ = p.Plan(ctx, "attic", t0); len(plans[0].Timeline.Slots()) != 0 {
 		t.Errorf("stale hf slots = %v", plans[0].Timeline.Slots())
 	}
+}
+
+// newPreset builds a valid preset for tests.
+func newPreset(t *testing.T, id shared.UUID, slug string, order int, now time.Time) *presetsdomain.Preset {
+	t.Helper()
+
+	spec, err := presetsdomain.NewSpec(presetsdomain.Draft{
+		Slug: slug, Name: "Preset " + slug, CenterFreq: 14_074_000, SampRate: 2_048_000, StartMod: "usb",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := presetsdomain.NewPreset(id, spec, order, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return p
 }

@@ -1,4 +1,4 @@
-package app
+package jobs
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
-	"github.com/yohang/mesh-sdr/internal/jobs/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -60,7 +59,7 @@ type StoreView struct {
 	Rows      int64
 	Bytes     int64
 	Sized     bool
-	LastRun   *domain.Run
+	LastRun   *Run
 }
 
 // List returns every store in registration order.
@@ -88,7 +87,7 @@ func (r *Retention) List(ctx context.Context) ([]StoreView, error) {
 
 // Purge applies the retention policy of a store now ("purge now"): it runs
 // its job (which never deletes rows younger than the retention) and audits
-// it. It returns the rows deleted, ErrUnknownStore or domain.ErrJobRunning.
+// it. It returns the rows deleted, ErrUnknownStore or ErrJobRunning.
 func (r *Retention) Purge(ctx context.Context, store string) (int64, error) {
 	for _, s := range r.stores {
 		if s.Name != store {
@@ -96,7 +95,7 @@ func (r *Retention) Purge(ctx context.Context, store string) (int64, error) {
 		}
 
 		rows, err := r.scheduler.RunNow(ctx, s.Job)
-		if errors.Is(err, domain.ErrJobRunning) {
+		if errors.Is(err, ErrJobRunning) {
 			return 0, err
 		}
 

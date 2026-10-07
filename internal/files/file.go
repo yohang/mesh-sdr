@@ -1,7 +1,4 @@
-// Package domain is the files domain (TECHNICAL_SPEC §7.1 `files`,
-// `file_blobs`, ADR 0010). This part models the admin-uploaded receiver
-// images; the files epic (FIL) adds decoder and recording files.
-package domain
+package files
 
 import (
 	"context"

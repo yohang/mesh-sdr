@@ -1,4 +1,4 @@
-package domain_test
+package jobs_test
 
 import (
 	"errors"
@@ -6,16 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yohang/mesh-sdr/internal/jobs/domain"
+	"github.com/yohang/mesh-sdr/internal/jobs"
 )
 
 func TestName(t *testing.T) {
-	if _, err := domain.NewName("sessions.reap"); err != nil {
+	if _, err := jobs.NewName("sessions.reap"); err != nil {
 		t.Error(err)
 	}
 
 	for _, bad := range []string{"", "reap", "Sessions.reap", "a." + strings.Repeat("b", 70)} {
-		if _, err := domain.NewName(bad); !errors.Is(err, domain.ErrInvalidJobName) {
+		if _, err := jobs.NewName(bad); !errors.Is(err, jobs.ErrInvalidJobName) {
 			t.Errorf("%q: %v", bad, err)
 		}
 	}
@@ -23,13 +23,13 @@ func TestName(t *testing.T) {
 
 func TestRunLifecycle(t *testing.T) {
 	t0 := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	r := domain.NewRun(domain.MustName("audit.purge"))
+	r := jobs.NewRun(jobs.MustName("audit.purge"))
 
 	if err := r.Start(t0, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := r.Start(t0.Add(time.Minute), time.Hour); !errors.Is(err, domain.ErrJobRunning) {
+	if err := r.Start(t0.Add(time.Minute), time.Hour); !errors.Is(err, jobs.ErrJobRunning) {
 		t.Errorf("overlap: %v", err)
 	}
 
@@ -39,18 +39,18 @@ func TestRunLifecycle(t *testing.T) {
 
 	r.Finish(t0.Add(2*time.Hour), 0, errors.New(strings.Repeat("é", 400)))
 
-	if r.Running() || r.Status() != domain.StatusError || len(r.LastError()) > 512 || !strings.HasPrefix(r.LastError(), "é") {
+	if r.Running() || r.Status() != jobs.StatusError || len(r.LastError()) > 512 || !strings.HasPrefix(r.LastError(), "é") {
 		t.Errorf("run = %+v", r)
 	}
 
-	if _, err := domain.RehydrateRun(domain.MustName("audit.purge"), domain.RunState{Status: "maybe"}); !errors.Is(err, domain.ErrInvalidJobRun) {
+	if _, err := jobs.RehydrateRun(jobs.MustName("audit.purge"), jobs.RunState{Status: "maybe"}); !errors.Is(err, jobs.ErrInvalidJobRun) {
 		t.Errorf("rehydrate: %v", err)
 	}
 }
 
 func TestAbandon(t *testing.T) {
 	t0 := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	r := domain.NewRun(domain.MustName("audit.purge"))
+	r := jobs.NewRun(jobs.MustName("audit.purge"))
 
 	if r.Abandon(t0) {
 		t.Error("an idle run was abandoned")
@@ -58,7 +58,7 @@ func TestAbandon(t *testing.T) {
 
 	_ = r.Start(t0, time.Hour)
 
-	if !r.Abandon(t0.Add(time.Minute)) || r.Running() || r.Status() != domain.StatusError || r.LastError() != domain.Interrupted {
+	if !r.Abandon(t0.Add(time.Minute)) || r.Running() || r.Status() != jobs.StatusError || r.LastError() != jobs.Interrupted {
 		t.Errorf("abandoned run = %+v", r)
 	}
 }

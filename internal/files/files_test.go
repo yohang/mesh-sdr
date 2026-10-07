@@ -1,6 +1,4 @@
-// Package repotest holds the contract suite of the files repository (ADR
-// 0006): every dialect adapter runs it against a migrated database.
-package repotest
+package files_test
 
 import (
 	"bytes"
@@ -8,26 +6,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yohang/mesh-sdr/internal/db"
-	"github.com/yohang/mesh-sdr/internal/files/domain"
+	"github.com/yohang/mesh-sdr/internal/db/dbtest"
+	"github.com/yohang/mesh-sdr/internal/files"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
-// Factory opens a fresh repository on a migrated database, with its
-// adapter (transactions and row counts).
-type Factory func(t *testing.T) (domain.Repository, *db.DB)
-
-// Run runs the repository contract: content larger than a chunk is stored
-// in several chunks and read back in order.
-func Run(t *testing.T, open Factory) {
+func TestFiles(t *testing.T) {
 	ctx := context.Background()
-	repo, tx := open(t)
+	tx := dbtest.NewSQLite(t)
+	repo := files.NewFiles(tx)
 	reader := tx
 
-	content := bytes.Repeat([]byte("0123456789abcdef"), (domain.ChunkSize*2+100)/16)
+	content := bytes.Repeat([]byte("0123456789abcdef"), (files.ChunkSize*2+100)/16)
 
-	f, err := domain.NewImage(domain.ImageSpec{
-		ID: shared.MustParseUUID("0192c3a4-5b6c-7d8e-9f01-23456789abcd"), Kind: domain.KindReceiverPhoto, MIME: domain.MIMEJPEG,
+	f, err := files.NewImage(files.ImageSpec{
+		ID: shared.MustParseUUID("0192c3a4-5b6c-7d8e-9f01-23456789abcd"), Kind: files.KindReceiverPhoto, MIME: files.MIMEJPEG,
 		Content: content, Width: 1, Height: 1, At: time.Now(),
 	})
 	if err != nil {
@@ -43,7 +36,7 @@ func Run(t *testing.T, open Factory) {
 		t.Errorf("chunks = %d, %v", chunks, err)
 	}
 
-	got, err := repo.LatestOfKind(ctx, domain.KindReceiverPhoto)
+	got, err := repo.LatestOfKind(ctx, files.KindReceiverPhoto)
 	if err != nil || got.SHA256() != f.SHA256() {
 		t.Fatalf("latest = %v, %v", got, err)
 	}
@@ -53,7 +46,7 @@ func Run(t *testing.T, open Factory) {
 		t.Errorf("content differs: %v", err)
 	}
 
-	if n, err := repo.DeleteKind(ctx, domain.KindReceiverPhoto); err != nil || n != 1 {
+	if n, err := repo.DeleteKind(ctx, files.KindReceiverPhoto); err != nil || n != 1 {
 		t.Errorf("delete = %d, %v", n, err)
 	}
 
