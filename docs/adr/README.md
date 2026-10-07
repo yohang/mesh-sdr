@@ -29,3 +29,4 @@ ADRs are written with Status `Proposed` (spikes) and switch to `Accepted` once t
 | [0023](0023-api-for-js-only.md) | JSON API only for scripts, islands and nodes | Accepted |
 | [0024](0024-scope-trim.md) | Backlog scope trim for a hobbyist product | Accepted |
 | [0025](0025-pragmatic-ddd.md) | Pragmatic DDD | Accepted |
+| [0026](0026-m1a-scope.md) | M1a scope (KISS) | Accepted |
