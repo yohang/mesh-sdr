@@ -30,6 +30,9 @@ const SUBPROTOCOL = "rx.v1";
 const BACKGROUND_HEADER = "X-Msdr-Background";
 const MIN_DELAY = 1000;
 const MAX_DELAY = 30000;
+// After this many connections in a row that never got a session.welcome,
+// the dispatcher stops and the shell offers a manual reload.
+const MAX_FAILED_HANDSHAKES = 5;
 
 // Close codes after which reconnecting cannot help (§6.2 client behaviour).
 const NO_RETRY = new Set([1000, 1003, 1008, 1009, 4400, 4403]);
@@ -40,6 +43,7 @@ let subscribed = new Set();
 let pendingSubs = new Map(); // sub request id → its topics, until acked
 let denied = new Set(); // topics refused on this connection: not asked again
 let attempt = 0;
+let failedHandshakes = 0;
 let retryAfter = 0;
 let timer = null;
 let stopped = false;
@@ -128,6 +132,7 @@ function onMessage(data) {
     case "session.welcome":
       ready = true;
       attempt = 0;
+      failedHandshakes = 0;
       subscribed = new Set();
       pendingSubs = new Map();
       denied = new Set();
@@ -181,6 +186,9 @@ function onMessage(data) {
 }
 
 function onClose(code) {
+  if (!ready) {
+    failedHandshakes++;
+  }
   socket = null;
   ready = false;
   subscribed = new Set();
@@ -197,6 +205,12 @@ function onClose(code) {
     return;
   }
   if (stopped || NO_RETRY.has(code)) {
+    return;
+  }
+  if (failedHandshakes >= MAX_FAILED_HANDSHAKES) {
+    stopped = true;
+    document.getElementById("msdr-events-stopped")?.removeAttribute("hidden");
+    fire("events.state", { state: "stopped", code });
     return;
   }
 

@@ -374,13 +374,28 @@ func (s *State) HasSession() bool { return s.session != nil }
 // activity of the session (ADR 0018).
 const BackgroundHeader = "X-Msdr-Background"
 
+// eventsPath is the hub events WebSocket (ADR 0016).
+const eventsPath = "/api/ws"
+
+// background reports whether a request is not activity of its user: a
+// live fragment refresh (BackgroundHeader), or the upgrade of the hub
+// events WebSocket, which a page opens on its own and reopens after every
+// network hiccup (ADR 0018).
+func background(r *http.Request) bool {
+	if r.Header.Get(BackgroundHeader) == "1" {
+		return true
+	}
+
+	return r.URL.Path == eventsPath && strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+}
+
 func (m *Module) session(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		st := &State{userAgent: r.UserAgent()}
 
 		if c, err := r.Cookie(m.sessionCookieName()); err == nil && c.Value != "" {
 			resolve := m.auth.Resolve
-			if r.Header.Get(BackgroundHeader) == "1" {
+			if background(r) {
 				resolve = m.auth.Peek
 			}
 
