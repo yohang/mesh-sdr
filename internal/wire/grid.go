@@ -318,16 +318,17 @@ func (g *hubGrid) applySettings(base app.Timings, s gridSettings) {
 // transitions (after the device registry listener), committed node event
 // batches, admin node changes, enrollments, forgotten devices and presence
 // changes.
-func (g *hubGrid) publishEvents(b *eventsapp.Broker, now func() time.Time, logger *slog.Logger) *gridEvents {
-	ge := newGridEvents(b, g, now, logger)
+func (g *hubGrid) publishEvents(b *eventsapp.Broker, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
+	ge := newGridEvents(b, g, policies, now, logger)
 
 	if g.status != nil {
 		g.status.Listen(ge.statusChanged)
 	}
 
 	if g.control != nil {
+		// Policies first: the events of the batch use the new snapshot.
+		g.control.OnApplied(refreshOnDevices(policies))
 		g.control.OnApplied(ge.applied)
-		g.control.OnApplied(recheckOnDevices(b))
 	}
 
 	if g.enrollment != nil {
@@ -343,6 +344,7 @@ func (g *hubGrid) publishEvents(b *eventsapp.Broker, now func() time.Time, logge
 
 	g.nodes.OnChange(ge.node)
 	g.devices.OnForget(ge.forgotten)
+	g.devices.OnForget(func(ctx context.Context, _ *domain.Device) { policies.refresh(ctx) })
 	g.presence.OnChange(ge.presenceChanged)
 
 	return ge

@@ -387,11 +387,13 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	}
 
 	// Hub events WebSocket (ADR 0016, ADR 0018) and its grid producers.
-	events := newEventsModule(cfg.Hub.URL, broker, idm.HTTP,
-		gridapp.NewListenPolicies(gridsqlite.NewDeviceRepository(adapter), storeListenPolicy{store: settingsModule.Store}),
-		g.presence, now, logger)
-	settingsModule.Store.Subscribe(listenPolicyWatch(broker, settingsModule.Store.String("listen_policy")))
-	ge := g.publishEvents(broker, now, logger)
+	policies := &policyCache{
+		policies: gridapp.NewListenPolicies(gridsqlite.NewDeviceRepository(adapter), storeListenPolicy{store: settingsModule.Store}),
+		broker:   broker, logger: component(logger, "events.wire.policies"),
+	}
+	events := newEventsModule(cfg.Hub.URL, broker, idm.HTTP, policies, g.presence, now, logger)
+	settingsModule.Store.Subscribe(listenPolicyWatch(policies, settingsModule.Store.String("listen_policy")))
+	ge := g.publishEvents(broker, policies, now, logger)
 	workers = append(workers, events.Run, ge.runPresence)
 
 	scheduler, retention, err := jobs(adapter, idm, sch, settingsModule.Store, auditLog, logger)

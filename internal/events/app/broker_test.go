@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -265,5 +266,53 @@ func TestAdmission(t *testing.T) {
 
 	if _, _, err := a.Admit("s9", "192.0.2.1", now.Add(time.Minute)); err != nil {
 		t.Fatalf("after a minute: %v", err)
+	}
+}
+
+// countingAuthz counts the authorisations.
+type countingAuthz struct{ n int }
+
+func (a *countingAuthz) AuthorizeTopic(context.Context, domain.Topic) error {
+	a.n++
+
+	return nil
+}
+
+// TestSubscribeDedupAndLimitFirst: duplicates are authorised once, and an
+// oversized request is refused before any authorisation.
+func TestSubscribeDedupAndLimitFirst(t *testing.T) {
+	ctx := context.Background()
+	az := &countingAuthz{}
+	s := app.NewBroker().Attach(domain.Viewer{}, az, func(app.Event) {})
+
+	topics, _, err := s.Subscribe(ctx, []string{"nodes", "nodes", "devices", "nodes"})
+	if err != nil || len(topics) != 2 || az.n != 2 {
+		t.Fatalf("dedup = %v, %v, %d authorisations", topics, err, az.n)
+	}
+
+	big := make([]string, 0, 1000)
+	for i := range 1000 {
+		big = append(big, "decodes:device=d"+strconv.Itoa(i))
+	}
+
+	az.n = 0
+
+	if _, _, err := s.Subscribe(ctx, big); !errors.Is(err, domain.ErrTooManyTopics) || az.n != 0 {
+		t.Fatalf("oversized sub = %v after %d authorisations", err, az.n)
+	}
+
+	// Duplicates of 30 topics fit with the 2 already held.
+	many := make([]string, 0, 60)
+	for i := range 30 {
+		id := "decodes:device=x" + strconv.Itoa(i)
+		many = append(many, id, id)
+	}
+
+	if _, _, err := s.Subscribe(ctx, many); err != nil {
+		t.Fatalf("30 new topics with duplicates: %v", err)
+	}
+
+	if _, _, err := s.Subscribe(ctx, []string{"presence"}); !errors.Is(err, domain.ErrTooManyTopics) {
+		t.Fatalf("33rd topic = %v", err)
 	}
 }

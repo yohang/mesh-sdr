@@ -189,6 +189,11 @@ func TestListenPolicies(t *testing.T) {
 		})
 	}
 
+	all, err := app.NewListenPolicies(devices, fixedPolicy{v: "registered"}).Effective(ctx)
+	if err != nil || len(all) != 2 || all["open"] != "anonymous" || all["closed"] != "registered" {
+		t.Errorf("Effective = %v, %v", all, err)
+	}
+
 	none := app.NewListenPolicies(deviceList{dev("closed", true, "")}, fixedPolicy{v: "registered"})
 	if got, _ := none.AnyAnonymous(ctx); got {
 		t.Error("AnyAnonymous without an anonymous device")

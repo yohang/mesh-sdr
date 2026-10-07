@@ -197,3 +197,23 @@ func (p *ListenPolicies) AnyAnonymous(ctx context.Context) (bool, error) {
 
 	return false, nil
 }
+
+// Effective returns the effective listen policy of every enabled device, by
+// device id: one consistent view for many checks.
+func (p *ListenPolicies) Effective(ctx context.Context) (map[string]string, error) {
+	devices, err := p.devices.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+
+	global := p.global(ctx)
+	out := make(map[string]string, len(devices))
+
+	for _, d := range devices {
+		if d.Flags().Enabled {
+			out[d.ID().String()] = effective(d, global)
+		}
+	}
+
+	return out, nil
+}

@@ -120,6 +120,8 @@ type Viewer struct {
 	// SessionRef is the public handle of the session (token.SessionRef),
 	// "" for an anonymous visitor.
 	SessionRef string
+	// Staff is set for operators and admins, who see the whole registry.
+	Staff bool
 }
 
 // Anonymous reports whether the viewer is not signed in.

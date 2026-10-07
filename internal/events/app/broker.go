@@ -160,11 +160,13 @@ func (s *Subscription) Rechecks() <-chan struct{} { return s.recheck }
 // Viewer returns the subscriber.
 func (s *Subscription) Viewer() domain.Viewer { return s.viewer }
 
-// Subscribe parses and authorises every topic, then adds them all, or none
-// when one fails (ADR 0016 decision 6): the error comes with the offending
-// topic.
+// Subscribe parses every topic, drops duplicates, refuses a request that
+// would exceed MaxTopics before any authorisation, then authorises each
+// topic and adds them all, or none when one fails (ADR 0016 decision 6):
+// the error comes with the offending topic.
 func (s *Subscription) Subscribe(ctx context.Context, raw []string) ([]domain.Topic, string, error) {
-	topics := make([]domain.Topic, 0, len(raw))
+	topics := make([]domain.Topic, 0, min(len(raw), domain.MaxTopics+1))
+	seen := map[domain.Topic]struct{}{}
 
 	for _, r := range raw {
 		t, err := domain.ParseTopic(r)
@@ -172,25 +174,32 @@ func (s *Subscription) Subscribe(ctx context.Context, raw []string) ([]domain.To
 			return nil, r, err
 		}
 
-		if err := s.authz.AuthorizeTopic(ctx, t); err != nil {
-			return nil, r, err
+		if _, dup := seen[t]; dup {
+			continue
 		}
 
+		seen[t] = struct{}{}
 		topics = append(topics, t)
+
+		if len(topics) > domain.MaxTopics {
+			return nil, "", domain.ErrTooManyTopics
+		}
+	}
+
+	if s.added(topics) > domain.MaxTopics {
+		return nil, "", domain.ErrTooManyTopics
+	}
+
+	for _, t := range topics {
+		if err := s.authz.AuthorizeTopic(ctx, t); err != nil {
+			return nil, t.String(), err
+		}
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	added := map[domain.Topic]struct{}{}
-
-	for _, t := range topics {
-		if _, ok := s.topics[t]; !ok {
-			added[t] = struct{}{}
-		}
-	}
-
-	if len(s.topics)+len(added) > domain.MaxTopics {
+	if s.addedLocked(topics) > domain.MaxTopics {
 		return nil, "", domain.ErrTooManyTopics
 	}
 
@@ -199,6 +208,27 @@ func (s *Subscription) Subscribe(ctx context.Context, raw []string) ([]domain.To
 	}
 
 	return topics, "", nil
+}
+
+// added returns the number of topics the subscription would hold with
+// topics.
+func (s *Subscription) added(topics []domain.Topic) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.addedLocked(topics)
+}
+
+func (s *Subscription) addedLocked(topics []domain.Topic) int {
+	n := len(s.topics)
+
+	for _, t := range topics {
+		if _, ok := s.topics[t]; !ok {
+			n++
+		}
+	}
+
+	return n
 }
 
 // Unsubscribe removes topics; unknown or malformed ones are ignored.
