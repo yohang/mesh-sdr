@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-07
-- Amended by: ADR 0022 (reporting engine and outbox removed)
+- Amended by: ADR 0022 (reporting engine and outbox removed), ADR 0023 and ADR 0026 (presets and schedules REST removed)
 - Deciders: project owner
 - Scope: epic part `epic/sched-1` of epic #446 (grid). It closes GRID-001 (#9) and GRID-016 (#24) in M0 and completes the schedule parts of ADM-009 (#67) and GRID-015 (#23).
 
@@ -49,6 +49,8 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
    - Admin › Devices › {device} gets a read-only Schedules section. It flags a schedule the hub disabled and says why.
    - Admin › Overview counts the schedules the hub disabled.
    - No new HTML form, so the HTML/API parity list is unchanged.
+
+   *Amendment (ADR 0023, ADR 0026, M1a):* presets are managed on the Admin › Presets HTML pages and schedules have a read-only Admin › Schedules list; the presets and schedules REST endpoints are removed.
 
 ### Domain
 
