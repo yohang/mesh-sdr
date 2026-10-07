@@ -379,6 +379,13 @@ func (d *demod) run() {
 
 		gap = gap || g != nil
 
+		// The hub setting applies live (no chain rebuild).
+		if us := d.e.deemphasisUS(); us != chain.Config().DeemphasisUS {
+			if err := chain.SetDeemphasis(us); err != nil {
+				d.e.log.Warn("wfm de-emphasis not applied", slog.Any("error", err))
+			}
+		}
+
 		res, err := chain.Process(iq)
 		if err != nil {
 			d.e.log.Error("demodulator failed", slog.Any("error", err))
@@ -439,7 +446,7 @@ func (d *demod) rebuild(chain *dsp.Chain, framer *dsp.Framer, key chainKey, b *b
 
 	nc, err := dsp.NewChain(dsp.ChainConfig{
 		Demod: m.Demod, ChannelRate: b.ch.Rate(), OutputRate: p.OutputRate, ResidualHz: b.ch.Residual(),
-		LowHz: p.LowHz, HighHz: p.HighHz, Squelch: p.SquelchDB, AGC: m.AGC, NR: nr,
+		LowHz: p.LowHz, HighHz: p.HighHz, Squelch: p.SquelchDB, AGC: m.AGC, NR: nr, DeemphasisUS: d.e.deemphasisUS(),
 	})
 	if err != nil {
 		d.e.log.Error("demodulator chain not rebuilt, keeping the previous one", slog.Any("error", err))

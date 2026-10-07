@@ -238,16 +238,6 @@ func NewBandPass(low, high, transition float32) (*Stage[complex64, complex64], e
 	return newStage[complex64, complex64](C.msdr_bandpass_new(C.float(low), C.float(high), C.float(transition)), "band-pass")
 }
 
-// NewWFMDeemphasis returns Csdr::WfmDeemphasis: the one-pole broadcast FM
-// de-emphasis with time constant tau seconds at sampleRate.
-func NewWFMDeemphasis(sampleRate int, tau float32) (*Stage[float32, float32], error) {
-	if sampleRate <= 0 || tau <= 0 {
-		return nil, fmt.Errorf("%w: wfm deemphasis rate %d tau %g", ErrBuild, sampleRate, tau)
-	}
-
-	return newStage[float32, float32](C.msdr_wfm_deemphasis_new(C.uint(sampleRate), C.float(tau)), "wfm deemphasis")
-}
-
 // NoiseFilter is Csdr::NoiseFilter<float>: a spectral gate that keeps the
 // FFT bins above the average power times a threshold.
 type NoiseFilter struct {

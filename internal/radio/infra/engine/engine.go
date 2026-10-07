@@ -44,16 +44,23 @@ const (
 // Factory builds engines.
 type Factory struct {
 	Logger *slog.Logger
+	// Deemphasis returns the WFM de-emphasis in µs pushed by the hub (0:
+	// none yet, 50 µs); nil: 50 µs.
+	Deemphasis func() int
 }
 
 // New implements app.Engines.
 func (f Factory) New(id shared.DeviceID) app.Engine {
-	return New(f.Logger.With(slog.String("device_id", id.String())))
+	e := New(f.Logger.With(slog.String("device_id", id.String())))
+	e.deemphasis = f.Deemphasis
+
+	return e
 }
 
 // Engine is the DSP of one device.
 type Engine struct {
-	log *slog.Logger
+	log        *slog.Logger
+	deemphasis func() int
 
 	mu     sync.Mutex
 	ep     *epoch
@@ -68,6 +75,15 @@ type Engine struct {
 // New returns an idle engine.
 func New(log *slog.Logger) *Engine {
 	return &Engine{log: log, subs: map[int]func(app.SpectrumFrame){}, demods: map[*demod]struct{}{}}
+}
+
+// deemphasisUS returns the current WFM de-emphasis (µs, 0: default).
+func (e *Engine) deemphasisUS() int {
+	if e.deemphasis == nil {
+		return 0
+	}
+
+	return e.deemphasis()
 }
 
 // epoch is one run of the device source.

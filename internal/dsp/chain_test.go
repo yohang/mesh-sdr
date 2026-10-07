@@ -275,3 +275,45 @@ func TestChainConfigValidation(t *testing.T) {
 		}
 	}
 }
+
+// TestDeemphasis: the one-pole filter is about 3 dB down at 1/(2πτ) (the
+// discrete pole is a little steeper at 48 kHz), and the
+// time constant changes live on a WFM chain.
+func TestDeemphasis(t *testing.T) {
+	gain := func(us int, freq float64) float64 {
+		d := newDeemphasis(48000, us)
+		in := make([]float32, 48000)
+
+		for i := range in {
+			in[i] = float32(math.Sin(2 * math.Pi * freq * float64(i) / 48000))
+		}
+
+		out := make([]float32, len(in))
+		if _, err := d.Process(in, out); err != nil {
+			t.Fatal(err)
+		}
+
+		return rms(out[24000:]) / rms(in[24000:])
+	}
+
+	for _, us := range []int{WFMDeemphasis50, WFMDeemphasis75} {
+		corner := 1 / (2 * math.Pi * float64(us) * 1e-6)
+		if g := gain(us, corner); math.Abs(g-math.Sqrt2/2) > 0.08 {
+			t.Fatalf("%d µs: gain %.3f at %.0f Hz", us, g, corner)
+		}
+	}
+
+	c, err := NewChain(ChainConfig{Demod: DemodWFM, ChannelRate: 240000, OutputRate: 48000, LowHz: -75000, HighHz: 75000, AGC: AGCOff})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if err := c.SetDeemphasis(WFMDeemphasis75); err != nil || c.Config().DeemphasisUS != 75 || c.deemph.alpha != newDeemphasis(48000, 75).alpha {
+		t.Fatalf("live de-emphasis: %v", err)
+	}
+
+	if err := c.SetDeemphasis(60); !errors.Is(err, ErrChain) {
+		t.Fatal(err)
+	}
+}

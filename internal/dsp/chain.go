@@ -29,9 +29,12 @@ const (
 	WideChannelRate = 200000
 )
 
-// WFMDeemphasisTau is the broadcast FM de-emphasis time constant (50 µs,
-// DEM-016).
-const WFMDeemphasisTau = 50e-6
+// Broadcast FM de-emphasis time constants in µs (DEM-016, hub setting
+// wfm_deemphasis).
+const (
+	WFMDeemphasis50 = 50
+	WFMDeemphasis75 = 75
+)
 
 // NR threshold range (§8.3 rule 4 nr_threshold).
 const (
@@ -137,6 +140,16 @@ type ChainConfig struct {
 	// AGC is the AGC profile of the mode family.
 	AGC AGCProfile
 	NR  NR
+	// DeemphasisUS is the WFM de-emphasis in µs (50 or 75; 0: 50).
+	DeemphasisUS int
+}
+
+func validDeemphasis(us int) error {
+	if us != 0 && us != WFMDeemphasis50 && us != WFMDeemphasis75 {
+		return fmt.Errorf("%w: wfm de-emphasis %d µs", ErrChain, us)
+	}
+
+	return nil
 }
 
 // Validate checks the ranges of §8.3 rule 4.
@@ -157,6 +170,10 @@ func (c ChainConfig) Validate() error {
 	}
 
 	if err := validSquelch(c.Squelch); err != nil {
+		return err
+	}
+
+	if err := validDeemphasis(c.DeemphasisUS); err != nil {
 		return err
 	}
 
@@ -205,11 +222,12 @@ type Chain struct {
 	demod stage[complex64, float32]
 	// pre run at the channel rate, rs resamples, post run at the output
 	// rate.
-	pre  []*step
-	rs   *step
-	post []*step
-	nr   *csdr.NoiseFilter
-	nrSt *step
+	pre    []*step
+	rs     *step
+	deemph *deemphasis
+	post   []*step
+	nr     *csdr.NoiseFilter
+	nrSt   *step
 	// steps is the float part of the chain in order.
 	steps []*step
 
@@ -316,15 +334,27 @@ func (c *Chain) build() error {
 	c.rs = &step{s: rs, ratio: float64(cfg.OutputRate) / rate}
 
 	if cfg.Demod == DemodWFM {
-		d, err := csdr.NewWFMDeemphasis(cfg.OutputRate, WFMDeemphasisTau)
-		if err != nil {
-			return err
-		}
-
-		c.post = append(c.post, &step{s: d, ratio: 1})
+		c.deemph = newDeemphasis(cfg.OutputRate, cfg.DeemphasisUS)
+		c.post = append(c.post, &step{s: c.deemph, ratio: 1})
 	}
 
 	return c.SetNR(cfg.NR)
+}
+
+// SetDeemphasis changes the WFM de-emphasis (µs) without rebuilding the
+// chain; other chains ignore it.
+func (c *Chain) SetDeemphasis(us int) error {
+	if err := validDeemphasis(us); err != nil {
+		return err
+	}
+
+	c.cfg.DeemphasisUS = us
+
+	if c.deemph != nil {
+		c.deemph.set(us)
+	}
+
+	return nil
 }
 
 func (c *Chain) shiftRate() float32 { return float32(-c.cfg.ResidualHz / c.cfg.ChannelRate) }

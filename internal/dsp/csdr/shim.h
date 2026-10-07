@@ -30,7 +30,6 @@ msdr_stage* msdr_dcblock_new(void);
 msdr_stage* msdr_realpart_new(void);
 // low, high and transition are relative to the sample rate (-0.5..0.5).
 msdr_stage* msdr_bandpass_new(float low, float high, float transition);
-msdr_stage* msdr_wfm_deemphasis_new(unsigned sample_rate, float tau);
 // fft_size is the noise filter block; threshold_db is its gate above the
 // average power.
 msdr_stage* msdr_noisefilter_new(unsigned fft_size, float threshold_db);

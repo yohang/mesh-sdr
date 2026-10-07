@@ -320,7 +320,7 @@ func TestBandPassKeepsBand(t *testing.T) {
 	}
 }
 
-func TestNoiseFilterAndWFMDeemphasis(t *testing.T) {
+func TestNoiseFilter(t *testing.T) {
 	nf, err := NewNoiseFilter(256, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -345,15 +345,5 @@ func TestNoiseFilterAndWFMDeemphasis(t *testing.T) {
 
 	if _, err := NewNoiseFilter(8, 0); err == nil {
 		t.Fatal("tiny noise filter accepted")
-	}
-
-	d, err := NewWFMDeemphasis(48000, 50e-6)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.Close()
-
-	if n, err := d.Process(in, out); err != nil || n != len(in) {
-		t.Fatalf("wfm deemphasis: n=%d err=%v", n, err)
 	}
 }
