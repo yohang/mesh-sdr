@@ -12,15 +12,20 @@
 #   sources        GPL sources of the bundled native components (OCI artifact)
 
 ARG GO_VERSION=1.26
+# golang:1.26-trixie (index digest); bump with GO_VERSION.
+ARG GO_IMAGE=golang:${GO_VERSION}-trixie@sha256:aae9c439b447d24c93ee483408992857cf39a3fb6ab7fe53affc65d834891fa8
 ARG DEBIAN_IMAGE=debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
 
 # Debian package pins (trixie). Bump together with DEBIAN_IMAGE.
 ARG FFTW_VERSION=3.3.10-2+b1
 ARG SAMPLERATE_VERSION=0.2.2-4+b2
 ARG RTLSDR_VERSION=2.0.2-2+b1
+ARG LIBUSB_VERSION=2:1.0.28-1
 ARG CA_CERTIFICATES_VERSION=20250419
 
-# Native components built from source (ADR 0014, ADR 0019).
+# Native components built from source (ADR 0014, ADR 0019). Upstream
+# publishes no release tarballs: the GitHub tag archives are pinned by
+# sha256.
 ARG CSDR_VERSION=0.18.41
 ARG CSDR_SHA256=aa903a61db5af280bf65aef75f0d850c68552621a086989ef86778294dff511a
 ARG OWRX_CONNECTOR_VERSION=0.6.5
@@ -75,7 +80,7 @@ RUN curl -fsSL -o csdr.tar.gz "https://github.com/luarvique/csdr/archive/refs/ta
     cp "owrx_connector-${OWRX_CONNECTOR_VERSION}/LICENSE" "${out}/usr/share/doc/owrx-connector/"
 
 
-FROM golang:${GO_VERSION}-trixie AS base
+FROM ${GO_IMAGE} AS base
 
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 
@@ -84,6 +89,7 @@ ARG TAILWIND_VERSION=4.3.3
 ARG FFTW_VERSION
 ARG SAMPLERATE_VERSION
 ARG RTLSDR_VERSION
+ARG LIBUSB_VERSION
 
 # cgo (ADR 0014): g++, libcsdr++ and its libraries; librtlsdr for the
 # connectors run by the dev stack and the tests.
@@ -93,7 +99,8 @@ ENV GOCACHE=/cache/go-build \
 
 RUN apt-get update; \
     apt-get install -y --no-install-recommends g++ \
-      "libfftw3-dev=${FFTW_VERSION}" "libsamplerate0-dev=${SAMPLERATE_VERSION}" "librtlsdr0=${RTLSDR_VERSION}"; \
+      "libfftw3-dev=${FFTW_VERSION}" "libsamplerate0-dev=${SAMPLERATE_VERSION}" "librtlsdr0=${RTLSDR_VERSION}" \
+      "libusb-1.0-0=${LIBUSB_VERSION}"; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=natives /opt/natives/usr/local/ /usr/local/
@@ -192,12 +199,13 @@ SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 ARG FFTW_VERSION
 ARG SAMPLERATE_VERSION
 ARG RTLSDR_VERSION
+ARG LIBUSB_VERSION
 ARG CA_CERTIFICATES_VERSION
 
 RUN apt-get update; \
     apt-get install -y --no-install-recommends \
       "ca-certificates=${CA_CERTIFICATES_VERSION}" "libfftw3-single3=${FFTW_VERSION}" \
-      "libsamplerate0=${SAMPLERATE_VERSION}" "librtlsdr0=${RTLSDR_VERSION}"; \
+      "libsamplerate0=${SAMPLERATE_VERSION}" "librtlsdr0=${RTLSDR_VERSION}" "libusb-1.0-0=${LIBUSB_VERSION}"; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd -g 65532 nonroot; \
     useradd -u 65532 -g 65532 -d /home/nonroot -m -s /usr/sbin/nologin nonroot; \
@@ -259,6 +267,7 @@ SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 ARG FFTW_VERSION
 ARG SAMPLERATE_VERSION
 ARG RTLSDR_VERSION
+ARG LIBUSB_VERSION
 ARG CSDR_VERSION
 ARG CSDR_SHA256
 ARG OWRX_CONNECTOR_VERSION
@@ -275,10 +284,18 @@ RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.s
     curl -fsSL -o "owrx_connector-${OWRX_CONNECTOR_VERSION}.tar.gz" "https://github.com/luarvique/owrx_connector/archive/refs/tags/${OWRX_CONNECTOR_VERSION}.tar.gz"; \
     echo "${OWRX_CONNECTOR_SHA256}  owrx_connector-${OWRX_CONNECTOR_VERSION}.tar.gz" | sha256sum -c -; \
     cd /sources/debian; \
-    usb_version="$(apt-cache show libusb-1.0-0 | sed -n 's/^Version: //p' | head -1)"; \
     apt-get source --download-only "fftw3=${FFTW_VERSION%+b*}" "rtl-sdr=${RTLSDR_VERSION%+b*}" \
-      "libsamplerate=${SAMPLERATE_VERSION%+b*}" "libusb-1.0=${usb_version%+b*}"; \
+      "libsamplerate=${SAMPLERATE_VERSION%+b*}" "libusb-1.0=${LIBUSB_VERSION%+b*}"; \
     rm -rf /var/lib/apt/lists/*
+
+# The source of MeshSDR itself (the files the binaries are built from),
+# next to the third-party sources.
+WORKDIR /meshsdr
+COPY go.mod go.sum LICENSE ./
+COPY cmd ./cmd
+COPY internal ./internal
+COPY .infra/docker/prod ./.infra/docker/prod
+RUN tar -czf /sources/meshsdr-src.tar.gz -C /meshsdr .
 
 FROM scratch AS sources
 
