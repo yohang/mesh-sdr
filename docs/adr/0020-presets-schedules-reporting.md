@@ -59,7 +59,7 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
   - `Fits(DeviceLimits)` checks that `center_freq ± samp_rate/2` lies within `[freq_min, freq_max]` and that `samp_rate` is one of the device's sample rates. A failure is `preset_incompatible`, with the failed check.
   - **Mode check (Q9).** Only the syntax of `start_mod` is checked. M0 nodes report decoder modes only, so a mode-support check would refuse every analog preset. It comes with the mode catalogue.
 - **Schedules.**
-  - The `Schedule` aggregate holds a `Window` (static UTC minutes, or a daylight phase), `DaysOfWeek` (Monday = bit 0), `Priority`, `enabled` and a `DisabledReason` (`device_stale`, `device_removed`, `preset_incompatible`).
+  - The `Schedule` aggregate holds a `Window` (static UTC minutes, `end` before `start` wrapping over midnight and `start = end` lasting the whole day from `start`, or a daylight phase), `DaysOfWeek` (Monday = bit 0), `Priority`, `enabled` and a `DisabledReason` (`device_stale`, `device_removed`, `preset_incompatible`).
   - **Daylight windows (Q3)** answer 422 `schedule_kind_unsupported`. The columns exist, so SVC-011 needs no migration.
   - **Disabling (Q10).** `Disable(reason)` sets `enabled = false` with the reason and its time. An admin re-enables the schedule with `PUT`, which clears the reason and checks the schedule again like a creation. A schedule kept disabled by an edit keeps its reason. `device_removed` replaces an earlier system reason; a schedule an admin disabled is left alone.
 - **Timeline (Q4, Q6).** `Evaluate(schedules, from, until)` is a pure function:
@@ -181,6 +181,16 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
 - **Forget transaction.** `grid/app.Devices.SetListener` registers the guard and the transactor, so a forget and its schedule disables commit together.
 - **Hub start.** The `schedules.publish` job runs at hub start like every job, so a schedule whose device went away while the hub was down is disabled at once.
 
+### Review fixes
+
+- **Refusals survive a reconnect.** The node records a desired-state revision only when it accepted every part (devices and `listen_policy`), so its next `ctl.welcome` asks for the state again. The hub keeps the refusals of the last answer across a welcome: the node stays `degraded` until it accepts a state.
+- **Pushes per node, on change.** Each node has its own lock. An ingested batch pushes only when a changed capability report marked the node (`MarkChanged`), so heartbeats cost nothing. Settings changes go through one coalescing worker tied to the hub lifecycle.
+- **Oversized state.** It is logged at Error once per node and revision, then at Debug.
+- **Node checks.** The node checks the preset values like the hub (positive bounded frequencies, sample rate and step, start frequency within the band) and the policy enum, with overflow-safe bounds.
+- **Edit after removal.** A schedule that stays disabled on its own device can be edited after the device left the registry.
+- **Outbox.** The overflow cap counts the pending entries first (index `network, status, id`). The pending TTL of a disabled network counts from when an entry became due, or from its expired lease for an entry in flight, not from its enqueue time.
+- **Rebuild risk.** Migration 00031 documents the cascade risk of rebuilding `devices` once a table references it.
+
 ## Spec inconsistencies
 
 Recorded here; the spec is not edited.
@@ -202,7 +212,7 @@ Recorded here; the spec is not edited.
 10. Preset order is `sort_order` (§7.1) or `position` (ADM-021, §9.1). `waterfall_levels` is `{min, max}` (§7.1) or may be `auto` (§9.1). `sort_order` and `{min, max}` are used.
 11. `GET /presets` is "anon LP" (§6.10), while presets are admin data in M0 and the access contract is static. It is admin-only until the receiver picker (RX-006).
 12. ADM-037 gates schedules on `services.enabled`, while §7.1 runs them on devices with `scheduler_enabled` only. Only `scheduler_enabled` is used.
-13. The day `days_of_week` applies to for an overnight window is not specified. It is the start day.
+13. The day `days_of_week` applies to for an overnight window is not specified. It is the start day. §7.1 does not say what `start_minute = end_minute` means: it is the whole day.
 14. GRID-001 still says the hub applies migrations at start and is gated by `hub.listen`. ADR 0006 refuses pending migrations, and ADR 0012 removed `hub.listen`.
 15. A full `ctl.state.apply` with every compatible preset per device (§4.4) can exceed the 64 KiB control message limit (§6.9). Preset data is sent once at the top level, and devices list ids.
 

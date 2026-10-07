@@ -1,6 +1,12 @@
 -- devices.active_preset_id gets its foreign key to presets now that the
 -- table exists (ADR 0008 Q26, ADR 0020): SQLite needs a table rebuild. A
 -- preset id unknown to the hub is stored as NULL.
+--
+-- Rebuild risk: DROP TABLE devices runs with foreign keys on, so it would
+-- cascade to (or be refused by) any table referencing devices. None does
+-- yet (schedules.device_id deliberately has no foreign key, ADR 0020); a
+-- later migration that rebuilds devices after such a table exists must
+-- rebuild the referencing tables too, or run with foreign keys off.
 
 -- +goose Up
 CREATE TABLE devices_new (
