@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -345,6 +346,11 @@ func TestStartTimeoutAndMissingTool(t *testing.T) {
 
 	// rtl_tcp runs the same fake.
 	h.states.waitFor(t, 5*time.Second, func(s domain.Snapshot) bool { return s.ID == "tcp" && s.State == domain.StateRunning })
+
+	// The longest device id (63 characters) runs too.
+	long := strings.Repeat("l", 63)
+	hl := newHarness(t, quick, device(t, long, "0", true))
+	hl.states.waitFor(t, 5*time.Second, func(s domain.Snapshot) bool { return s.ID == long && s.State == domain.StateRunning })
 
 	// A device whose tool is missing is unavailable.
 	sup, _ := process.New(process.Options{RuntimeDir: filepath.Join(t.TempDir(), "run"), Logger: logger()})
