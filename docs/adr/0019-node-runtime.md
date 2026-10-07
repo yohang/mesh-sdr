@@ -42,6 +42,8 @@ GRID-002: "`meshsdr node` starts the device sources and DSP, and exposes the aut
 | `tools.rtl_connector`, `tools.rtl_tcp_connector` | resolved in `tools.dirs` |
 | `devices.<id>.driver` | `{device, ppm, rf_gain = "auto" \| dB, iqswap}`; rtl_tcp needs `host:port` |
 | `devices.<id>.auto_recover` | `true` (restart a failed device after 15 min) |
+| `node.max_demods` | `32` (interim; demodulators of the whole node) |
+| `devices.<id>.max_demods` | `16` (interim; `0` means the default) |
 
 The hidden exec-helper argv mode is `__exec-helper`, run first in `main`.
 
@@ -56,6 +58,19 @@ The hidden exec-helper argv mode is `__exec-helper`, run first in `main`.
 17. **AGPL self-source.** The repository becomes public later; until then the About page link stays the source offer of MeshSDR itself.
 18. **Dev stack.** The dev node has an `rtl_sdr` device on the fake connector, built by Air into `tmp/`.
 19. **CI.** Both builds are linted and tested with cgo; `-race` runs on `internal/dsp`, `internal/radio` (channelizer included) and `sendq`.
+
+### Hardening (security review)
+
+- The exec helper locks its OS thread first: `PR_SET_NO_NEW_PRIVS` and `setpriority` are per thread, and it reads `PR_GET_NO_NEW_PRIVS` back before `execve`. The final group SIGKILL after an exit is sent only while the group has members.
+- The media WS enforces the advertised `msg_rate` (20 msg/s, burst 50): `rate_limited` with `retry_after_ms`, close 4429 after 10 refusals in a minute.
+- `auth.refresh` reauthorises the stream handler: devices the new token no longer allows to listen to are detached; demodulators it no longer allows (scope or `lim.max_demods`) are removed; `demod.set` checks the `demod` scope.
+- `node.max_demods` and `devices.<id>.max_demods` bound the demodulators whatever the tokens grant (`capacity_exceeded`). The defaults are interim; the owner tunes them.
+- Demodulator channels (filter design, rings) are built outside the engine lock, so ingestion never waits on them; demodulators created before a device runs are validated against its tuning.
+- Supervisor instance ids of long device ids (up to 63 characters) are shortened with a hash of the id.
+- Each audio frame carries the codec of the framer that produced it; `audio.configure` refuses unknown codecs, answers `opus` with `adpcm-ima` explicitly, and applies to every demodulator or none.
+- **Loopback ports.** `node.ipc_port_range` ports are probed free on 127.0.0.1 before a run, but another local process may bind one between the probe and the connector (TOCTOU): the connector then fails and the next attempt takes new ports. The connector sockets are unauthenticated: any process of the same host, notably of the same user, can read the IQ or send control lines. The node therefore assumes a single-tenant host (ADR 0017 decision 11).
+- **USB devices in containers.** Pass the bus (`devices: ["/dev/bus/usb:/dev/bus/usb"]`, or one device node) and give the nonroot user its group (`group_add: ["<gid of /dev/bus/usb/*>"]`, often `plugdev` or the host's USB group); the host must not load the DVB kernel driver of RTL-SDR dongles (`blacklist dvb_usb_rtl28xxu`). rtl_tcp devices need no USB access.
+- **Pins.** The Go and Debian base images are pinned by digest, the shipped Debian packages (libusb included) by version, used by both the runtime and the `sources` stages. csdr and owrx_connector publish no release tarballs: the GitHub tag archives are pinned by sha256. The `-sources` image also holds MeshSDR's own source, and `THIRD_PARTY_NOTICES` carries a written offer naming the repository and tag.
 
 ### Interim values (until settings reach the node)
 
