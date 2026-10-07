@@ -15,7 +15,7 @@ func params(t *testing.T) DeviceParams {
 		t.Fatal(err)
 	}
 
-	drv, err := NewDriver(typ, "", 1, AutoGain(), false)
+	drv, err := NewDriver(typ, DriverSettings{PPM: 1, Gain: AutoGain()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,15 +61,15 @@ func TestValueObjects(t *testing.T) {
 		t.Fatal("supported types")
 	}
 
-	if _, err := NewDriver(tcp, "localhost", 0, AutoGain(), false); !errors.Is(err, ErrInvalidDriver) {
+	if _, err := NewDriver(tcp, DriverSettings{Device: "localhost"}); !errors.Is(err, ErrInvalidDriver) {
 		t.Fatal("rtl_tcp without port accepted")
 	}
 
-	if _, err := NewDriver(tcp, "a\nb:1", 0, AutoGain(), false); !errors.Is(err, ErrInvalidDriver) {
+	if _, err := NewDriver(tcp, DriverSettings{Device: "a\nb:1"}); !errors.Is(err, ErrInvalidDriver) {
 		t.Fatal("control character accepted")
 	}
 
-	if _, err := NewDriver(tcp, "sdr.lan:1234", 2000, AutoGain(), false); !errors.Is(err, ErrInvalidDriver) {
+	if _, err := NewDriver(tcp, DriverSettings{Device: "sdr.lan:1234", PPM: 2000}); !errors.Is(err, ErrInvalidDriver) {
 		t.Fatal("ppm out of range accepted")
 	}
 
@@ -173,5 +173,71 @@ func TestDeviceLifecycleAndDemand(t *testing.T) {
 
 	if !on.Wanted() {
 		t.Fatal("always_on not wanted")
+	}
+}
+
+func TestConfiguredTuningAndDriver(t *testing.T) {
+	p := params(t)
+	p.Center, p.Rate = MustFrequency(145_500_000), MustSampleRate(1_024_000)
+
+	d, err := NewDevice(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if tu := d.Tuning(); tu.Center().Hz() != 145_500_000 || tu.Rate().PerSecond() != 1_024_000 {
+		t.Fatalf("configured tuning %+v", tu)
+	}
+
+	// Only the rate set: the band starts at the bottom of the range.
+	p = params(t)
+	p.Rate = MustSampleRate(1_024_000)
+
+	if d, _ = NewDevice(p); d.Tuning().Center().Hz() != 24_000_000+512_000 {
+		t.Fatal(d.Tuning().Center().Hz())
+	}
+
+	for name, mutate := range map[string]func(*DeviceParams){
+		"centre outside the range": func(p *DeviceParams) { p.Center = MustFrequency(10_000_000) },
+		"rate not supported":       func(p *DeviceParams) { p.Rate = MustSampleRate(250_000) },
+		"lfo below zero": func(p *DeviceParams) {
+			p.Driver, _ = NewDriver(p.Type, DriverSettings{LFOOffset: -30_000_000})
+		},
+	} {
+		p := params(t)
+		mutate(&p)
+
+		if _, err := NewDevice(p); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+
+	for _, s := range []string{"", "off", "i", "q"} {
+		if _, err := ParseDirectSampling(s); err != nil {
+			t.Fatal(s, err)
+		}
+	}
+
+	if _, err := ParseDirectSampling("x"); !errors.Is(err, ErrInvalidDriver) {
+		t.Fatal(err)
+	}
+
+	typ, _ := NewDeviceType(TypeRTLSDR)
+	drv, _ := NewDriver(typ, DriverSettings{LFOOffset: -100_000_000})
+
+	if drv.HardwareHz(130_000_000) != 30_000_000 {
+		t.Fatal(drv.HardwareHz(130_000_000))
+	}
+}
+
+func TestInvalidDeviceIsFailedAndNeverRuns(t *testing.T) {
+	d := NewInvalidDevice(shared.MustDeviceID("bad"), "Bad")
+
+	if st, reason := d.State(); st != StateFailed || reason != ReasonInvalidConfig {
+		t.Fatal(st, reason)
+	}
+
+	if d.Usable() || d.AddListener() == nil || d.Wanted() {
+		t.Fatal("an invalid device can run")
 	}
 }

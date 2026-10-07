@@ -105,8 +105,6 @@ sample_rates = [2_048_000]
 		{"tiny notsent lowat", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\nws_notsent_lowat = 10\n"}, "node.ws_notsent_lowat"},
 		{"relative tool dir", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[tools]\ndirs = [\"bin\"]\n"}, "tools.dirs[0]"},
 		{"relative tool", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[tools]\nrtl_connector = \"rtl_connector\"\n"}, "tools.rtl_connector"},
-		{"rtl_tcp without port", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[devices.v]\nname = \"x\"\nfreq_range = { min = 10, max = 50 }\nsample_rates = [1]\ntype = \"rtl_tcp\"\ndriver = { device = \"sdr.lan\" }\n"}, "devices.v.driver"},
-		{"gain out of range", RoleNode, map[string]string{"node.toml": "schema_version = 1\n[node]\nid = \"attic\"\n[devices.v]\nname = \"x\"\nfreq_range = { min = 10, max = 50 }\nsample_rates = [1]\ntype = \"rtl_sdr\"\ndriver = { rf_gain = 300 }\n"}, "devices.v.driver.rf_gain"},
 	}
 
 	for _, tt := range tests {

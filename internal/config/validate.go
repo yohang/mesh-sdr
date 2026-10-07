@@ -18,7 +18,6 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
-	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -396,7 +395,6 @@ func (n *Node) validate(o Origins) []Problem {
 			c.fail(key+".max_demods", CodeInvalidValue, "want 0..1000 (0: default 16)")
 		}
 
-		c.driver(key, d)
 	}
 
 	if (n.TLS.Cert == "") != (n.TLS.Key == "") {
@@ -410,29 +408,6 @@ func (n *Node) validate(o Origins) []Problem {
 	c.log(n.Log)
 
 	return c.problems
-}
-
-// driver validates the driver table of a device the node can run, with the
-// rules of the radio domain (§8.2 rule 2).
-func (c *checker) driver(key string, d DeviceConfig) {
-	typ, err := radiodomain.NewDeviceType(d.Type)
-	if err != nil || !typ.Supported() {
-		return
-	}
-
-	gain := radiodomain.AutoGain()
-
-	if !d.Driver.RFGain.Auto() {
-		if gain, err = radiodomain.NewGain(d.Driver.RFGain.DB()); err != nil {
-			c.domainError(key+".driver.rf_gain", err)
-
-			return
-		}
-	}
-
-	if _, err := radiodomain.NewDriver(typ, d.Driver.Device, d.Driver.PPM, gain, d.Driver.IQSwap); err != nil {
-		c.domainError(key+".driver", err)
-	}
 }
 
 func validFingerprint(s string) bool {

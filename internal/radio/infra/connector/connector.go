@@ -276,7 +276,7 @@ func (src *source) args(iqPort, ctlPort, rate int) []string {
 		"-d", d.Device(),
 		"-p", strconv.Itoa(iqPort),
 		"-c", strconv.Itoa(ctlPort),
-		"-f", strconv.FormatInt(center, 10),
+		"-f", strconv.FormatInt(d.HardwareHz(center), 10),
 		"-s", strconv.Itoa(rate),
 		"-g", d.Gain().String(),
 		"-P", strconv.Itoa(d.PPM()),
@@ -284,6 +284,14 @@ func (src *source) args(iqPort, ctlPort, rate int) []string {
 
 	if d.IQSwap() {
 		args = append(args, "-i")
+	}
+
+	if d.BiasTee() {
+		args = append(args, "-b")
+	}
+
+	if ds := d.DirectSampling(); ds != domain.DirectSamplingOff {
+		args = append(args, "-e", strconv.Itoa(int(ds)))
 	}
 
 	return args
@@ -331,8 +339,9 @@ func (src *source) control(ctx context.Context, addr string) {
 	_ = conn.Close()
 }
 
-// SetCenter implements app.Source: center_freq over the control socket.
-// The next start uses the new centre as well.
+// SetCenter implements app.Source: center_freq (plus the driver
+// lfo_offset) over the control socket. The next start uses the new centre
+// as well.
 func (src *source) SetCenter(hz int64) error {
 	src.mu.Lock()
 	defer src.mu.Unlock()
@@ -345,7 +354,7 @@ func (src *source) SetCenter(hz int64) error {
 
 	_ = src.ctl.SetWriteDeadline(time.Now().Add(time.Second))
 
-	if _, err := io.WriteString(src.ctl, "center_freq:"+strconv.FormatInt(hz, 10)+"\n"); err != nil {
+	if _, err := io.WriteString(src.ctl, "center_freq:"+strconv.FormatInt(src.p.Driver.HardwareHz(hz), 10)+"\n"); err != nil {
 		return fmt.Errorf("connector control: %w", err)
 	}
 

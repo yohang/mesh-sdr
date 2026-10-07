@@ -53,6 +53,10 @@ type DeviceParams struct {
 	OperatorCanRetune bool
 	AutoRecover       bool
 	Driver            Driver
+	// Center and Rate are the initial tuning (zero: derived from the range
+	// and the first sample rate).
+	Center Frequency
+	Rate   SampleRate
 	// MaxDemods caps the demodulators of the device (0: DefaultMaxDemods).
 	MaxDemods int
 }
@@ -64,6 +68,10 @@ const DefaultMaxDemods = 16
 // the life of the process) and its runtime state.
 type Device struct {
 	p DeviceParams
+
+	// invalid: the configuration of the device is invalid; it is reported
+	// failed and never runs.
+	invalid bool
 
 	state     State
 	reason    string
@@ -85,13 +93,27 @@ func NewDevice(p DeviceParams) (*Device, error) {
 		return nil, ErrInvalidDevice.WithDetail("device id and type are required")
 	}
 
+	if p.Center.hz != 0 && !p.Range.Contains(p.Center) {
+		return nil, ErrOutOfRange.WithDetail("device " + p.ID.String() + ": center_freq " + fmtHz(p.Center.hz) + " outside freq_range")
+	}
+
+	if p.Rate.v != 0 && !containsRate(p.Rates, p.Rate) {
+		return nil, ErrOutOfRange.WithDetail("device " + p.ID.String() + ": sample_rate " + strconv.Itoa(p.Rate.v) + " not in sample_rates")
+	}
+
+	if p.Type.Supported() {
+		if lo, hi := p.Driver.HardwareHz(p.Range.min.hz), p.Driver.HardwareHz(p.Range.max.hz); lo <= 0 || hi > MaxFrequency {
+			return nil, ErrInvalidDriver.WithDetail("device " + p.ID.String() + ": freq_range + driver.lfo_offset must stay within 0..100 GHz")
+		}
+	}
+
 	if p.MaxDemods <= 0 {
 		p.MaxDemods = DefaultMaxDemods
 	}
 
 	d := &Device{p: p, state: StateStopped}
 	d.p.Rates = slices.Clone(p.Rates)
-	d.tuning = defaultTuning(p.Range, d.p.Rates)
+	d.tuning = initialTuning(p.Range, d.p.Rates, p.Center, p.Rate)
 
 	switch {
 	case !p.Enabled:
@@ -101,6 +123,20 @@ func NewDevice(p DeviceParams) (*Device, error) {
 	}
 
 	return d, nil
+}
+
+// ReasonInvalidConfig is the reason of a device whose configuration is
+// invalid (SRC-002).
+const ReasonInvalidConfig = "invalid_config"
+
+// NewInvalidDevice returns a device whose configuration is invalid: it is
+// reported failed (invalid_config) and never runs, so that the error shows
+// instead of the device silently missing (SRC-002).
+func NewInvalidDevice(id shared.DeviceID, name string) *Device {
+	return &Device{
+		p:       DeviceParams{ID: id, Name: name, MaxDemods: DefaultMaxDemods},
+		invalid: true, state: StateFailed, reason: ReasonInvalidConfig,
+	}
 }
 
 // ID returns the device id.
@@ -123,8 +159,11 @@ func (d *Device) Tuning() Tuning { return d.tuning }
 // Listeners returns the USER demand (attached media sessions).
 func (d *Device) Listeners() int { return d.listeners }
 
-// Usable reports whether the device can run (enabled, with a driver).
-func (d *Device) Usable() bool { return d.state != StateDisabled && d.state != StateUnavailable }
+// Usable reports whether the device can run (valid, enabled, with a
+// driver).
+func (d *Device) Usable() bool {
+	return !d.invalid && d.state != StateDisabled && d.state != StateUnavailable
+}
 
 // Wanted reports whether the device has demand (§8.2: USER or ALWAYS_ON;
 // the linger after the last listener is the manager's timer).
