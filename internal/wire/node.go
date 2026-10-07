@@ -27,6 +27,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
+	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
 
@@ -95,7 +96,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	}
 
 	if o.prober == nil {
-		o.prober = probe.New(version.String(), o.devices, time.Now())
+		o.prober = probe.New(version.String(), o.devices, engine.Modes(), time.Now())
 	}
 
 	ag, err := agent.New(agent.Options{
@@ -110,12 +111,14 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	holder := pki.NewCertHolder(cert)
 	revoked := pki.NewRevokedSet()
 
-	manager, streams, err := newRadio(cfg, logger, deviceReporter{ag})
+	// The desired state pushed by the hub carries the WFM de-emphasis the
+	// engines apply and the listen policy the media server enforces.
+	state := agent.NewDesiredState(o.devices())
+
+	manager, streams, err := newRadio(cfg, logger, deviceReporter{ag}, func() int { return state.Policy().WFMDeemphasis })
 	if err != nil {
 		return nil, err
 	}
-
-	state := agent.NewDesiredState(o.devices())
 
 	mediaServer := media.NewServer(media.Options{
 		NodeID: id.String(), Version: version.String(), GatewayIdentity: cfg.HubTrust.HubIdentity,

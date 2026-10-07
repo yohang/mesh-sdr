@@ -1,6 +1,7 @@
 package agent_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/yohang/mesh-sdr/internal/grid/agent"
@@ -23,7 +24,7 @@ func TestDesiredState(t *testing.T) {
 	}
 
 	first := s.Apply(ctl.StateApply{
-		Revision: 1, Presets: presets, Policy: ctl.StatePolicy{ListenPolicy: "anonymous"},
+		Revision: 1, Presets: presets, Policy: ctl.StatePolicy{ListenPolicy: "anonymous", WFMDeemphasis: 50},
 		Devices: map[string]ctl.DesiredDevice{
 			"hf": {Presets: []string{"ft8"}, ActivePresetID: "ft8", Schedule: ctl.Timeline{
 				From: 0, Until: 100, Slots: []ctl.TimelineSlot{{From: 10, Until: 20, PresetID: "ft8"}},
@@ -44,7 +45,7 @@ func TestDesiredState(t *testing.T) {
 	// The hub sends a preset the node config refuses for hf, and a broken
 	// timeline for vhf: both keep their previous state.
 	second := s.Apply(ctl.StateApply{
-		Revision: 2, Presets: map[string]ctl.Preset{"2m": presets["2m"]}, Policy: ctl.StatePolicy{ListenPolicy: "registered"},
+		Revision: 2, Presets: map[string]ctl.Preset{"2m": presets["2m"]}, Policy: ctl.StatePolicy{ListenPolicy: "registered", WFMDeemphasis: 75},
 		Devices: map[string]ctl.DesiredDevice{
 			"hf":  {Presets: []string{"2m"}},
 			"vhf": {Presets: []string{"2m"}, Schedule: ctl.Timeline{From: 0, Until: 10, Slots: []ctl.TimelineSlot{{From: 5, Until: 20, PresetID: "2m"}}}},
@@ -65,14 +66,14 @@ func TestDesiredState(t *testing.T) {
 
 	// A refused part leaves the revision unrecorded, so the next welcome
 	// asks for the state again.
-	if s.Revision() != 0 || s.Policy().ListenPolicy != "registered" {
+	if s.Revision() != 0 || s.Policy().ListenPolicy != "registered" || s.Policy().WFMDeemphasis != 75 {
 		t.Errorf("revision %d, policy %+v", s.Revision(), s.Policy())
 	}
 
 	// Values the hub never sends are refused: a start frequency outside the
 	// band, a zero step, an invalid policy.
 	bad := s.Apply(ctl.StateApply{
-		Revision: 3, Policy: ctl.StatePolicy{ListenPolicy: "everyone"},
+		Revision: 3, Policy: ctl.StatePolicy{ListenPolicy: "everyone", WFMDeemphasis: 50},
 		Presets: map[string]ctl.Preset{"x": {Name: "x", CenterFreq: 14_074_000, SampRate: 2_048_000, StartFreq: 20_000_000, TuningStep: 1}},
 		Devices: map[string]ctl.DesiredDevice{"hf": {Presets: []string{"x"}}},
 	})
@@ -81,7 +82,7 @@ func TestDesiredState(t *testing.T) {
 	}
 
 	ok := s.Apply(ctl.StateApply{
-		Revision: 4, Policy: ctl.StatePolicy{ListenPolicy: "anonymous"},
+		Revision: 4, Policy: ctl.StatePolicy{ListenPolicy: "anonymous", WFMDeemphasis: 50},
 		Presets: map[string]ctl.Preset{"ft8": presets["ft8"]},
 		Devices: map[string]ctl.DesiredDevice{"hf": {Presets: []string{"ft8"}}},
 	})
@@ -115,5 +116,30 @@ func TestDesiredStateListenPolicy(t *testing.T) {
 				t.Errorf("global %s: %s = %q, want %q", global, d, got, p)
 			}
 		}
+	}
+}
+
+// TestDesiredStateOlderHub: a hub that predates wfm_deemphasis sends a
+// policy without it; the node accepts the state with the default, and each
+// policy field is checked on its own.
+func TestDesiredStateOlderHub(t *testing.T) {
+	s := agent.NewDesiredState(nil)
+
+	var old ctl.StateApply
+	if err := json.Unmarshal([]byte(`{"revision":7,"presets":{},"devices":{},"policy":{"listen_policy":"registered"}}`), &old); err != nil {
+		t.Fatal(err)
+	}
+
+	if out := s.Apply(old); len(out.Errors) != 0 || s.Revision() != 7 || s.Policy().WFMDeemphasis != agent.DefaultWFMDeemphasis {
+		t.Fatalf("older hub: %+v, revision %d, policy %+v", out, s.Revision(), s.Policy())
+	}
+
+	s.Apply(ctl.StateApply{Revision: 8, Policy: ctl.StatePolicy{ListenPolicy: "registered", WFMDeemphasis: 75}})
+
+	// An invalid de-emphasis keeps the previous one, the listen policy
+	// still applies.
+	out := s.Apply(ctl.StateApply{Revision: 9, Policy: ctl.StatePolicy{ListenPolicy: "anonymous", WFMDeemphasis: 60}})
+	if len(out.Errors) != 1 || s.Policy() != (ctl.StatePolicy{ListenPolicy: "anonymous", WFMDeemphasis: 75}) || s.Revision() != 8 {
+		t.Fatalf("mixed: %+v, policy %+v, revision %d", out, s.Policy(), s.Revision())
 	}
 }

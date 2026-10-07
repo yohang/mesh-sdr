@@ -16,6 +16,9 @@ const (
 	CodeInvalidState       = "invalid_state"
 )
 
+// DefaultWFMDeemphasis is the WFM de-emphasis (µs) when the hub sends none.
+const DefaultWFMDeemphasis = 50
+
 // DesiredState holds the desired state pushed by the hub (§8.1 rule 3,
 // ADR 0020), in RAM only. It re-checks each device's presets against the
 // node config before accepting it; a refused device keeps its previous
@@ -145,11 +148,23 @@ func (s *DesiredState) Apply(st ctl.StateApply) ctl.StateApplied {
 		}
 	}
 
+	// Each policy field is checked on its own; a refused one keeps its
+	// previous value.
 	switch st.Policy.ListenPolicy {
 	case "anonymous", "registered":
-		s.policy = st.Policy
+		s.policy.ListenPolicy = st.Policy.ListenPolicy
 	default:
 		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: "invalid listen_policy"})
+	}
+
+	// A hub that predates wfm_deemphasis sends none: the default applies.
+	switch st.Policy.WFMDeemphasis {
+	case 0:
+		s.policy.WFMDeemphasis = DefaultWFMDeemphasis
+	case 50, 75:
+		s.policy.WFMDeemphasis = st.Policy.WFMDeemphasis
+	default:
+		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: "invalid wfm_deemphasis"})
 	}
 
 	s.presets, s.devices = presets, devices

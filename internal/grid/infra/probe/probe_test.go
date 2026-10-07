@@ -29,12 +29,16 @@ func TestProberReadsProc(t *testing.T) {
 		}
 	}
 
-	p := New("1.2.3", nil, time.Now().Add(-time.Minute))
+	p := New("1.2.3", nil, []string{"am", "nfm"}, time.Now().Add(-time.Minute))
 	p.root = root + "/"
 
 	caps := p.Capabilities(context.Background())
 	if caps.ProductVersion != "1.2.3" || caps.Platform.RAMBytes != 4000*1024 || caps.Platform.CPUModel != "Test CPU" || caps.Devices == nil {
 		t.Errorf("capabilities = %+v", caps)
+	}
+
+	if len(caps.Decoders) != 1 || caps.Decoders[0].Cap != AnalogCap || len(caps.Decoders[0].Modes) != 2 {
+		t.Errorf("analog modes = %+v", caps.Decoders)
 	}
 
 	hb := p.Heartbeat(context.Background())

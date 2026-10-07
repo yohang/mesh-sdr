@@ -8,7 +8,8 @@
 //   - the shared FFT channelizer, one goroutine per device while it has
 //     demodulators, runs the forward FFT once per block and extracts every
 //     listener channel;
-//   - each demodulator runs its chain (NFM) and audio framing in its own
+//   - each demodulator runs its chain (analog mode catalogue in demod.go)
+//     and audio framing in its own
 //     goroutine, reading its channel ring.
 //
 // Rings are bounded on every edge; a slow reader loses its oldest blocks
@@ -43,16 +44,23 @@ const (
 // Factory builds engines.
 type Factory struct {
 	Logger *slog.Logger
+	// Deemphasis returns the WFM de-emphasis in µs pushed by the hub (0:
+	// none yet, 50 µs); nil: 50 µs.
+	Deemphasis func() int
 }
 
 // New implements app.Engines.
 func (f Factory) New(id shared.DeviceID) app.Engine {
-	return New(f.Logger.With(slog.String("device_id", id.String())))
+	e := New(f.Logger.With(slog.String("device_id", id.String())))
+	e.deemphasis = f.Deemphasis
+
+	return e
 }
 
 // Engine is the DSP of one device.
 type Engine struct {
-	log *slog.Logger
+	log        *slog.Logger
+	deemphasis func() int
 
 	mu     sync.Mutex
 	ep     *epoch
@@ -67,6 +75,15 @@ type Engine struct {
 // New returns an idle engine.
 func New(log *slog.Logger) *Engine {
 	return &Engine{log: log, subs: map[int]func(app.SpectrumFrame){}, demods: map[*demod]struct{}{}}
+}
+
+// deemphasisUS returns the current WFM de-emphasis (µs, 0: default).
+func (e *Engine) deemphasisUS() int {
+	if e.deemphasis == nil {
+		return 0
+	}
+
+	return e.deemphasis()
 }
 
 // epoch is one run of the device source.
@@ -102,7 +119,7 @@ func (e *Engine) Start(t domain.Tuning) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ep := &epoch{ctx: ctx, cancel: cancel, rate: rate, iq: dsp.NewRing[complex64](ringSlots(rate, MaxBlock), MaxBlock)}
 
-	plan, err := dsp.NewChannelPlan(rate, dsp.NFMChannelRate)
+	plan, err := dsp.NewChannelPlan(rate, dsp.NarrowChannelRate)
 	if err != nil {
 		e.log.Warn("no channelizer at this sample rate: demodulators unavailable", slog.Int("sample_rate", rate), slog.Any("error", err))
 	}
@@ -120,9 +137,13 @@ func (e *Engine) Start(t domain.Tuning) {
 
 // bind builds the channel of d for ep outside the lock and installs it if
 // ep is still the current run. An offset that no longer fits leaves the
-// demodulator silent until it is changed.
+// demodulator silent until it is changed. The channel is installed only if
+// the parameters it was built for are still current (a Set meanwhile
+// builds its own).
 func (e *Engine) bind(d *demod, ep *epoch) {
-	b, err := newBinding(ep, d.Params())
+	p, gen := d.state()
+
+	b, err := newBinding(ep, p)
 	if err != nil {
 		e.log.Warn("demodulator does not fit the new sample rate", slog.Any("error", err))
 	}
@@ -130,12 +151,9 @@ func (e *Engine) bind(d *demod, ep *epoch) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if e.ep != ep {
-		return
-	}
-
-	if _, ok := e.demods[d]; ok {
-		d.setBinding(b)
+	_, live := e.demods[d]
+	if (e.ep != ep || !live || !d.installFor(b, gen)) && b != nil {
+		b.ring.Close()
 	}
 }
 
@@ -340,7 +358,8 @@ func (e *Engine) runChannelizer(ctx context.Context, ep *epoch) {
 // NewDemod implements app.Engine. Its channel is validated against the
 // device tuning and built outside the engine lock.
 func (e *Engine) NewDemod(p app.DemodParams, audio func(app.AudioOut), meter func(app.Meter)) (app.Demod, error) {
-	if err := validate(p); err != nil {
+	p, _, err := normalize(p)
+	if err != nil {
 		return nil, err
 	}
 
@@ -399,16 +418,31 @@ func (e *Engine) NewDemod(p app.DemodParams, audio func(app.AudioOut), meter fun
 // checkChannel validates the channel of p at a device rate before the
 // device runs.
 func checkChannel(rate int, p app.DemodParams) error {
-	plan, err := dsp.NewChannelPlan(rate, dsp.NFMChannelRate)
+	plan, err := dsp.NewChannelPlan(rate, dsp.NarrowChannelRate)
 	if err != nil {
 		return domain.ErrDeviceUnavailable.WithDetail("no demodulator at this sample rate")
 	}
 
-	if _, err := plan.NewChannel(float64(p.OffsetHz), p.LowHz, p.HighHz); err != nil {
-		return domain.ErrOutOfRange.WithDetail(err.Error())
+	_, err = newChannel(plan, p)
+
+	return err
+}
+
+// newChannel builds the channel of a normalized p at the rate of its mode
+// (§8.3 rule 5: a mode must fit the device sample rate).
+func newChannel(plan dsp.ChannelPlan, p app.DemodParams) (*dsp.Channel, error) {
+	m, _ := modeOf(p.Mode)
+
+	if float64(plan.SampleRate) < m.ChannelRate {
+		return nil, domain.ErrOutOfRange.WithDetail("mode " + m.Name + " does not fit the device sample rate")
 	}
 
-	return nil
+	ch, err := plan.NewChannel(m.ChannelRate, float64(p.OffsetHz), p.LowHz, p.HighHz)
+	if err != nil {
+		return nil, domain.ErrOutOfRange.WithDetail(err.Error())
+	}
+
+	return ch, nil
 }
 
 func (e *Engine) removeDemod(d *demod) {

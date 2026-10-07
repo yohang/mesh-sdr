@@ -142,6 +142,9 @@ trusted_proxies = []
 [settings]
 # anonymous | registered (a device can override it in its node config).
 # listen_policy = "anonymous"
+# Broadcast FM de-emphasis in µs: 50 (Europe, most of the world) or 75
+# (Americas, South Korea). Pushed to the nodes.
+# wfm_deemphasis = 50
 
 [settings.receiver]
 # name = "MeshSDR"                       # station name (top bar, titles)

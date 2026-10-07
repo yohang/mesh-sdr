@@ -32,7 +32,6 @@ import (
 // Device defaults sent in device.config until the hub pushes settings
 // (FEATURE_SPEC defaults of waterfall.*, dsp.squelch_auto_margin; ADR 0019).
 const (
-	defaultBandpass  = 4000.0
 	tuningStepHz     = 1000
 	waterfallMin     = -88
 	waterfallMax     = -20
@@ -530,7 +529,10 @@ func (ss *session) configureAudio(req rxv1.Envelope) {
 }
 
 func applied(p app.DemodParams) media.Applied {
-	return media.Applied{Mode: p.Mode, OffsetHz: p.OffsetHz, Bandpass: media.Bandpass{LowHz: p.LowHz, HighHz: p.HighHz}, SquelchDB: p.SquelchDB}
+	return media.Applied{
+		Mode: p.Mode, OffsetHz: p.OffsetHz, Bandpass: media.Bandpass{LowHz: p.LowHz, HighHz: p.HighHz}, SquelchDB: p.SquelchDB,
+		NR: media.NR{Enabled: p.NR.Enabled, Threshold: p.NR.ThresholdDB},
+	}
 }
 
 func (ss *session) createDemod(req rxv1.Envelope) {
@@ -575,13 +577,17 @@ func (ss *session) createDemod(req rxv1.Envelope) {
 		return
 	}
 
+	// Without bandpass (zero edges) the engine applies the mode's default.
 	params := app.DemodParams{
-		Mode: p.Mode, OffsetHz: p.OffsetHz, LowHz: -defaultBandpass, HighHz: defaultBandpass,
-		SquelchDB: p.SquelchDB, OutputRate: audio.rate, Codec: audio.codec,
+		Mode: p.Mode, OffsetHz: p.OffsetHz, SquelchDB: p.SquelchDB, OutputRate: audio.rate, Codec: audio.codec,
 	}
 
 	if p.Bandpass != nil {
 		params.LowHz, params.HighHz = p.Bandpass.LowHz, p.Bandpass.HighHz
+	}
+
+	if p.NR != nil {
+		params.NR = app.NR{Enabled: p.NR.Enabled, ThresholdDB: p.NR.Threshold}
 	}
 
 	meterKey := "meter:" + id
@@ -627,7 +633,7 @@ func (ss *session) createDemod(req rxv1.Envelope) {
 	ss.peer.Send(rxv1.TypeStreamOpen, media.StreamOpen{
 		StreamID: stream, Kind: media.KindAudio, Codec: string(audio.codec), SampleRate: audio.rate, Channels: 1, DemodID: id,
 	})
-	ss.peer.Ack(req, media.DemodCreated{DemodID: id, AudioStreamID: stream, Applied: applied(params)})
+	ss.peer.Ack(req, media.DemodCreated{DemodID: id, AudioStreamID: stream, Applied: applied(d.Params())})
 }
 
 func meterJSON(id string, m app.Meter) []byte {
@@ -677,8 +683,10 @@ func (ss *session) setDemod(req rxv1.Envelope) {
 
 	params := d.demod.Params()
 
-	if p.Mode != nil {
+	// A new mode takes its default pass band unless one is given.
+	if p.Mode != nil && *p.Mode != params.Mode {
 		params.Mode = *p.Mode
+		params.LowHz, params.HighHz = 0, 0
 	}
 
 	if p.OffsetHz != nil {
@@ -703,13 +711,17 @@ func (ss *session) setDemod(req rxv1.Envelope) {
 		params.SquelchDB = p.SquelchDB
 	}
 
+	if p.NR != nil {
+		params.NR = app.NR{Enabled: p.NR.Enabled, ThresholdDB: p.NR.Threshold}
+	}
+
 	if err := d.demod.Set(params); err != nil {
 		ss.fail(req, err)
 
 		return
 	}
 
-	ss.peer.Ack(req, media.AppliedResult{Applied: applied(params)})
+	ss.peer.Ack(req, media.AppliedResult{Applied: applied(d.demod.Params())})
 }
 
 func (ss *session) removeDemod(req rxv1.Envelope) {

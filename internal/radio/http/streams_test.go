@@ -198,7 +198,7 @@ func TestStreamSessionErrors(t *testing.T) {
 		t.Fatalf("opus not refused for adpcm: %+v", res)
 	}
 
-	check(rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "am"}, rxv1.CodeDemodError)
+	check(rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "dmr"}, rxv1.CodeDemodError)
 	check(rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm", "offset_hz": 500_000}, rxv1.CodeOutOfRange)
 	check(rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm", "offset_hz": 10_000}, "")
 
@@ -206,6 +206,17 @@ func TestStreamSessionErrors(t *testing.T) {
 
 	check(rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm"}, rxv1.CodeCapacityExceeded)
 	check(rxv1.TypeDemodSet, map[string]any{"demod_id": created.DemodID, "offset_hz": -20_000}, "")
+
+	// A new mode takes its default pass band; NR is range-checked; broadcast
+	// FM runs on the 48 kHz audio configured above.
+	check(rxv1.TypeDemodSet, map[string]any{"demod_id": created.DemodID, "mode": "usb", "nr": map[string]any{"enabled": true, "threshold": 6}}, "")
+
+	if a := p.last().result.(media.AppliedResult).Applied; a.Bandpass != (media.Bandpass{LowHz: 300, HighHz: 2700}) || !a.NR.Enabled || a.NR.Threshold != 6 {
+		t.Fatalf("applied %+v", a)
+	}
+
+	check(rxv1.TypeDemodSet, map[string]any{"demod_id": created.DemodID, "nr": map[string]any{"enabled": true, "threshold": 30}}, rxv1.CodeOutOfRange)
+	check(rxv1.TypeDemodSet, map[string]any{"demod_id": created.DemodID, "mode": "wfm"}, "")
 	check(rxv1.TypeDemodSet, map[string]any{"demod_id": "zz"}, rxv1.CodeNotFound)
 	check(rxv1.TypeDeviceRetune, map[string]any{"device_id": "vhf", "center_hz": 10}, rxv1.CodeOutOfRange)
 	check(rxv1.TypeDeviceRetune, map[string]any{"device_id": "vhf", "center_hz": 145_500_000}, "")

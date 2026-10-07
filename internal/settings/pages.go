@@ -64,10 +64,12 @@ var formPages = []formPage{
 	},
 	{
 		Section: "nodes", Title: "Node health", Path: "/admin/grid",
-		Intro: "How often nodes report, and when the hub marks a silent node degraded or offline (GRID-009).",
+		Intro: "How often nodes report, when the hub marks a silent node degraded or offline (GRID-009), and the demodulation settings pushed to the nodes.",
 		Forms: []sectionSpec{
 			{ID: "heartbeats", Title: "Heartbeats", Description: "Nodes take a new heartbeat interval when their control channel reconnects.",
 				Keys: []string{"grid.heartbeat_interval_s", "grid.offline_after_s"}},
+			{ID: "demodulation", Title: "Demodulation", Description: "Nodes apply a change to their running demodulators.",
+				Keys: []string{"wfm_deemphasis"}},
 		},
 	},
 }

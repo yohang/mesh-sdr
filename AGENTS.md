@@ -47,7 +47,7 @@ internal/web/           embedded static assets (tokens CSS, ES modules, vendored
 internal/web/layout/    app shell templates (document, #main, error page), shared by every module
 internal/web/render/    render helper: full page vs htmx fragment, HTML headers, shell error pages
 internal/web/icongen/   icon generator (go:generate, golang.org/x/image/vector)
-internal/dsp/           node DSP: rings with gap markers, shared spectrum, FFT channelizer, NFM chain, audio framing (no I/O, no goroutines)
+internal/dsp/           node DSP: rings with gap markers, shared spectrum, FFT channelizer, demodulator chains (AM, SAM, NFM, SSB/CW, WFM), audio framing (no I/O, no goroutines)
 internal/dsp/csdr/      cgo shim over libcsdr++ (the only cgo package)
 internal/protocol/rxv1/ rx.v1 codec, payloads (ctl, media), tokens, wsconn adapter, sendq (§6.8 media send queue)
 internal/wire/          composition root (hand-written IoC) and the adapters between modules

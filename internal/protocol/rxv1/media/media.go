@@ -123,24 +123,33 @@ type Bandpass struct {
 	HighHz float64 `json:"high_hz"`
 }
 
-// DemodCreate is demod.create (client → node). NR, AGC, DMR filter and
-// audio service are not provided by this node and are ignored.
+// NR is the noise reduction of a demodulator.
+type NR struct {
+	Enabled   bool    `json:"enabled"`
+	Threshold float64 `json:"threshold"`
+}
+
+// DemodCreate is demod.create (client → node). Without bandpass, the mode's
+// default pass band applies. AGC, DMR filter and audio service are not
+// provided by this node and are ignored.
 type DemodCreate struct {
 	DeviceID  string    `json:"device_id"`
 	Mode      string    `json:"mode"`
 	OffsetHz  int64     `json:"offset_hz"`
 	Bandpass  *Bandpass `json:"bandpass,omitempty"`
 	SquelchDB *float64  `json:"squelch_db,omitempty"`
+	NR        *NR       `json:"nr,omitempty"`
 }
 
 // DemodSet is demod.set (client → node): any field of demod.create but the
-// device.
+// device. A new mode without bandpass takes the mode's default pass band.
 type DemodSet struct {
 	DemodID   string    `json:"demod_id"`
 	Mode      *string   `json:"mode,omitempty"`
 	OffsetHz  *int64    `json:"offset_hz,omitempty"`
 	Bandpass  *Bandpass `json:"bandpass,omitempty"`
 	SquelchDB *float64  `json:"squelch_db,omitempty"`
+	NR        *NR       `json:"nr,omitempty"`
 }
 
 // DemodRef is demod.remove (client → node).
@@ -315,6 +324,7 @@ type Applied struct {
 	OffsetHz  int64    `json:"offset_hz"`
 	Bandpass  Bandpass `json:"bandpass"`
 	SquelchDB *float64 `json:"squelch_db"`
+	NR        NR       `json:"nr"`
 }
 
 // AppliedResult is the ack result of demod.set.

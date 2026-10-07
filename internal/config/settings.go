@@ -16,6 +16,9 @@ package config
 // x-max-duration bound durations.
 type Settings struct {
 	ListenPolicy string `toml:"listen_policy" env:"LISTEN_POLICY" jsonschema:"enum=anonymous,enum=registered" jsonschema_extras:"x-public=true,x-label=Listen policy" jsonschema_description:"Global listen policy: anonymous lets visitors listen without an account, registered requires a signed-in listener. A device can override it in its node config."`
+	// WFMDeemphasis is the broadcast FM de-emphasis time constant in µs
+	// (DEM-016), pushed to the nodes in the desired state.
+	WFMDeemphasis int `toml:"wfm_deemphasis" env:"WFM_DEEMPHASIS" jsonschema:"enum=50,enum=75" jsonschema_extras:"x-label=WFM de-emphasis (µs)" jsonschema_description:"Broadcast FM de-emphasis time constant, in microseconds: 50 (Europe and most of the world) or 75 (Americas, South Korea). Nodes apply it to their WFM demodulators."`
 
 	Receiver  SettingsReceiver  `toml:"receiver" envPrefix:"RECEIVER__" jsonschema:"description=Receiver identity and policies."`
 	UI        SettingsUI        `toml:"ui" envPrefix:"UI__" jsonschema:"description=Look and feel."`
@@ -100,8 +103,9 @@ type SettingsPasswordReset struct {
 // DefaultSettings returns the built-in defaults of the settings.
 func DefaultSettings() Settings {
 	return Settings{
-		ListenPolicy: "anonymous",
-		Receiver:     SettingsReceiver{Name: "MeshSDR", UsagePolicyURL: "/policy"},
+		ListenPolicy:  "anonymous",
+		WFMDeemphasis: 50,
+		Receiver:      SettingsReceiver{Name: "MeshSDR", UsagePolicyURL: "/policy"},
 		UI: SettingsUI{
 			ThemeMode: "auto", ShortcutSet: "default",
 		},

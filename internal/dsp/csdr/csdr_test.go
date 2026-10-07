@@ -227,3 +227,127 @@ func TestClosedStage(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestAMDemodRealPartDCBlock(t *testing.T) {
+	am, err := NewAMDemod()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer am.Close()
+
+	rp, err := NewRealPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rp.Close()
+
+	dc, err := NewDCBlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dc.Close()
+
+	in := tone(8192, 0.01, 0.5)
+	out := make([]float32, len(in))
+
+	if n, err := am.Process(in, out); err != nil || n != len(in) || math.Abs(float64(out[100])-0.5) > 1e-4 {
+		t.Fatalf("am: n=%d err=%v out=%g", n, err, out[100])
+	}
+
+	if n, err := rp.Process(in, out); err != nil || n != len(in) || math.Abs(float64(out[100])-0.5*math.Cos(2*math.Pi)) > 1e-3 {
+		t.Fatalf("real part: n=%d err=%v out=%g", n, err, out[100])
+	}
+
+	// The magnitude is a constant: DC block brings it to zero.
+	if _, err := am.Process(in, out); err != nil {
+		t.Fatal(err)
+	}
+
+	blocked := make([]float32, len(out))
+	if _, err := dc.Process(out, blocked); err != nil {
+		t.Fatal(err)
+	}
+
+	if v := math.Abs(float64(blocked[len(blocked)-1])); v > 0.01 {
+		t.Fatalf("dc block left %g", v)
+	}
+}
+
+func TestBandPassKeepsBand(t *testing.T) {
+	if _, err := NewBandPass(0.2, 0.1, 0.01); err == nil {
+		t.Fatal("inverted band accepted")
+	}
+
+	if _, err := NewBandPass(float32(math.NaN()), 0.1, 0.01); err == nil {
+		t.Fatal("NaN band accepted")
+	}
+
+	run := func(cycles float64) float64 {
+		bp, err := NewBandPass(0.01, 0.1, 0.01)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer bp.Close()
+
+		in := tone(16384, cycles, 1)
+		out := make([]complex64, len(in))
+		n := 0
+
+		for off := 0; off < len(in); off += 1000 {
+			k, err := bp.Process(in[off:min(off+1000, len(in))], out[n:])
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			n += k
+		}
+
+		if n < len(in)/2 {
+			t.Fatalf("got %d samples", n)
+		}
+
+		var p float64
+		for _, v := range out[n/2 : n] {
+			p += float64(real(v)*real(v) + imag(v)*imag(v))
+		}
+
+		return p / float64(n-n/2)
+	}
+
+	if p := run(0.05); p < 0.8 || p > 1.2 {
+		t.Fatalf("in-band power %g", p)
+	}
+
+	// The mirror frequency is outside the complex band.
+	if p := run(-0.05); p > 1e-3 {
+		t.Fatalf("out-of-band power %g", p)
+	}
+}
+
+func TestNoiseFilter(t *testing.T) {
+	nf, err := NewNoiseFilter(256, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nf.Close()
+
+	in := make([]float32, 2048)
+	for i := range in {
+		in[i] = 0.5 * float32(math.Sin(2*math.Pi*0.05*float64(i)))
+	}
+
+	out := make([]float32, len(in))
+
+	n, err := nf.Process(in, out)
+	if err != nil || n == 0 || n%128 != 0 {
+		t.Fatalf("noise filter: n=%d err=%v", n, err)
+	}
+
+	if err := nf.SetThreshold(10); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewNoiseFilter(8, 0); err == nil {
+		t.Fatal("tiny noise filter accepted")
+	}
+}

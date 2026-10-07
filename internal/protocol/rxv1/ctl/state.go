@@ -60,6 +60,8 @@ type TimelineSlot struct {
 // StatePolicy holds the global settings a node enforces.
 type StatePolicy struct {
 	ListenPolicy string `json:"listen_policy"`
+	// WFMDeemphasis is the broadcast FM de-emphasis in µs (50 or 75).
+	WFMDeemphasis int `json:"wfm_deemphasis"`
 }
 
 // StateApplied answers ctl.state.apply (node → hub, §4.4). It carries no
