@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -292,4 +293,81 @@ func TestMediaDeviceStreaming(t *testing.T) {
 
 		return st == domain.StateRunning && d.CenterFreq() != nil && *d.CenterFreq() == 145_000_000
 	})
+}
+
+// TestNodeEnforcesListenPolicy: the node wiring hands the desired state to
+// the media server (media.Options.Policy; nil would fail open), so a node
+// refuses an anonymous token on a device its config marks registered,
+// even when the token's scope names it (SRC-023).
+func TestNodeEnforcesListenPolicy(t *testing.T) {
+	e := newGridEnv(t, fastTimings())
+
+	e.nodeCfg.Node.RuntimeDir = filepath.Join(t.TempDir(), "run")
+	e.nodeCfg.Tools.RTLConnector = fakeConnector(t)
+	e.nodeCfg.Devices = map[string]config.DeviceConfig{"vhf": {
+		Name: "VHF", Type: "rtl_sdr", FreqRange: config.FreqRange{Min: config.MustFrequency("144MHz"), Max: config.MustFrequency("146MHz")},
+		SampleRates: []int64{250_000}, ListenPolicy: "registered",
+	}}
+
+	e.enrollNode(t, fakeProber{})
+
+	eventually(t, "control channel", 15*time.Second, func() bool { return e.g.manager.Connected(domain.MustNodeID("attic")) })
+
+	now := time.Now()
+
+	raw, err := e.g.keys.Issue(context.Background(), token.Claims{
+		Issuer: e.hubCfg.Hub.URL, Audience: token.Audience("attic"), Subject: token.AnonymousSubject, ConnectionID: "anon-1",
+		Roles: []string{}, IssuedAt: now.Add(-time.Second), NotBefore: now, ExpiresAt: now.Add(5 * time.Minute),
+		Scopes: []token.Scope{{Device: "vhf", Perms: []string{token.PermListen, token.PermDemod}}}, Limits: token.Limits{MaxDemods: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var ws *websocket.Conn
+
+	eventually(t, "keys installed", 5*time.Second, func() bool {
+		var st int
+		ws, st = e.dialMedia(t, raw, "anon-1")
+
+		return ws != nil && st == 101
+	})
+
+	c := &mediaClient{t: t, ws: ws}
+	c.send("session.hello", map[string]any{"client": map[string]any{"name": "test", "version": "1"}})
+	c.until("welcome", func(env *rxv1.Envelope, _ *rxv1.FrameHeader, _ []byte) bool {
+		return env != nil && env.Type() == rxv1.TypeSessionWelcome
+	})
+
+	c.send("device.attach", map[string]any{"device_id": "vhf"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for {
+		typ, b, err := ws.Read(ctx)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+
+		if typ != websocket.MessageText {
+			t.Fatal("a binary frame reached an anonymous visitor of a registered device")
+		}
+
+		env, err := rxv1.DecodeEnvelope(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		switch env.Type() {
+		case rxv1.TypeError:
+			if p := string(env.Payload()); !strings.Contains(p, `"forbidden"`) || !strings.Contains(p, "signed-in listener") {
+				t.Fatalf("refusal = %s", p)
+			}
+
+			return
+		case rxv1.TypeAck:
+			t.Fatalf("anonymous attach accepted: %s", env.Payload())
+		}
+	}
 }
