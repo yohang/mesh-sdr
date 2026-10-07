@@ -36,7 +36,7 @@ func (m module) Routes(r chi.Router) {
 
 func TestNewRouterModules(t *testing.T) {
 	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("api")) })
-	h := httpserver.NewRouter(slog.New(slog.DiscardHandler), api, module{"a"}, module{"b"})
+	h := httpserver.NewRouter(slog.New(slog.DiscardHandler), "", api, module{"a"}, module{"b"})
 
 	tests := []struct{ path, body string }{
 		{"/a", "a"},
@@ -68,7 +68,7 @@ func TestSecurityHeaders(t *testing.T) {
 		_, _ = w.Write([]byte(nonce))
 	}
 
-	h := httpserver.NewRouter(slog.New(slog.DiscardHandler), http.HandlerFunc(page), routes(func(r chi.Router) { r.Get("/page", page) }))
+	h := httpserver.NewRouter(slog.New(slog.DiscardHandler), "", http.HandlerFunc(page), routes(func(r chi.Router) { r.Get("/page", page) }))
 
 	for _, path := range []string{"/page", "/page", httpserver.APIPrefix + "/x"} {
 		rec := httptest.NewRecorder()
@@ -112,6 +112,46 @@ func TestSecurityHeaders(t *testing.T) {
 	for _, banned := range []string{"unsafe-inline", "unsafe-eval", "script-src 'self'"} {
 		if strings.Contains(csp, banned) {
 			t.Errorf("CSP contains %q: %s", banned, csp)
+		}
+	}
+}
+
+// TestWorkletCSP checks that the receiver worklet, and only that file, is
+// allowed besides the nonce, on the origin of the hub public URL (ADR 0015
+// decision 5).
+func TestWorkletCSP(t *testing.T) {
+	tests := []struct {
+		url  string
+		want []string
+	}{
+		{"https://hub.example/", []string{"https://hub.example/static/js/receiver/rx-worklet.js"}},
+		{"http://localhost:3000/base/path?q=1", []string{"http://localhost:3000/static/js/receiver/rx-worklet.js"}},
+		{"", nil},
+		{"not a url", nil},
+	}
+
+	for _, tt := range tests {
+		got := httpserver.WorkletScripts(tt.url)
+		if strings.Join(got, " ") != strings.Join(tt.want, " ") {
+			t.Errorf("WorkletScripts(%q) = %q, want %q", tt.url, got, tt.want)
+		}
+	}
+
+	page := func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) }
+	h := httpserver.NewRouter(slog.New(slog.DiscardHandler), "https://hub.example", http.HandlerFunc(page),
+		routes(func(r chi.Router) { r.Get("/page", page) }))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/page", nil))
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, " https://hub.example/static/js/receiver/rx-worklet.js; ") {
+		t.Errorf("CSP does not allow the worklet: %s", csp)
+	}
+
+	for _, banned := range []string{"'self'", "blob:", "wasm-unsafe-eval"} {
+		if script, _, _ := strings.Cut(csp[strings.Index(csp, "script-src"):], ";"); strings.Contains(script, banned) {
+			t.Errorf("script-src contains %q: %s", banned, script)
 		}
 	}
 }
@@ -165,7 +205,7 @@ func (tokenModule) Routes(r chi.Router) {
 func TestRequestLogHidesTokens(t *testing.T) {
 	var logs strings.Builder
 
-	h := httpserver.NewRouter(slog.New(slog.NewTextHandler(&logs, nil)), http.NotFoundHandler(), tokenModule{}, module{"a"})
+	h := httpserver.NewRouter(slog.New(slog.NewTextHandler(&logs, nil)), "", http.NotFoundHandler(), tokenModule{}, module{"a"})
 
 	for _, path := range []string{"/invite/s3cr3t-t0ken", "/a"} {
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
@@ -185,7 +225,7 @@ func TestAPIPathsAnswerProblems(t *testing.T) {
 	html := routes(func(r chi.Router) {
 		r.NotFound(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "html 404", http.StatusNotFound) })
 	})
-	h := httpserver.NewRouter(slog.New(slog.DiscardHandler), api, html)
+	h := httpserver.NewRouter(slog.New(slog.DiscardHandler), "", api, html)
 
 	for _, tt := range []struct{ method, path string }{
 		{http.MethodGet, "/api"},

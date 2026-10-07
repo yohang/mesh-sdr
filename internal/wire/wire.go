@@ -413,6 +413,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	router := httpserver.NewRouter(
 		component(logger, "http.router"),
+		cfg.Hub.URL,
 		api.NewHandler(apiServer, idm.HTTP, component(logger, "http.api")),
 		// Every request body, API and forms, is capped (gateway.max_body)
 		// before any module reads it.

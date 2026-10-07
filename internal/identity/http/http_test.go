@@ -136,7 +136,7 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 		logs:    logs,
 		mail:    mails,
 		revoked: revoked,
-		handler: httpserver.NewRouter(logger, api.NewHandler(srv, m.HTTP, logger), m.HTTP, adminPage{m.HTTP}),
+		handler: httpserver.NewRouter(logger, "", api.NewHandler(srv, m.HTTP, logger), m.HTTP, adminPage{m.HTTP}),
 		admin:   identity.UserAdmin(d),
 		setup:   m.Setup,
 	}

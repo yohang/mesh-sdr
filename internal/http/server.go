@@ -33,14 +33,16 @@ type Module interface {
 // NewRouter builds the hub router: the router middlewares, then each
 // module's middlewares, then the REST API handler under APIPrefix (which
 // serves its own problem+json errors, like any other path under /api), the
-// static assets and each module's routes.
-func NewRouter(logger *slog.Logger, api http.Handler, modules ...Module) http.Handler {
+// static assets and each module's routes. publicURL is the hub public URL
+// (hub.url): the CSP names the receiver worklet on its origin
+// (WorkletScripts).
+func NewRouter(logger *slog.Logger, publicURL string, api http.Handler, modules ...Module) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
-	r.Use(securityHeaders)
+	r.Use(securityHeaders(WorkletScripts(publicURL)))
 
 	for _, m := range modules {
 		r.Use(m.Middlewares()...)
