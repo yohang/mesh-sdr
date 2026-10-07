@@ -12,17 +12,15 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 )
 
-// JSONBodyLimit bounds every /api/v1 request body except the uploads, which
-// have their own caps (uploadLimits).
+// JSONBodyLimit bounds every /api/v1 request body.
 const JSONBodyLimit = 1 << 20
 
 // operation is an operation of openapi.yaml matched by method and path.
 type operation struct {
-	method    string
-	path      *regexp.Regexp
-	params    int
-	role      domain.Role
-	multipart bool
+	method string
+	path   *regexp.Regexp
+	params int
+	role   domain.Role
 }
 
 var (
@@ -67,10 +65,7 @@ func loadOperations(spec []byte) []operation {
 
 		for method, raw := range item {
 			var op struct {
-				Access      string `json:"x-meshsdr-access"`
-				RequestBody struct {
-					Content map[string]json.RawMessage `json:"content"`
-				} `json:"requestBody"`
+				Access string `json:"x-meshsdr-access"`
 			}
 
 			if json.Unmarshal(raw, &op) != nil {
@@ -82,8 +77,7 @@ func loadOperations(spec []byte) []operation {
 				continue
 			}
 
-			_, multipart := op.RequestBody.Content["multipart/form-data"]
-			out = append(out, operation{method: strings.ToUpper(method), path: re, params: params, role: role, multipart: multipart})
+			out = append(out, operation{method: strings.ToUpper(method), path: re, params: params, role: role})
 		}
 	}
 
@@ -106,20 +100,11 @@ func matchOperation(r *http.Request) *operation {
 	return nil
 }
 
-// AcceptsMultipart reports whether r targets an operation whose request
-// body is declared multipart/form-data in openapi.yaml (uploads): the
-// JSON-only rule of /api/v1 does not apply to it.
-func AcceptsMultipart(r *http.Request) bool {
-	op := matchOperation(r)
-
-	return op != nil && op.multipart
-}
-
 // guard runs before routing: it checks the access level of the operation
 // (x-meshsdr-access) before any body is read, so an unauthorised request
-// never gets its body decoded, and bounds the body of every non-upload
-// operation to JSONBodyLimit. The strict policy middleware checks the
-// access level again after decoding (defence in depth).
+// never gets its body decoded, and bounds every body to JSONBodyLimit. The
+// strict policy middleware checks the access level again after decoding
+// (defence in depth).
 func guard(authz Authorizer) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,9 +117,7 @@ func guard(authz Authorizer) func(http.Handler) http.Handler {
 				}
 			}
 
-			if op == nil || !op.multipart {
-				r.Body = http.MaxBytesReader(w, r.Body, JSONBodyLimit)
-			}
+			r.Body = http.MaxBytesReader(w, r.Body, JSONBodyLimit)
 
 			next.ServeHTTP(w, r)
 		})

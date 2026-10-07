@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func (e *gridEnv) signIn(t *testing.T, user string) *hubBrowser {
 	b := &hubBrowser{t: t, base: "http://" + e.gatewayAddr, c: &http.Client{Jar: jar}}
 	b.refreshCSRF()
 
-	if st, body := b.do(http.MethodPost, "/api/v1/auth/login", `{"login":"`+user+`","password":"`+mediaPassword+`"}`); st != http.StatusOK {
+	if st, body, _ := b.form("/login", url.Values{"login": {user}, "password": {mediaPassword}}); st != http.StatusNoContent {
 		t.Fatalf("login: %d %s", st, body)
 	}
 
@@ -265,7 +266,7 @@ func TestTokenRefreshFollowsListenPolicy(t *testing.T) {
 	}
 
 	root := e.signIn(t, "root")
-	if st, body := root.do(http.MethodPatch, "/api/v1/settings", `{"values":{"listen_policy":"registered"}}`); st != http.StatusOK {
+	if st, body, _ := root.form("/admin/access", url.Values{"section": {"listening"}, "listen_policy": {"registered"}}); st != http.StatusOK {
 		t.Fatalf("set listen_policy: %d %s", st, body)
 	}
 
@@ -362,28 +363,14 @@ func TestIdentityTokensOnNodes(t *testing.T) {
 	// The user signs the first session out from a second one.
 	second := e.signIn(t, "lis")
 
-	st, body := first.do(http.MethodGet, "/api/v1/me/sessions", "")
-	if st != http.StatusOK {
+	st, body := first.do(http.MethodGet, "/account", "")
+	current := regexp.MustCompile(`(?s)\(this session\).*?(/account/sessions/[A-Za-z0-9_-]+/revoke)`).FindSubmatch(body)
+
+	if st != http.StatusOK || current == nil {
 		t.Fatalf("sessions: %d %s", st, body)
 	}
 
-	var list struct {
-		Sessions []struct {
-			ID      string `json:"id"`
-			Current bool   `json:"current"`
-		} `json:"sessions"`
-	}
-	_ = json.Unmarshal(body, &list)
-
-	ref := ""
-
-	for _, s := range list.Sessions {
-		if s.Current {
-			ref = s.ID
-		}
-	}
-
-	if st, body := second.do(http.MethodDelete, "/api/v1/me/sessions/"+ref, ""); st != http.StatusNoContent {
+	if st, body, _ := second.form(string(current[1]), nil); st != http.StatusOK {
 		t.Fatalf("revoke session: %d %s", st, body)
 	}
 

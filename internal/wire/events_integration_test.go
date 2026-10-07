@@ -172,7 +172,7 @@ func TestEventsEndToEnd(t *testing.T) {
 	}
 
 	// Signing out ends the socket of that session at once.
-	if st, body := lis.do(http.MethodPost, "/api/v1/auth/logout", ""); st != http.StatusNoContent {
+	if st, body, _ := lis.form("/logout", nil); st != http.StatusNoContent {
 		t.Fatalf("logout: %d %s", st, body)
 	}
 

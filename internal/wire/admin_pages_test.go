@@ -167,6 +167,11 @@ func TestAdminLockedField(t *testing.T) {
 
 func TestAdminPurgeNow(t *testing.T) {
 	h := newAdminHub(t, nil)
+
+	if res, _ := h.browser("op").form("/admin/retention/purge", url.Values{"store": {"audit_log"}}, true); res.StatusCode != http.StatusForbidden {
+		t.Errorf("operator = %d", res.StatusCode)
+	}
+
 	b := h.browser("root")
 
 	// The hub runs its scheduled purges at start; a purge requested while
@@ -188,5 +193,13 @@ func TestAdminPurgeNow(t *testing.T) {
 
 	if res, _ := b.form("/admin/retention/purge", url.Values{"store": {"files"}}, true); res.StatusCode != http.StatusNotFound {
 		t.Errorf("unknown store = %d", res.StatusCode)
+	}
+
+	if n := h.count("SELECT count(*) FROM audit_log WHERE action = 'retention.purge' AND target_id = 'audit_log'"); n != 1 {
+		t.Errorf("purge audit rows = %d", n)
+	}
+
+	if n := h.count("SELECT count(*) FROM job_runs WHERE job = 'audit.purge' AND last_status = 'ok'"); n != 1 {
+		t.Errorf("job runs = %d", n)
 	}
 }

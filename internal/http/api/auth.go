@@ -3,37 +3,24 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
-	"strconv"
 
-	"github.com/yohang/mesh-sdr/internal/http/problem"
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 )
 
-// Sessions is the identity HTTP layer used by the auth endpoints.
+// Sessions is the identity HTTP layer used by the session and token
+// endpoints.
 type Sessions interface {
 	Principal(ctx context.Context) domain.Principal
 	// CSRFToken returns the request's CSRF token and, for a visitor without
 	// a pre-session cookie, the cookie to set.
 	CSRFToken(ctx context.Context) (string, *http.Cookie)
-	Login(ctx context.Context, login, password string, remember bool) (domain.Principal, string, []*http.Cookie, error)
-	Logout(ctx context.Context) (*http.Cookie, error)
-	// ChangePassword changes the caller's password and replaces its
-	// session: it returns the new CSRF token and the cookie to set.
-	ChangePassword(ctx context.Context, current, newPassword string) (domain.Principal, string, *http.Cookie, bool, error)
-	// Actor returns who makes the request, for account operations.
+	// Actor returns who makes the request.
 	Actor(ctx context.Context) app.Actor
-	// CheckSetup checks a first-admin setup token and returns the minimum
-	// password length.
-	CheckSetup(ctx context.Context, token string) (int, error)
-	// CompleteSetup creates the first admin and signs it in.
-	// email and displayName are optional.
-	CompleteSetup(ctx context.Context, token, username, email, displayName, password string) (domain.Principal, string, []*http.Cookie, error)
 }
 
-// AuthHandlers serve /auth/session, /auth/login and /auth/logout.
+// AuthHandlers serve /auth/session: the CSRF token of the scripts.
 type AuthHandlers struct {
 	sessions Sessions
 }
@@ -51,92 +38,6 @@ func (h AuthHandlers) GetSession(ctx context.Context, _ GetSessionRequestObject)
 	}
 
 	return sessionResponse{info: sessionInfo(h.sessions.Principal(ctx), token), cookies: cookies}, nil
-}
-
-// Login implements StrictServerInterface.
-func (h AuthHandlers) Login(ctx context.Context, req LoginRequestObject) (LoginResponseObject, error) {
-	remember := req.Body.RememberMe != nil && *req.Body.RememberMe
-
-	p, token, cookies, err := h.sessions.Login(ctx, req.Body.Login, req.Body.Password, remember)
-
-	var rl *domain.RateLimitError
-	if errors.As(err, &rl) {
-		return rateLimited{err: rl}, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return sessionResponse{info: sessionInfo(p, token), cookies: cookies}, nil
-}
-
-// ChangePassword implements StrictServerInterface.
-func (h AuthHandlers) ChangePassword(ctx context.Context, req ChangePasswordRequestObject) (ChangePasswordResponseObject, error) {
-	p, token, cookie, _, err := h.sessions.ChangePassword(ctx, req.Body.CurrentPassword, req.Body.NewPassword)
-
-	var rl *domain.RateLimitError
-	if errors.As(err, &rl) {
-		return rateLimited{err: rl}, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return sessionResponse{info: sessionInfo(p, token), cookies: []*http.Cookie{cookie}}, nil
-}
-
-// CheckSetup implements StrictServerInterface.
-func (h AuthHandlers) CheckSetup(ctx context.Context, req CheckSetupRequestObject) (CheckSetupResponseObject, error) {
-	n, err := h.sessions.CheckSetup(ctx, req.Token)
-
-	var rl *domain.RateLimitError
-	if errors.As(err, &rl) {
-		return rateLimited{err: rl}, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return CheckSetup200JSONResponse{MinPasswordLength: n}, nil
-}
-
-// CompleteSetup implements StrictServerInterface.
-func (h AuthHandlers) CompleteSetup(ctx context.Context, req CompleteSetupRequestObject) (CompleteSetupResponseObject, error) {
-	var email, displayName string
-	if req.Body.Email != nil {
-		email = *req.Body.Email
-	}
-
-	if req.Body.DisplayName != nil {
-		displayName = *req.Body.DisplayName
-	}
-
-	b := req.Body
-	p, token, cookies, err := h.sessions.CompleteSetup(ctx, b.Token, b.Username, email, displayName, b.Password)
-
-	var rl *domain.RateLimitError
-	if errors.As(err, &rl) {
-		return rateLimited{err: rl}, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return sessionResponse{info: sessionInfo(p, token), cookies: cookies}, nil
-}
-
-// Logout implements StrictServerInterface.
-func (h AuthHandlers) Logout(ctx context.Context, _ LogoutRequestObject) (LogoutResponseObject, error) {
-	c, err := h.sessions.Logout(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return logoutResponse{cookie: c}, nil
 }
 
 func sessionInfo(p domain.Principal, token string) SessionInfo {
@@ -173,7 +74,7 @@ type sessionResponse struct {
 	cookies []*http.Cookie
 }
 
-func (s sessionResponse) write(w http.ResponseWriter) error {
+func (s sessionResponse) VisitGetSessionResponse(w http.ResponseWriter) error {
 	for _, c := range s.cookies {
 		http.SetCookie(w, c)
 	}
@@ -183,50 +84,4 @@ func (s sessionResponse) write(w http.ResponseWriter) error {
 	w.WriteHeader(http.StatusOK)
 
 	return json.NewEncoder(w).Encode(s.info)
-}
-
-func (s sessionResponse) VisitGetSessionResponse(w http.ResponseWriter) error { return s.write(w) }
-func (s sessionResponse) VisitLoginResponse(w http.ResponseWriter) error      { return s.write(w) }
-func (s sessionResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
-	return s.write(w)
-}
-func (s sessionResponse) VisitCompleteSetupResponse(w http.ResponseWriter) error { return s.write(w) }
-
-// rateLimited is a 429 problem with Retry-After.
-type rateLimited struct{ err *domain.RateLimitError }
-
-func (r rateLimited) VisitLoginResponse(w http.ResponseWriter) error { return r.write(w) }
-
-func (r rateLimited) VisitChangePasswordResponse(w http.ResponseWriter) error { return r.write(w) }
-
-func (r rateLimited) VisitChangeMyEmailResponse(w http.ResponseWriter) error { return r.write(w) }
-
-func (r rateLimited) VisitCheckSetupResponse(w http.ResponseWriter) error { return r.write(w) }
-
-func (r rateLimited) VisitCompleteSetupResponse(w http.ResponseWriter) error { return r.write(w) }
-
-func (r rateLimited) write(w http.ResponseWriter) error {
-	w.Header().Set("Retry-After", strconv.Itoa(int(r.err.RetryAfter().Seconds())))
-	problem.Write(w, problem.FromError(r.err))
-
-	return nil
-}
-
-// logoutResponse clears the session cookie.
-type logoutResponse struct{ cookie *http.Cookie }
-
-func (l logoutResponse) VisitDeleteMeResponse(w http.ResponseWriter) error {
-	return l.VisitLogoutResponse(w)
-}
-
-func (l logoutResponse) VisitLogoutAllResponse(w http.ResponseWriter) error {
-	return l.VisitLogoutResponse(w)
-}
-
-func (l logoutResponse) VisitLogoutResponse(w http.ResponseWriter) error {
-	http.SetCookie(w, l.cookie)
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusNoContent)
-
-	return nil
 }

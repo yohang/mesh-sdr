@@ -1,6 +1,6 @@
 // Package http serves the receiver images of the admin Site page (ADM-004):
-// the images section, its upload and "restore default" actions. The JSON
-// API (/api/v1/branding) lives in internal/http/api and uses ReadUpload.
+// the images section, its upload and "restore default" actions. The images
+// themselves are served by GET /api/v1/branding/{slot} (internal/http/api).
 package http
 
 import (

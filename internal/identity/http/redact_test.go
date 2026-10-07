@@ -22,8 +22,9 @@ func TestTokensNeverReachTheLogs(t *testing.T) {
 		{http.MethodGet, "/setup/" + token + "/x"},
 		{http.MethodGet, "//setup/" + token},
 		{http.MethodGet, "/SETUP/" + token},
-		{http.MethodPost, "/setup/" + token}, // 405, CSRF refusal first
-		{http.MethodDelete, "/api/v1/auth/invitations/" + token},
+		{http.MethodPost, "/setup/" + token},               // 405, CSRF refusal first
+		{http.MethodDelete, "/api/v1/auth/setup/" + token}, // no such operation: 404
+		{http.MethodPost, "/api/v1/auth/invitations/" + token + "/accept"},
 	} {
 		anon.do(tc.method, tc.path, "", "", nil)
 	}

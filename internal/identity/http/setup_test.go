@@ -101,6 +101,12 @@ func TestSetupRefusals(t *testing.T) {
 		t.Errorf("outside admin networks = %d", res.StatusCode)
 	}
 
+	c.session()
+
+	if res := c.postSetup(strings.TrimPrefix(path, "/setup/"), "root", newPassword, newPassword); res.StatusCode != http.StatusForbidden {
+		t.Errorf("POST outside admin networks = %d", res.StatusCode)
+	}
+
 	c.remote = "10.1.2.3:4444"
 
 	for _, p := range []string{"/setup/not-the-token", "/setup"} {
@@ -124,60 +130,5 @@ func TestSetupRefusals(t *testing.T) {
 
 	if last.StatusCode != http.StatusTooManyRequests || last.Header.Get("Retry-After") == "" {
 		t.Errorf("flood = %d", last.StatusCode)
-	}
-}
-
-// TestSetupAPI covers the API twin of the setup page (API-002, AUTH-018):
-// check the link, create the first admin and get its session.
-func TestSetupAPI(t *testing.T) {
-	h := newHub(t, func(c *config.Hub) { c.Admin.AllowedNetworks = []string{"10.0.0.0/8"} })
-	token := strings.TrimPrefix(h.beginSetup(), "/setup/")
-
-	c := h.client()
-	c.session()
-
-	check := func(tok string) (*http.Response, string) {
-		res := c.do(http.MethodGet, "/api/v1/auth/setup/"+tok, "", "", nil)
-
-		return res, body(t, res)
-	}
-
-	if res, b := check(token); res.StatusCode != http.StatusForbidden || !strings.Contains(b, `"code":"admin_network_denied"`) {
-		t.Errorf("outside admin networks = %d %s", res.StatusCode, b)
-	}
-
-	c.remote = "10.1.2.3:4444"
-
-	if res, b := check("not-the-token"); res.StatusCode != http.StatusNotFound || !strings.Contains(b, `"code":"setup_token_invalid"`) {
-		t.Errorf("wrong token = %d %s", res.StatusCode, b)
-	}
-
-	if res, b := check(token); res.StatusCode != http.StatusOK || !strings.Contains(b, `"min_password_length":10`) {
-		t.Errorf("check = %d %s", res.StatusCode, b)
-	}
-
-	if strings.Contains(h.logs.String(), token) {
-		t.Error("the setup token reached the logs")
-	}
-
-	post := func(payload string) (*http.Response, string) {
-		res := c.do(http.MethodPost, "/api/v1/auth/setup", "application/json", payload, map[string]string{identityhttp.CSRFHeader: c.token})
-
-		return res, body(t, res)
-	}
-
-	if res, b := post(`{"token":"` + token + `","username":"root","password":"password123"}`); res.StatusCode != http.StatusUnprocessableEntity ||
-		!strings.Contains(b, `"path":"password"`) {
-		t.Errorf("common password = %d %s", res.StatusCode, b)
-	}
-
-	res, b := post(`{"token":"` + token + `","username":"root","display_name":"Root","password":"` + newPassword + `"}`)
-	if res.StatusCode != http.StatusOK || !strings.Contains(b, `"authenticated":true`) || !strings.Contains(b, `"admin"`) ||
-		setCookie(res, "__Host-rx_session") == nil {
-		t.Fatalf("setup = %d %s", res.StatusCode, b)
-	}
-
-	if res, _ := check(token); res.StatusCode != http.StatusNotFound {
-		t.Errorf("used token = %d", res.StatusCode)
 	}
 }

@@ -43,22 +43,24 @@ func multipartBody(t *testing.T, data []byte, fields map[string]string) (string,
 	return mw.FormDataContentType(), buf.String()
 }
 
-func TestBrandingAPI(t *testing.T) {
+// TestReceiverImages: images are uploaded on Admin › Site and served by
+// GET /api/v1/branding/{slot}.
+func TestReceiverImages(t *testing.T) {
 	h := newAdminHub(t, nil)
 	admin, anon := h.browser("root"), h.browser("")
+	htmx := map[string]string{"HX-Request": "true"}
 
 	if res, _ := anon.do(http.MethodGet, "/api/v1/branding/avatar", "", "", nil); res.StatusCode != http.StatusNotFound {
 		t.Errorf("unset avatar = %d", res.StatusCode)
 	}
 
-	ctype, body := multipartBody(t, pngImage(t, 48, 48), nil)
+	ctype, body := multipartBody(t, pngImage(t, 48, 48), map[string]string{"slot": "avatar"})
 
-	if res, _ := h.browser("lis").do(http.MethodPut, "/api/v1/branding/avatar", ctype, body, nil); res.StatusCode != http.StatusForbidden {
+	if res, _ := h.browser("lis").do(http.MethodPost, "/admin/site/images", ctype, body, nil); res.StatusCode != http.StatusForbidden {
 		t.Errorf("listener upload = %d", res.StatusCode)
 	}
 
-	res, raw := admin.do(http.MethodPut, "/api/v1/branding/avatar", ctype, body, nil)
-	if res.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"mime_type":"image/png"`) {
+	if res, raw := admin.do(http.MethodPost, "/admin/site/images", ctype, body, htmx); res.StatusCode != http.StatusOK || !strings.Contains(string(raw), "The avatar was updated.") {
 		t.Fatalf("upload = %d %s", res.StatusCode, raw)
 	}
 
@@ -73,24 +75,24 @@ func TestBrandingAPI(t *testing.T) {
 	}
 
 	// Too large, by the declared size, before reading.
-	big, bigBody := multipartBody(t, make([]byte, 300<<10), nil)
-	if res, raw := admin.do(http.MethodPut, "/api/v1/branding/avatar", big, bigBody, nil); res.StatusCode != http.StatusRequestEntityTooLarge {
+	big, bigBody := multipartBody(t, make([]byte, 3<<20), map[string]string{"slot": "avatar"})
+	if res, raw := admin.do(http.MethodPost, "/admin/site/images", big, bigBody, htmx); res.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("oversized = %d %s", res.StatusCode, raw)
 	}
 
-	svgType, svgBody := multipartBody(t, []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), nil)
-	if res, raw := admin.do(http.MethodPut, "/api/v1/branding/panorama", svgType, svgBody, nil); res.StatusCode != http.StatusUnprocessableEntity ||
-		!strings.Contains(string(raw), "unsupported_image") {
+	svgType, svgBody := multipartBody(t, []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), map[string]string{"slot": "panorama"})
+	if res, raw := admin.do(http.MethodPost, "/admin/site/images", svgType, svgBody, htmx); res.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("svg = %d %s", res.StatusCode, raw)
 	}
 
-	// Multipart is accepted only where the API declares it.
-	if res, _ := admin.do(http.MethodPatch, "/api/v1/settings", ctype, body, nil); res.StatusCode != http.StatusUnsupportedMediaType {
-		t.Errorf("multipart PATCH /settings = %d", res.StatusCode)
+	// The API takes JSON bodies only.
+	if res, _ := admin.do(http.MethodPost, "/api/v1/presets", ctype, body, nil); res.StatusCode != http.StatusUnsupportedMediaType {
+		t.Errorf("multipart POST /presets = %d", res.StatusCode)
 	}
 
-	if res, _ := admin.do(http.MethodDelete, "/api/v1/branding/avatar", "", "", nil); res.StatusCode != http.StatusNoContent {
-		t.Errorf("DELETE = %d", res.StatusCode)
+	if res, raw := admin.do(http.MethodPost, "/admin/site/images/remove", "application/x-www-form-urlencoded", "slot=avatar", htmx); res.StatusCode != http.StatusOK ||
+		!strings.Contains(string(raw), "removed") {
+		t.Errorf("remove = %d %s", res.StatusCode, raw)
 	}
 
 	if n := h.count("SELECT count(*) FROM audit_log WHERE action LIKE 'receiver_image.%'"); n != 2 {

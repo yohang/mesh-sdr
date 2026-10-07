@@ -137,7 +137,7 @@ func (s *Accounts) RevokeOtherSessions(ctx context.Context, by Actor) (int, erro
 }
 
 // RevokeAllOwnSessions signs out every session of the actor, the request's
-// included (`/auth/logout-all`).
+// included ("Sign out everywhere" on the account page).
 func (s *Accounts) RevokeAllOwnSessions(ctx context.Context, by Actor) (int, error) {
 	if by.Principal.IsAnonymous() {
 		return 0, domain.ErrUnauthenticated

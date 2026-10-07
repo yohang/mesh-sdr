@@ -220,6 +220,21 @@ func (m *Module) revokeOthersAction(w http.ResponseWriter, r *http.Request) {
 	m.sessionsResult(w, r, err, fmt.Sprintf("%d other session(s) signed out.", n))
 }
 
+// revokeAllAction signs out every session of the user, this one included
+// ("Sign out everywhere"), then goes to the login page.
+func (m *Module) revokeAllAction(w http.ResponseWriter, r *http.Request) {
+	noIndex(w)
+
+	if _, err := m.accounts.RevokeAllOwnSessions(r.Context(), m.Actor(r.Context())); err != nil {
+		m.sessionsResult(w, r, err, "")
+
+		return
+	}
+
+	http.SetCookie(w, m.cookie(m.sessionCookieName(), "", -1))
+	m.redirect(w, r, "/login")
+}
+
 func (m *Module) sessionsResult(w http.ResponseWriter, r *http.Request, err error, ok string) {
 	v, verr := m.accountView(r)
 	if verr != nil {

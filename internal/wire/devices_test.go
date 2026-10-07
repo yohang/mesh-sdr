@@ -104,30 +104,3 @@ func TestDevicePages(t *testing.T) {
 		t.Errorf("audit rows = %d", n)
 	}
 }
-
-func TestDeviceAPI(t *testing.T) {
-	h := newAdminHub(t, nil)
-	seedDevices(t, h)
-
-	if status, v, _ := h.browser("op").json(http.MethodGet, "/api/v1/devices/vhf", ""); status != 200 || v["missing_since"] == nil || v["operator_can_retune"] != true {
-		t.Errorf("operator GET = %d %v", status, v)
-	}
-
-	if status, _, _ := h.browser("lis").json(http.MethodGet, "/api/v1/devices/vhf", ""); status != 403 {
-		t.Errorf("listener GET = %d", status)
-	}
-
-	if status, _, _ := h.browser("op").json(http.MethodDelete, "/api/v1/devices/vhf", ""); status != 403 {
-		t.Errorf("operator DELETE = %d", status)
-	}
-
-	admin := h.browser("root")
-
-	if status, v, _ := admin.json(http.MethodDelete, "/api/v1/devices/hf", ""); status != 409 || v["code"] != "device_reported" {
-		t.Errorf("DELETE reported = %d %v", status, v)
-	}
-
-	if status, _, _ := admin.json(http.MethodDelete, "/api/v1/devices/vhf", ""); status != 204 {
-		t.Errorf("DELETE missing = %d", status)
-	}
-}

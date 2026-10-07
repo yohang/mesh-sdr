@@ -1,7 +1,6 @@
 package http_test
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -110,7 +109,7 @@ func TestForcedPasswordChange(t *testing.T) {
 		t.Errorf("old password login = %d", res.StatusCode)
 	}
 
-	if res := other.login("alice", newPassword, false); res.StatusCode != http.StatusOK {
+	if res := other.login("alice", newPassword, false); res.StatusCode != http.StatusSeeOther {
 		t.Errorf("new password login = %d", res.StatusCode)
 	}
 }
@@ -151,15 +150,7 @@ func TestPasswordChangeKeepsRememberMe(t *testing.T) {
 	}
 }
 
-func (c *client) changePasswordAPI(current, next string) *http.Response {
-	c.h.t.Helper()
-
-	b, _ := json.Marshal(map[string]string{"current_password": current, "new_password": next})
-
-	return c.do(http.MethodPost, "/api/v1/auth/password", "application/json", string(b), map[string]string{identityhttp.CSRFHeader: c.token})
-}
-
-func TestVoluntaryPasswordChangeAPI(t *testing.T) {
+func TestVoluntaryPasswordChange(t *testing.T) {
 	h := newHub(t)
 	h.addUser("bob", domain.RoleOperator)
 
@@ -172,49 +163,33 @@ func TestVoluntaryPasswordChangeAPI(t *testing.T) {
 	other.session()
 	other.login("bob", password, false)
 
-	for _, tc := range []struct {
-		current, next, code, reason string
-		status                      int
-	}{
-		{"wrong password!", newPassword, "invalid_current_password", "", http.StatusUnprocessableEntity},
-		{password, "short", "invalid_password", "too_short", http.StatusUnprocessableEntity},
-		{password, "qwertyuiop", "invalid_password", "common", http.StatusUnprocessableEntity},
-		{password, password, "invalid_password", "same_as_current", http.StatusUnprocessableEntity},
+	for _, tc := range []struct{ current, next string }{
+		{"wrong password!", newPassword},
+		{password, "short"},
+		{password, "qwertyuiop"},
+		{password, password},
 	} {
-		res := c.changePasswordAPI(tc.current, tc.next)
-		v := decode(t, res)
-
-		if res.StatusCode != tc.status || v["code"] != tc.code {
-			t.Errorf("%q → %d %v", tc.next, res.StatusCode, v)
-		}
-
-		if tc.reason != "" {
-			errs, _ := v["errors"].([]any)
-			if e, _ := errs[0].(map[string]any); len(errs) != 1 || e["code"] != tc.reason {
-				t.Errorf("%q errors = %v", tc.next, v["errors"])
-			}
+		res := c.changePassword(tc.current, tc.next, tc.next, "", nil)
+		if b := body(t, res); res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(b, `role="alert"`) {
+			t.Errorf("%q → %d %s", tc.next, res.StatusCode, b)
 		}
 	}
 
 	// The CSRF header is required.
-	res := c.do(http.MethodPost, "/api/v1/auth/password", "application/json", `{"current_password":"x","new_password":"y"}`, nil)
-	if res.StatusCode != http.StatusForbidden {
+	form := url.Values{"current_password": {password}, "new_password": {newPassword}, "confirm_password": {newPassword}}
+	if res := c.do(http.MethodPost, identityhttp.PasswordChangePath, "application/x-www-form-urlencoded", form.Encode(), nil); res.StatusCode != http.StatusForbidden {
 		t.Errorf("without CSRF = %d", res.StatusCode)
 	}
 
-	res = c.changePasswordAPI(password, newPassword)
-	v := decode(t, res)
+	before := c.token
 
-	if res.StatusCode != http.StatusOK || v["authenticated"] != true || v["csrf_token"] == c.token {
-		t.Fatalf("change = %d %v", res.StatusCode, v)
-	}
-
-	if setCookie(res, "__Host-rx_session") == nil {
-		t.Fatal("no new session cookie")
+	res := c.changePassword(password, newPassword, newPassword, "", nil)
+	if res.StatusCode != http.StatusSeeOther || setCookie(res, "__Host-rx_session") == nil {
+		t.Fatalf("change = %d", res.StatusCode)
 	}
 
 	// The caller keeps a session (the new one), its other sessions are gone.
-	if s := c.session(); s["authenticated"] != true || s["csrf_token"] != v["csrf_token"] {
+	if s := c.session(); s["authenticated"] != true || s["csrf_token"] == before {
 		t.Errorf("caller session = %v", s)
 	}
 
@@ -226,34 +201,18 @@ func TestVoluntaryPasswordChangeAPI(t *testing.T) {
 	if b := body(t, page); !strings.Contains(b, "password-changed") || strings.Contains(b, "password-forced") {
 		t.Errorf("changed page = %s", b)
 	}
-
-	anon := h.client()
-	anon.session()
-
-	if res := anon.changePasswordAPI(password, newPassword); res.StatusCode != http.StatusUnauthorized {
-		t.Errorf("anonymous = %d", res.StatusCode)
-	}
 }
 
+// TestUnknownBodyFieldsAreRefused: JSON bodies of the API are closed
+// (SR-20).
 func TestUnknownBodyFieldsAreRefused(t *testing.T) {
 	h := newHub(t)
-	h.addUser("bob", domain.RoleListener)
-
 	c := h.client()
 	c.session()
 
-	res := c.do(http.MethodPost, "/api/v1/auth/login", "application/json",
-		`{"login":"bob","password":"`+password+`","role":"admin"}`, map[string]string{identityhttp.CSRFHeader: c.token})
+	res := c.do(http.MethodPost, "/api/v1/auth/token", "application/json",
+		`{"node_id":"roof","cid":"x","role":"admin"}`, map[string]string{identityhttp.CSRFHeader: c.token})
 	if v := decode(t, res); res.StatusCode != http.StatusBadRequest || v["code"] != "unknown_field" {
-		t.Errorf("login with an unknown field = %d %v", res.StatusCode, v)
-	}
-
-	c.login("bob", password, false)
-	c.session()
-
-	res = c.do(http.MethodPost, "/api/v1/auth/password", "application/json",
-		`{"current_password":"`+password+`","new_password":"`+newPassword+`","x":1}`, map[string]string{identityhttp.CSRFHeader: c.token})
-	if v := decode(t, res); res.StatusCode != http.StatusBadRequest || v["code"] != "unknown_field" {
-		t.Errorf("password change with an unknown field = %d %v", res.StatusCode, v)
+		t.Errorf("token request with an unknown field = %d %v", res.StatusCode, v)
 	}
 }

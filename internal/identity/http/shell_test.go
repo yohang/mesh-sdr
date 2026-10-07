@@ -34,7 +34,7 @@ func TestShellUser(t *testing.T) {
 
 	c.session()
 
-	if res := c.login("alice", password, false); res.StatusCode != http.StatusOK {
+	if res := c.login("alice", password, false); res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("login = %d", res.StatusCode)
 	}
 

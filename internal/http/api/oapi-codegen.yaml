@@ -4,3 +4,7 @@ generate:
   models: true
   chi-server: true
   strict-server: true
+compatibility:
+  # Keep enum constants prefixed by their type (HealthStatusOk), whatever
+  # the other enums of the document.
+  always-prefix-enum-values: true

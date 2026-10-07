@@ -25,7 +25,7 @@ func TestPolicyCoversEveryOperation(t *testing.T) {
 		}
 	}
 
-	want := map[string]domain.Role{"GetSession": domain.RoleAnonymous, "Login": domain.RoleAnonymous, "Logout": domain.RoleListener}
+	want := map[string]domain.Role{"GetSession": domain.RoleAnonymous, "MintAccessToken": domain.RoleAnonymous, "CreatePreset": domain.RoleAdmin}
 	for op, role := range want {
 		if p[op] != role {
 			t.Errorf("%s requires %v, want %v", op, p[op], role)

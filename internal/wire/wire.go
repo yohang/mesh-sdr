@@ -309,7 +309,6 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	ideps := identityDeps(cfg, logger, adapter)
 	ideps.Settings = settingsModule.Store
-	ideps.AcceptsMultipart = api.AcceptsMultipart
 	ideps.Devices = gridDevices{g.devices}
 
 	var workers []func(context.Context)
@@ -406,17 +405,11 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		func(r *http.Request) string { return clientip.From(r.Context()).String() }, component(logger, "grid.http.authz"))
 
 	apiServer := api.Server{
-		HealthHandlers:     api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
-		AuthHandlers:       api.NewAuthHandlers(idm.HTTP),
-		GridHandlers:       api.NewGridHandlers(idm.HTTP, g.nodes, g.history, g.caps, g.devices, g.presence),
-		SettingsHandlers:   api.NewSettingsHandlers(settingsModule.Store, settingsModule.Effective, settingsActor),
-		RetentionHandlers:  api.NewRetentionHandlers(retention, settingsActor),
-		BrandingHandlers:   api.NewBrandingHandlers(images, settingsActor),
-		AccountHandlers:    api.NewAccountHandlers(idm.HTTP, idm.Accounts, idm.Profile),
-		InvitationHandlers: api.NewInvitationHandlers(idm.HTTP, idm.HTTP, idm.Invitations),
-		ResetHandlers:      api.NewResetHandlers(idm.HTTP, idm.Resets),
-		AuditHandlers:      api.NewAuditHandlers(idm.Audit),
-		TokenHandlers:      api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
+		HealthHandlers:   api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
+		AuthHandlers:     api.NewAuthHandlers(idm.HTTP),
+		ConfigHandlers:   api.NewConfigHandlers(settingsModule.Effective),
+		BrandingHandlers: api.NewBrandingHandlers(images),
+		TokenHandlers:    api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
 		FeatureHandlers: api.NewFeatureHandlers(idm.HTTP, gridapp.NewFeatures(gridsqlite.NewDeviceRepository(adapter),
 			gridsqlite.NewCapabilityRepository(adapter), storeListenPolicy{store: settingsModule.Store})),
 		PresetHandlers:   api.NewPresetHandlers(sch.presets, scheduleDevices{repo: g.deviceRepo}),
