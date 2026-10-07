@@ -27,6 +27,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
+	radiohttp "github.com/yohang/mesh-sdr/internal/radio/http"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
@@ -128,7 +129,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	})
 
 	ctlServer := control.NewNodeServer(control.NodeOptions{
-		Agent: ag, State: state, Media: mediaServer, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
+		Agent: ag, State: appliedState{state, streams}, Media: mediaServer, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
 		Renewer: &control.FileRenewer{NodeID: id.String(), CertFile: cfg.TLS.Cert, Roots: roots, Key: key, Holder: holder, Now: time.Now},
 		Now:     time.Now, Logger: component(logger, "grid.infra.control"),
 	})
@@ -143,6 +144,21 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 		addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server"),
 		workers: []func(context.Context){ag.Run, ctlServer.Run, mediaServer.Run, manager.Run},
 	}, nil
+}
+
+// appliedState tells the stream handler about every applied desired state:
+// an edited or unassigned preset is no longer active on its device.
+type appliedState struct {
+	*agent.DesiredState
+
+	streams *radiohttp.Streams
+}
+
+func (s appliedState) Apply(st ctl.StateApply) ctl.StateApplied {
+	out := s.DesiredState.Apply(st)
+	s.streams.StateApplied()
+
+	return out
 }
 
 // deviceReporter sends device states to the hub (device.state, coalesced

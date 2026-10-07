@@ -14,6 +14,7 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -71,27 +72,37 @@ type Streams struct {
 	log     *slog.Logger
 
 	// switching serialises the shared changes of the devices
-	// (preset.select).
+	// (preset.select, device.retune) and guards lastSwitch and applied.
 	switching sync.Mutex
-
-	// switches limits the preset switches of each device (§5.11).
-	switches *ratelimit.Limiter[string]
-	now      func() time.Time
+	// lastSwitch is the time of the last preset switch of each device
+	// (§5.11 limit).
+	lastSwitch map[string]time.Time
+	// applied is the active preset of each device as it was switched: an
+	// edit or an unassignment by the hub clears it.
+	applied map[string]activePreset
+	// retunes limits the device.retune of each device (§5.11).
+	retunes *ratelimit.Limiter[string]
+	now     func() time.Time
 
 	mu       sync.Mutex
 	sessions map[*session]struct{}
 }
 
-// PresetSwitchEvery is the per-device preset switch limit (§5.11: one
-// switch per 5 s).
-const PresetSwitchEvery = 5 * time.Second
+// Per-device limits of the shared changes (§5.11): one preset switch per
+// 5 s, four retunes per second.
+const (
+	PresetSwitchEvery = 5 * time.Second
+	RetuneEvery       = 250 * time.Millisecond
+	RetuneBurst       = 4
+)
 
 // NewStreams returns the handler. state may be nil (no hub state: no
 // preset, the node defaults apply).
 func NewStreams(d Devices, state DesiredState, log *slog.Logger) *Streams {
 	return &Streams{
 		devices: d, state: state, log: log, sessions: map[*session]struct{}{},
-		switches: ratelimit.New[string](PresetSwitchEvery, 1, ratelimit.DefaultCapacity), now: time.Now,
+		lastSwitch: map[string]time.Time{}, applied: map[string]activePreset{},
+		retunes: ratelimit.New[string](RetuneEvery, RetuneBurst, ratelimit.DefaultCapacity), now: time.Now,
 	}
 }
 
@@ -129,6 +140,37 @@ func (s *Streams) presets(device, activeID string) (*media.PresetRef, *ctl.Prese
 	}
 
 	return ref, active, avail
+}
+
+// activePreset is a switched preset: its id and its content then.
+type activePreset struct {
+	id string
+	p  ctl.Preset
+}
+
+// StateApplied clears the active preset of the devices whose preset the
+// hub edited or no longer assigns to them. Call it after every applied
+// desired state.
+func (s *Streams) StateApplied() {
+	s.switching.Lock()
+	defer s.switching.Unlock()
+
+	for device, was := range s.applied {
+		if p, err := s.resolve(device, was.id); err == nil && reflect.DeepEqual(p, was.p) {
+			continue
+		}
+
+		s.clearPreset(device)
+	}
+}
+
+// clearPreset forgets the active preset of a device (switching held).
+func (s *Streams) clearPreset(device string) {
+	delete(s.applied, device)
+
+	if err := s.devices.SetActivePreset(device, ""); err != nil {
+		s.log.Warn("active preset not cleared", slog.String("device_id", device), slog.Any("error", err))
+	}
 }
 
 // resolve returns a preset of the desired state that the device may run.
@@ -232,6 +274,10 @@ type demodState struct {
 	device string
 	stream uint16
 	demod  app.Demod
+	// mu makes each read-modify-write of the parameters atomic: the
+	// listener's demod.set and audio.configure, and the moves of a shared
+	// centre change made by another session.
+	mu sync.Mutex
 }
 
 func wireCodec(c app.AudioCodec) rxv1.Codec {
@@ -358,7 +404,12 @@ func (ss *session) deviceConfig(rev int, snap domain.Snapshot, info app.Spectrum
 	}
 
 	if p := active; p != nil {
-		cfg.Start = media.Start{Mode: p.StartMod, OffsetHz: p.StartFreq - snap.CenterHz}
+		cfg.Start = media.Start{Mode: p.StartMod}
+
+		// A retune since the switch may leave the start outside the band.
+		if off := p.StartFreq - snap.CenterHz; abs(off) <= int64(snap.RateHz)/2 {
+			cfg.Start.OffsetHz = off
+		}
 		cfg.TuningStepHz = int(p.TuningStep)
 
 		if p.InitialSquelchLevel != nil {
@@ -650,13 +701,20 @@ func (ss *session) configureAudio(req rxv1.Envelope) {
 	var done []change
 
 	for _, d := range demods {
+		d.mu.Lock()
 		old := d.demod.Params()
 		params := old
 		params.Codec, params.OutputRate = codec, p.SampleRate
+		err := d.demod.Set(params)
+		d.mu.Unlock()
 
-		if err := d.demod.Set(params); err != nil {
+		if err != nil {
 			for _, c := range done {
-				_ = c.d.demod.Set(c.old)
+				c.d.mu.Lock()
+				back := c.d.demod.Params()
+				back.Codec, back.OutputRate = c.old.Codec, c.old.OutputRate
+				_ = c.d.demod.Set(back)
+				c.d.mu.Unlock()
 			}
 
 			ss.fail(req, err)
@@ -831,6 +889,9 @@ func (ss *session) setDemod(req rxv1.Envelope) {
 		return
 	}
 
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	params := d.demod.Params()
 
 	// A new mode takes its default pass band unless one is given.
@@ -918,6 +979,12 @@ func (ss *session) retune(req rxv1.Envelope) {
 	s.switching.Lock()
 	defer s.switching.Unlock()
 
+	if ok, retry := s.retunes.Allow(p.DeviceID, s.now()); !ok {
+		ss.peer.RateLimited(req, retry)
+
+		return
+	}
+
 	listeners := s.listeners(p.DeviceID)
 	old := centre(p.DeviceID, listeners)
 
@@ -931,6 +998,11 @@ func (ss *session) retune(req rxv1.Envelope) {
 	start, half := snap.CenterHz, int64(snap.RateHz)/2
 	if _, preset, _ := s.presets(p.DeviceID, snap.ActivePreset); preset != nil && abs(preset.StartFreq-snap.CenterHz) <= half {
 		start = preset.StartFreq
+	}
+
+	// The device no longer runs its preset as switched.
+	if snap.ActivePreset != "" {
+		s.clearPreset(p.DeviceID)
 	}
 
 	for _, l := range listeners {
@@ -1035,8 +1107,8 @@ func (ss *session) selectPreset(req rxv1.Envelope) {
 		return
 	}
 
-	if ok, retry := s.switches.Allow(p.DeviceID, s.now()); !ok {
-		ss.peer.RateLimited(req, retry)
+	if wait := s.lastSwitch[p.DeviceID].Add(PresetSwitchEvery).Sub(s.now()); wait > 0 {
+		ss.peer.RateLimited(req, wait)
 
 		return
 	}
@@ -1055,6 +1127,8 @@ func (ss *session) selectPreset(req rxv1.Envelope) {
 	}
 
 	snap.ActivePreset = p.PresetID
+	s.lastSwitch[p.DeviceID] = s.now()
+	s.applied[p.DeviceID] = activePreset{id: p.PresetID, p: preset}
 
 	s.log.Info("preset selected", slog.String("device_id", p.DeviceID), slog.String("preset_id", p.PresetID),
 		slog.Int64("center_hz", snap.CenterHz), slog.Int("sample_rate", snap.RateHz))
@@ -1104,53 +1178,9 @@ func (ss *session) centreMoved(device string, oldCenter, startHz int64, mine *ct
 	}
 
 	snap := a.lease.Snapshot()
-	half := int64(snap.RateHz) / 2
-	start := startHz - snap.CenterHz
 
 	for _, d := range ss.demodsOn(device) {
-		cur := d.demod.Params()
-		params := cur
-
-		if mine != nil {
-			params.OffsetHz = start
-
-			// A new mode takes its default pass band (demod.set).
-			if mine.StartMod != cur.Mode {
-				params.Mode, params.LowHz, params.HighHz = mine.StartMod, 0, 0
-			}
-
-			if q := mine.InitialSquelchLevel; q != nil {
-				params.SquelchDB = new(float64(*q))
-			}
-
-			if n := mine.InitialNRLevel; n != nil {
-				params.NR = app.NR{Enabled: true, ThresholdDB: float64(*n)}
-			}
-		} else if params.OffsetHz = oldCenter + cur.OffsetHz - snap.CenterHz; params.OffsetHz < -half || params.OffsetHz > half {
-			params.OffsetHz = start
-		}
-
-		if params == cur {
-			continue
-		}
-
-		err := d.demod.Set(params)
-		if err != nil && params.Mode != cur.Mode {
-			// The preset's mode is not provided by this node: keep the
-			// current one.
-			params.Mode, params.LowHz, params.HighHz = cur.Mode, cur.LowHz, cur.HighHz
-			err = d.demod.Set(params)
-		}
-
-		if err != nil {
-			ss.s.log.Warn("demodulator not moved after a centre change", slog.String("device_id", device),
-				slog.String("demod_id", d.id), slog.Any("error", err))
-
-			continue
-		}
-
-		res := applied(d.demod.Params())
-		ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: d.stream, Applied: &res})
+		ss.moveDemod(d, oldCenter, startHz, snap, mine)
 	}
 
 	if !config {
@@ -1163,6 +1193,62 @@ func (ss *session) centreMoved(device string, oldCenter, startHz int64, mine *ct
 	ss.mu.Unlock()
 
 	ss.peer.Send(rxv1.TypeDeviceConfig, ss.deviceConfig(rev, snap, a.lease.Engine().Spectrum()))
+}
+
+// moveDemod moves one demodulator after a centre change (see
+// centreMoved), atomically with the listener's own changes. When the
+// engine refuses the preset's mode, squelch or noise reduction, only the
+// offset moves.
+func (ss *session) moveDemod(d *demodState, oldCenter, startHz int64, snap domain.Snapshot, mine *ctl.Preset) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	half := int64(snap.RateHz) / 2
+	start := startHz - snap.CenterHz
+	cur := d.demod.Params()
+	moved := cur
+
+	if mine != nil {
+		moved.OffsetHz = start
+	} else if moved.OffsetHz = oldCenter + cur.OffsetHz - snap.CenterHz; abs(moved.OffsetHz) > half {
+		moved.OffsetHz = start
+	}
+
+	params := moved
+
+	if mine != nil {
+		// A new mode takes its default pass band (demod.set).
+		if mine.StartMod != cur.Mode {
+			params.Mode, params.LowHz, params.HighHz = mine.StartMod, 0, 0
+		}
+
+		if q := mine.InitialSquelchLevel; q != nil {
+			params.SquelchDB = new(float64(*q))
+		}
+
+		if n := mine.InitialNRLevel; n != nil {
+			params.NR = app.NR{Enabled: true, ThresholdDB: float64(*n)}
+		}
+	}
+
+	if params == cur {
+		return
+	}
+
+	err := d.demod.Set(params)
+	if err != nil && params != moved {
+		err = d.demod.Set(moved)
+	}
+
+	if err != nil {
+		ss.s.log.Warn("demodulator not moved after a centre change", slog.String("device_id", d.device),
+			slog.String("demod_id", d.id), slog.Any("error", err))
+
+		return
+	}
+
+	res := applied(d.demod.Params())
+	ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: d.stream, Applied: &res})
 }
 
 // Reauthorize implements media.StreamSession: after auth.refresh, devices

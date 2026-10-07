@@ -448,17 +448,152 @@ func TestPresetSelect(t *testing.T) {
 		t.Errorf("listener device.config after a forced switch: %+v", cfg)
 	}
 
+	// The hub's state unchanged keeps the active preset; an edit of the
+	// preset clears it.
+	streams.StateApplied()
+
+	if got := m.Devices()[0].ActivePreset; got != "far" {
+		t.Fatalf("active preset after an unchanged state: %q", got)
+	}
+
+	far := state.presets["far"]
+	far.TuningStep = 500
+	state.presets["far"] = far
+	streams.StateApplied()
+
+	if got := m.Devices()[0].ActivePreset; got != "" {
+		t.Errorf("active preset after an edit: %q", got)
+	}
+
 	// device.retune: the listener keeps 145 MHz while it stays in the band,
-	// then moves to the new centre (far's start is outside the new band).
+	// then moves to the new centre; the retune clears the active preset.
+	do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "far"}, rxv1.CodeRateLimited)
+
+	now = now.Add(radiohttp.PresetSwitchEvery)
+	do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "far"}, "")
 	do(opSS, op, rxv1.TypeDeviceRetune, map[string]any{"device_id": "vhf", "center_hz": 145_050_000}, "")
 
 	if a := applied(lis); a.OffsetHz != -50_000 {
 		t.Errorf("listener demodulator after a retune: %+v", a)
 	}
 
+	if got := m.Devices()[0].ActivePreset; got != "" {
+		t.Errorf("active preset after a retune: %q", got)
+	}
+
 	do(opSS, op, rxv1.TypeDeviceRetune, map[string]any{"device_id": "vhf", "center_hz": 145_500_000}, "")
 
 	if a := applied(lis); a.OffsetHz != 0 {
 		t.Errorf("listener demodulator after a retune out of its band: %+v", a)
+	}
+
+	// Four retunes per second (§5.11).
+	do(opSS, op, rxv1.TypeDeviceRetune, map[string]any{"device_id": "vhf", "center_hz": 145_400_000}, "")
+	do(opSS, op, rxv1.TypeDeviceRetune, map[string]any{"device_id": "vhf", "center_hz": 145_300_000}, "")
+	do(opSS, op, rxv1.TypeDeviceRetune, map[string]any{"device_id": "vhf", "center_hz": 145_200_000}, rxv1.CodeRateLimited)
+}
+
+// TestPresetSelectRace: two operators switch the same device at once while
+// a listener retunes its demodulator: one switch wins, the other is rate
+// limited, and the listener's demodulator stays consistent (run with
+// -race).
+func TestPresetSelectRace(t *testing.T) {
+	m := runManager(t)
+	ctx := context.Background()
+
+	state := desired{
+		devices: map[string]ctl.DesiredDevice{"vhf": {Presets: []string{"a", "b"}}},
+		presets: map[string]ctl.Preset{
+			"a": {Name: "A", CenterFreq: 144_150_000, SampRate: 250_000, StartFreq: 144_150_000, StartMod: "nfm", TuningStep: 1000},
+			"b": {Name: "B", CenterFreq: 144_160_000, SampRate: 250_000, StartFreq: 144_160_000, StartMod: "nfm", TuningStep: 1000},
+		},
+		policy: ctl.StatePolicy{ListenPolicy: "anonymous"},
+	}
+	streams := radiohttp.NewStreams(m, state, slog.New(slog.DiscardHandler))
+
+	all := []string{token.PermListen, token.PermDemod, token.PermPreset, token.PermRetune}
+	peers := make([]*peer, 3)
+	sessions := make([]media.StreamSession, 3)
+
+	for i := range peers {
+		peers[i] = &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, all...)}
+		sessions[i] = streams.Open(peers[i])
+
+		defer sessions[i].Close()
+
+		sessions[i].Handle(ctx, env(t, rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}))
+		sessions[i].Handle(ctx, env(t, rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm"}))
+	}
+
+	var wg sync.WaitGroup
+
+	for i, id := range []string{"a", "b"} {
+		wg.Go(func() {
+			sessions[i].Handle(ctx, env(t, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": id}))
+		})
+	}
+
+	wg.Go(func() {
+		for off := range 20 {
+			sessions[2].Handle(ctx, env(t, rxv1.TypeDemodSet, map[string]any{"demod_id": "d1", "offset_hz": off * 1000}))
+		}
+	})
+	wg.Wait()
+
+	codes := map[rxv1.ErrorCode]int{}
+	winner := ""
+
+	for i, id := range []string{"a", "b"} {
+		r := peers[i].last()
+		codes[r.code]++
+
+		if r.typ == rxv1.TypeAck {
+			winner = id
+		}
+	}
+
+	if codes[""] != 1 || codes[rxv1.CodeRateLimited] != 1 {
+		t.Fatalf("switch outcomes: %v", codes)
+	}
+
+	if s := m.Devices()[0]; s.ActivePreset != winner || s.CenterHz != state.presets[winner].CenterFreq {
+		t.Errorf("device after the race: %+v, winner %s", s, winner)
+	}
+
+	if r := peers[2].last(); r.typ != rxv1.TypeAck {
+		t.Errorf("last demod.set: %+v", r)
+	}
+}
+
+// TestPresetSelectUnknownMode: a start mode the engine refuses still moves
+// the caller's demodulator to the preset's start, in its current mode.
+func TestPresetSelectUnknownMode(t *testing.T) {
+	m := runManager(t)
+	ctx := context.Background()
+
+	state := desired{
+		devices: map[string]ctl.DesiredDevice{"vhf": {Presets: []string{"odd"}}},
+		presets: map[string]ctl.Preset{
+			"odd": {Name: "Odd", CenterFreq: 144_150_000, SampRate: 250_000, StartFreq: 144_160_000, StartMod: "dmr", TuningStep: 1000},
+		},
+		policy: ctl.StatePolicy{ListenPolicy: "anonymous"},
+	}
+
+	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen, token.PermDemod, token.PermPreset)}
+	ss := radiohttp.NewStreams(m, state, slog.New(slog.DiscardHandler)).Open(p)
+
+	defer ss.Close()
+
+	ss.Handle(ctx, env(t, rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}))
+	ss.Handle(ctx, env(t, rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm"}))
+	ss.Handle(ctx, env(t, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "odd"}))
+
+	if r := p.last(); r.typ != rxv1.TypeAck {
+		t.Fatalf("switch: %+v", r)
+	}
+
+	u, ok := p.lastSent(rxv1.TypeStreamUpdate).(media.StreamUpdate)
+	if !ok || u.Applied == nil || u.Applied.OffsetHz != 10_000 || u.Applied.Mode != "nfm" {
+		t.Errorf("demodulator after a switch to an unknown mode: %+v", u.Applied)
 	}
 }
