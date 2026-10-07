@@ -15,7 +15,7 @@ const PasswordChangePath = "/account/password"
 
 // pendingAllowed are the paths a user flagged must_change_password may
 // still reach: the password change itself, logout, the session API (CSRF
-// token), and the static resources and health checks that pages need.
+// token of the scripts), and the static resources and health checks.
 var pendingAllowed = map[string]bool{
 	PasswordChangePath:      true,
 	"/logout":               true,
@@ -24,8 +24,6 @@ var pendingAllowed = map[string]bool{
 	"/manifest.webmanifest": true,
 	"/robots.txt":           true,
 	"/api/v1/auth/session":  true,
-	"/api/v1/auth/logout":   true,
-	"/api/v1/auth/password": true,
 	"/api/v1/openapi.json":  true,
 }
 

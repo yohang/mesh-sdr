@@ -1,4 +1,5 @@
-// Package api is the hub REST API under /api/v1. openapi.yaml is the source
+// Package api is the hub JSON API under /api/v1: only what scripts,
+// islands, nodes and operations need (ADR 0023). openapi.yaml is the source
 // of truth: oapi-codegen generates the chi strict server (api.gen.go) and the
 // document is embedded as openapi.json.
 //
@@ -28,14 +29,8 @@ type Server struct {
 	MetaHandlers
 	HealthHandlers
 	AuthHandlers
-	GridHandlers
-	SettingsHandlers
-	RetentionHandlers
+	ConfigHandlers
 	BrandingHandlers
-	AccountHandlers
-	InvitationHandlers
-	ResetHandlers
-	AuditHandlers
 	TokenHandlers
 	FeatureHandlers
 	PresetHandlers
@@ -61,7 +56,7 @@ func NewHandler(srv StrictServerInterface, authz Authorizer, logger *slog.Logger
 	}
 
 	r := chi.NewRouter()
-	r.Use(problem.Recoverer(logger), guard(authz), uploadLimits)
+	r.Use(problem.Recoverer(logger), guard(authz))
 	r.NotFound(problem.NotFound)
 	r.MethodNotAllowed(problem.MethodNotAllowed)
 

@@ -42,7 +42,7 @@ func TestGuardRefusesBeforeReadingTheBody(t *testing.T) {
 	h := NewHandler(Server{}, deny, slog.New(slog.DiscardHandler))
 
 	body := &countingBody{}
-	req := httptest.NewRequest(http.MethodPatch, "/settings", nil)
+	req := httptest.NewRequest(http.MethodPost, "/presets", nil)
 	req.Body = body
 	req.ContentLength = 64 << 20
 	req.Header.Set("Content-Type", "application/json")
@@ -51,7 +51,7 @@ func TestGuardRefusesBeforeReadingTheBody(t *testing.T) {
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized || body.n != 0 {
-		t.Errorf("anonymous oversize PATCH = %d, %d bytes read", rec.Code, body.n)
+		t.Errorf("anonymous oversize POST = %d, %d bytes read", rec.Code, body.n)
 	}
 }
 
@@ -60,30 +60,14 @@ func TestGuardBoundsJSONBodies(t *testing.T) {
 	h := NewHandler(Server{}, allow, slog.New(slog.DiscardHandler))
 
 	body := &countingBody{}
-	req := httptest.NewRequest(http.MethodPatch, "/settings", nil)
-	req.Body = io.NopCloser(io.MultiReader(strings.NewReader(`{"values":{"x":"`), body))
+	req := httptest.NewRequest(http.MethodPost, "/presets", nil)
+	req.Body = io.NopCloser(io.MultiReader(strings.NewReader(`{"name":"`), body))
 	req.Header.Set("Content-Type", "application/json")
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusRequestEntityTooLarge || body.n > 2*JSONBodyLimit {
-		t.Errorf("oversize PATCH = %d, %d bytes read", rec.Code, body.n)
-	}
-}
-
-func TestAcceptsMultipart(t *testing.T) {
-	for _, tt := range []struct {
-		method, path string
-		want         bool
-	}{
-		{http.MethodPut, "/api/v1/branding/avatar", true},
-		{http.MethodGet, "/api/v1/branding/avatar", false},
-		{http.MethodPatch, "/api/v1/settings", false},
-		{http.MethodDelete, "/api/v1/settings/schema", false},
-	} {
-		if got := AcceptsMultipart(httptest.NewRequest(tt.method, tt.path, nil)); got != tt.want {
-			t.Errorf("%s %s = %v", tt.method, tt.path, got)
-		}
+		t.Errorf("oversize POST = %d, %d bytes read", rec.Code, body.n)
 	}
 }

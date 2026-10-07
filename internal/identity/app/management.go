@@ -83,37 +83,6 @@ func (s *Accounts) SetEnabled(ctx context.Context, by Actor, id domain.UserID, e
 	return changed, nil
 }
 
-// SetDisplayName changes a user's display name (admin); empty removes it.
-func (s *Accounts) SetDisplayName(ctx context.Context, by Actor, id domain.UserID, name string) error {
-	var display domain.DisplayName
-
-	if name != "" {
-		var err error
-		if display, err = domain.NewDisplayName(name); err != nil {
-			return err
-		}
-	}
-
-	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		u, err := s.users.ByID(ctx, id)
-		if err != nil {
-			return err
-		}
-
-		if !u.SetDisplayName(display, s.now()) {
-			return nil
-		}
-
-		if err := s.users.Save(ctx, u); err != nil {
-			return err
-		}
-
-		return s.record(ctx, by, domain.ActionUserUpdate, id, nil, map[string]string{"field": "display_name"})
-	})
-
-	return wrap("set display name", err)
-}
-
 // SetGeneratedPassword gives a user a random password that must be changed
 // at the next sign-in (ACC-008), revokes every session of the user and
 // returns the password, to show once to the admin.

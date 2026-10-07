@@ -8,17 +8,13 @@ func TestLoadBodyFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	login := f["POST /auth/login"]
-	if a := login.allowed; !a["login"] || !a["password"] || !a["remember_me"] || len(a) != 3 || login.operation != "Login" {
-		t.Errorf("login fields = %+v", login)
+	token := f["POST /auth/token"]
+	if a := token.allowed; !a["node_id"] || !a["cid"] || len(a) != 2 || token.operation != "MintAccessToken" {
+		t.Errorf("token fields = %+v", token)
 	}
 
-	if req := login.required; len(req) != 2 || req[0] != "login" || req[1] != "password" {
-		t.Errorf("login required fields = %v", req)
-	}
-
-	if pw := f["POST /auth/password"].allowed; !pw["current_password"] || !pw["new_password"] || len(pw) != 2 {
-		t.Errorf("password fields = %v", pw)
+	if req := token.required; len(req) != 2 || req[0] != "cid" || req[1] != "node_id" {
+		t.Errorf("token required fields = %v", req)
 	}
 
 	// Every JSON request body of the API is closed (SR-20).

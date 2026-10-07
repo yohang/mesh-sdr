@@ -10,7 +10,6 @@ var TokenPrefixes = []string{
 	"/invite/",
 	"/password/reset/",
 	"/account/email/verify/",
-	"/auth/invitations/",
 }
 
 // Path returns p with everything after a token prefix replaced by

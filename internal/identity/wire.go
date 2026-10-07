@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"runtime"
 	"sync"
 	"time"
@@ -59,8 +58,6 @@ type Deps struct {
 	// Settings reads the identity policies from the settings store. Nil
 	// means the built-in defaults (CLI commands).
 	Settings settingsrc.Values
-	// AcceptsMultipart reports API upload operations (api.AcceptsMultipart).
-	AcceptsMultipart func(r *http.Request) bool
 	// Mail queues outgoing e-mail; nil when smtp.host is not set.
 	Mail notify.Outbox
 	// Devices lists the devices of a node, to scope access tokens; nil
@@ -284,10 +281,9 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 		Invitations: invitations,
 		Auth:        auth, Passwords: changer, Setup: setup, Profile: profile, Accounts: accounts,
 	}, pages, identityhttp.Config{
-		HubURL:           d.Config.Hub.URL,
-		TrustedProxies:   config.Prefixes(d.Config.HTTP.TrustedProxies),
-		AdminNetworks:    config.Prefixes(d.Config.Admin.AllowedNetworks),
-		AcceptsMultipart: d.AcceptsMultipart,
+		HubURL:         d.Config.Hub.URL,
+		TrustedProxies: config.Prefixes(d.Config.HTTP.TrustedProxies),
+		AdminNetworks:  config.Prefixes(d.Config.Admin.AllowedNetworks),
 	}, component(d.Logger, "identity.http"))
 	if err != nil {
 		return nil, fmt.Errorf("identity http: %w", err)

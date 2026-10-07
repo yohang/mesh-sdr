@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,29 @@ import (
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/http/api"
+	idomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+)
+
+var discard = slog.New(slog.DiscardHandler)
+
+// roleAuthz authorizes callers holding role, like the identity module.
+type roleAuthz struct{ role idomain.Role }
+
+func (a roleAuthz) Authorize(_ context.Context, need idomain.Role) error {
+	switch {
+	case a.role >= need:
+		return nil
+	case a.role == idomain.RoleAnonymous:
+		return idomain.ErrUnauthenticated
+	default:
+		return idomain.ErrForbidden
+	}
+}
+
+var (
+	anonymous = roleAuthz{idomain.RoleAnonymous}
+	listener  = roleAuthz{idomain.RoleListener}
+	admin     = roleAuthz{idomain.RoleAdmin}
 )
 
 type summary []gridapp.DeviceFeatures

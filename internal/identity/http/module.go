@@ -164,9 +164,6 @@ type Config struct {
 	TrustedProxies []netip.Prefix
 	// AdminNetworks is admin.allowed_networks.
 	AdminNetworks []netip.Prefix
-	// AcceptsMultipart reports API requests whose operation takes a
-	// multipart/form-data body (uploads); nil means none.
-	AcceptsMultipart func(r *http.Request) bool
 }
 
 // Module is the identity router module (internal/http.Module).
@@ -189,7 +186,6 @@ type Module struct {
 	secure      bool
 	preKey      []byte
 	routes      chi.Routes
-	upload      func(r *http.Request) bool
 }
 
 // New returns the module.
@@ -228,7 +224,6 @@ func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, e
 		admin:       cfg.AdminNetworks,
 		secure:      secure,
 		preKey:      []byte(rand.Text()),
-		upload:      cfg.AcceptsMultipart,
 	}, nil
 }
 
@@ -530,8 +525,7 @@ func (m *Module) csrf(next http.Handler) http.Handler {
 }
 
 // requireJSON answers 415 to state-changing /api/v1 requests with a body
-// that is not application/json (ADR 0003 §6), except multipart/form-data
-// bodies of the upload operations.
+// that is not application/json (ADR 0003 §6).
 func (m *Module) requireJSON(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSafe(r.Method) || !isAPI(r) || (r.ContentLength == 0 && len(r.TransferEncoding) == 0) {
@@ -544,7 +538,7 @@ func (m *Module) requireJSON(next http.Handler) http.Handler {
 		mt, _, _ := strings.Cut(ct, ";")
 		mt = strings.ToLower(strings.TrimSpace(mt))
 
-		if mt == "application/json" || (mt == "multipart/form-data" && m.upload != nil && m.upload(r)) {
+		if mt == "application/json" {
 			next.ServeHTTP(w, r)
 
 			return
@@ -635,7 +629,7 @@ func (m *Module) Actor(ctx context.Context) app.Actor {
 // Principal returns who makes the request.
 func (m *Module) Principal(ctx context.Context) domain.Principal { return FromContext(ctx).Principal() }
 
-// Login opens a session for the request (API and page). It returns the new
+// Login opens a session for the request (login page). It returns the new
 // principal, the CSRF token of the new session and the cookies to set.
 func (m *Module) Login(ctx context.Context, login, password string, remember bool) (domain.Principal, string, []*http.Cookie, error) {
 	st := FromContext(ctx)
@@ -730,12 +724,6 @@ func (m *Module) SessionRef(ctx context.Context) string {
 	}
 
 	return ""
-}
-
-// OpenedSession returns the principal, CSRF token and cookies of a session
-// opened by an invitation (API).
-func (m *Module) OpenedSession(res app.LoginResult) (domain.Principal, string, []*http.Cookie) {
-	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.sessionCookies(res)
 }
 
 // Logout ends the request's session and returns the cookie to clear it.

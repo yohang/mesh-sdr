@@ -22,9 +22,8 @@ import (
 // Admin › Nodes (GRID-005, GRID-009, GRID-015): the node registry with its
 // health, certificates, devices, capabilities and load history, read by
 // operators; adding, editing, disabling, re-enrolling, revoking and
-// removing nodes is for admins. Each form has its /api/v1 twin (ADR 0013):
-// createNode, updateNode, issueNodeEnrollmentToken, revokeNode, deleteNode
-// and probeNodeCapabilities.
+// removing nodes is for admins. The forms are the only way to do it: there
+// is no /api/v1 twin (ADR 0023).
 
 // NodeAdmin is the node registry and its admin use cases (grid app.Nodes).
 type NodeAdmin interface {
