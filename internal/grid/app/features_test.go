@@ -35,6 +35,11 @@ func (r reports) Get(_ context.Context, id domain.NodeID) (domain.CapabilityRepo
 	return rep, nil
 }
 
+// links is a fixed set of connected nodes.
+type links []domain.NodeID
+
+func (l links) Connected() []domain.NodeID { return l }
+
 type fixedPolicy struct {
 	v   string
 	err error
@@ -104,23 +109,23 @@ func TestFeatures(t *testing.T) {
 	summary := func(p fixedPolicy) []string {
 		t.Helper()
 
-		got, err := app.NewFeatures(devices, caps, p).Summary(context.Background())
+		got, err := app.NewFeatures(devices, caps, p, links{domain.MustNodeID("garden")}).Summary(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		var out []string
 		for _, d := range got {
-			out = append(out, fmt.Sprintf("%s@%s %s %v", d.ID, d.Node, d.ListenPolicy, d.Modes))
+			out = append(out, fmt.Sprintf("%s@%s %s %v node_online=%v", d.ID, d.Node, d.ListenPolicy, d.Modes, d.NodeOnline))
 		}
 
 		return out
 	}
 
 	want := []string{
-		"hf@attic anonymous [ft8 wspr]",
-		"vhf@attic registered []", // driver missing
-		"uhf@garden anonymous []", // node not reported yet
+		"hf@attic anonymous [ft8 wspr] node_online=false",
+		"vhf@attic registered [] node_online=false", // driver missing
+		"uhf@garden anonymous [] node_online=true",  // node connected, not reported yet
 	}
 	if got := summary(fixedPolicy{v: "anonymous"}); !slices.Equal(got, want) {
 		t.Errorf("summary = %v, want %v", got, want)
@@ -129,7 +134,7 @@ func TestFeatures(t *testing.T) {
 	// The global policy applies where no device override exists; an
 	// unreadable policy fails closed.
 	for _, p := range []fixedPolicy{{v: "registered"}, {err: errors.New("down")}, {v: "bogus"}} {
-		if got := summary(p); got[0] != "hf@attic registered [ft8 wspr]" || got[2] != "uhf@garden anonymous []" {
+		if got := summary(p); got[0] != "hf@attic registered [ft8 wspr] node_online=false" || got[2] != "uhf@garden anonymous [] node_online=true" {
 			t.Errorf("policy %+v: summary = %v", p, got)
 		}
 	}

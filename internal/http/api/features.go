@@ -41,7 +41,7 @@ func (h FeatureHandlers) GetFeatures(ctx context.Context, _ GetFeaturesRequestOb
 		}
 
 		out.Devices = append(out.Devices, DeviceFeatures{
-			Id: d.ID.String(), NodeId: d.Node.String(), Name: d.Name, Online: d.Online, Modes: d.Modes,
+			Id: d.ID.String(), NodeId: d.Node.String(), Name: d.Name, Online: d.Online, NodeOnline: d.NodeOnline, Modes: d.Modes,
 		})
 	}
 
