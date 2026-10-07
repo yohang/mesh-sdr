@@ -41,7 +41,7 @@ internal/db/sqlite/queries/    sqlc queries
 internal/db/sqlite/sqlc/       sqlc output (generated)
 internal/db/dbtest/     test helper (`dbtest.NewSQLite`: migrated database in t.TempDir())
 internal/http/          chi router, middlewares, server
-internal/http/api/      openapi.yaml (source of truth), oapi-codegen config, generated server, /api/v1 handlers
+internal/http/api/      openapi.yaml (source of truth), oapi-codegen config, generated server, /api/v1 handlers (JSON for scripts, islands and nodes only)
 internal/http/problem/  RFC 9457 problem+json errors, domain error → HTTP status
 internal/web/           embedded static assets (tokens CSS, ES modules, vendored htmx), go:generate for templ + icons + tailwind
 internal/web/layout/    app shell templates (document, #main, error page), shared by every module
@@ -172,7 +172,7 @@ Dev containers are rootless: the `dev` stage creates an `app` user with the host
 - `make lint` and `make test` must pass before committing.
 - Tests: stdlib `testing`, table-driven; repositories tested against real SQLite in `t.TempDir()` (`dbtest.NewSQLite`).
 - Dependencies: stdlib and `golang.org/x/*` are fine; any other third-party dependency requires the owner's approval.
-- REST: every `/api/v1` endpoint is declared in `internal/http/api/openapi.yaml` first, then generated (oapi-codegen strict chi server); module handler structs are embedded in `api.Server`. One JSON error format: RFC 9457 `application/problem+json` with a stable `code` (`internal/http/problem`).
+- REST: `/api/v1` only for JSON needed by JS/islands/nodes (and the resources pages link to); UI actions are HTML forms; no API twins (ADR 0023). Every `/api/v1` endpoint is declared in `internal/http/api/openapi.yaml` first, then generated (oapi-codegen strict chi server); module handler structs are embedded in `api.Server`. One JSON error format: RFC 9457 `application/problem+json` with a stable `code` (`internal/http/problem`).
 - Git: one branch + PR per epic (`epic/<area>-<n>`), split into ordered parts when another epic needs a subset first; PR body lists `Closes #<n>` per ticket; spikes get `spike/<key>-<topic>` branches. No AI attribution in commits or PRs.
 - Dockerfile (`.infra/docker/Dockerfile`, built from the repository root) stages: `natives` (csdr + owrx_connector from pinned tarballs) → `base` (Go + C/C++ toolchain, cgo) → `dev` (Air) / `build` → `runtime` (`debian:trixie-slim` by digest, pinned apt packages, nonroot 65532, licence notices) → `prod`; `sources` (GPL sources, `-sources` tag). Rebuild the dev image after changing a native or apt pin.
 - `.infra/docker/Dockerfile.dockerignore` whitelists: ignore everything, then `!` what the build needs.

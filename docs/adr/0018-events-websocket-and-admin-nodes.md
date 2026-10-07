@@ -5,6 +5,7 @@
 - Deciders: project owner
 - Scope: epic part `epic/events-1`: GRID-017 (#25), AUTH-004 (#31), GRID-005 (#13), GRID-009 (#17) and the events WebSocket of GRID-001 (#9).
 - Builds on: ADR 0016 (events WebSocket to htmx bridge), and ADR 0003, 0007, 0008, 0009, 0010, 0011, 0012 and 0013.
+- Amended by: ADR 0023 (the Admin › Nodes forms have no API twins; the node, device and connection operations are removed)
 
 ## Context
 

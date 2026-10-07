@@ -4,6 +4,7 @@
 - Date: 2026-10-06
 - Deciders: project owner
 - Scope: epic part `epic/ui-2`, the remaining UI and API tickets of M0: UI-006 #75, UI-010 #79, UI-002 #71, RX-001 #84, API-002 #83, API-001 #82, and RX-034 #193.
+- Amended by: ADR 0023 (`/api/v1` only for scripts, islands and nodes: no API twins, parity test and setup API removed)
 
 ## Context
 
