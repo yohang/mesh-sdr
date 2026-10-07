@@ -495,6 +495,17 @@ type settingRule struct {
 }
 
 var settingRules = []settingRule{
+	{[]string{"waterfall.min_db", "waterfall.max_db"}, func(get func(string) any) []shared.Violation {
+		lo, _ := get("waterfall.min_db").(int)
+		hi, _ := get("waterfall.max_db").(int)
+
+		if hi <= lo {
+			return []shared.Violation{shared.NewViolation("waterfall.max_db", CodeInvalidValue,
+				fmt.Sprintf("must be above waterfall.min_db (%d)", lo))}
+		}
+
+		return nil
+	}},
 	{[]string{"grid.heartbeat_interval_s", "grid.offline_after_s"}, func(get func(string) any) []shared.Violation {
 		hb, _ := get("grid.heartbeat_interval_s").(int)
 		off, _ := get("grid.offline_after_s").(int)

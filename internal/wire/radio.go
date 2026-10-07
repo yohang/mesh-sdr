@@ -20,9 +20,11 @@ import (
 // manager, the owrx connectors under the process supervisor, the DSP
 // engines and the media stream handler. It checks node.runtime_dir (SR-53:
 // the node refuses to start on a shared or foreign directory) and sweeps
-// the workdirs left by a previous run. deemphasis reads the WFM
-// de-emphasis of the desired state.
-func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, deemphasis func() int) (*radioapp.Manager, *radiohttp.Streams, error) {
+// the workdirs left by a previous run. The engines and the stream handler
+// read the desired state pushed by the hub (WFM de-emphasis, presets,
+// waterfall defaults).
+func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, state radiohttp.DesiredState,
+) (*radioapp.Manager, *radiohttp.Streams, error) {
 	devices, err := radioDevices(cfg, logger)
 	if err != nil {
 		return nil, nil, err
@@ -70,14 +72,14 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 	})
 
 	m, err := radioapp.NewManager(radioapp.Options{
-		Devices: devices, Sources: sources, Engines: engine.Factory{Logger: component(logger, "radio.infra.engine"), Deemphasis: deemphasis},
+		Devices: devices, Sources: sources, Engines: engine.Factory{Logger: component(logger, "radio.infra.engine"), Deemphasis: func() int { return state.Policy().WFMDeemphasis }},
 		Reporter: reporter, Logger: component(logger, "radio.app.manager"), MaxDemods: cfg.Node.MaxDemods,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return m, radiohttp.NewStreams(m, component(logger, "radio.http.streams")), nil
+	return m, radiohttp.NewStreams(m, state, component(logger, "radio.http.streams")), nil
 }
 
 // radioDevices builds the devices of the node configuration, ordered by id.

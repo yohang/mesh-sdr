@@ -62,6 +62,16 @@ type StatePolicy struct {
 	ListenPolicy string `json:"listen_policy"`
 	// WFMDeemphasis is the broadcast FM de-emphasis in µs (50 or 75).
 	WFMDeemphasis int `json:"wfm_deemphasis"`
+	// Waterfall are the waterfall defaults of device.config (hub settings
+	// waterfall.*, ADR 0026); nil: the node defaults.
+	Waterfall *StateWaterfall `json:"waterfall,omitempty"`
+}
+
+// StateWaterfall are the waterfall levels (dB) and palette of the receiver.
+type StateWaterfall struct {
+	MinDB   int    `json:"min_db"`
+	MaxDB   int    `json:"max_db"`
+	Palette string `json:"palette"`
 }
 
 // StateApplied answers ctl.state.apply (node → hub, §4.4). It carries no

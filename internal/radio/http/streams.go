@@ -21,6 +21,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/dsp"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/media"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/sendq"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
@@ -29,8 +30,10 @@ import (
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
-// Device defaults sent in device.config until the hub pushes settings
-// (FEATURE_SPEC defaults of waterfall.*, dsp.squelch_auto_margin; ADR 0019).
+// Device defaults sent in device.config (FEATURE_SPEC defaults of
+// waterfall.*, dsp.squelch_auto_margin; ADR 0019). The waterfall levels and
+// palette are replaced by the hub settings once the desired state carries
+// them (ADR 0026).
 const (
 	tuningStepHz     = 1000
 	waterfallMin     = -88
@@ -49,15 +52,42 @@ type Devices interface {
 	Watch(id string, fn func(domain.Snapshot)) (func(), error)
 }
 
+// DesiredState is the desired state pushed by the hub
+// (grid/agent.DesiredState): the presets of each device and the global
+// settings.
+type DesiredState interface {
+	Device(id string) (ctl.DesiredDevice, bool)
+	Preset(id string) (ctl.Preset, bool)
+	Policy() ctl.StatePolicy
+}
+
 // Streams implements media.Streams.
 type Streams struct {
 	devices Devices
+	state   DesiredState
 	log     *slog.Logger
 }
 
-// NewStreams returns the handler.
-func NewStreams(d Devices, log *slog.Logger) *Streams {
-	return &Streams{devices: d, log: log}
+// NewStreams returns the handler. state may be nil (no hub state: the
+// node defaults apply).
+func NewStreams(d Devices, state DesiredState, log *slog.Logger) *Streams {
+	return &Streams{devices: d, state: state, log: log}
+}
+
+// waterfall returns the waterfall defaults of device.config: the hub
+// settings when the desired state carries them, else the node defaults.
+func (s *Streams) waterfall() media.Waterfall {
+	w := media.Waterfall{Levels: media.Levels{Min: waterfallMin, Max: waterfallMax}, AutoMinRange: autoMinRange, Scheme: waterfallScheme}
+
+	if s.state == nil {
+		return w
+	}
+
+	if p := s.state.Policy().Waterfall; p != nil {
+		w.Levels, w.Scheme = media.Levels{Min: float64(p.MinDB), Max: float64(p.MaxDB)}, p.Palette
+	}
+
+	return w
 }
 
 // Open implements media.Streams.
@@ -213,7 +243,7 @@ func (ss *session) deviceConfig(a *attached, snap domain.Snapshot, info app.Spec
 		DeviceID: snap.ID, Revision: a.revision, CenterHz: snap.CenterHz, SampleRate: snap.RateHz,
 		PresetsAvailable: []media.PresetRef{}, TuningStepHz: tuningStepHz,
 		Start:     media.Start{Mode: media.ModeNFM},
-		Waterfall: media.Waterfall{Levels: media.Levels{Min: waterfallMin, Max: waterfallMax}, AutoMinRange: autoMinRange, Scheme: waterfallScheme},
+		Waterfall: ss.s.waterfall(),
 		FFT:       media.FFTConfig{Size: info.Size, FPS: info.FPS},
 		Squelch:   media.Squelch{Initial: squelchInitial, AutoMargin: squelchMargin},
 		Limits:    media.FreqLimits{MinHz: snap.MinHz, MaxHz: snap.MaxHz},

@@ -163,7 +163,7 @@ func TestStreamSessionErrors(t *testing.T) {
 	ctx := context.Background()
 
 	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen, token.PermDemod)}
-	ss := radiohttp.NewStreams(m, slog.New(slog.DiscardHandler)).Open(p)
+	ss := radiohttp.NewStreams(m, nil, slog.New(slog.DiscardHandler)).Open(p)
 
 	defer ss.Close()
 
@@ -238,7 +238,7 @@ func TestReauthorizeAfterRefresh(t *testing.T) {
 	ctx := context.Background()
 
 	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(2, token.PermListen, token.PermDemod)}
-	ss := radiohttp.NewStreams(m, slog.New(slog.DiscardHandler)).Open(p)
+	ss := radiohttp.NewStreams(m, nil, slog.New(slog.DiscardHandler)).Open(p)
 
 	defer ss.Close()
 

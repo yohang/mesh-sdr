@@ -292,7 +292,12 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 
 	st := ctl.StateApply{
 		Presets: map[string]ctl.Preset{}, Devices: map[string]ctl.DesiredDevice{},
-		Policy: ctl.StatePolicy{ListenPolicy: policy, WFMDeemphasis: s.settings.Int("wfm_deemphasis")},
+		Policy: ctl.StatePolicy{
+			ListenPolicy: policy, WFMDeemphasis: s.settings.Int("wfm_deemphasis"),
+			Waterfall: &ctl.StateWaterfall{
+				MinDB: s.settings.Int("waterfall.min_db"), MaxDB: s.settings.Int("waterfall.max_db"), Palette: s.settings.String("waterfall.palette"),
+			},
+		},
 	}
 
 	for _, plan := range plans {
