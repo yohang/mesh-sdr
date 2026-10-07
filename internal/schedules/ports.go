@@ -10,16 +10,6 @@ import (
 // Clock returns the current time.
 type Clock func() time.Time
 
-// IDs generates schedule ids (UUIDv7).
-type IDs interface {
-	New(now time.Time) (shared.UUID, error)
-}
-
-// Transactor runs a unit of work in one write transaction.
-type Transactor interface {
-	WithinTx(ctx context.Context, fn func(ctx context.Context) error) error
-}
-
 // Device is what schedules need of a device of the registry.
 type Device struct {
 	ID, Node         string

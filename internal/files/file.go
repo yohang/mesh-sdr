@@ -1,7 +1,6 @@
 package files
 
 import (
-	"context"
 	"crypto/sha256"
 	"strconv"
 	"time"
@@ -193,17 +192,3 @@ func (f *File) UploadedBy() shared.UUID { return f.uploadedBy }
 
 // CreatedAt returns when the file was stored.
 func (f *File) CreatedAt() time.Time { return f.createdAt }
-
-// Repository stores files with their content. Writes join the caller's
-// transaction.
-type Repository interface {
-	// Add stores f and its content, in chunks of ChunkSize.
-	Add(ctx context.Context, f *File, content []byte) error
-	// LatestOfKind returns the newest file of kind, or ErrFileNotFound.
-	LatestOfKind(ctx context.Context, kind Kind) (*File, error)
-	// Content returns the content of a file.
-	Content(ctx context.Context, f *File) ([]byte, error)
-	// DeleteKind deletes every file of kind with its content and returns
-	// how many were deleted.
-	DeleteKind(ctx context.Context, kind Kind) (int, error)
-}

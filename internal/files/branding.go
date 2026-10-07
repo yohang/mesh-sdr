@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/db"
+
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -23,23 +25,6 @@ type Image struct {
 	Data          []byte
 	MIME          MIMEType
 	Width, Height int
-}
-
-// ImageProcessor validates an upload (magic bytes, dimensions, colour
-// model, at most maxPixels pixels, read before decoding) and re-encodes it
-// to out, dropping its metadata.
-type ImageProcessor interface {
-	Reencode(ctx context.Context, data []byte, out MIMEType, maxPixels int) (Image, error)
-}
-
-// Transactor runs a unit of work in one write transaction.
-type Transactor interface {
-	WithinTx(ctx context.Context, fn func(ctx context.Context) error) error
-}
-
-// IDGenerator returns new UUIDv7 ids.
-type IDGenerator interface {
-	New(now time.Time) (shared.UUID, error)
 }
 
 // Clock returns the current time.
@@ -53,20 +38,20 @@ const (
 
 // Branding manages the receiver images.
 type Branding struct {
-	repo  Repository
-	tx    Transactor
-	proc  ImageProcessor
-	ids   IDGenerator
+	repo  *Files
+	tx    *db.DB
+	proc  *Processor
+	ids   *shared.UUIDv7Generator
 	audit audit.Appender
 	now   Clock
 }
 
 // BrandingDeps are the dependencies of Branding.
 type BrandingDeps struct {
-	Repo      Repository
-	Tx        Transactor
-	Processor ImageProcessor
-	IDs       IDGenerator
+	Repo      *Files
+	Tx        *db.DB
+	Processor *Processor
+	IDs       *shared.UUIDv7Generator
 	Audit     audit.Appender
 	Now       Clock
 }

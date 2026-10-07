@@ -20,8 +20,6 @@ type Presets struct{ db *db.DB }
 // NewPresets returns the repository.
 func NewPresets(a *db.DB) *Presets { return &Presets{db: a} }
 
-var _ Repository = (*Presets)(nil)
-
 // Get implements Repository.
 func (r *Presets) Get(ctx context.Context, id shared.UUID) (*Preset, error) {
 	row, err := sqlc.New(r.db.Reader(ctx)).GetPreset(ctx, id.Bytes())

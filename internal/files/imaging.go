@@ -27,8 +27,6 @@ const JPEGQuality = 85
 // a decode may take hundreds of megabytes and seconds of CPU.
 type Processor struct{ slot chan struct{} }
 
-var _ ImageProcessor = (*Processor)(nil)
-
 // NewProcessor returns a processor.
 func NewProcessor() *Processor { return &Processor{slot: make(chan struct{}, 1)} }
 

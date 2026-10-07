@@ -19,8 +19,6 @@ type Schedules struct{ db *db.DB }
 // NewSchedules returns the repository.
 func NewSchedules(a *db.DB) *Schedules { return &Schedules{db: a} }
 
-var _ Repository = (*Schedules)(nil)
-
 // Get implements Repository.
 func (r *Schedules) Get(ctx context.Context, id shared.UUID) (*Schedule, error) {
 	row, err := sqlc.New(r.db.Reader(ctx)).GetSchedule(ctx, id.Bytes())

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/db"
+
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -21,16 +23,6 @@ import (
 
 // Clock returns the current time.
 type Clock func() time.Time
-
-// IDs generates preset ids (UUIDv7).
-type IDs interface {
-	New(now time.Time) (shared.UUID, error)
-}
-
-// Transactor runs a unit of work in one write transaction.
-type Transactor interface {
-	WithinTx(ctx context.Context, fn func(ctx context.Context) error) error
-}
 
 // Audit actions.
 const (
@@ -55,10 +47,10 @@ type ChangeListener interface {
 // optional; Changed, when set, runs after every committed change (the
 // desired state of the nodes is pushed again).
 type Deps struct {
-	Repo     Repository
-	Tx       Transactor
+	Repo     *Presets
+	Tx       *db.DB
 	Audit    audit.Appender
-	IDs      IDs
+	IDs      *shared.UUIDv7Generator
 	Now      Clock
 	Usage    Usage
 	Listener ChangeListener

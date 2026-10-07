@@ -1,7 +1,6 @@
 package presets
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"strconv"
@@ -360,23 +359,4 @@ func Rehydrate(s Snapshot) (*Preset, error) {
 	}
 
 	return &Preset{id: s.ID, spec: spec, sortOrder: s.SortOrder, createdAt: s.CreatedAt, updatedAt: s.UpdatedAt, version: s.Version}, nil
-}
-
-// Repository persists presets.
-type Repository interface {
-	Get(ctx context.Context, id shared.UUID) (*Preset, error)
-	// List returns every preset by sort order, then name.
-	List(ctx context.Context) ([]*Preset, error)
-	// SlugTaken reports whether another preset than except has slug.
-	SlugTaken(ctx context.Context, slug string, except shared.UUID) (bool, error)
-	// NextSortOrder returns the position after the last preset.
-	NextSortOrder(ctx context.Context) (int, error)
-	// Create inserts a preset (ErrSlugTaken on a duplicate slug).
-	Create(ctx context.Context, p *Preset) error
-	// Update writes p when the stored version is expectedVersion
-	// (ErrVersionConflict otherwise, ErrSlugTaken on a duplicate slug).
-	Update(ctx context.Context, p *Preset, expectedVersion int) error
-	// Delete deletes a preset (ErrPresetNotFound, ErrPresetInUse while
-	// schedules reference it).
-	Delete(ctx context.Context, id shared.UUID) error
 }

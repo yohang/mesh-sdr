@@ -13,7 +13,7 @@ import (
 )
 
 func TestSchedules(t *testing.T) {
-	open := func(t *testing.T, presetIDs ...shared.UUID) schedules.Repository {
+	open := func(t *testing.T, presetIDs ...shared.UUID) *schedules.Schedules {
 		a := dbtest.NewSQLite(t)
 		repo := presets.NewPresets(a)
 		now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)

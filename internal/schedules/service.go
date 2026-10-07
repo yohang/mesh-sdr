@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"strconv"
 
+	"github.com/yohang/mesh-sdr/internal/db"
+
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -21,12 +23,12 @@ import (
 // runs after every committed change (the desired state of the nodes is
 // pushed again).
 type Deps struct {
-	Repo    Repository
-	Tx      Transactor
+	Repo    *Schedules
+	Tx      *db.DB
 	Devices Devices
 	Presets Presets
 	Audit   audit.Appender
-	IDs     IDs
+	IDs     *shared.UUIDv7Generator
 	Now     Clock
 	Changed func(ctx context.Context)
 	Logger  *slog.Logger

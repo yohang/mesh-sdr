@@ -16,8 +16,6 @@ import (
 // Files is the SQLite files repository.
 type Files struct{ db *db.DB }
 
-var _ Repository = (*Files)(nil)
-
 // NewFiles returns the repository.
 func NewFiles(a *db.DB) *Files { return &Files{db: a} }
 

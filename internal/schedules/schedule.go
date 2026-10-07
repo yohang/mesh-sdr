@@ -1,7 +1,6 @@
 package schedules
 
 import (
-	"context"
 	"errors"
 	"time"
 
@@ -292,18 +291,4 @@ func Rehydrate(s Snapshot) (*Schedule, error) {
 		spec:   Spec{device: device, preset: s.Preset, window: w, days: days, priority: prio, enabled: s.Enabled},
 		reason: s.Reason, disabledAt: s.DisabledAt, createdAt: s.CreatedAt, updatedAt: s.UpdatedAt, version: s.Version,
 	}, nil
-}
-
-// Repository persists schedules.
-type Repository interface {
-	Get(ctx context.Context, id shared.UUID) (*Schedule, error)
-	// List returns every schedule by device, then start.
-	List(ctx context.Context) ([]*Schedule, error)
-	ListByDevice(ctx context.Context, device shared.DeviceID) ([]*Schedule, error)
-	ListByPreset(ctx context.Context, preset shared.UUID) ([]*Schedule, error)
-	Create(ctx context.Context, s *Schedule) error
-	// Update writes s when the stored version is expectedVersion
-	// (ErrVersionConflict otherwise).
-	Update(ctx context.Context, s *Schedule, expectedVersion int) error
-	Delete(ctx context.Context, id shared.UUID) error
 }
