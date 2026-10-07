@@ -1,4 +1,4 @@
-package domain
+package shell
 
 import (
 	"net/url"

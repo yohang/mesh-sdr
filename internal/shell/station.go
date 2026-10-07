@@ -1,4 +1,4 @@
-package app
+package shell
 
 import "context"
 

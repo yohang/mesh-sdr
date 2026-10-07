@@ -1,11 +1,8 @@
-// Package app holds the shell use cases.
-package app
+package shell
 
 import (
 	"context"
 	"log/slog"
-
-	"github.com/yohang/mesh-sdr/internal/shell/domain"
 )
 
 // Defaults used when a setting cannot be read.
@@ -20,11 +17,11 @@ const (
 // Settings reads the shell's admin settings. Errors are infra failures or
 // invalid stored values; callers fall back to the defaults.
 type Settings interface {
-	ThemeMode(ctx context.Context) (domain.ThemeMode, error)
+	ThemeMode(ctx context.Context) (ThemeMode, error)
 	SiteName(ctx context.Context) (string, error)
 	PolicyURL(ctx context.Context) (string, error)
-	HelpLink(ctx context.Context) (domain.HelpLink, error)
-	ShortcutSet(ctx context.Context) (domain.ShortcutSet, error)
+	HelpLink(ctx context.Context) (HelpLink, error)
+	ShortcutSet(ctx context.Context) (ShortcutSet, error)
 }
 
 // LookAndFeel returns the admin-set look and feel of the shell.
@@ -41,18 +38,18 @@ func NewLookAndFeel(settings Settings, logger *slog.Logger) *LookAndFeel {
 // View is the look and feel of one request.
 type View struct {
 	SiteName  string
-	ThemeMode domain.ThemeMode
+	ThemeMode ThemeMode
 	PolicyURL string
 	// Help is the help link (UI-002); zero when unset.
-	Help domain.HelpLink
+	Help HelpLink
 	// Shortcuts is the keyboard shortcut set.
-	Shortcuts domain.ShortcutSet
+	Shortcuts ShortcutSet
 }
 
 // View returns the current look and feel. A failing settings source never
 // breaks a page: the default applies and the failure is logged.
 func (l *LookAndFeel) View(ctx context.Context) View {
-	v := View{SiteName: DefaultSiteName, ThemeMode: domain.DefaultThemeMode(), PolicyURL: DefaultPolicyURL}
+	v := View{SiteName: DefaultSiteName, ThemeMode: DefaultThemeMode(), PolicyURL: DefaultPolicyURL}
 
 	if mode, err := l.settings.ThemeMode(ctx); err != nil {
 		l.logger.WarnContext(ctx, "theme mode unavailable, using the default",

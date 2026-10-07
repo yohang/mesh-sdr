@@ -1,4 +1,4 @@
-package http
+package shell
 
 import (
 	"strings"

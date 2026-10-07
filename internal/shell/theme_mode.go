@@ -1,6 +1,4 @@
-// Package domain holds the shell bounded context: the admin-set look and feel
-// and the static pages of the app shell.
-package domain
+package shell
 
 import (
 	"strconv"

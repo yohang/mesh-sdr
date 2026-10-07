@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	shelldomain "github.com/yohang/mesh-sdr/internal/shell/domain"
+	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 func TestSchema(t *testing.T) {
@@ -123,7 +123,7 @@ func TestUsagePolicySchemaLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := s.Properties.Settings.Properties.Receiver.Properties.Text.MaxLength; got != shelldomain.MaxPolicyTextLength {
-		t.Errorf("schema maxLength = %d, want %d", got, shelldomain.MaxPolicyTextLength)
+	if got := s.Properties.Settings.Properties.Receiver.Properties.Text.MaxLength; got != shell.MaxPolicyTextLength {
+		t.Errorf("schema maxLength = %d, want %d", got, shell.MaxPolicyTextLength)
 	}
 }

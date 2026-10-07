@@ -1,15 +1,15 @@
-package domain_test
+package shell_test
 
 import (
 	"errors"
 	"testing"
 
-	"github.com/yohang/mesh-sdr/internal/shell/domain"
+	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 func TestSections(t *testing.T) {
 	var got []string
-	for _, s := range domain.Sections() {
+	for _, s := range shell.Sections() {
 		got = append(got, s.ID()+" "+s.Label()+" "+s.Path())
 	}
 
@@ -24,16 +24,16 @@ func TestSections(t *testing.T) {
 		}
 	}
 
-	s, err := domain.NewSection("files")
-	if err != nil || s != domain.SectionFiles {
+	s, err := shell.NewSection("files")
+	if err != nil || s != shell.SectionFiles {
 		t.Errorf("NewSection(files) = %v, %v", s, err)
 	}
 
-	if _, err := domain.NewSection("settings"); !errors.Is(err, domain.ErrInvalidSection) {
+	if _, err := shell.NewSection("settings"); !errors.Is(err, shell.ErrInvalidSection) {
 		t.Errorf("NewSection(settings) error = %v", err)
 	}
 
-	if !(domain.Section{}).IsZero() || domain.SectionMap.IsZero() {
+	if !(shell.Section{}).IsZero() || shell.SectionMap.IsZero() {
 		t.Error("IsZero")
 	}
 }

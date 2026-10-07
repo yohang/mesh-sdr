@@ -1,9 +1,7 @@
-package app
+package shell
 
 import (
 	"context"
-
-	"github.com/yohang/mesh-sdr/internal/shell/domain"
 )
 
 // Gate decides whether the visitor of a request may open a section. Gates
@@ -25,12 +23,12 @@ var Everyone Gate = GateFunc(func(context.Context) bool { return true })
 // Navigation lists the sections a visitor may open (UI-006). A section
 // without a gate is never shown, so the navigation fails closed.
 type Navigation struct {
-	gates map[domain.Section]Gate
+	gates map[Section]Gate
 }
 
 // NewNavigation returns the use case. gates holds the gate of each section.
-func NewNavigation(gates map[domain.Section]Gate) *Navigation {
-	g := make(map[domain.Section]Gate, len(gates))
+func NewNavigation(gates map[Section]Gate) *Navigation {
+	g := make(map[Section]Gate, len(gates))
 	for s, gate := range gates {
 		if gate != nil {
 			g[s] = gate
@@ -42,10 +40,10 @@ func NewNavigation(gates map[domain.Section]Gate) *Navigation {
 
 // Sections returns the sections the visitor of ctx may open, in navigation
 // order.
-func (n *Navigation) Sections(ctx context.Context) []domain.Section {
-	var out []domain.Section
+func (n *Navigation) Sections(ctx context.Context) []Section {
+	var out []Section
 
-	for _, s := range domain.Sections() {
+	for _, s := range Sections() {
 		if g, ok := n.gates[s]; ok && g.Allows(ctx) {
 			out = append(out, s)
 		}

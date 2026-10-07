@@ -1,7 +1,4 @@
-// Package http serves the app shell: the shell data every page renders with
-// (render.ShellSource), the home and static pages, and the error pages of
-// every path outside the API.
-package http
+package shell
 
 import (
 	"io/fs"
@@ -12,8 +9,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/yohang/mesh-sdr/internal/shell/app"
-	"github.com/yohang/mesh-sdr/internal/shell/domain"
 	"github.com/yohang/mesh-sdr/internal/version"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 	"github.com/yohang/mesh-sdr/internal/web/render"
@@ -24,8 +19,8 @@ import (
 // ShellSource builds the per-request shell data from the look and feel and
 // the sections the visitor may open.
 type ShellSource struct {
-	lookAndFeel *app.LookAndFeel
-	nav         *app.Navigation
+	lookAndFeel *LookAndFeel
+	nav         *Navigation
 	user        func(r *http.Request) *layout.User
 	now         func() time.Time
 }
@@ -33,7 +28,7 @@ type ShellSource struct {
 // NewShellSource returns a ShellSource. user returns the signed-in visitor
 // of a request for the user menu (nil: anonymous); it may be nil. now is
 // the clock of the top bar.
-func NewShellSource(lookAndFeel *app.LookAndFeel, nav *app.Navigation, user func(r *http.Request) *layout.User,
+func NewShellSource(lookAndFeel *LookAndFeel, nav *Navigation, user func(r *http.Request) *layout.User,
 	now func() time.Time,
 ) *ShellSource {
 	return &ShellSource{lookAndFeel: lookAndFeel, nav: nav, user: user, now: now}
@@ -79,8 +74,8 @@ func (s *ShellSource) Shell(r *http.Request) layout.Shell {
 type Module struct {
 	render   *render.Renderer
 	shell    render.ShellSource
-	policy   *app.Policy
-	station  *app.Station
+	policy   *Policy
+	station  *Station
 	static   fs.FS
 	markdown *markdown
 	logger   *slog.Logger
@@ -88,7 +83,7 @@ type Module struct {
 
 // NewModule returns the shell router module. static is the embedded static
 // assets filesystem (web.Static).
-func NewModule(rd *render.Renderer, shell render.ShellSource, policy *app.Policy, station *app.Station, static fs.FS,
+func NewModule(rd *render.Renderer, shell render.ShellSource, policy *Policy, station *Station, static fs.FS,
 	logger *slog.Logger,
 ) *Module {
 	return &Module{render: rd, shell: shell, policy: policy, station: station, static: static, markdown: newMarkdown(), logger: logger}
@@ -110,9 +105,9 @@ func (m *Module) Routes(r chi.Router) {
 	}
 
 	get("/", m.receiver)
-	get(domain.SectionMap.Path(), m.placeholder(domain.SectionMap, "The live map is not available yet."))
-	get(domain.SectionDecodes.Path(), m.placeholder(domain.SectionDecodes, "Decoded messages are not available yet."))
-	get(domain.SectionFiles.Path(), m.placeholder(domain.SectionFiles, "Received files are not available yet."))
+	get(SectionMap.Path(), m.placeholder(SectionMap, "The live map is not available yet."))
+	get(SectionDecodes.Path(), m.placeholder(SectionDecodes, "Decoded messages are not available yet."))
+	get(SectionFiles.Path(), m.placeholder(SectionFiles, "Received files are not available yet."))
 	get("/robots.txt", robots)
 	get("/policy", m.policyPage)
 	get(AboutPath, m.aboutPage)
@@ -159,14 +154,14 @@ func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
 		desc = ""
 	}
 
-	page := layout.Page{Section: domain.SectionReceiver.ID()}
+	page := layout.Page{Section: SectionReceiver.ID()}
 	m.render.Page(w, r, http.StatusOK, page, receiverPage(m.shell.Shell(r).SiteName, st, desc), nil)
 }
 
 // placeholder serves the entry page of a section whose module does not
 // exist yet (Map, Decodes, Files): its heading and a short notice. The
 // section's module takes the route over when it lands.
-func (m *Module) placeholder(sec domain.Section, notice string) http.HandlerFunc {
+func (m *Module) placeholder(sec Section, notice string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page := layout.Page{Title: sec.Label(), Section: sec.ID()}
 		m.render.Page(w, r, http.StatusOK, page, placeholderPage(sec.Label(), notice), nil)
@@ -202,7 +197,7 @@ func (m *Module) aboutPage(w http.ResponseWriter, r *http.Request) {
 
 // footerLinks are the information links of the footer and the user menu:
 // help (when set), the usage policy and About.
-func footerLinks(v app.View) []layout.Link {
+func footerLinks(v View) []layout.Link {
 	var links []layout.Link
 	if !v.Help.IsZero() {
 		links = append(links, layout.Link{Label: "Help", Href: v.Help.String(), External: true})

@@ -1,4 +1,4 @@
-package app_test
+package shell_test
 
 import (
 	"bytes"
@@ -8,42 +8,41 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yohang/mesh-sdr/internal/shell/app"
-	"github.com/yohang/mesh-sdr/internal/shell/domain"
+	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 type policySettings struct {
-	text domain.PolicyText
+	text shell.PolicyText
 	set  bool
 	err  error
 }
 
-func (s policySettings) UsagePolicy(context.Context) (domain.PolicyText, bool, error) {
+func (s policySettings) UsagePolicy(context.Context) (shell.PolicyText, bool, error) {
 	return s.text, s.set, s.err
 }
 
-func TestPolicy(t *testing.T) {
+func TestPolicyText(t *testing.T) {
 	var logs bytes.Buffer
 
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
-	custom := domain.MustPolicyText("Be nice.")
+	custom := shell.MustPolicyText("Be nice.")
 
 	tests := []struct {
 		name     string
 		settings policySettings
-		want     domain.PolicyText
+		want     shell.PolicyText
 		warn     bool
 	}{
 		{"set", policySettings{text: custom, set: true}, custom, false},
-		{"unset", policySettings{}, app.DefaultPolicy(), false},
-		{"source error", policySettings{err: errors.New("db down")}, app.DefaultPolicy(), true},
+		{"unset", policySettings{}, shell.DefaultPolicy(), false},
+		{"source error", policySettings{err: errors.New("db down")}, shell.DefaultPolicy(), true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logs.Reset()
 
-			if got := app.NewPolicy(tt.settings, logger).Text(context.Background()); got != tt.want {
+			if got := shell.NewPolicy(tt.settings, logger).Text(context.Background()); got != tt.want {
 				t.Errorf("text = %q", got.Markdown())
 			}
 
@@ -53,7 +52,7 @@ func TestPolicy(t *testing.T) {
 		})
 	}
 
-	if !strings.Contains(app.DefaultPolicy().Markdown(), "## Acceptable use") {
+	if !strings.Contains(shell.DefaultPolicy().Markdown(), "## Acceptable use") {
 		t.Error("default policy not embedded")
 	}
 }

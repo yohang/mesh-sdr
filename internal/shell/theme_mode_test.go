@@ -1,10 +1,10 @@
-package domain_test
+package shell_test
 
 import (
 	"errors"
 	"testing"
 
-	"github.com/yohang/mesh-sdr/internal/shell/domain"
+	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 func TestNewThemeMode(t *testing.T) {
@@ -18,7 +18,7 @@ func TestNewThemeMode(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		m, err := domain.NewThemeMode(tt.in)
+		m, err := shell.NewThemeMode(tt.in)
 		if err != nil {
 			t.Fatalf("%s: %v", tt.in, err)
 		}
@@ -29,16 +29,16 @@ func TestNewThemeMode(t *testing.T) {
 	}
 
 	for _, bad := range []string{"", "Light", "sepia", "auto "} {
-		if _, err := domain.NewThemeMode(bad); !errors.Is(err, domain.ErrInvalidThemeMode) {
+		if _, err := shell.NewThemeMode(bad); !errors.Is(err, shell.ErrInvalidThemeMode) {
 			t.Errorf("%q: err = %v", bad, err)
 		}
 	}
 
-	if d := domain.DefaultThemeMode(); !d.IsAuto() || d.String() != "auto" {
+	if d := shell.DefaultThemeMode(); !d.IsAuto() || d.String() != "auto" {
 		t.Errorf("default = %s", d)
 	}
 
-	if m, _ := domain.NewThemeMode("dark"); m != domain.MustThemeMode("dark") {
+	if m, _ := shell.NewThemeMode("dark"); m != shell.MustThemeMode("dark") {
 		t.Error("theme modes are not compared by value")
 	}
 }

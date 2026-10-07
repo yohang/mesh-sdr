@@ -1,12 +1,9 @@
-// Package infra holds the shell adapters.
-package infra
+package shell
 
 import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/yohang/mesh-sdr/internal/shell/domain"
 )
 
 // Setting keys read by the shell (ADR 0010).
@@ -38,10 +35,10 @@ type StoreSettings struct {
 func NewStoreSettings(values Values) *StoreSettings { return &StoreSettings{values: values} }
 
 // ThemeMode returns ui.theme_mode.
-func (s *StoreSettings) ThemeMode(context.Context) (domain.ThemeMode, error) {
-	m, err := domain.NewThemeMode(s.values.String(KeyThemeMode))
+func (s *StoreSettings) ThemeMode(context.Context) (ThemeMode, error) {
+	m, err := NewThemeMode(s.values.String(KeyThemeMode))
 	if err != nil {
-		return domain.ThemeMode{}, fmt.Errorf("%s: %w", KeyThemeMode, err)
+		return ThemeMode{}, fmt.Errorf("%s: %w", KeyThemeMode, err)
 	}
 
 	return m, nil
@@ -68,20 +65,20 @@ func (s *StoreSettings) PolicyURL(context.Context) (string, error) {
 }
 
 // HelpLink returns receiver.help_url (zero when unset).
-func (s *StoreSettings) HelpLink(context.Context) (domain.HelpLink, error) {
-	h, err := domain.NewHelpLink(strings.TrimSpace(s.values.String(KeyHelpURL)))
+func (s *StoreSettings) HelpLink(context.Context) (HelpLink, error) {
+	h, err := NewHelpLink(strings.TrimSpace(s.values.String(KeyHelpURL)))
 	if err != nil {
-		return domain.HelpLink{}, fmt.Errorf("%s: %w", KeyHelpURL, err)
+		return HelpLink{}, fmt.Errorf("%s: %w", KeyHelpURL, err)
 	}
 
 	return h, nil
 }
 
 // ShortcutSet returns ui.shortcut_set.
-func (s *StoreSettings) ShortcutSet(context.Context) (domain.ShortcutSet, error) {
-	set, err := domain.NewShortcutSet(s.values.String(KeyShortcutSet))
+func (s *StoreSettings) ShortcutSet(context.Context) (ShortcutSet, error) {
+	set, err := NewShortcutSet(s.values.String(KeyShortcutSet))
 	if err != nil {
-		return domain.ShortcutSet{}, fmt.Errorf("%s: %w", KeyShortcutSet, err)
+		return ShortcutSet{}, fmt.Errorf("%s: %w", KeyShortcutSet, err)
 	}
 
 	return set, nil
@@ -89,15 +86,15 @@ func (s *StoreSettings) ShortcutSet(context.Context) (domain.ShortcutSet, error)
 
 // UsagePolicy returns receiver.usage_policy_text; set is false when it is
 // empty.
-func (s *StoreSettings) UsagePolicy(context.Context) (domain.PolicyText, bool, error) {
+func (s *StoreSettings) UsagePolicy(context.Context) (PolicyText, bool, error) {
 	text := s.values.String(KeyUsagePolicyText)
 	if strings.TrimSpace(text) == "" {
-		return domain.PolicyText{}, false, nil
+		return PolicyText{}, false, nil
 	}
 
-	p, err := domain.NewPolicyText(text)
+	p, err := NewPolicyText(text)
 	if err != nil {
-		return domain.PolicyText{}, false, fmt.Errorf("%s: %w", KeyUsagePolicyText, err)
+		return PolicyText{}, false, fmt.Errorf("%s: %w", KeyUsagePolicyText, err)
 	}
 
 	return p, true, nil

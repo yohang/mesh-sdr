@@ -1,28 +1,27 @@
-package app_test
+package shell_test
 
 import (
 	"context"
 	"slices"
 	"testing"
 
-	"github.com/yohang/mesh-sdr/internal/shell/app"
-	"github.com/yohang/mesh-sdr/internal/shell/domain"
+	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 type adminKey struct{}
 
-func TestNavigation(t *testing.T) {
-	admin := app.GateFunc(func(ctx context.Context) bool { return ctx.Value(adminKey{}) != nil })
+func TestNavigationGates(t *testing.T) {
+	admin := shell.GateFunc(func(ctx context.Context) bool { return ctx.Value(adminKey{}) != nil })
 
-	nav := app.NewNavigation(map[domain.Section]app.Gate{
-		domain.SectionReceiver: app.Everyone,
-		domain.SectionMap:      app.Everyone,
-		domain.SectionFiles:    app.Everyone,
-		domain.SectionAdmin:    admin,
-		domain.SectionDecodes:  nil, // no gate: never shown
+	nav := shell.NewNavigation(map[shell.Section]shell.Gate{
+		shell.SectionReceiver: shell.Everyone,
+		shell.SectionMap:      shell.Everyone,
+		shell.SectionFiles:    shell.Everyone,
+		shell.SectionAdmin:    admin,
+		shell.SectionDecodes:  nil, // no gate: never shown
 	})
 
-	ids := func(ss []domain.Section) (out []string) {
+	ids := func(ss []shell.Section) (out []string) {
 		for _, s := range ss {
 			out = append(out, s.ID())
 		}

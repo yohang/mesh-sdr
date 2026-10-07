@@ -1,14 +1,13 @@
-package http
+package shell
 
 import (
-	"github.com/yohang/mesh-sdr/internal/shell/app"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // receiverPage is the Receiver section until the receiver exists (M1): the
 // station and a notice. descHTML is goldmark output, which carries no raw
 // HTML nor dangerous URLs (see markdown.go).
-templ receiverPage(siteName string, st app.StationView, descHTML string) {
+templ receiverPage(siteName string, st StationView, descHTML string) {
 	<div class="flex items-center gap-3">
 		if st.HasAvatar {
 			<img src="/api/v1/branding/avatar" alt="" width="48" height="48" class="size-12 rounded-md object-cover"/>

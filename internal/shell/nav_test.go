@@ -11,13 +11,12 @@ import (
 
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/shell"
-	"github.com/yohang/mesh-sdr/internal/shell/app"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // navRouter serves the shell with an admin gate that is open or closed.
 func navRouter(admin bool) http.Handler {
-	gate := app.GateFunc(func(context.Context) bool { return admin })
+	gate := shell.GateFunc(func(context.Context) bool { return admin })
 	m := shell.Wire(shell.Deps{Settings: values{}, AdminGate: gate, Logger: discard})
 	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 

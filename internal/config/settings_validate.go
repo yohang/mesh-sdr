@@ -18,7 +18,7 @@ import (
 
 	settingsdomain "github.com/yohang/mesh-sdr/internal/settings/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
-	shelldomain "github.com/yohang/mesh-sdr/internal/shell/domain"
+	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 // Violation codes of setting values. Semantic checks keep the code of the
@@ -66,7 +66,7 @@ var settingHooks = map[string]func(v any) error{
 			return nil // empty: the built-in default policy
 		}
 
-		_, err := shelldomain.NewPolicyText(s)
+		_, err := shell.NewPolicyText(s)
 
 		return err
 	},

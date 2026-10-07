@@ -1,4 +1,4 @@
-package app_test
+package shell_test
 
 import (
 	"bytes"
@@ -8,29 +8,28 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yohang/mesh-sdr/internal/shell/app"
-	"github.com/yohang/mesh-sdr/internal/shell/domain"
+	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 type settings struct {
-	mode domain.ThemeMode
+	mode shell.ThemeMode
 	err  error
 }
 
-func (s settings) ThemeMode(context.Context) (domain.ThemeMode, error) { return s.mode, s.err }
-func (s settings) SiteName(context.Context) (string, error)            { return "F4XYZ", s.err }
+func (s settings) ThemeMode(context.Context) (shell.ThemeMode, error) { return s.mode, s.err }
+func (s settings) SiteName(context.Context) (string, error)           { return "F4XYZ", s.err }
 func (s settings) PolicyURL(context.Context) (string, error) {
 	return "https://example.org/rules", s.err
 }
 
-func (s settings) HelpLink(context.Context) (domain.HelpLink, error) {
-	h, _ := domain.NewHelpLink("https://docs.example.org")
+func (s settings) HelpLink(context.Context) (shell.HelpLink, error) {
+	h, _ := shell.NewHelpLink("https://docs.example.org")
 
 	return h, s.err
 }
 
-func (s settings) ShortcutSet(context.Context) (domain.ShortcutSet, error) {
-	set, _ := domain.NewShortcutSet("off")
+func (s settings) ShortcutSet(context.Context) (shell.ShortcutSet, error) {
+	set, _ := shell.NewShortcutSet("off")
 
 	return set, s.err
 }
@@ -40,7 +39,7 @@ func TestLookAndFeel(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 
-	v := app.NewLookAndFeel(settings{mode: domain.MustThemeMode("dark")}, logger).View(context.Background())
+	v := shell.NewLookAndFeel(settings{mode: shell.MustThemeMode("dark")}, logger).View(context.Background())
 	if !v.ThemeMode.IsDark() || v.SiteName != "F4XYZ" || v.PolicyURL != "https://example.org/rules" ||
 		v.Help.String() != "https://docs.example.org" || v.Shortcuts.Enabled() {
 		t.Errorf("view = %+v", v)
@@ -50,8 +49,8 @@ func TestLookAndFeel(t *testing.T) {
 		t.Errorf("unexpected logs: %s", logs.String())
 	}
 
-	v = app.NewLookAndFeel(settings{err: errors.New("db down")}, logger).View(context.Background())
-	if !v.ThemeMode.IsAuto() || v.SiteName != app.DefaultSiteName || v.PolicyURL != app.DefaultPolicyURL ||
+	v = shell.NewLookAndFeel(settings{err: errors.New("db down")}, logger).View(context.Background())
+	if !v.ThemeMode.IsAuto() || v.SiteName != shell.DefaultSiteName || v.PolicyURL != shell.DefaultPolicyURL ||
 		!v.Help.IsZero() || !v.Shortcuts.Enabled() {
 		t.Errorf("fallback = %s, want auto", v.ThemeMode)
 	}
