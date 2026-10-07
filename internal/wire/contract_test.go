@@ -290,6 +290,26 @@ func TestAPIContract(t *testing.T) {
 
 	t.Run("rights", func(t *testing.T) { checkRights(t, h, v) })
 	t.Run("happy paths", func(t *testing.T) { happyPaths(t, h) })
+	t.Run("removed operations", func(t *testing.T) {
+		// The UI actions have no API twin any more (ADR 0023): their former
+		// paths answer the API's problem+json, even for an admin.
+		admin := h.signedIn("admin", 10)
+
+		for _, tc := range []struct {
+			method, path, code string
+			status             int
+		}{
+			{http.MethodPost, "/users", "not_found", http.StatusNotFound},
+			{http.MethodPost, "/auth/login", "not_found", http.StatusNotFound},
+			{http.MethodPatch, "/settings", "not_found", http.StatusNotFound},
+			// GET /branding/{slot} stays: the other methods are not allowed.
+			{http.MethodPut, "/branding/avatar", "method_not_allowed", http.StatusMethodNotAllowed},
+		} {
+			if status, res := admin.do(tc.method, tc.path, map[string]any{}); status != tc.status || res["code"] != tc.code {
+				t.Errorf("%s %s = %d %v, want %d %s", tc.method, tc.path, status, res, tc.status, tc.code)
+			}
+		}
+	})
 
 	for _, id := range v.Uncovered() {
 		t.Errorf("operation %s never answered a validated 2xx", id)

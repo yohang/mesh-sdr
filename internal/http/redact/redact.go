@@ -10,6 +10,9 @@ var TokenPrefixes = []string{
 	"/invite/",
 	"/password/reset/",
 	"/account/email/verify/",
+	// No route since ADR 0023, but a stale client may still send a live
+	// invitation token to the former API path.
+	"/auth/invitations/",
 }
 
 // Path returns p with everything after a token prefix replaced by

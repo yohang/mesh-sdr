@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strconv"
 
-	"github.com/yohang/mesh-sdr/internal/http/problem"
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 )
@@ -86,33 +84,4 @@ func (s sessionResponse) VisitGetSessionResponse(w http.ResponseWriter) error {
 	w.WriteHeader(http.StatusOK)
 
 	return json.NewEncoder(w).Encode(s.info)
-}
-
-// rateLimited is a 429 problem with Retry-After.
-type rateLimited struct{ err *domain.RateLimitError }
-
-func (r rateLimited) write(w http.ResponseWriter) error {
-	w.Header().Set("Retry-After", strconv.Itoa(int(r.err.RetryAfter().Seconds())))
-	problem.Write(w, problem.FromError(r.err))
-
-	return nil
-}
-
-// jsonOK writes a 200 JSON body, not cached.
-type jsonOK struct{ v any }
-
-func (j jsonOK) write(w http.ResponseWriter) error {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	return json.NewEncoder(w).Encode(j.v)
-}
-
-func optString(s string) *string {
-	if s == "" {
-		return nil
-	}
-
-	return &s
 }

@@ -17,6 +17,7 @@ func TestPath(t *testing.T) {
 		{"/password/reset/s3cr3t", "/password/reset/{token}"},
 		{"/account/email/verify/s3cr3t", "/account/email/verify/{token}"},
 		{"/api/v1/auth/setup/s3cr3t", "/api/v1/auth/setup/{token}"},
+		{"/api/v1/auth/invitations/s3cr3t/accept", "/api/v1/auth/invitations/{token}"},
 		{"/setup", "/setup"},
 		{"/setup/", "/setup/"},
 		{"/password/reset", "/password/reset"},
