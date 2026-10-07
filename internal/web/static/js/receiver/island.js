@@ -190,7 +190,8 @@ class MsdrReceiver extends HTMLElement {
     this.layout();
   }
 
-  async loadDevices() {
+  // fetchDevices reads the devices the visitor may listen to.
+  async fetchDevices() {
     try {
       const res = await fetch(FEATURES_URL, { credentials: "same-origin", headers: { Accept: "application/json" } });
       if (!res.ok) throw new Error(`features API answered ${res.status}`);
@@ -201,6 +202,17 @@ class MsdrReceiver extends HTMLElement {
       this.devices = [];
       this.devicesError = true;
     }
+  }
+
+  // refreshDevices re-reads the devices after a lost connection, so that an
+  // offline node shows as such while the engine keeps retrying.
+  async refreshDevices() {
+    await this.fetchDevices();
+    if (this.isConnected) this.layout();
+  }
+
+  async loadDevices() {
+    await this.fetchDevices();
     this.loaded = true;
     if (!this.isConnected) return;
 
@@ -244,6 +256,7 @@ class MsdrReceiver extends HTMLElement {
   /** @param {string} what */
   changed(what) {
     if (what === "state") {
+      if (this.engine.state === "reconnecting" && this.loaded) this.refreshDevices();
       this.announce();
       this.layout();
     } else if (what === "config") {
@@ -289,6 +302,10 @@ class MsdrReceiver extends HTMLElement {
     if (this.devices.length === 0) {
       if (!this.cfg.signed_in) return { text: "Sign in to listen to this receiver.", login: true };
       return { text: "No receiver device is available." };
+    }
+    const d = this.chosen();
+    if (d && d.node_online === false && e.state !== "listening" && e.state !== "connected") {
+      return { text: "This device's node is offline." };
     }
     const st = e.deviceState?.state;
     if (st === "failed" || st === "disabled" || st === "unavailable") {
