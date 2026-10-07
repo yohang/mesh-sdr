@@ -22,13 +22,9 @@ import (
 // Devices is the device registry.
 type Devices interface {
 	List(ctx context.Context) ([]*domain.Device, error)
+	ListByNode(ctx context.Context, id domain.NodeID) ([]*domain.Device, error)
 	Get(ctx context.Context, id string) (*domain.Device, error)
 	Forget(ctx context.Context, actor, id string) error
-}
-
-// Nodes reads the node registry.
-type Nodes interface {
-	Get(ctx context.Context, id string) (*domain.Node, error)
 }
 
 // Renderer renders pages in the app shell (internal/web/render).
@@ -52,21 +48,28 @@ type DeviceSchedules interface {
 	ForDevice(ctx context.Context, device string) ([]ScheduleRow, error)
 }
 
-// AdminDeps are the dependencies of the admin device pages.
+// AdminDeps are the dependencies of the admin grid pages.
 type AdminDeps struct {
-	Render  Renderer
-	Devices Devices
-	Nodes   Nodes
+	Render       Renderer
+	Devices      Devices
+	Nodes        NodeAdmin
+	History      LoadHistory
+	Capabilities CapabilityReports
+	Connections  ConnectionRegistry
+	Users        UserNames
 	// Schedules lists the schedules of a device; nil shows none.
 	Schedules DeviceSchedules
 	Operator  func(http.Handler) http.Handler // operator role (identity)
 	Admin     func(http.Handler) http.Handler // admin role and network (identity)
 	IsAdmin   func(r *http.Request) bool
+	Now       func() time.Time
 	Logger    *slog.Logger
 }
 
-// AdminModule serves the read-only device pages of the admin area (ADM-008)
-// and "forget device" (ADM-009). Operators read them; only admins forget.
+// AdminModule serves the grid pages of the admin area: the read-only device
+// pages (ADM-008) with "forget device" (ADM-009), Admin › Nodes (GRID-005,
+// GRID-009) and Admin › Connections (GRID-017). Operators read devices and
+// nodes; everything else is for admins.
 type AdminModule struct{ d AdminDeps }
 
 // NewAdminModule returns the router module (internal/http.Module).
@@ -83,8 +86,34 @@ func (m *AdminModule) Routes(r chi.Router) {
 		r.Head("/admin/devices", m.list)
 		r.Get("/admin/devices/{id}", m.detail)
 		r.Head("/admin/devices/{id}", m.detail)
+		r.Get("/admin/nodes", m.nodesPage)
+		r.Head("/admin/nodes", m.nodesPage)
+		r.Get("/admin/nodes/{id}", m.nodePage)
+		r.Head("/admin/nodes/{id}", m.nodePage)
 	})
-	r.With(m.d.Admin, noIndex).Post("/admin/devices/{id}/forget", m.forget)
+	r.Group(func(r chi.Router) {
+		r.Use(m.d.Admin, noIndex)
+		r.Post("/admin/devices/{id}/forget", m.forget)
+		r.Get("/admin/nodes/new", m.newNodePage)
+		r.Post("/admin/nodes", m.addNode)
+		r.Post("/admin/nodes/{id}", m.editNode)
+		r.Post("/admin/nodes/{id}/disable", m.setDisabled(true))
+		r.Post("/admin/nodes/{id}/enable", m.setDisabled(false))
+		r.Post("/admin/nodes/{id}/token", m.issueToken)
+		r.Post("/admin/nodes/{id}/revoke", m.revokeNode)
+		r.Post("/admin/nodes/{id}/delete", m.deleteNode)
+		r.Post("/admin/nodes/{id}/probe", m.probeNode)
+		r.Get("/admin/connections", m.connectionsPage)
+		r.Head("/admin/connections", m.connectionsPage)
+	})
+}
+
+func (m *AdminModule) now() time.Time {
+	if m.d.Now == nil {
+		return time.Now()
+	}
+
+	return m.d.Now()
 }
 
 func noIndex(next http.Handler) http.Handler {
@@ -94,14 +123,14 @@ func noIndex(next http.Handler) http.Handler {
 	})
 }
 
-func (m *AdminModule) page(w http.ResponseWriter, r *http.Request, status int, title string, content templ.Component) {
+func (m *AdminModule) page(w http.ResponseWriter, r *http.Request, status int, title, section string, content, fragment templ.Component) {
 	sections := layout.OperatorAdminSections
 	if m.d.IsAdmin(r) {
 		sections = layout.AdminSections
 	}
 
 	m.d.Render.Page(w, r, status, layout.Page{Title: title, Section: layout.SectionAdmin},
-		layout.AdminPageWith("devices", sections, content), nil)
+		layout.AdminPageWith(section, sections, content), fragment)
 }
 
 func (m *AdminModule) list(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +142,7 @@ func (m *AdminModule) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.page(w, r, http.StatusOK, "Devices", devicesPage(devices))
+	m.page(w, r, http.StatusOK, "Devices", "devices", devicesPage(devices), devicesTable(devices))
 }
 
 // deviceView is the detail page of a device.
@@ -168,7 +197,7 @@ func (m *AdminModule) detail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.page(w, r, http.StatusOK, "Device "+v.Device.Name(), devicePage(v))
+	m.page(w, r, http.StatusOK, "Device "+v.Device.Name(), "devices", devicePage(v), nil)
 }
 
 func (m *AdminModule) forget(w http.ResponseWriter, r *http.Request) {
@@ -176,14 +205,7 @@ func (m *AdminModule) forget(w http.ResponseWriter, r *http.Request) {
 
 	err := m.d.Devices.Forget(r.Context(), app.ActorUser, id)
 	if err == nil {
-		if r.Header.Get("HX-Request") == "true" {
-			w.Header().Set("HX-Redirect", "/admin/devices")
-			w.WriteHeader(http.StatusNoContent)
-
-			return
-		}
-
-		http.Redirect(w, r, "/admin/devices", http.StatusSeeOther)
+		redirect(w, r, "/admin/devices")
 
 		return
 	}
@@ -204,7 +226,7 @@ func (m *AdminModule) forget(w http.ResponseWriter, r *http.Request) {
 		status, v.Failure = http.StatusInternalServerError, "The device could not be forgotten. Try again later."
 	}
 
-	m.page(w, r, status, "Device "+v.Device.Name(), devicePage(v))
+	m.page(w, r, status, "Device "+v.Device.Name(), "devices", devicePage(v), nil)
 }
 
 // disabledReason explains why the hub disabled a schedule.

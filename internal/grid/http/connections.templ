@@ -1,0 +1,53 @@
+package http
+
+import "strconv"
+
+// connectionsPage is Admin › Connections (GRID-017): who is connected now.
+templ connectionsPage(v connectionsView) {
+	<h1 class="text-2xl font-semibold">Connections</h1>
+	<p class="text-fg-muted">Open connections of the presence registry, across every node: listeners of a receiver, and pages following the hub events.</p>
+	@connectionsTable(v)
+}
+
+// connectionsTable is the live part of the page, also its htmx fragment.
+templ connectionsTable(v connectionsView) {
+	<div
+		id="connections-table"
+		class="flex flex-col gap-3"
+		data-msdr-topics="presence"
+		hx-get="/admin/connections"
+		hx-trigger="msdr:presence.count from:body delay:1s, msdr:resync from:body"
+		hx-swap="outerMorph"
+	>
+		<p>{ strconv.Itoa(v.Listeners) } listeners, { strconv.Itoa(v.Viewers) } pages.</p>
+		if len(v.Rows) > 0 {
+			<div class="overflow-x-auto">
+				<table class="w-full text-left">
+					<caption class="sr-only">Open connections</caption>
+					<thead>
+						<tr class="border-b border-border">
+							<th scope="col" class="py-1 pr-4">User</th>
+							<th scope="col" class="py-1 pr-4">Client</th>
+							<th scope="col" class="py-1 pr-4">Address</th>
+							<th scope="col" class="py-1 pr-4">Node / device</th>
+							<th scope="col" class="py-1 pr-4">Since</th>
+							<th scope="col" class="py-1">Last seen</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, c := range v.Rows {
+							<tr class="border-b border-border">
+								<th scope="row" class="py-1 pr-4 font-medium">{ c.User }</th>
+								<td class="py-1 pr-4">{ c.Kind }</td>
+								<td class="py-1 pr-4 font-mono">{ c.IP }</td>
+								<td class="py-1 pr-4">{ c.Where }</td>
+								<td class="py-1 pr-4">{ utc(c.OpenedAt) }</td>
+								<td class="py-1">{ utc(c.LastSeen) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</div>
+}

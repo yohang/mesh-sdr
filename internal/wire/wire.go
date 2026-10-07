@@ -6,6 +6,7 @@ package wire
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -442,10 +443,12 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		}),
 		imagesHTTP,
 		gridhttp.NewAdminModule(gridhttp.AdminDeps{
-			Render: shellModule.Renderer, Devices: g.devices, Nodes: g.nodes,
+			Render: shellModule.Renderer, Devices: g.devices, Nodes: g.nodes, History: g.history, Capabilities: g.caps,
+			Connections: g.presence, Users: userNames{users: identitysqlite.NewUsers(adapter, shared.NewUUIDv7Generator())},
 			Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets},
 			Operator:  idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
-			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Logger: component(logger, "grid.http.admin"),
+			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Now: now,
+			Logger: component(logger, "grid.http.admin"),
 		}),
 		routes(func(r chi.Router) { r.Method(http.MethodGet, gateway.AuthzPath, authz) }),
 		events,
@@ -533,4 +536,41 @@ func (g gridDevices) NodeDevices(ctx context.Context, nodeID string) ([]identity
 // TokenKeyring opens the token signing keyring (meshsdr hub keys …).
 func TokenKeyring(cfg config.Hub, now time.Time) (*keyring.Keyring, error) {
 	return identity.Keyring(cfg, now)
+}
+
+// userNames gives the names of users to the grid admin pages.
+type userNames struct{ users identitydomain.UserRepository }
+
+// Names implements gridhttp.UserNames: the display name, else the username.
+func (u userNames) Names(ctx context.Context, ids []shared.UUID) (map[shared.UUID]string, error) {
+	out := make(map[shared.UUID]string, len(ids))
+
+	for _, id := range ids {
+		if _, done := out[id]; done {
+			continue
+		}
+
+		uid, err := identitydomain.NewUserID(id)
+		if err != nil {
+			continue
+		}
+
+		user, err := u.users.ByID(ctx, uid)
+		if errors.Is(err, identitydomain.ErrUserNotFound) {
+			continue
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		name := user.Username().String()
+		if d := user.DisplayName(); !d.IsZero() {
+			name = d.String()
+		}
+
+		out[id] = name
+	}
+
+	return out, nil
 }
