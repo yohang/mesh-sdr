@@ -182,6 +182,28 @@ Numbers refer to the questions of the design proposal. The owner accepted every 
 - **Audit actor.** Node actions of the HTML pages use the `user` audit actor, like the REST calls (ADR 0008 Q3).
 - **Spike.** The spike's `wsconn.AcceptOrigins` was not kept. The events handler checks the `Origin` itself (problem+json answers) and upgrades with `wsconn.AcceptOriginChecked`.
 
+### Security review fixes
+
+The review found no authentication bypass, admin leak or CSRF issue. It found denial-of-service and correctness issues, fixed as follows:
+
+1. **Bounded `sub`.** Duplicate topics are dropped, and a request that would exceed 32 topics is refused before any authorisation.
+2. **One policy snapshot.** Topic checks read a cached snapshot of the effective listen policies (`policyCache`) instead of reading the device registry for each topic. The snapshot is reloaded on a `listen_policy` change, a device report or a forgotten device. Sockets re-authorise their topics only when the snapshot actually changed.
+3. **Presence writes.** `presence.heartbeat` writes its device only when it differs from the last one recorded, and at most every 10 s per connection.
+4. **Caps.**
+   - IPv6 clients count per /64 for the per-address cap and for the upgrade rate (`app.AddressKey`).
+   - An anonymous socket holding no topic is closed (1000) after a 30 s grace period, during which it counts against the caps.
+5. **Idle timeout.**
+   - The `/api/ws` upgrade (`Upgrade: websocket`) is a background request: the identity middleware peeks at the session.
+   - The dispatcher stops after five connections in a row without a `session.welcome`. The shell then shows a "live updates stopped, reload" notice (`#msdr-events-stopped`).
+6. **Audiences.**
+   - `device.status` reaches operators, admins and the viewers who may listen to the device.
+   - `node.status` reaches operators, admins and the viewers who may listen to one of the node's devices.
+   - The registry states `enrolling`, `revoked`, `removed` and `forgotten` reach operators and admins only. `Viewer.Staff` marks operators and admins.
+7. **Heartbeat interval per link.** Each node is evaluated against the heartbeat interval sent in the `ctl.hello` of its current channel (`LinkState.HeartbeatInterval`) until it reconnects. Lowering `grid.heartbeat_interval_s` therefore no longer marks connected nodes degraded.
+8. **Tickers.** The status sweeper and the presence reaper reset their tickers as soon as the timings change.
+9. **Strikes.** A connection closes on the eleventh violation in a minute (more than 10), consistent with the node (§5.9).
+10. **Session checks.** A session whose known expiry is close or already past is re-read at most every 5 s.
+
 ## Spec divergences
 
 Recorded here; the spec is not edited.
