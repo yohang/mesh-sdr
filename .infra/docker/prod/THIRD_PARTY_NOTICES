@@ -1,0 +1,57 @@
+MeshSDR container image: third-party notices
+=============================================
+
+MeshSDR is free software under the GNU Affero General Public License,
+version 3 or later (/usr/share/doc/meshsdr/LICENSE). The meshsdr binary
+links the components below; the image also ships the external programs
+listed further down. Versions are pinned in .infra/docker/Dockerfile.
+
+Corresponding sources
+---------------------
+
+The corresponding sources of the GPL and LGPL components bundled in this
+image (csdr, owrx_connector and the Debian source packages of FFTW,
+rtl-sdr, libusb and libsamplerate, at the exact versions installed) are
+published with every release as the OCI image tagged `<version>-sources`
+next to this image (same repository), under /sources. The source of
+MeshSDR itself is linked from the About page of the running hub.
+
+Native components built from source
+-----------------------------------
+
+csdr / libcsdr++ 0.18.41 (https://github.com/luarvique/csdr, tag 0.18.41)
+  Linked into meshsdr (cgo, internal/dsp/csdr) and used by the connectors.
+  Mixed licence, per file: GPL-3.0-or-later (framework, FFT, AGC, AM demod,
+  ...) and BSD-3-Clause (FIR, FM demod, shift, deemphasis, window, log
+  power, ...). Texts: /usr/share/doc/csdr/.
+  Copyright (c) 2021-2026 Jakob Ketterl, Marat Fayzullin and contributors;
+  Copyright (c) 2014-2015 Andras Retzler, HA7ILM.
+
+owrx_connector 0.6.5 (https://github.com/luarvique/owrx_connector, tag 0.6.5)
+  rtl_connector, rtl_tcp_connector and libowrx-connector, run by the node as
+  separate processes. GPL-3.0-or-later. Text: /usr/share/doc/owrx-connector/.
+  Copyright (c) 2019-2026 Jakob Ketterl, Marat Fayzullin and contributors.
+
+Debian packages (copyright files under /usr/share/doc/<package>/copyright)
+-------------------------------------------------------------------------
+
+libfftw3-single3 (FFTW 3.3.10)   GPL-2.0-or-later (used under GPL-3.0)
+libsamplerate0 (0.2.2)           BSD-2-Clause
+librtlsdr0 (rtl-sdr 2.0.2)       GPL-2.0-or-later (used under GPL-3.0)
+libusb-1.0-0                     LGPL-2.1-or-later
+ca-certificates                  MPL-2.0 / GPL-2.0-or-later
+
+Go modules
+----------
+
+The licence texts of every Go module linked into meshsdr are reproduced in
+/usr/share/doc/meshsdr/go-modules.txt (among them gonum, BSD-3-Clause;
+coder/websocket, ISC; Caddy, Apache-2.0; modernc.org/sqlite, BSD-3-Clause).
+
+Combined work
+-------------
+
+The meshsdr binary is a combined work of AGPL-3.0-or-later code with
+GPL-3.0-or-later and BSD-licensed parts of libcsdr++, FFTW
+(GPL-2.0-or-later) and libsamplerate (BSD-2-Clause). GPLv3 section 13 and
+AGPLv3 section 13 allow this combination (ADR 0014).

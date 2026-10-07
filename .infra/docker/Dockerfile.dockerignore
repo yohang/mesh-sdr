@@ -4,6 +4,7 @@
 !internal/
 !go.mod
 !go.sum
+!LICENSE
 !.infra/docker/prod/
 
 **/*_templ.go
