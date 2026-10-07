@@ -220,7 +220,7 @@ func TestSettingsAPIAccess(t *testing.T) {
 			t.Errorf("%q PATCH = %d, want %d", tt.user, status, tt.status)
 		}
 
-		if status, v, _ := b.json(http.MethodGet, "/api/v1/settings/public", ""); status != 200 || v["receiver.name"] != "MeshSDR" || v["receiver.admin_email"] != nil {
+		if status, v, _ := b.json(http.MethodGet, "/api/v1/settings/public", ""); status != 200 || v["receiver.name"] != "MeshSDR" || v["receiver.usage_policy_text"] != nil {
 			t.Errorf("%q public settings = %d %v", tt.user, status, v)
 		}
 	}
@@ -264,7 +264,7 @@ func TestSettingsAPISaveCycle(t *testing.T) {
 	}
 
 	// Per-field errors.
-	status, p, _ = b.json(http.MethodPatch, "/api/v1/settings", `{"values":{"ui.theme_mode":"sepia","ui.tuning_precision":9,"nope":1}}`)
+	status, p, _ = b.json(http.MethodPatch, "/api/v1/settings", `{"values":{"ui.theme_mode":"sepia","auth.password_min_length":7,"nope":1}}`)
 
 	errs, _ := p["errors"].([]any)
 	if status != 422 || p["code"] != "invalid_setting" || len(errs) != 3 {

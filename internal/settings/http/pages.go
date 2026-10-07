@@ -25,11 +25,9 @@ var formPages = []formPage{
 		Intro: "Station information shown to visitors (ADM-003).",
 		Forms: []sectionSpec{
 			{ID: "station", Title: "Station", Keys: []string{
-				"receiver.name", "receiver.location", "receiver.country", "receiver.gps", "receiver.altitude_m", "bandplan.region",
+				"receiver.name", "receiver.location", "receiver.gps",
 			}},
-			{ID: "contact", Title: "Contact and help", Keys: []string{
-				"receiver.admin_email", "receiver.admin_email_public", "receiver.help_url",
-			}},
+			{ID: "contact", Title: "Help", Keys: []string{"receiver.help_url"}},
 			{ID: "panorama", Title: "Panorama text", Keys: []string{"receiver.photo_title", "receiver.photo_desc"}},
 			{ID: "policy", Title: "Usage policy", Keys: []string{"receiver.usage_policy_text", "receiver.usage_policy_url"}},
 		},
@@ -38,7 +36,7 @@ var formPages = []formPage{
 		Section: "access", Title: "Access", Path: "/admin/access",
 		Intro: "Who may listen, and how sign-in is protected (ADM-005).",
 		Forms: []sectionSpec{
-			{ID: "listening", Title: "Listening", Keys: []string{"listen_policy", "ui.recorder_enabled"}},
+			{ID: "listening", Title: "Listening", Keys: []string{"listen_policy"}},
 			{ID: "sessions", Title: "Sessions", Description: "New lifetimes apply to sessions opened from now on; activity extends open sessions with the new idle timeout.",
 				Keys: []string{"session.idle_timeout", "session.absolute_timeout", "session.remember_me_timeout"}},
 			{ID: "passwords", Title: "Passwords", Keys: []string{"auth.password_min_length"}},
@@ -54,11 +52,7 @@ var formPages = []formPage{
 		Intro: "The look and feel is the same for every visitor: there is no per-user theme (ADM-006, UI-001).",
 		Forms: []sectionSpec{
 			{ID: "theme", Title: "Theme", Description: "A change applies on the next full page load.", Keys: []string{"ui.theme_mode"}},
-			{ID: "display", Title: "Display defaults", Keys: []string{
-				"ui.shortcut_set", "ui.tuning_precision", "ui.layout.side_panel_open", "ui.layout.default_tab",
-				"ui.layout.spectrum", "ui.layout.bandplan", "ui.layout.frequency_format",
-			}},
-			{ID: "bookmarks", Title: "Web bookmarks", Keys: []string{"bookmarks.eibi_range_km", "bookmarks.repeater_range_km"}},
+			{ID: "display", Title: "Display defaults", Keys: []string{"ui.shortcut_set"}},
 		},
 	},
 	{

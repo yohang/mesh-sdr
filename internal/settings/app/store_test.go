@@ -186,7 +186,7 @@ func TestStoreDefaultsAndTypedValues(t *testing.T) {
 		t.Errorf("theme = %s %s", e.Value(), e.Source())
 	}
 
-	if s.String("receiver.name") != "MeshSDR" || !s.Bool("ui.recorder_enabled") || s.Int("ui.tuning_precision") != 2 {
+	if s.String("receiver.name") != "MeshSDR" || s.Int("grid.heartbeat_interval_s") != 10 {
 		t.Error("typed defaults")
 	}
 
@@ -374,10 +374,10 @@ func TestStoreLoadIgnoresInvalidRows(t *testing.T) {
 	ctx := context.Background()
 
 	for key, raw := range map[string]string{
-		"ui.theme_mode":       `"dark"`,
-		"ui.shortcut_set":     `"vim"`,
-		"retired.key":         `true`,
-		"ui.tuning_precision": `4`,
+		"ui.theme_mode":            `"dark"`,
+		"ui.shortcut_set":          `"vim"`,
+		"retired.key":              `true`,
+		"auth.password_min_length": `12`,
 	} {
 		s, _ := domain.NewSetting(domain.MustKey(key), domain.MustValue(raw), 1, shared.UUID{}, t0)
 		_ = f.repo.Save(ctx, s)
@@ -395,7 +395,7 @@ func TestStoreLoadIgnoresInvalidRows(t *testing.T) {
 		t.Errorf("invalid row used: %s", e.Source())
 	}
 
-	if s.Int("ui.tuning_precision") != 4 {
+	if s.Int("auth.password_min_length") != 12 {
 		t.Error("valid row not used")
 	}
 
