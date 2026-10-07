@@ -5,6 +5,7 @@
 - **Deciders:** project owner
 - **Spike:** SPK-03 (#3). The prototype and raw measurements are on branch `spike/spk-03-caddy`, under `spikes/spk-03-caddy/`. They are not merged.
 - **Unblocks:** GRID-011 (#19), GRID-012 (#20). Related: INT-001 (#85)
+- **Amended by:** ADR 0012 (forward auth in-process, node transport module, listeners)
 
 ## Context
 

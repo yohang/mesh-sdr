@@ -1,8 +1,8 @@
 -- name: InsertConnection :execrows
 INSERT INTO connections (
     id, kind, user_id, session_id, role_id, ip, user_agent, node_id, device_id, preset_id, tuned_freq,
-    mode, secondary_mode, opened_at, last_heartbeat_at, closed_at, close_reason, bytes_out, bytes_in
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    mode, secondary_mode, opened_at, last_heartbeat_at, closed_at, close_reason, bytes_out, bytes_in, hub_issued
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (id) DO NOTHING;
 
 -- name: GetConnection :one

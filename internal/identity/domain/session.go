@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"net/netip"
 	"strings"
 	"time"
@@ -338,11 +339,14 @@ func (s *Session) RevokeReason() RevokeReason { return s.revokeReason }
 
 // Ref returns the public handle of the session: what users and admins see
 // to revoke it, and the `sid` claim of access tokens. The session id itself
-// is never sent to clients (§7.1).
+// is never sent to clients (§7.1). It is token.SessionRef of the id (the
+// first 128 bits of the SHA-256 of its text form, in hex), the reference
+// nodes receive in ctl.revocations; the domain cannot import the protocol
+// package, so a wire test pins the two together.
 func (s *Session) Ref() string {
-	h := sha256.Sum256(append([]byte("rx-sid:"), s.id.Bytes()...))
+	h := sha256.Sum256([]byte(s.id.String()))
 
-	return base64.RawURLEncoding.EncodeToString(h[:16])
+	return hex.EncodeToString(h[:16])
 }
 
 // Persistent reports whether the session was opened with "remember me": its

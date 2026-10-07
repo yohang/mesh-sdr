@@ -11,15 +11,16 @@ import (
 )
 
 // NewNodeRouter returns the API of an enrolled node. Every peer already
-// passed mTLS with the hub CA; /control checks for the hub identity itself.
-// /ws (media) arrives with GRID-012.
-func NewNodeRouter(control http.Handler, logger *slog.Logger) http.Handler {
+// passed mTLS with the hub CA; /control checks for the hub identity and /ws
+// (media) for the gateway identity themselves.
+func NewNodeRouter(control, media http.Handler, logger *slog.Logger) http.Handler {
 	r := chi.NewRouter()
 	r.Use(problem.Recoverer(logger))
 	r.NotFound(problem.NotFound)
 	r.MethodNotAllowed(problem.MethodNotAllowed)
 
 	r.Method(http.MethodGet, "/control", control)
+	r.Method(http.MethodGet, "/ws", media)
 
 	health := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -31,6 +31,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/http/api/apitest"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // API-002 contract tests: the whole hub, its REST API validated against
@@ -55,6 +56,10 @@ type contractHub struct {
 func newContractHub(t *testing.T, v *apitest.Validator, users map[string]identitydomain.Role) *contractHub {
 	t.Helper()
 
+	if !GatewayAvailable() {
+		t.Skip("the hub needs the gateway (nogateway build)")
+	}
+
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -68,9 +73,12 @@ func newContractHub(t *testing.T, v *apitest.Validator, users map[string]identit
 	writeFile(t, filepath.Join(dir, "tls", "ca.key"), string(keyPEM), 0o600)
 	writeFile(t, filepath.Join(dir, "hub.toml"), `schema_version = 1
 [hub]
-listen = "127.0.0.1:0"
 url = "http://hub.test"
 allow_insecure_url = true
+[gateway]
+tls_mode = "off"
+http_listen = "127.0.0.1:0"
+storage_dir = "`+filepath.Join(dir, "caddy")+`"
 [db]
 dsn = "sqlite://`+filepath.Join(dir, "hub.db")+`"
 [tls]
@@ -446,7 +454,30 @@ func happyPaths(t *testing.T, h *contractHub) {
 	expect(admin, http.MethodGet, "/nodes/attic/capabilities", nil, http.StatusOK)
 	expect(admin, http.MethodGet, "/devices", nil, http.StatusOK)
 	expect(admin, http.MethodGet, "/devices/hf", nil, http.StatusOK)
-	expect(admin, http.MethodPost, "/auth/token", map[string]any{"node_id": "attic", "cid": "c1"}, http.StatusOK)
+	// POST /auth/token refreshes a media connection the gateway authz
+	// issued to the caller (ADR 0012): here an anonymous one, so another
+	// caller is refused.
+	cid, err := shared.NewUUIDv7(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := domain.NewConnection(domain.ConnectionInfo{
+		ID: cid, Kind: domain.ConnectionMedia, IP: "10.0.0.1", NodeID: "attic", HubIssued: true,
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := gridsqlite.NewConnectionRepository(h.adapter).Open(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+
+	expect(anon, http.MethodPost, "/auth/token", map[string]any{"node_id": "attic", "cid": cid.String()}, http.StatusOK)
+
+	if _, res := admin.do(http.MethodPost, "/auth/token", map[string]any{"node_id": "attic", "cid": cid.String()}); res["code"] != "invalid_connection" {
+		t.Errorf("token for another caller's connection = %v", res)
+	}
 
 	// A device its node no longer reports can be forgotten.
 	dev.MarkUnavailable(now)
@@ -461,6 +492,17 @@ func happyPaths(t *testing.T, h *contractHub) {
 	}
 
 	expect(admin, http.MethodDelete, "/devices/hf", nil, http.StatusNoContent)
+
+	// A revoked node stays listed until it is deleted (GRID-015).
+	revoked := expect(admin, http.MethodPost, "/nodes/attic/revoke", nil, http.StatusOK)
+	if revoked["enrollment_state"] != "revoked" {
+		t.Errorf("revoked node = %v", revoked)
+	}
+
+	if _, res := admin.do(http.MethodPost, "/nodes/attic/revoke", nil); res["code"] != "node_revoked" {
+		t.Errorf("second revocation = %v", res)
+	}
+
 	expect(admin, http.MethodDelete, "/nodes/attic", nil, http.StatusNoContent)
 
 	// Settings, retention and receiver images (ADR 0010).

@@ -95,6 +95,16 @@ func (h *CertHolder) Get() *tls.Certificate {
 	return h.cert
 }
 
+// Serial returns the serial of the current leaf ("" when unknown).
+func (h *CertHolder) Serial() string {
+	c := h.Get()
+	if c == nil || c.Leaf == nil {
+		return ""
+	}
+
+	return SerialString(c.Leaf)
+}
+
 // Set replaces the certificate.
 func (h *CertHolder) Set(cert tls.Certificate) {
 	h.mu.Lock()

@@ -220,6 +220,104 @@ func (s *Nodes) Delete(ctx context.Context, actor, id string) error {
 	return nil
 }
 
+// Revoke ends the trust of an enrolled node (GRID-015): its certificate
+// and any renewed one pending are added to the revocation list, the node
+// stays listed as revoked (re-enroll it with IssueToken), and its control
+// channel is closed after the revocation list is pushed, so the node closes
+// its media connections. Config-declared nodes can be revoked too: it is
+// not a deletion.
+func (s *Nodes) Revoke(ctx context.Context, actor, id string) (*domain.Node, error) {
+	n, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	now := s.now()
+
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		v := n.Version()
+		pending := n.PendingCertificate()
+
+		cert, err := n.Revoke(now)
+		if err != nil {
+			return err
+		}
+
+		if err := revoke(ctx, s.revocations, pending, n.ID(), "revoked", now); err != nil {
+			return err
+		}
+
+		if err := revoke(ctx, s.revocations, cert, n.ID(), "revoked", now); err != nil {
+			return err
+		}
+
+		return s.repo.Save(ctx, n, v)
+	})
+	if err != nil {
+		s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.revoke", Target: id, Result: ResultDenied, Detail: map[string]string{"reason": err.Error()}})
+
+		return nil, fmt.Errorf("revoke node %s: %w", id, err)
+	}
+
+	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "node.revoke", Target: id, Result: ResultOK})
+	s.logger.InfoContext(ctx, "node revoked", slog.String("node_id", id))
+	s.linksOrNone().Drop(ctx, n.ID())
+
+	return n, nil
+}
+
+// EnrollLocal records the certificate the hub CA issued in-process for the
+// local node of the all role (GRID-003): no token exchange, the hub and the
+// node share the process. The previous certificates of the node, if any,
+// are revoked. A revoked node is not re-enrolled: an admin must issue a new
+// enrollment token first.
+func (s *Nodes) EnrollLocal(ctx context.Context, id string, cert domain.CertInfo) error {
+	n, err := s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if n.Enrollment() == domain.EnrollmentRevoked {
+		return domain.ErrNodeRevoked
+	}
+
+	tok, err := domain.NewEnrollmentToken()
+	if err != nil {
+		return err
+	}
+
+	now := s.now()
+
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		v := n.Version()
+
+		if err := revoke(ctx, s.revocations, n.PendingCertificate(), n.ID(), "reissued", now); err != nil {
+			return err
+		}
+
+		if err := revoke(ctx, s.revocations, n.Certificate(), n.ID(), "reissued", now); err != nil {
+			return err
+		}
+
+		n.IssueEnrollmentKey(tok.Key(), time.Time{}, now)
+
+		if err := n.CompleteEnrollment(tok.Key(), n.URL(), cert, now); err != nil {
+			return err
+		}
+
+		return s.repo.Save(ctx, n, v)
+	})
+	if err != nil {
+		return fmt.Errorf("enroll local node %s: %w", id, err)
+	}
+
+	s.audit.Record(ctx, AuditRecord{ActorKind: ActorSystem, Action: "node.enroll", Target: id, Result: ResultOK,
+		Detail: map[string]string{"via": "local", "cert_serial": cert.Serial()}})
+	s.linksOrNone().Wake()
+
+	return nil
+}
+
 // IssueToken issues a new enrollment token (re-enrollment). The current
 // certificate, if any, is revoked.
 func (s *Nodes) IssueToken(ctx context.Context, actor, id string) (Issued, error) {

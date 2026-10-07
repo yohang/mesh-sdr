@@ -34,6 +34,22 @@ func testConnections(t *testing.T, r Repos) {
 	b := open("attic", t0)
 	c := open("garden", t0)
 
+	// The gateway authz marks the rows it issues.
+	issued := must(shared.NewUUIDv7(t0))
+	if _, err := repo.Open(ctx, must(domain.NewConnection(domain.ConnectionInfo{
+		ID: issued, Kind: domain.ConnectionMedia, IP: "192.0.2.1", NodeID: "cellar", HubIssued: true,
+	}, t0))); err != nil {
+		t.Fatal(err)
+	}
+
+	if !must(repo.Get(ctx, issued)).Info().HubIssued || must(repo.Get(ctx, a)).Info().HubIssued {
+		t.Error("hub_issued not stored")
+	}
+
+	if n, err := repo.CloseNode(ctx, domain.MustNodeID("cellar"), domain.CloseNodeLost, t0); err != nil || n != 1 {
+		t.Fatalf("close node = %d, %v", n, err)
+	}
+
 	if n, err := repo.Heartbeat(ctx, []shared.UUID{a, b}, t0.Add(time.Minute)); err != nil || n != 2 {
 		t.Fatalf("heartbeat = %d, %v", n, err)
 	}
@@ -70,7 +86,7 @@ func testConnections(t *testing.T, r Repos) {
 		t.Errorf("open list = %d", len(list))
 	}
 
-	if n, err := repo.DeleteClosedBefore(ctx, t0.Add(3*time.Minute)); err != nil || n != 3 {
+	if n, err := repo.DeleteClosedBefore(ctx, t0.Add(3*time.Minute)); err != nil || n != 4 {
 		t.Fatalf("retention = %d, %v", n, err)
 	}
 

@@ -15,7 +15,7 @@ func TestSchema(t *testing.T) {
 		def      any
 		lockable bool
 	}{
-		{RoleHub, []string{"schema_version"}, []string{"hub", "listen"}, "0.0.0.0:8073", false},
+		{RoleHub, []string{"schema_version"}, []string{"gateway", "https_listen"}, ":443", false},
 		{RoleHub, []string{"schema_version"}, []string{"db", "dsn"}, "sqlite:///var/lib/meshsdr/hub.db", false},
 		{RoleHub, []string{"schema_version"}, []string{"settings", "ui", "theme_mode"}, "auto", true},
 		{RoleNode, []string{"schema_version"}, []string{"node", "listen"}, "0.0.0.0:8074", false},

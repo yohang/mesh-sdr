@@ -6,6 +6,8 @@
 // Fields added by ADR 0008 beyond the spec tables are additive and optional.
 package ctl
 
+import "github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
+
 // Hello opens a session (hub → node).
 type Hello struct {
 	HubID      string   `json:"hub_id"`
@@ -32,12 +34,32 @@ type Ack struct {
 	UptoSeq int64 `json:"upto_seq"`
 }
 
-// Revocations lists revoked sessions, users and certificate serials
-// (hub → node).
+// KeysUpdate is ctl.keys.update (hub → node, §5.8): the public keys that
+// verify access tokens (a JWKS), the issuer the tokens carry (hub.url, also
+// the only browser Origin the node accepts) and the kids revoked before
+// their time. It replaces the node's previous key set; a node that has not
+// received one since boot refuses media connects (hub_unavailable).
+type KeysUpdate struct {
+	Issuer      string      `json:"issuer"`
+	Keys        []token.JWK `json:"keys"`
+	RevokedKids []string    `json:"revoked_kids"`
+}
+
+// Revoked is one revoked session or user, with the hub time of its
+// revocation in Unix milliseconds. Tokens issued (iat, hub clock) at or
+// before that time are refused; later ones (a new sign-in) are not.
+type Revoked struct {
+	ID string `json:"id"`
+	At int64  `json:"at"`
+}
+
+// Revocations lists revoked sessions (token.SessionRef of the session id),
+// users (user ids) and certificate serials (hub → node). The node closes the
+// media connections whose token matches within 1 s (§5.8).
 type Revocations struct {
-	Sessions    []string `json:"sessions"`
-	Users       []string `json:"users"`
-	CertSerials []string `json:"cert_serials"`
+	Sessions    []Revoked `json:"sessions"`
+	Users       []Revoked `json:"users"`
+	CertSerials []string  `json:"cert_serials"`
 }
 
 // CertRenew carries a renewed node certificate (hub → node): base64 standard

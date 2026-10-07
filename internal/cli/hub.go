@@ -17,6 +17,10 @@ import (
 	"github.com/yohang/mesh-sdr/internal/wire"
 )
 
+// errNoGateway fails the hub and all roles fast in a nogateway build.
+var errNoGateway = errors.New("this meshsdr binary was built without the gateway (-tags nogateway): " +
+	"it can only run the node role; use the full binary for the hub and all roles")
+
 func (a *app) newHubCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hub",
@@ -58,6 +62,10 @@ func (a *app) runHub(ctx context.Context) error {
 		return err
 	}
 
+	if !wire.GatewayAvailable() {
+		return errNoGateway
+	}
+
 	adapter, err := wire.OpenDB(ctx, cfg.DB, logger)
 	if err != nil {
 		return err
@@ -69,7 +77,7 @@ func (a *app) runHub(ctx context.Context) error {
 		return fmt.Errorf("refusing to start: %w", err)
 	}
 
-	logger.InfoContext(ctx, "hub starting", slog.String("listen", cfg.Hub.Listen), slog.String("url", cfg.Hub.URL))
+	logger.InfoContext(ctx, "hub starting", slog.String("url", cfg.Hub.URL), slog.String("tls_mode", cfg.Gateway.TLSMode))
 
 	hub, err := wire.Hub(ctx, cfg, meta.Origins, logger, adapter)
 	if err != nil {
@@ -77,10 +85,7 @@ func (a *app) runHub(ctx context.Context) error {
 	}
 
 	if u := hub.SetupURL(); u != "" {
-		// Not through the logger: the URL carries a secret token.
-		_, _ = fmt.Fprintf(a.stderr, "\nNo admin account exists. Open this one-time URL within %d minutes to create the first admin:\n\n    %s\n\n"+
-			"Or create one on this host with `meshsdr hub user add <name> --role admin`. A restart issues a new URL.\n\n",
-			int(identityapp.SetupTTL.Minutes()), u)
+		a.printSetupURL(u)
 	}
 
 	if err := hub.Run(ctx); err != nil {
@@ -90,6 +95,14 @@ func (a *app) runHub(ctx context.Context) error {
 	logger.InfoContext(ctx, "hub stopped")
 
 	return nil
+}
+
+// printSetupURL prints the first-admin setup URL, not through the logger:
+// it carries a secret token.
+func (a *app) printSetupURL(u string) {
+	_, _ = fmt.Fprintf(a.stderr, "\nNo admin account exists. Open this one-time URL within %d minutes to create the first admin:\n\n    %s\n\n"+
+		"Or create one on this host with `meshsdr hub user add <name> --role admin`. A restart issues a new URL.\n\n",
+		int(identityapp.SetupTTL.Minutes()), u)
 }
 
 func (a *app) newMigrateCmd() *cobra.Command {

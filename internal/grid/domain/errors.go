@@ -29,4 +29,12 @@ var (
 	ErrCapabilitiesNotReported = shared.NewError(shared.KindNotFound, "capabilities_not_reported", "the node has not reported its capabilities yet")
 	ErrInvalidConnection       = shared.NewError(shared.KindInvalid, "invalid_connection", "invalid connection")
 	ErrConnectionNotFound      = shared.NewError(shared.KindNotFound, "connection_not_found", "connection not found")
+
+	// Gateway authz answers (§5.9, §5.16).
+	ErrNodeOffline       = shared.NewError(shared.KindUnavailable, "node_offline", "the node is offline")
+	ErrNodeIncompatible  = shared.NewError(shared.KindUnavailable, "node_incompatible", "the node runs an incompatible version")
+	ErrListenLoginNeeded = shared.NewError(shared.KindUnauthenticated, "unauthenticated", "sign in to listen to this node")
+	ErrListenForbidden   = shared.NewError(shared.KindForbidden, "forbidden", "no device of this node may be listened to")
+	ErrOriginDenied      = shared.NewError(shared.KindForbidden, "origin_denied", "origin not allowed")
+	ErrTokenRateLimited  = shared.NewError(shared.KindRateLimited, "rate_limited", "too many connections, retry later")
 )

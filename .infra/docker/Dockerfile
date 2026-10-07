@@ -73,21 +73,49 @@ RUN go mod download
 
 COPY . .
 
+# Two artifacts (ADR 0012): meshsdr with the embedded gateway (hub, node,
+# all) and meshsdr-node without it (-tags nogateway, node role only).
+# /etc/meshsdr/tls links to the data volume: the CA and node certificates
+# written by `meshsdr all` and `meshsdr node enroll` survive the container.
 RUN --mount=type=cache,target=/cache/go-build \
     go generate ./...; \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/meshsdr ./cmd/meshsdr; \
-    mkdir -p /out/var/lib/meshsdr
+    CGO_ENABLED=0 go build -tags nogateway -trimpath -ldflags="-s -w" -o /out/meshsdr-node ./cmd/meshsdr; \
+    if go list -deps -tags nogateway ./cmd/meshsdr | grep -q caddyserver; then \
+      echo "the nogateway build links Caddy" >&2; exit 1; \
+    fi; \
+    mkdir -p /out/var/lib/meshsdr/tls /out/etc/meshsdr; \
+    ln -s /var/lib/meshsdr/tls /out/etc/meshsdr/tls
 
 
+# Hub, node or all. Default: all (hub + local node). The gateway listens on
+# :443 with ACME for the host of hub.url (gateway.* keys to change it).
 FROM gcr.io/distroless/static-debian13:nonroot AS prod
 
 COPY --from=build --chown=nonroot:nonroot /out/var/lib/meshsdr /var/lib/meshsdr
 COPY .infra/docker/prod/etc/meshsdr /etc/meshsdr
+COPY --from=build /out/etc/meshsdr/ /etc/meshsdr/
 COPY --from=build /out/meshsdr /meshsdr
 
 VOLUME /var/lib/meshsdr
-# hub.listen, node.listen
-EXPOSE 8073 8074
+# gateway.https_listen (gateway.http_listen when set, :80)
+EXPOSE 443
 
 ENTRYPOINT ["/meshsdr"]
-CMD ["hub"]
+CMD ["all"]
+
+
+# Node only, without the gateway (published with the -node tag suffix).
+FROM gcr.io/distroless/static-debian13:nonroot AS prod-node
+
+COPY --from=build --chown=nonroot:nonroot /out/var/lib/meshsdr /var/lib/meshsdr
+COPY .infra/docker/prod/etc/meshsdr /etc/meshsdr
+COPY --from=build /out/etc/meshsdr/ /etc/meshsdr/
+COPY --from=build /out/meshsdr-node /meshsdr
+
+VOLUME /var/lib/meshsdr
+# node.listen
+EXPOSE 8074
+
+ENTRYPOINT ["/meshsdr"]
+CMD ["node"]

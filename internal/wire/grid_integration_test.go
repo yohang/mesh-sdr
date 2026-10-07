@@ -62,13 +62,46 @@ func eventually(t *testing.T, what string, timeout time.Duration, cond func() bo
 func run(t *testing.T, p *Process) (stop func()) {
 	t.Helper()
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	ln, err := p.Listen(ctx)
+	ln, err := p.Listen(context.Background())
 	if err != nil {
-		cancel()
 		t.Fatal(err)
 	}
+
+	return runOn(t, p, ln)
+}
+
+// runFront runs p behind its gateway until the test ends.
+func runFront(t *testing.T, p *Process) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	go func() { done <- p.Run(ctx) }()
+
+	t.Cleanup(func() {
+		cancel()
+
+		if err := <-done; err != nil {
+			t.Errorf("run: %v", err)
+		}
+	})
+
+	eventually(t, "gateway listening", 10*time.Second, func() bool {
+		c, err := net.Dial("tcp4", p.Addr())
+		if err == nil {
+			_ = c.Close()
+		}
+
+		return err == nil
+	})
+}
+
+// runOn serves p on ln (a hub without its gateway).
+func runOn(t *testing.T, p *Process, ln net.Listener) (stop func()) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan error, 1)
 
@@ -124,12 +157,35 @@ type gridEnv struct {
 	g        *hubGrid
 	nodeAddr string
 	ca       *pki.CA
+	// gatewayAddr is the plain listener of the gateway, when the hub runs
+	// behind it.
+	gatewayAddr string
 }
 
 func newGridEnv(t *testing.T, timings gridapp.Timings, tweaks ...func(*control.HubOptions)) *gridEnv {
 	t.Helper()
 
+	return newGridEnvWith(t, false, timings, tweaks...)
+}
+
+// newGridEnvWith builds the env; withGateway runs the hub behind its
+// embedded gateway (plain HTTP on a free port, hub.url on it).
+func newGridEnvWith(t *testing.T, withGateway bool, timings gridapp.Timings, tweaks ...func(*control.HubOptions)) *gridEnv {
+	t.Helper()
+
+	if !GatewayAvailable() {
+		t.Skip("the hub needs the gateway (nogateway build)")
+	}
+
 	hubDir, nodeDir := t.TempDir(), t.TempDir()
+
+	hubURL, hubID, gatewayAddr, gatewayCfg := "https://hub.example.org", "hub.example.org", "", ""
+	if withGateway {
+		gatewayAddr = freePort(t)
+		hubURL, hubID = "http://"+gatewayAddr, "127.0.0.1"
+		gatewayCfg = "[gateway]\ntls_mode = \"off\"\nhttp_listen = \"" + gatewayAddr + "\"\nstorage_dir = \"" +
+			filepath.Join(hubDir, "caddy") + "\"\n"
+	}
 
 	certPEM, keyPEM, err := pki.GenerateCA("test hub CA", time.Now())
 	if err != nil {
@@ -141,9 +197,9 @@ func newGridEnv(t *testing.T, timings gridapp.Timings, tweaks ...func(*control.H
 	writeFile(t, filepath.Join(hubDir, "tls", "ca.pem"), string(certPEM), 0o644)
 	writeFile(t, filepath.Join(hubDir, "tls", "ca.key"), string(keyPEM), 0o600)
 	writeFile(t, filepath.Join(hubDir, "hub.toml"), `schema_version = 1
-[hub]
-listen = "127.0.0.1:0"
-url = "https://hub.example.org"
+`+gatewayCfg+`[hub]
+url = "`+hubURL+`"
+allow_insecure_url = true
 [db]
 dsn = "sqlite://`+filepath.Join(hubDir, "hub.db")+`"
 [tls]
@@ -166,7 +222,7 @@ cert = "tls/node.pem"
 key = "tls/node.key"
 [hub_trust]
 ca_cert = "tls/ca.pem"
-hub_identity = "hub.example.org"
+hub_identity = "`+hubID+`"
 ca_fingerprint = "`+pki.FormatFingerprint(ca.Fingerprint())+`"
 [devices.hf]
 name = "HF"
@@ -200,9 +256,18 @@ sample_rates = [2_048_000]
 		t.Fatal(err)
 	}
 
-	run(t, p)
+	if withGateway {
+		runFront(t, p)
+	} else {
+		ln, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	return &gridEnv{hubCfg: hubCfg, nodeCfg: nodeCfg, adapter: adapter, g: g, nodeAddr: nodeAddr, ca: ca}
+		runOn(t, p, ln)
+	}
+
+	return &gridEnv{hubCfg: hubCfg, nodeCfg: nodeCfg, adapter: adapter, g: g, nodeAddr: nodeAddr, ca: ca, gatewayAddr: gatewayAddr}
 }
 
 // enrollNode adds the node on the hub and runs `node enroll` until the hub

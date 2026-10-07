@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -29,12 +30,19 @@ var discard = slog.New(slog.DiscardHandler)
 func serve(t *testing.T, p *wire.Process) string {
 	t.Helper()
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	ln, err := p.Listen(ctx)
+	ln, err := p.Listen(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	return serveOn(t, p, ln)
+}
+
+// serveOn runs p on ln (the hub handler without its gateway).
+func serveOn(t *testing.T, p *wire.Process, ln net.Listener) string {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan error, 1)
 
@@ -56,20 +64,35 @@ func serve(t *testing.T, p *wire.Process) string {
 	return ln.Addr().String()
 }
 
-func hub(t *testing.T, cfg config.Hub, a db.Adapter) *wire.Process {
+// hub serves the hub handler (without the gateway) on a random local port
+// and returns its base URL.
+func hub(t *testing.T, cfg config.Hub, a db.Adapter) string {
 	t.Helper()
 
-	cfg.Hub.URL = "http://" + cfg.Hub.Listen
-	cfg.Hub.AllowInsecureURL = true
-	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
-	cfg.Auth.TokenKeyDir = filepath.Join(t.TempDir(), "keys")
+	if !wire.GatewayAvailable() {
+		t.Skip("the hub needs the gateway (nogateway build)")
+	}
 
-	p, err := wire.Hub(context.Background(), cfg, config.Origins{}, discard, a)
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	return p
+	cfg.Hub.URL = "http://" + ln.Addr().String()
+	cfg.Hub.AllowInsecureURL = true
+	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
+	cfg.Gateway.TLSMode = config.TLSModeOff
+	cfg.Gateway.HTTPListen = "127.0.0.1:0"
+	cfg.Gateway.StorageDir = t.TempDir()
+	cfg.Auth.TokenKeyDir = filepath.Join(t.TempDir(), "keys")
+
+	p, err := wire.Hub(context.Background(), cfg, config.Origins{}, discard, a)
+	if err != nil {
+		_ = ln.Close()
+		t.Fatal(err)
+	}
+
+	return "http://" + serveOn(t, p, ln)
 }
 
 func get(t *testing.T, c *http.Client, url string) (int, string, []byte) {
@@ -96,11 +119,7 @@ func get(t *testing.T, c *http.Client, url string) (int, string, []byte) {
 }
 
 func TestHub(t *testing.T) {
-	cfg := config.DefaultHub()
-	cfg.Hub.Listen = "127.0.0.1:0"
-
-	addr := serve(t, hub(t, cfg, dbtest.NewSQLite(t)))
-	base := "http://" + addr
+	base := hub(t, config.DefaultHub(), dbtest.NewSQLite(t))
 
 	tests := []struct {
 		path   string
@@ -146,12 +165,9 @@ type downDB struct{ db.Adapter }
 func (downDB) Ping(context.Context) error { return errors.New("down") }
 
 func TestHubNotReady(t *testing.T) {
-	cfg := config.DefaultHub()
-	cfg.Hub.Listen = "127.0.0.1:0"
+	base := hub(t, config.DefaultHub(), downDB{dbtest.NewSQLite(t)})
 
-	addr := serve(t, hub(t, cfg, downDB{dbtest.NewSQLite(t)}))
-
-	status, _, body := get(t, http.DefaultClient, "http://"+addr+"/api/v1/healthz/ready")
+	status, _, body := get(t, http.DefaultClient, base+"/api/v1/healthz/ready")
 	if status != http.StatusServiceUnavailable || !json.Valid(body) {
 		t.Fatalf("got %d %s", status, body)
 	}
@@ -224,9 +240,7 @@ func TestOpenDB(t *testing.T) {
 // The login page renders in the app shell, with the shell's security
 // headers, and coexists with the shell's HEAD and 405 handling.
 func TestLoginPageInShell(t *testing.T) {
-	cfg := config.DefaultHub()
-	cfg.Hub.Listen = "127.0.0.1:0"
-	base := "http://" + serve(t, hub(t, cfg, dbtest.NewSQLite(t)))
+	base := hub(t, config.DefaultHub(), dbtest.NewSQLite(t))
 
 	do := func(method, path string) (*http.Response, string) {
 		t.Helper()
@@ -292,20 +306,17 @@ func TestLoginPageInShell(t *testing.T) {
 // pages, see a discreet "Sign in" entry, and protected pages ask them to
 // sign in.
 func TestHubWithoutAccounts(t *testing.T) {
-	cfg := config.DefaultHub()
-	cfg.Hub.Listen = "127.0.0.1:0"
-
-	addr := serve(t, hub(t, cfg, dbtest.NewSQLite(t)))
+	base := hub(t, config.DefaultHub(), dbtest.NewSQLite(t))
 	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 	for _, path := range []string{"/", "/policy", "/login", "/password/forgot"} {
-		status, _, b := get(t, c, "http://"+addr+path)
+		status, _, b := get(t, c, base+path)
 		if status != http.StatusOK || !strings.Contains(string(b), `href="/login"`) && path != "/login" {
 			t.Errorf("GET %s = %d", path, status)
 		}
 	}
 
-	_, _, b := get(t, c, "http://"+addr+"/api/v1/auth/session")
+	_, _, b := get(t, c, base+"/api/v1/auth/session")
 
 	var s map[string]any
 	if err := json.Unmarshal(b, &s); err != nil || s["authenticated"] != false {
@@ -313,7 +324,7 @@ func TestHubWithoutAccounts(t *testing.T) {
 	}
 
 	for _, path := range []string{"/account", "/admin/users"} {
-		if status, _, _ := get(t, c, "http://"+addr+path); status != http.StatusSeeOther {
+		if status, _, _ := get(t, c, base+path); status != http.StatusSeeOther {
 			t.Errorf("GET %s = %d, want a redirect to sign in", path, status)
 		}
 	}

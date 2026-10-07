@@ -39,20 +39,26 @@ func (c caInfo) Fingerprint() (string, error) {
 
 // hubGrid is the hub side of the grid module.
 type hubGrid struct {
-	ca         *pki.CA
-	hubID      string
-	nodes      *app.Nodes
-	history    *app.History
-	enrollment *app.Enrollment
-	tracker    *app.Tracker
-	control    *app.Control
-	status     *app.Status
-	caps       *app.Capabilities
-	devices    *app.Devices
-	presence   *app.Presence
-	manager    *control.Manager
-	startup    []func(ctx context.Context) error
-	workers    []func(ctx context.Context)
+	keys          *hubKeys
+	caPath        string
+	revocations   domain.RevocationRepository
+	nodeRepo      domain.NodeRepository
+	deviceRepo    domain.DeviceRepository
+	gatewayClient *pki.ClientSource
+	ca            *pki.CA
+	hubID         string
+	nodes         *app.Nodes
+	history       *app.History
+	enrollment    *app.Enrollment
+	tracker       *app.Tracker
+	control       *app.Control
+	status        *app.Status
+	caps          *app.Capabilities
+	devices       *app.Devices
+	presence      *app.Presence
+	manager       *control.Manager
+	startup       []func(ctx context.Context) error
+	workers       []func(ctx context.Context)
 }
 
 // HubID returns the hub id: the host of hub.url (ADR 0008 Q6).
@@ -147,11 +153,16 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		return nil, err
 	}
 
+	// The identity keyring is built after the grid; it is attached to keys
+	// once identity is wired (newHub).
+	keys := newHubKeys(now)
+
 	audit := newGridAuditor(adapter, now, logger)
 	nodeRepo := gridsqlite.NewNodeRepository(adapter)
 	revocations := gridsqlite.NewRevocationRepository(adapter)
 
 	g := &hubGrid{
+		keys:    keys,
 		ca:      ca,
 		hubID:   hubID,
 		history: app.NewHistory(),
@@ -162,6 +173,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 	capRepo := gridsqlite.NewCapabilityRepository(adapter)
 	connRepo := gridsqlite.NewConnectionRepository(adapter)
 	deviceRepo := gridsqlite.NewDeviceRepository(adapter)
+	g.nodeRepo, g.deviceRepo, g.revocations, g.caPath = nodeRepo, deviceRepo, revocations, cfg.TLS.CACert
 	g.devices = app.NewDevices(deviceRepo, audit, component(logger, "grid.app.devices"))
 
 	if ca != nil {
@@ -172,6 +184,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 			HubID: hubID, CA: ca, Client: pki.NewClientSource(ca, pki.KindHub, hubID, now),
 			Nodes: nodeRepo, Revocations: revocations, Control: g.control,
 			HeartbeatInterval: timings.HeartbeatInterval, Now: now, Logger: component(logger, "grid.infra.control"),
+			Keys: keys, Issuer: cfg.Hub.URL,
 		}
 		for _, t := range tweaks {
 			t(&hubOpts)

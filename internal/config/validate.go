@@ -9,6 +9,7 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -80,7 +81,7 @@ func (c *checker) log(l Log) {
 func (h *Hub) validate(o Origins) []Problem {
 	c := &checker{origins: o}
 
-	c.listen("hub.listen", h.Hub.Listen)
+	c.gateway(h)
 
 	switch u, err := url.Parse(h.Hub.URL); {
 	case h.Hub.URL == "":
@@ -201,6 +202,98 @@ func (c *checker) smtp(s SMTP) {
 		c.fail("smtp.from", CodeRequired, "smtp.from is required with smtp.host")
 	case err != nil || a.Address == "":
 		c.fail("smtp.from", CodeInvalidValue, fmt.Sprintf("invalid address %q", s.From))
+	}
+}
+
+// gateway checks the [gateway] table.
+func (c *checker) gateway(h *Hub) {
+	g := h.Gateway
+
+	switch g.Mode {
+	case "embedded":
+	case "sidecar":
+		c.fail("gateway.mode", CodeInvalidValue, "gateway.mode = sidecar is not implemented (ADR 0002): use embedded")
+	default:
+		c.enum("gateway.mode", g.Mode, "embedded")
+	}
+
+	c.enum("gateway.tls_mode", g.TLSMode, TLSModeACME, TLSModeFiles, TLSModeInternal, TLSModeOff)
+
+	if g.TLSMode == TLSModeOff {
+		if g.HTTPListen == "" {
+			c.fail("gateway.http_listen", CodeRequired, "gateway.http_listen is required with gateway.tls_mode = off")
+		}
+	} else {
+		if g.HTTPSListen == "" {
+			c.fail("gateway.https_listen", CodeRequired, "gateway.https_listen is required unless gateway.tls_mode = off")
+		} else {
+			c.listen("gateway.https_listen", g.HTTPSListen)
+		}
+	}
+
+	if g.HTTPListen != "" {
+		c.listen("gateway.http_listen", g.HTTPListen)
+	}
+
+	if g.HTTPListen != "" && g.HTTPListen == g.HTTPSListen && g.TLSMode != TLSModeOff {
+		c.fail("gateway.http_listen", CodeInvalidValue, "gateway.http_listen and gateway.https_listen must differ")
+	}
+
+	if g.TLSMode == TLSModeFiles {
+		if g.TLSCert == "" {
+			c.fail("gateway.tls_cert", CodeRequired, "gateway.tls_cert is required with gateway.tls_mode = files")
+		}
+
+		if g.TLSKey == "" {
+			c.fail("gateway.tls_key", CodeRequired, "gateway.tls_key is required with gateway.tls_mode = files")
+		} else {
+			c.privateKeyFile("gateway.tls_key", g.TLSKey)
+		}
+	}
+
+	if g.TLSMode == TLSModeACME {
+		if u, err := url.Parse(h.Hub.URL); err == nil && u.Hostname() != "" {
+			if host := u.Hostname(); net.ParseIP(host) != nil || !strings.Contains(host, ".") {
+				c.fail("gateway.tls_mode", CodeInvalidValue, fmt.Sprintf("ACME needs a public DNS name in hub.url, not %q: use files or internal", host))
+			}
+		}
+	}
+
+	if g.ACMECA != "" {
+		if u, err := url.Parse(g.ACMECA); err != nil || u.Scheme != "https" || u.Host == "" {
+			c.fail("gateway.acme_ca", CodeInvalidValue, "want the https URL of an ACME directory")
+		}
+	}
+
+	if g.StorageDir == "" {
+		c.fail("gateway.storage_dir", CodeRequired, "gateway.storage_dir is required")
+	}
+
+	if g.StreamCloseDelay.Duration() <= 0 {
+		c.fail("gateway.stream_close_delay", CodeInvalidValue, "want a positive duration")
+	}
+
+	if g.StreamTimeout.Duration() <= 0 {
+		c.fail("gateway.stream_timeout", CodeInvalidValue, "want a positive duration")
+	}
+
+	if g.MaxBody.Bytes() < 64<<10 {
+		c.fail("gateway.max_body", CodeInvalidValue, "want at least 64KiB")
+	}
+}
+
+// privateKeyFile checks that a private key file exists and is readable by
+// its owner only (mode 0600 or stricter).
+func (c *checker) privateKeyFile(key, path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		c.fail(key, CodeInvalidValue, fmt.Sprintf("cannot read %s: %v", path, err))
+
+		return
+	}
+
+	if info.Mode().Perm()&0o077 != 0 {
+		c.fail(key, CodeInsecureSecretFile, fmt.Sprintf("%s has mode %04o, want 0600", path, info.Mode().Perm()))
 	}
 }
 

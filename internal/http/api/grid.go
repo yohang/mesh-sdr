@@ -21,6 +21,7 @@ type NodeAdmin interface {
 	Update(ctx context.Context, actor, id string, name, url *string, disabled *bool, expectedVersion int) (*domain.Node, error)
 	Delete(ctx context.Context, actor, id string) error
 	IssueToken(ctx context.Context, actor, id string) (gridapp.Issued, error)
+	Revoke(ctx context.Context, actor, id string) (*domain.Node, error)
 }
 
 // CapabilityReports reads and refreshes capability reports.
@@ -197,6 +198,16 @@ func (h GridHandlers) DeleteNode(ctx context.Context, req DeleteNodeRequestObjec
 	}
 
 	return DeleteNode204Response{}, nil
+}
+
+// RevokeNode implements StrictServerInterface.
+func (h GridHandlers) RevokeNode(ctx context.Context, req RevokeNodeRequestObject) (RevokeNodeResponseObject, error) {
+	n, err := h.nodes.Revoke(ctx, actor, req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	return RevokeNode200JSONResponse(nodeDTO(n)), nil
 }
 
 // IssueNodeEnrollmentToken implements StrictServerInterface.

@@ -75,8 +75,8 @@ max_read_connections = 3
 		t.Errorf("log = %+v", cfg.Log)
 	}
 
-	if cfg.Hub.Listen != "0.0.0.0:8073" {
-		t.Errorf("hub.listen = %q, want default", cfg.Hub.Listen)
+	if cfg.Gateway.HTTPSListen != ":443" || cfg.Gateway.TLSMode != TLSModeACME {
+		t.Errorf("gateway = %+v, want the defaults", cfg.Gateway)
 	}
 
 	wantFiles := []string{"hub.toml", filepath.Join("hub.d", "10-a.toml"), filepath.Join("hub.d", "20-b.toml")}
@@ -86,7 +86,7 @@ max_read_connections = 3
 
 	origins := map[string]string{
 		"hub.url":                 "hub.toml:4",
-		"hub.listen":              "default",
+		"gateway.https_listen":    "default",
 		"db.dsn":                  filepath.Join("hub.d", "20-b.toml") + ":2",
 		"db.max_read_connections": filepath.Join("hub.d", "10-a.toml") + ":4",
 		"log.level":               "env:MESHSDR_LOG__LEVEL",
@@ -98,7 +98,7 @@ max_read_connections = 3
 		}
 	}
 
-	if !meta.Origins.Of("log.level").Locked() || meta.Origins.Of("hub.listen").Locked() {
+	if !meta.Origins.Of("log.level").Locked() || meta.Origins.Of("gateway.https_listen").Locked() {
 		t.Error("Locked() mismatch")
 	}
 
@@ -184,8 +184,8 @@ func TestLoadErrors(t *testing.T) {
 		},
 		{
 			name: "unknown key", role: RoleHub,
-			files: map[string]string{"hub.toml": minimalHub + "lisen = \":80\"\n"},
-			code:  CodeUnknownKey, origin: "hub.toml:5", message: `did you mean "hub.listen"?`,
+			files: map[string]string{"hub.toml": minimalHub + "ulr = \"https://x\"\n"},
+			code:  CodeUnknownKey, origin: "hub.toml:5", message: `did you mean "hub.url"?`,
 		},
 		{
 			name: "unknown table", role: RoleHub,
@@ -195,8 +195,8 @@ func TestLoadErrors(t *testing.T) {
 		{
 			name: "unknown env var", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub},
-			env:   map[string]string{"MESHSDR_HUB__LISTN": ":80"},
-			code:  CodeUnknownEnv, origin: "env:MESHSDR_HUB__LISTN", message: "MESHSDR_HUB__LISTEN",
+			env:   map[string]string{"MESHSDR_GATEWAY__HTTP_LISTN": ":80"},
+			code:  CodeUnknownEnv, origin: "env:MESHSDR_GATEWAY__HTTP_LISTN", message: "MESHSDR_GATEWAY__HTTP_LISTEN",
 		},
 		{
 			name: "parse error", role: RoleHub,
@@ -254,8 +254,33 @@ func TestLoadErrors(t *testing.T) {
 		},
 		{
 			name: "bad listen", role: RoleHub,
-			files: map[string]string{"hub.toml": minimalHub + "listen = \"nope\"\n"},
-			code:  CodeInvalidValue, origin: "hub.toml:5",
+			files: map[string]string{"hub.toml": minimalHub + "[gateway]\nhttps_listen = \"nope\"\n"},
+			code:  CodeInvalidValue, origin: "hub.toml:6",
+		},
+		{
+			name: "gateway sidecar", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[gateway]\nmode = \"sidecar\"\n"},
+			code:  CodeInvalidValue, origin: "hub.toml:6", message: "not implemented",
+		},
+		{
+			name: "tls off without a plain listener", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[gateway]\ntls_mode = \"off\"\n"},
+			code:  CodeRequired, origin: "default",
+		},
+		{
+			name: "tls files without a certificate", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[gateway]\ntls_mode = \"files\"\n"},
+			code:  CodeRequired, origin: "default",
+		},
+		{
+			name: "acme on an IP address", role: RoleHub,
+			files: map[string]string{"hub.toml": "schema_version = 1\n[hub]\nurl = \"https://10.0.0.1\"\n"},
+			code:  CodeInvalidValue, origin: "default", message: "public DNS name",
+		},
+		{
+			name: "bad listen policy", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[settings]\nlisten_policy = \"everyone\"\n"},
+			code:  CodeInvalidValue, origin: "hub.toml:6",
 		},
 		{
 			name: "argon2 memory below floor", role: RoleHub,
@@ -544,5 +569,36 @@ func TestSMTP(t *testing.T) {
 
 	if _, err := load("[smtp]\nhost = \"mailpit\"\nport = 1025\nfrom = \"a@b.example\"\ntls = \"none\"\nallow_insecure = true\n", nil); err != nil {
 		t.Errorf("explicitly insecure relay refused: %v", err)
+	}
+}
+
+// The operator key of the public listener must be a 0600 file.
+func TestGatewayKeyFileMode(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"hub.toml":    minimalHub + "[gateway]\ntls_mode = \"files\"\ntls_cert = \"tls/pub.pem\"\ntls_key = \"tls/pub.key\"\n",
+		"tls/pub.pem": "cert", "tls/pub.key": "key",
+	})
+
+	if _, _, err := LoadHub(Options{Dir: dir, Env: map[string]string{}}); err != nil {
+		t.Fatalf("0600 key: %v", err)
+	}
+
+	if err := os.Chmod(filepath.Join(dir, "tls", "pub.key"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := LoadHub(Options{Dir: dir, Env: map[string]string{}})
+
+	var cerr *Error
+	if !errors.As(err, &cerr) || cerr.Problems[0].Code != CodeInsecureSecretFile || cerr.Problems[0].Key != "gateway.tls_key" {
+		t.Fatalf("world-readable key: %v", err)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "tls", "pub.key")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := LoadHub(Options{Dir: dir, Env: map[string]string{}}); !errors.As(err, &cerr) || cerr.Problems[0].Key != "gateway.tls_key" {
+		t.Fatalf("missing key: %v", err)
 	}
 }

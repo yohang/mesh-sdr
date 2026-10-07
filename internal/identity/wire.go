@@ -271,7 +271,7 @@ func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error
 	}
 
 	tokens := app.NewTokens(app.TokensDeps{
-		Signer: keys, Devices: devices, Binder: d.Binder, Settings: settings.Defaults{},
+		Signer: keys, Devices: devices, Binder: d.Binder, Settings: values,
 		Limiter: memory.NewKeyLimiter(tokenEvery, tokenBurst, memory.DefaultCapacity),
 		Issuer:  d.Config.Hub.URL, TTL: d.Config.Auth.TokenTTL.Duration(), Now: d.Now,
 		Logger: component(d.Logger, "identity.app.tokens"),

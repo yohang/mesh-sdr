@@ -1,6 +1,8 @@
 package http_test
 
 import (
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -206,5 +208,32 @@ func TestAPIPathsAnswerProblems(t *testing.T) {
 
 	if rec.Body.String() != "html 404\n" {
 		t.Errorf("GET /apis = %q, want the module's 404", rec.Body.String())
+	}
+}
+
+func TestLimitBody(t *testing.T) {
+	h := httpserver.LimitBody(10)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(r.Body); err != nil {
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+
+				return
+			}
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	for _, tc := range []struct {
+		body string
+		want int
+	}{{"small", http.StatusNoContent}, {"far too large for the limit", http.StatusRequestEntityTooLarge}} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(tc.body)))
+
+		if rec.Code != tc.want {
+			t.Errorf("%q: status %d, want %d", tc.body, rec.Code, tc.want)
+		}
 	}
 }

@@ -22,6 +22,10 @@ x-hub: &hub
     MESHSDR_SETTINGS__RECEIVER__HELP_URL: http://hub-auto:8073/about
     # The checker signs in several times per hub from one address.
     MESHSDR_SETTINGS__AUTH__LOGIN_RATE_LIMIT: 100/1m
+    # Plain HTTP on 8073 inside the compose network (the gateway's TLS is
+    # covered by the Go tests).
+    MESHSDR_GATEWAY__TLS_MODE: "off"
+    MESHSDR_GATEWAY__HTTP_LISTEN: ":8073"
   volumes:
     - data:/var/lib/meshsdr
 

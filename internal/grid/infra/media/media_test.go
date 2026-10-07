@@ -1,0 +1,411 @@
+package media_test
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/tls"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+
+	"github.com/yohang/mesh-sdr/internal/grid/infra/media"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
+)
+
+const (
+	issuer = "https://sdr.example.org"
+	origin = "https://sdr.example.org"
+	hubID  = "sdr.example.org"
+)
+
+type env struct {
+	srv    *media.Server
+	url    string
+	ca     *pki.CA
+	key    ed25519.PrivateKey
+	client *http.Client
+}
+
+func newEnv(t *testing.T) *env {
+	t.Helper()
+
+	certPEM, keyPEM, err := pki.GenerateCA("test", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ca, err := pki.ParseCA(certPEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nodeKey, _ := pki.GenerateKey()
+
+	csr, err := pki.CreateNodeCSR(nodeKey, "roof", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	der, err := ca.SignNodeCSR(csr, "roof", "127.0.0.1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	serverCert := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: nodeKey}
+
+	srv := media.NewServer(media.Options{
+		NodeID: "roof", Version: "1.0.0", GatewayIdentity: hubID, OwnSerial: func() string { return "AB" },
+		Now: time.Now, Logger: slog.New(slog.DiscardHandler),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() { srv.Run(ctx); close(done) }()
+
+	ts := httptest.NewUnstartedServer(srv)
+	ts.TLS = pki.NodeServerConfig(pki.NewCertHolder(serverCert), ca.Pool(), nil)
+	ts.StartTLS()
+
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		ts.Close()
+	})
+
+	_, key, _ := ed25519.GenerateKey(rand.Reader)
+
+	return &env{srv: srv, url: "wss" + strings.TrimPrefix(ts.URL, "https"), ca: ca, key: key, client: clientAs(t, ca, pki.KindGateway, hubID)}
+}
+
+func clientAs(t *testing.T, ca *pki.CA, kind, id string) *http.Client {
+	t.Helper()
+
+	cert, err := ca.MintClient(kind, id, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		MinVersion: tls.VersionTLS13, RootCAs: ca.Pool(), ServerName: pki.NodeServerName("roof"),
+		Certificates: []tls.Certificate{cert},
+	}}}
+}
+
+func (e *env) installKeys(t *testing.T, keys ...ed25519.PrivateKey) {
+	t.Helper()
+
+	u := ctl.KeysUpdate{Issuer: issuer}
+	for _, k := range keys {
+		u.Keys = append(u.Keys, token.NewJWK(k.Public().(ed25519.PublicKey)))
+	}
+
+	if err := e.srv.UpdateKeys(u); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (e *env) token(t *testing.T, cid string, exp time.Time, mut ...func(*token.Claims)) string {
+	t.Helper()
+
+	c := token.Claims{
+		Issuer: issuer, Audience: token.Audience("roof"), Subject: "u1", SessionID: token.SessionRef("s1"), ConnectionID: cid,
+		Roles:    []string{"listener"},
+		Scopes:   []token.Scope{{Device: "hf", Perms: []string{token.PermListen, token.PermDemod}}},
+		IssuedAt: time.Now().Add(-time.Second), NotBefore: time.Now().Add(-time.Second), ExpiresAt: exp,
+	}
+	for _, m := range mut {
+		m(&c)
+	}
+
+	raw, err := token.Sign(c, e.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return raw
+}
+
+// dial opens /ws; it returns the connection or the HTTP status of a refusal.
+func (e *env) dial(t *testing.T, client *http.Client, tok, cid, org string) (*websocket.Conn, int) {
+	t.Helper()
+
+	h := http.Header{}
+	h.Set("Origin", org)
+	h.Set(media.HeaderAccessToken, tok)
+	h.Set(media.HeaderCID, cid)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ws, resp, err := websocket.Dial(ctx, e.url+"/ws", &websocket.DialOptions{
+		HTTPClient: client, HTTPHeader: h, Subprotocols: []string{rxv1.Subprotocol},
+	})
+	if resp != nil && resp.Body != nil {
+		if err != nil {
+			b, _ := io.ReadAll(resp.Body)
+			t.Logf("refused: %d %s", resp.StatusCode, b)
+		}
+
+		_ = resp.Body.Close()
+	}
+
+	if err != nil {
+		if resp == nil {
+			t.Fatalf("dial: %v", err)
+		}
+
+		return nil, resp.StatusCode
+	}
+
+	t.Cleanup(func() { _ = ws.CloseNow() })
+
+	return ws, http.StatusSwitchingProtocols
+}
+
+func send(t *testing.T, ws *websocket.Conn, typ rxv1.MessageType, id string, payload any) {
+	t.Helper()
+
+	cid := rxv1.CorrelationID{}
+	if id != "" {
+		cid = rxv1.MustCorrelationID(id)
+	}
+
+	env, err := rxv1.NewEnvelope(typ, cid, time.Now().UnixMilli(), payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b, _ := env.MarshalJSON()
+
+	if err := ws.Write(context.Background(), websocket.MessageText, b); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func read(t *testing.T, ws *websocket.Conn) (rxv1.Envelope, error) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, b, err := ws.Read(ctx)
+	if err != nil {
+		return rxv1.Envelope{}, err
+	}
+
+	return rxv1.DecodeEnvelope(b)
+}
+
+func expectType(t *testing.T, ws *websocket.Conn, want rxv1.MessageType) rxv1.Envelope {
+	t.Helper()
+
+	env, err := read(t, ws)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	if env.Type() != want {
+		t.Fatalf("got %s %s, want %s", env.Type(), env.Payload(), want)
+	}
+
+	return env
+}
+
+func expectClose(t *testing.T, ws *websocket.Conn, want websocket.StatusCode) {
+	t.Helper()
+
+	for {
+		_, err := read(t, ws)
+		if err == nil {
+			continue
+		}
+
+		if got := websocket.CloseStatus(err); got != want {
+			t.Fatalf("close status = %d (%v), want %d", got, err, want)
+		}
+
+		return
+	}
+}
+
+func hello(t *testing.T, ws *websocket.Conn) map[string]any {
+	t.Helper()
+
+	send(t, ws, rxv1.TypeSessionHello, "", map[string]any{"client": map[string]string{"name": "test", "version": "1"}})
+
+	var w map[string]any
+	if err := json.Unmarshal(expectType(t, ws, rxv1.TypeSessionWelcome).Payload(), &w); err != nil {
+		t.Fatal(err)
+	}
+
+	return w
+}
+
+func TestRefusals(t *testing.T) {
+	e := newEnv(t)
+	exp := time.Now().Add(5 * time.Minute)
+
+	if _, st := e.dial(t, e.client, e.token(t, "c1", exp), "c1", origin); st != http.StatusServiceUnavailable {
+		t.Fatalf("no keys: status %d, want 503", st)
+	}
+
+	e.installKeys(t, e.key)
+
+	_, other, _ := ed25519.GenerateKey(rand.Reader)
+
+	cases := []struct {
+		name   string
+		client *http.Client
+		tok    string
+		cid    string
+		origin string
+		want   int
+	}{
+		{"hub certificate", clientAs(t, e.ca, pki.KindHub, hubID), e.token(t, "c1", exp), "c1", origin, http.StatusForbidden},
+		{"other gateway", clientAs(t, e.ca, pki.KindGateway, "evil.example.org"), e.token(t, "c1", exp), "c1", origin, http.StatusForbidden},
+		{"origin", e.client, e.token(t, "c1", exp), "c1", "https://evil.example.org", http.StatusForbidden},
+		{"no token", e.client, "", "c1", origin, http.StatusUnauthorized},
+		{"expired", e.client, e.token(t, "c1", time.Now().Add(-time.Minute)), "c1", origin, http.StatusUnauthorized},
+		{"other node", e.client, e.token(t, "c1", exp, func(c *token.Claims) { c.Audience = token.Audience("shack") }), "c1", origin, http.StatusUnauthorized},
+		{"unknown key", e.client, func() string {
+			raw, _ := token.Sign(token.Claims{Issuer: issuer, Audience: token.Audience("roof"), ConnectionID: "c1", ExpiresAt: exp}, other)
+
+			return raw
+		}(), "c1", origin, http.StatusUnauthorized},
+		{"cid mismatch", e.client, e.token(t, "c1", exp), "c2", origin, http.StatusUnauthorized},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, st := e.dial(t, tc.client, tc.tok, tc.cid, tc.origin); st != tc.want {
+				t.Fatalf("status %d, want %d", st, tc.want)
+			}
+		})
+	}
+}
+
+func TestSession(t *testing.T) {
+	e := newEnv(t)
+	e.installKeys(t, e.key)
+
+	exp := time.Now().Add(5 * time.Minute)
+
+	ws, st := e.dial(t, e.client, e.token(t, "c1", exp), "c1", origin)
+	if st != http.StatusSwitchingProtocols {
+		t.Fatalf("status %d", st)
+	}
+
+	if _, st := e.dial(t, e.client, e.token(t, "c1", exp), "c1", origin); st != http.StatusConflict {
+		t.Fatalf("second use of a cid: status %d, want 409", st)
+	}
+
+	// Nothing but session.hello before the welcome.
+	send(t, ws, rxv1.TypeDeviceAttach, "a0", map[string]string{"device_id": "hf"})
+	expectType(t, ws, rxv1.TypeError)
+
+	w := hello(t, ws)
+	if w["cid"] != "c1" || w["user"].(map[string]any)["id"] != "u1" {
+		t.Fatalf("welcome = %v", w)
+	}
+
+	// Scope checks of device-scoped messages.
+	send(t, ws, rxv1.TypeDeviceAttach, "a1", map[string]string{"device_id": "vhf"})
+
+	if p := string(expectType(t, ws, rxv1.TypeError).Payload()); !strings.Contains(p, `"forbidden"`) {
+		t.Fatalf("attach out of scope: %s", p)
+	}
+
+	send(t, ws, rxv1.TypeDeviceRetune, "a2", map[string]string{"device_id": "hf"})
+
+	if p := string(expectType(t, ws, rxv1.TypeError).Payload()); !strings.Contains(p, `"forbidden"`) {
+		t.Fatalf("retune without the permission: %s", p)
+	}
+
+	// Refresh: another cid is refused, the same one is acknowledged.
+	send(t, ws, rxv1.TypeAuthRefresh, "r1", map[string]string{"token": e.token(t, "c9", exp)})
+
+	if p := string(expectType(t, ws, rxv1.TypeError).Payload()); !strings.Contains(p, "token_invalid") {
+		t.Fatalf("refresh of another cid: %s", p)
+	}
+
+	send(t, ws, rxv1.TypeAuthRefresh, "r2", map[string]string{"token": e.token(t, "c1", exp.Add(time.Minute))})
+	expectType(t, ws, rxv1.TypeAck)
+
+	// A revoked session is closed with 4403.
+	e.srv.Revoke(ctl.Revocations{Sessions: []ctl.Revoked{{ID: token.SessionRef("s1"), At: time.Now().UnixMilli()}}})
+	expectClose(t, ws, websocket.StatusCode(rxv1.CloseForbidden))
+
+	// Its tokens are refused afterwards.
+	if _, st := e.dial(t, e.client, e.token(t, "c2", exp), "c2", origin); st != http.StatusForbidden {
+		t.Fatalf("token of a revoked session: status %d, want 403", st)
+	}
+}
+
+func TestExpiry(t *testing.T) {
+	e := newEnv(t)
+	e.installKeys(t, e.key)
+
+	// Expired 28.5 s ago (exp has a 1 s resolution): accepted within the
+	// leeway, closed about 1.5 s later.
+	ws, st := e.dial(t, e.client, e.token(t, "c1", time.Now().Add(-token.Leeway+1500*time.Millisecond)), "c1", origin)
+	if st != http.StatusSwitchingProtocols {
+		t.Fatalf("status %d", st)
+	}
+
+	hello(t, ws)
+	expectClose(t, ws, websocket.StatusCode(rxv1.CloseUnauthenticated))
+}
+
+func TestWithdrawn(t *testing.T) {
+	e := newEnv(t)
+	e.installKeys(t, e.key)
+
+	exp := time.Now().Add(5 * time.Minute)
+
+	ws, _ := e.dial(t, e.client, e.token(t, "c1", exp), "c1", origin)
+	hello(t, ws)
+
+	// The node's own certificate serial is revoked.
+	e.srv.Revoke(ctl.Revocations{CertSerials: []string{"AB"}})
+	expectClose(t, ws, websocket.StatusCode(rxv1.CloseForbidden))
+
+	if _, st := e.dial(t, e.client, e.token(t, "c2", exp), "c2", origin); st != http.StatusServiceUnavailable {
+		t.Fatalf("withdrawn node: status %d, want 503", st)
+	}
+
+	// A new control channel installs keys again.
+	e.installKeys(t, e.key)
+
+	ws, _ = e.dial(t, e.client, e.token(t, "c3", exp), "c3", origin)
+	hello(t, ws)
+
+	// Dropping the signing key closes its sessions.
+	_, other, _ := ed25519.GenerateKey(rand.Reader)
+	e.installKeys(t, other)
+	expectClose(t, ws, websocket.StatusCode(rxv1.CloseUnauthenticated))
+
+	if e.srv.Count() != 0 {
+		// The registry is cleaned when the handler returns.
+		deadline := time.Now().Add(2 * time.Second)
+		for e.srv.Count() != 0 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if n := e.srv.Count(); n != 0 {
+		t.Fatalf("open sessions = %d", n)
+	}
+
+}

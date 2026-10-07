@@ -62,6 +62,19 @@ func NewRouter(logger *slog.Logger, api http.Handler, modules ...Module) http.Ha
 	return r
 }
 
+// LimitBody caps request bodies at n bytes (gateway.max_body, §4.6).
+func LimitBody(n int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil && r.Body != http.NoBody {
+				r.Body = http.MaxBytesReader(w, r.Body, n)
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // Server timeouts. WriteTimeout stays unset: it would cut long-lived
 // WebSocket and streaming responses. Hijacked (WebSocket) connections must
 // clear the read deadline set by ReadTimeout.

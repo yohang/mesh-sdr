@@ -5,6 +5,8 @@ package app
 import (
 	"context"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
 )
 
 // Clock returns the current time.
@@ -42,6 +44,34 @@ type AuditRecord struct {
 // Auditor records security-relevant actions.
 type Auditor interface {
 	Record(ctx context.Context, r AuditRecord)
+}
+
+// VerificationKeys are the published access-token keys (§5.8).
+type VerificationKeys struct {
+	Keys        []token.JWK
+	RevokedKids []string
+}
+
+// KeySource gives the public keys that verify access tokens, pushed to the
+// nodes over ctl.keys.update. The identity keyring implements it (ACC-007);
+// an interim adapter holds one ephemeral key per hub process.
+type KeySource interface {
+	VerificationKeys(ctx context.Context) (VerificationKeys, error)
+	// Changed is signalled when the keys change (rotation, revocation). A
+	// nil channel means the keys never change.
+	Changed() <-chan struct{}
+}
+
+// TokenIssuer signs access tokens with the current signing key.
+type TokenIssuer interface {
+	Issue(ctx context.Context, c token.Claims) (string, error)
+}
+
+// RevocationBroadcaster pushes revoked sessions (token.SessionRef) and users
+// to every node, which close the matching media connections and refuse the
+// tokens issued up to at (hub clock; zero means now) (§5.8).
+type RevocationBroadcaster interface {
+	BroadcastRevocations(ctx context.Context, at time.Time, sessions, users []string)
 }
 
 // Timings are the grid durations that become DB settings later (ADR 0008

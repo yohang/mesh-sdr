@@ -15,7 +15,7 @@ import (
 func (a *app) newHubNodeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "node",
-		Short: "Manage nodes (add, list, show, token, disable, enable, remove)",
+		Short: "Manage nodes (add, list, show, token, disable, enable, revoke, remove)",
 		Args:  cobra.NoArgs,
 	}
 
@@ -102,6 +102,22 @@ func (a *app) newHubNodeCmd() *cobra.Command {
 		},
 		a.newNodeToggleCmd("disable", true),
 		a.newNodeToggleCmd("enable", false),
+		&cobra.Command{
+			Use:   "revoke <id>",
+			Short: "Revoke the certificate of a node: it stays listed as revoked until re-enrolled (node token)",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return a.withNodes(cmd.Context(), func(ctx context.Context, s *gridapp.Nodes) error {
+					if _, err := s.Revoke(ctx, gridapp.ActorCLI, args[0]); err != nil {
+						return err
+					}
+
+					a.print("node %s revoked", args[0])
+
+					return nil
+				})
+			},
+		},
 		&cobra.Command{
 			Use:   "remove <id>",
 			Short: "Remove an admin-added node and revoke its certificate",
