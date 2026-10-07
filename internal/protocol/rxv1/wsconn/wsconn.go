@@ -20,6 +20,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/sendq"
 )
 
 // Errors returned by Conn.
@@ -147,6 +148,10 @@ type Options struct {
 	PingInterval time.Duration
 	// PongTimeout closes the connection when a pong does not arrive in time.
 	PongTimeout time.Duration
+	// Queue, when set, replaces the JSON queue: the §6.8 media send queue
+	// (JSON, audio, meters, FFT). MaxQueueBytes is then unused; a queue
+	// failure closes the connection with 4413.
+	Queue *sendq.Queue
 }
 
 // Conn is a WebSocket carrying rx.v1 envelopes.
@@ -224,6 +229,16 @@ func (c *Conn) Send(env rxv1.Envelope) error {
 	default:
 	}
 
+	if q := c.opts.Queue; q != nil {
+		if err := q.PushJSON(b); err != nil {
+			c.closeWith(rxv1.CloseSlowConsumer, "slow consumer", ErrSlowConsumer)
+
+			return ErrSlowConsumer
+		}
+
+		return nil
+	}
+
 	c.mu.Lock()
 	if c.pending+len(b) > c.opts.MaxQueueBytes {
 		c.mu.Unlock()
@@ -246,6 +261,10 @@ func (c *Conn) Send(env rxv1.Envelope) error {
 
 // Pending returns the number of queued outbound bytes.
 func (c *Conn) Pending() int {
+	if q := c.opts.Queue; q != nil {
+		return q.Pending()
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -253,6 +272,12 @@ func (c *Conn) Pending() int {
 }
 
 func (c *Conn) writeLoop() {
+	if c.opts.Queue != nil {
+		c.queueLoop()
+
+		return
+	}
+
 	for {
 		select {
 		case <-c.closed:
@@ -286,6 +311,65 @@ func (c *Conn) writeLoop() {
 			}
 		}
 	}
+}
+
+// queueLoop writes the items of the media send queue in its priority order.
+func (c *Conn) queueLoop() {
+	q := c.opts.Queue
+
+	for {
+		select {
+		case <-c.closed:
+			return
+		case <-q.Ready():
+		}
+
+		if q.Err() != nil {
+			c.closeWith(rxv1.CloseSlowConsumer, "slow consumer", ErrSlowConsumer)
+
+			return
+		}
+
+		for {
+			it, ok := q.Pop()
+			if !ok {
+				break
+			}
+
+			if err := c.writeItem(c.ctx, it); err != nil {
+				c.closeWith(rxv1.CloseGoingAway, "write failed", fmt.Errorf("wsconn: write: %w", err))
+
+				return
+			}
+		}
+	}
+}
+
+// writeItem writes one queue item; a binary frame is its header followed
+// by its shared payload, in one message and without copying the payload.
+func (c *Conn) writeItem(ctx context.Context, it sendq.Item) error {
+	if !it.Binary() {
+		return c.ws.Write(ctx, websocket.MessageText, it.Text)
+	}
+
+	w, err := c.ws.Writer(ctx, websocket.MessageBinary)
+	if err != nil {
+		return err
+	}
+
+	if _, err := w.Write(it.Header); err != nil {
+		_ = w.Close()
+
+		return err
+	}
+
+	if _, err := w.Write(it.Payload); err != nil {
+		_ = w.Close()
+
+		return err
+	}
+
+	return w.Close()
 }
 
 func (c *Conn) pingLoop() {
@@ -379,6 +463,15 @@ func (c *Conn) closeWith(code rxv1.CloseCode, reason string, err error) {
 func (c *Conn) flush() {
 	ctx, cancel := context.WithTimeout(c.ctx, FlushTimeout)
 	defer cancel()
+
+	if q := c.opts.Queue; q != nil {
+		for {
+			it, ok := q.Pop()
+			if !ok || c.writeItem(ctx, it) != nil {
+				return
+			}
+		}
+	}
 
 	for {
 		c.mu.Lock()
