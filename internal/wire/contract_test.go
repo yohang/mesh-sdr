@@ -565,9 +565,30 @@ func schedulingPaths(t *testing.T, h *contractHub, admin *apiClient, expect func
 	expect(admin, http.MethodGet, "/schedules", nil, http.StatusOK)
 	expect(admin, http.MethodGet, "/schedules/"+sid, nil, http.StatusOK)
 
+	// A second device of attic, with its own schedule.
+	ctx := context.Background()
+	devices := gridsqlite.NewDeviceRepository(h.adapter)
+
+	vhf, err := domain.NewReportedDevice(domain.MustNodeID("attic"), domain.DeviceSpec{
+		ID: domain.MustDeviceID("vhf"), Name: "VHF", Type: "rtl_sdr", Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000,
+		SampleRates: []int64{2_048_000},
+	}, 1, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := devices.Save(ctx, vhf); err != nil {
+		t.Fatal(err)
+	}
+
+	other := expect(admin, http.MethodPost, "/schedules", map[string]any{
+		"device_id": "vhf", "preset_id": pid, "start_minute": 0, "end_minute": 0,
+	}, http.StatusCreated)
+	otherID, _ := other["id"].(string)
+
 	// Operators read the schedules of the devices they operate; other
 	// users see none.
-	if list := expect(h.signedIn("operator", 10), http.MethodGet, "/schedules", nil, http.StatusOK); len(list["items"].([]any)) != 1 {
+	if list := expect(h.signedIn("operator", 10), http.MethodGet, "/schedules", nil, http.StatusOK); len(list["items"].([]any)) != 2 {
 		t.Errorf("operator schedules = %v", list)
 	}
 
@@ -575,9 +596,48 @@ func schedulingPaths(t *testing.T, h *contractHub, admin *apiClient, expect func
 		t.Errorf("listener schedules = %v", list)
 	}
 
+	// An operator of hf only sees the schedules of hf.
+	listener := "/users/" + userID(t, expect(admin, http.MethodGet, "/users", nil, http.StatusOK), "listener")
+	expect(admin, http.MethodPut, listener+"/roles", map[string]any{"grants": []any{map[string]any{"role": "operator", "device_id": "hf"}}}, http.StatusOK)
+
+	scoped := h.signedIn("listener", 10)
+	if list := expect(scoped, http.MethodGet, "/schedules", nil, http.StatusOK); len(list["items"].([]any)) != 1 || list["items"].([]any)[0].(map[string]any)["id"] != sid {
+		t.Errorf("hf operator schedules = %v", list)
+	}
+
+	expect(scoped, http.MethodGet, "/schedules/"+sid, nil, http.StatusOK)
+
+	if res := expect(scoped, http.MethodGet, "/schedules/"+otherID, nil, http.StatusNotFound); res["code"] != "schedule_not_found" {
+		t.Errorf("another device's schedule = %v", res)
+	}
+
+	expect(admin, http.MethodDelete, "/schedules/"+otherID, nil, http.StatusNoContent)
+	vhf.MarkUnavailable(time.Now())
+
+	if err := devices.Save(ctx, vhf); err != nil {
+		t.Fatal(err)
+	}
+
+	if ok, err := devices.DeleteMissing(ctx, vhf.ID()); err != nil || !ok {
+		t.Fatalf("delete vhf = %v, %v", ok, err)
+	}
+
 	expect(admin, http.MethodPut, "/schedules/"+sid, map[string]any{
 		"version": 1, "device_id": "hf", "preset_id": pid, "start_minute": 0, "end_minute": 60, "priority": 2, "days_of_week": 31,
 	}, http.StatusOK)
+
+	// Optimistic concurrency: a stale version is refused.
+	if res := expect(admin, http.MethodPut, "/schedules/"+sid, map[string]any{
+		"version": 1, "device_id": "hf", "preset_id": pid, "start_minute": 0, "end_minute": 60,
+	}, http.StatusConflict); res["code"] != "version_conflict" {
+		t.Errorf("stale schedule version = %v", res)
+	}
+
+	if res := expect(admin, http.MethodPut, "/presets/"+pid, map[string]any{
+		"version": 7, "name": "20 m FT8", "center_freq": 14_074_000, "samp_rate": 2_048_000,
+	}, http.StatusConflict); res["code"] != "version_conflict" {
+		t.Errorf("stale preset version = %v", res)
+	}
 
 	// A preset that no longer fits its schedule's device disables the
 	// schedule (GRID-016).
