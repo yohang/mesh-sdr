@@ -50,6 +50,11 @@ jobs:
       - name: Test
         run: docker run --rm -v "$PWD:/app" mesh-sdr-dev:ci go test ./...
 
+      # The cgo DSP, the device runtime and the media send queue run
+      # concurrent goroutines over shared rings (ADR 0019).
+      - name: Test (race)
+        run: docker run --rm -v "$PWD:/app" mesh-sdr-dev:ci go test -race ./internal/dsp/... ./internal/radio/... ./internal/protocol/rxv1/sendq/...
+
       # The node-only build (ADR 0012) must not link Caddy.
       - name: Test (nogateway)
         run: |
@@ -98,11 +103,19 @@ jobs:
           # meshsdr-node: node only, built with -tags nogateway.
           - target: prod-node
             suffix: "-node"
+          # Corresponding sources of the bundled GPL components (§8.7).
+          - target: sources
+            suffix: "-sources"
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v7
+
+      # arm64 images are built under QEMU on main and tags only; pull
+      # requests build amd64 (ADR 0019).
+      - uses: docker/setup-qemu-action@v4
+        if: github.event_name != 'pull_request'
 
       - uses: docker/setup-buildx-action@v4
 
@@ -134,6 +147,7 @@ jobs:
           context: .
           file: .infra/docker/Dockerfile
           target: ${{ matrix.target }}
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
