@@ -35,7 +35,8 @@ type Options struct {
 	DeferSecrets bool
 	// CADefaults gives the hub the CA paths of the all role (tls/ca.pem,
 	// tls/ca.key) when both files exist in the config dir: the hub admin
-	// subcommands use it, so they work on an all deployment.
+	// subcommands (migrate, node, user, keys) use it, so they work on an
+	// all deployment; `hub` and `hub config check` do not.
 	CADefaults bool
 }
 

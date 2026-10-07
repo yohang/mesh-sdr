@@ -52,7 +52,8 @@ func (a *app) configCheck(role config.Role) error {
 
 	switch role {
 	case config.RoleHub:
-		opts.CADefaults = true
+		// Like the bare hub (no CA defaults): the check validates what
+		// `meshsdr hub` would run.
 		_, meta, err = config.LoadHub(opts)
 	case config.RoleNode:
 		_, meta, err = config.LoadNode(opts)
