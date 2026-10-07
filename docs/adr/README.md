@@ -24,4 +24,5 @@ ADRs are written with Status `Proposed` (spikes) and switch to `Accepted` once t
 | [0018](0018-events-websocket-and-admin-nodes.md) | Hub events WebSocket, presence registry and Admin › Nodes | Accepted |
 | [0019](0019-node-runtime.md) | Node runtime (devices, DSP, media streaming, images) | Accepted |
 | [0020](0020-presets-schedules-reporting.md) | Presets, schedules, desired state and the reporting engine | Accepted |
+| [0021](0021-gateway-on-net-http.md) | Gateway on net/http, without Caddy | Accepted |
 | [0022](0022-simplified-config-and-storage.md) | Simplified configuration and storage | Accepted |
