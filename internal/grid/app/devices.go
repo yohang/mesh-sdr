@@ -11,18 +11,35 @@ import (
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
+// DeviceListener is told about registry changes, inside their transaction
+// (GRID-016: the schedules of stale, removed or changed devices).
+type DeviceListener interface {
+	// DeviceReported runs for every device of a capability report.
+	DeviceReported(ctx context.Context, d *domain.Device) error
+	// DevicesStale runs for the devices a report no longer lists.
+	DevicesStale(ctx context.Context, ids []domain.DeviceID) error
+	// DevicesRemoved runs for devices deleted from the registry.
+	DevicesRemoved(ctx context.Context, ids []domain.DeviceID) error
+}
+
 // Devices mirrors node device definitions and states into the read-only
 // device registry (§7.1 devices, GRID-016).
 type Devices struct {
-	repo   domain.DeviceRepository
-	audit  Auditor
-	logger *slog.Logger
+	repo     domain.DeviceRepository
+	audit    Auditor
+	logger   *slog.Logger
+	listener DeviceListener
+	tx       Transactor
 }
 
 // NewDevices returns the service.
 func NewDevices(repo domain.DeviceRepository, audit Auditor, logger *slog.Logger) *Devices {
 	return &Devices{repo: repo, audit: audit, logger: logger}
 }
+
+// SetListener registers the registry listener and the transactor that
+// makes a forget and its consequences atomic (composition time only).
+func (s *Devices) SetListener(l DeviceListener, tx Transactor) { s.listener, s.tx = l, tx }
 
 // SpecOf converts a reported device.
 func SpecOf(d ctl.Device) (domain.DeviceSpec, error) {
@@ -75,6 +92,12 @@ func (s *Devices) Sync(ctx context.Context, n *domain.Node, caps ctl.Capabilitie
 		if err := s.repo.Save(ctx, d); err != nil {
 			return err
 		}
+
+		if s.listener != nil {
+			if err := s.listener.DeviceReported(ctx, d); err != nil {
+				return err
+			}
+		}
 	}
 
 	known, err := s.repo.ListByNode(ctx, n.ID())
@@ -82,15 +105,22 @@ func (s *Devices) Sync(ctx context.Context, n *domain.Node, caps ctl.Capabilitie
 		return err
 	}
 
+	var stale []domain.DeviceID
+
 	for _, d := range known {
 		if !reported[d.ID()] && d.MarkUnavailable(now) {
 			if err := s.repo.Save(ctx, d); err != nil {
 				return err
 			}
 
+			stale = append(stale, d.ID())
 			s.logger.InfoContext(ctx, "device no longer reported by its node", slog.String("device_id", d.ID().String()),
 				slog.String("node_id", n.ID().String()))
 		}
+	}
+
+	if s.listener != nil && len(stale) > 0 {
+		return s.listener.DevicesStale(ctx, stale)
 	}
 
 	return nil
@@ -163,8 +193,8 @@ func (s *Devices) NodeStatusChanged(ctx context.Context, id domain.NodeID, statu
 // Forget deletes a device its node no longer reports (ADM-009) and audits
 // it. A device still reported, or whose node is only offline, cannot be
 // forgotten (domain.ErrDeviceStillReported): it is removed from the node
-// config first. Presets are device-independent and not affected; there are
-// no schedules yet to disable.
+// config first. Presets are device-independent and not affected; the
+// schedules of the device are disabled (listener).
 func (s *Devices) Forget(ctx context.Context, actor, id string) error {
 	d, err := s.Get(ctx, id)
 	if err != nil {
@@ -176,13 +206,31 @@ func (s *Devices) Forget(ctx context.Context, actor, id string) error {
 		return domain.ErrDeviceStillReported
 	}
 
-	deleted, err := s.repo.DeleteMissing(ctx, d.ID())
-	if err != nil {
-		return err
+	forget := func(ctx context.Context) error {
+		deleted, err := s.repo.DeleteMissing(ctx, d.ID())
+		if err != nil {
+			return err
+		}
+
+		if !deleted {
+			return domain.ErrDeviceStillReported
+		}
+
+		if s.listener != nil {
+			return s.listener.DevicesRemoved(ctx, []domain.DeviceID{d.ID()})
+		}
+
+		return nil
 	}
 
-	if !deleted {
-		return domain.ErrDeviceStillReported
+	if s.tx != nil {
+		err = s.tx.WithinTx(ctx, forget)
+	} else {
+		err = forget(ctx)
+	}
+
+	if err != nil {
+		return err
 	}
 
 	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "device.forget", Target: d.ID().String(), Result: ResultOK,

@@ -19,6 +19,9 @@ const (
 	HintMissedHeartbeats = "missed_heartbeats"
 	HintClockOffset      = "clock_offset"
 	HintNTPUnsynced      = "ntp_unsynced"
+	// HintStateApplyFailed: the node refused the desired state of some
+	// devices, which keep their previous one (§4.9).
+	HintStateApplyFailed = "state_apply_failed"
 )
 
 // MaxClockOffset is the clock offset above which a node is degraded (§4.5).
@@ -82,6 +85,8 @@ func (s *Status) Evaluate(n *domain.Node, link LinkState, known bool, now time.T
 		return domain.StatusDegraded, HintClockOffset
 	case !link.NTPSynced:
 		return domain.StatusDegraded, HintNTPUnsynced
+	case len(link.StateErrors) > 0:
+		return domain.StatusDegraded, HintStateApplyFailed
 	case link.Compat.Level == domain.CompatOlder:
 		return domain.StatusDegraded, link.Compat.Hint
 	}

@@ -28,6 +28,7 @@ type Nodes struct {
 	ca          CAInfo
 	links       Links
 	logger      *slog.Logger
+	onDelete    []func(ctx context.Context, id domain.NodeID) error
 }
 
 // CAInfo exposes the hub CA fingerprint shown with enrollment tokens.

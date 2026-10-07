@@ -36,6 +36,9 @@ type HubOptions struct {
 	// no ctl.keys.update is sent and nodes refuse media connects.
 	Keys   app.KeySource
 	Issuer string
+	// State pushes the desired state of the devices (ADR 0020); nil sends
+	// none.
+	State *app.States
 
 	// Tunables; zero values take the spec defaults.
 	ReconcileEvery time.Duration
@@ -368,6 +371,20 @@ func (m *Manager) Probe(_ context.Context, id domain.NodeID) error {
 	return send(l.current().conn, rxv1.TypeCtlCapabilitiesProbe, rxv1.MustCorrelationID("probe"), ctl.Empty{})
 }
 
+// SendState implements app.StateSender: ctl.state.apply on the open
+// channel of id.
+func (m *Manager) SendState(_ context.Context, id domain.NodeID, st ctl.StateApply) error {
+	m.mu.Lock()
+	l, ok := m.links[id]
+	m.mu.Unlock()
+
+	if !ok || l.current() == nil {
+		return domain.ErrNodeUnavailable
+	}
+
+	return send(l.current().conn, rxv1.TypeCtlStateApply, rxv1.MustCorrelationID("state"), st)
+}
+
 // Connected reports whether a channel to id is up.
 func (m *Manager) Connected(id domain.NodeID) bool {
 	m.mu.Lock()
@@ -599,6 +616,12 @@ func (s *hubSession) run(ctx context.Context, l *link) error {
 
 	if !s.restricted {
 		s.maybeRenew(ctx)
+
+		if o.State != nil {
+			if err := o.State.Welcomed(ctx, s.id, welcome.LastAppliedRevision); err != nil {
+				s.logger.ErrorContext(ctx, "push desired state", slog.Any("error", err))
+			}
+		}
 	}
 
 	return s.loop(ctx, reads)
@@ -847,6 +870,10 @@ func (s *hubSession) handle(ctx context.Context, env rxv1.Envelope) (app.Event, 
 		s.onAck(ctx, env)
 
 		return app.Event{}, false
+	case rxv1.TypeCtlStateApplied:
+		s.onStateApplied(ctx, env)
+
+		return app.Event{}, false
 	}
 
 	seq, err := decode[ctl.SeqOnly](env)
@@ -857,6 +884,24 @@ func (s *hubSession) handle(ctx context.Context, env rxv1.Envelope) (app.Event, 
 	}
 
 	return app.Event{Seq: seq.Seq, Type: t, Payload: env.Payload()}, true
+}
+
+// onStateApplied records the node's answer to a desired state; it is not
+// an event (no seq).
+func (s *hubSession) onStateApplied(ctx context.Context, env rxv1.Envelope) {
+	o := s.m.o
+
+	a, err := decode[ctl.StateApplied](env)
+	if err != nil {
+		sendError(s.conn, err)
+
+		return
+	}
+
+	if o.State != nil {
+		o.State.Applied(ctx, s.id, a)
+		o.Control.Touch(ctx, s.id)
+	}
 }
 
 func (s *hubSession) onAck(ctx context.Context, env rxv1.Envelope) {

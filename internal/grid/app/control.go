@@ -84,6 +84,10 @@ func (c *Control) OnLinkChange(f func(ctx context.Context, id domain.NodeID)) {
 	c.onLink = append(c.onLink, f)
 }
 
+// Touch runs the link-change callbacks of id (the node answered a
+// desired state, for example).
+func (c *Control) Touch(ctx context.Context, id domain.NodeID) { c.linkChanged(ctx, id) }
+
 func (c *Control) linkChanged(ctx context.Context, id domain.NodeID) {
 	for _, f := range c.onLink {
 		f(ctx, id)
