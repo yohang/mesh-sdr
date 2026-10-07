@@ -196,7 +196,14 @@ func (m *Pages) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := m.d.Service.Delete(r.Context(), p.ID().String())
+	version, verr := strconv.Atoi(r.PostForm.Get("version"))
+	if verr != nil {
+		m.d.Render.Error(w, r, http.StatusBadRequest)
+
+		return
+	}
+
+	err := m.d.Service.Delete(r.Context(), p.ID().String(), version)
 	if err == nil {
 		redirect(w, r, "/admin/presets?done=deleted")
 
@@ -210,6 +217,8 @@ func (m *Pages) delete(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, ErrPresetInUse) && errors.As(err, &de):
 		msg = sentence(de.Message())
+	case errors.Is(err, ErrVersionConflict):
+		msg = "This preset was changed meanwhile: check it before deleting it."
 	case errors.Is(err, ErrPresetNotFound):
 		m.d.Render.Error(w, r, http.StatusNotFound)
 

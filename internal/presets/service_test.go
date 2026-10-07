@@ -94,12 +94,16 @@ func TestCreateReplaceDelete(t *testing.T) {
 	}
 
 	sc.using = []shared.UUID{sc.disabled[0]}
-	if err := s.Delete(ctx, a.ID().String()); !errors.Is(err, presets.ErrPresetInUse) {
+	if err := s.Delete(ctx, a.ID().String(), 2); !errors.Is(err, presets.ErrPresetInUse) {
 		t.Errorf("delete in use: %v", err)
 	}
 
 	sc.using = nil
-	if err := s.Delete(ctx, a.ID().String()); err != nil {
+	if err := s.Delete(ctx, a.ID().String(), 1); !errors.Is(err, presets.ErrVersionConflict) {
+		t.Errorf("stale delete: %v", err)
+	}
+
+	if err := s.Delete(ctx, a.ID().String(), 2); err != nil {
 		t.Fatal(err)
 	}
 

@@ -18,12 +18,14 @@ import (
 func TestPresetPagesAccess(t *testing.T) {
 	h := newAdminHub(t, nil)
 	create := url.Values{"name": {"2 m"}, "center_freq": {"145000000"}, "samp_rate": {"2048000"}}
+	browsers := map[string]*browser{}
 
 	for _, tt := range []struct {
 		user string
 		want int
 	}{{"", http.StatusSeeOther}, {"lis", http.StatusForbidden}, {"op", http.StatusForbidden}, {"root", http.StatusOK}} {
 		b := h.browser(tt.user)
+		browsers[tt.user] = b
 
 		for _, path := range []string{"/admin/presets", "/admin/presets/new", "/admin/schedules"} {
 			if res, _ := b.do(http.MethodGet, path, "", "", nil); res.StatusCode != tt.want {
@@ -41,7 +43,30 @@ func TestPresetPagesAccess(t *testing.T) {
 		}
 	}
 
-	admin := h.browser("root")
+	// Edit and delete forms of an existing preset are refused too.
+	admin := browsers["root"]
+
+	res, _ := admin.form("/admin/presets", create, false)
+	edit := strings.TrimSuffix(res.Header.Get("Location"), "?done=created")
+
+	for _, user := range []string{"", "lis", "op"} {
+		b := browsers[user]
+
+		for path, values := range map[string]url.Values{
+			edit:             {"version": {"1"}, "name": {"Taken"}, "center_freq": {"145000000"}, "samp_rate": {"2048000"}},
+			edit + "/delete": {"version": {"1"}},
+		} {
+			if res, _ := b.form(path, values, false); res.StatusCode != http.StatusForbidden &&
+				!strings.HasPrefix(res.Header.Get("Location"), "/login") {
+				t.Errorf("%q POST %s = %d %s", user, path, res.StatusCode, res.Header.Get("Location"))
+			}
+		}
+	}
+
+	if n := h.count("SELECT count(*) FROM presets WHERE name = '2 m' AND version = 1"); n != 1 {
+		t.Errorf("the preset changed after refused forms (%d)", n)
+	}
+
 	token := admin.token
 	admin.token = "forged"
 
@@ -51,8 +76,8 @@ func TestPresetPagesAccess(t *testing.T) {
 
 	admin.token = token
 
-	if n := h.count("SELECT count(*) FROM presets"); n != 0 {
-		t.Errorf("%d presets created by refused forms", n)
+	if n := h.count("SELECT count(*) FROM presets"); n != 1 {
+		t.Errorf("%d presets, want only the admin's", n)
 	}
 }
 
@@ -122,7 +147,7 @@ func TestPresetPages(t *testing.T) {
 		t.Fatalf("delete page = %d", res.StatusCode)
 	}
 
-	if res, body := admin.form(edit+"/delete", url.Values{}, false); res.StatusCode != http.StatusConflict || !strings.Contains(body, "schedules") {
+	if res, body := admin.form(edit+"/delete", url.Values{"version": {"2"}}, false); res.StatusCode != http.StatusConflict || !strings.Contains(body, "schedules") {
 		t.Fatalf("delete of a preset in use = %d %s", res.StatusCode, body)
 	}
 
@@ -130,7 +155,12 @@ func TestPresetPages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if res, _ := admin.form(edit+"/delete", url.Values{}, false); res.StatusCode != http.StatusSeeOther ||
+	if res, body := admin.form(edit+"/delete", url.Values{"version": {"1"}}, false); res.StatusCode != http.StatusConflict ||
+		!strings.Contains(body, "changed meanwhile") {
+		t.Fatalf("stale delete = %d %s", res.StatusCode, body)
+	}
+
+	if res, _ := admin.form(edit+"/delete", url.Values{"version": {"2"}}, false); res.StatusCode != http.StatusSeeOther ||
 		res.Header.Get("Location") != "/admin/presets?done=deleted" {
 		t.Fatalf("delete = %d %s", res.StatusCode, res.Header.Get("Location"))
 	}

@@ -182,6 +182,7 @@ templ deletePage(p *Preset, failure string) {
 	}
 	<p>Devices tuned to this preset keep their tuning. A preset that schedules use cannot be deleted.</p>
 	<form class="flex flex-wrap items-center gap-4" method="post" action={ templ.SafeURL("/admin/presets/" + p.ID().String() + "/delete") }>
+		<input type="hidden" name="version" value={ strconv.Itoa(p.Version()) }/>
 		<button type="submit" class="rounded border border-danger px-3 py-1 font-semibold text-danger">Delete the preset</button>
 		<a href={ templ.URL("/admin/presets/" + p.ID().String()) }>Cancel</a>
 	</form>
