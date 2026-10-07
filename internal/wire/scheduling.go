@@ -14,7 +14,6 @@ import (
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
-	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/schedules"
@@ -195,13 +194,6 @@ func (a scheduleDevices) All(ctx context.Context) ([]schedules.Device, error) {
 	return out, nil
 }
 
-// Limits implements api.DeviceLimits.
-func (a scheduleDevices) Limits(ctx context.Context, id string) (presets.DeviceLimits, bool, error) {
-	d, ok, err := a.Device(ctx, id)
-
-	return limitsOf(d), ok, err
-}
-
 func limitsOf(d schedules.Device) presets.DeviceLimits {
 	return presets.DeviceLimits{FreqMin: d.FreqMin, FreqMax: d.FreqMax, SampleRates: d.SampleRates}
 }
@@ -357,19 +349,6 @@ func ctlPreset(p *presets.Preset) ctl.Preset {
 	}
 
 	return out
-}
-
-// deviceScope implements api.DeviceScope: the operator role on the device
-// (global roles included).
-type deviceScope struct{}
-
-func (deviceScope) CanOperate(ctx context.Context, device string) bool {
-	id, err := shared.NewDeviceID(device)
-	if err != nil {
-		return false
-	}
-
-	return identityhttp.FromContext(ctx).Principal().HasOnDevice(identitydomain.RoleOperator, id)
 }
 
 // deviceSchedules adapts the schedules to the device page (grid/http).

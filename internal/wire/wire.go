@@ -409,8 +409,6 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		TokenHandlers:    api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
 		FeatureHandlers: api.NewFeatureHandlers(idm.HTTP, gridapp.NewFeatures(gridsqlite.NewDeviceRepository(adapter),
 			gridsqlite.NewCapabilityRepository(adapter), storeListenPolicy{store: settingsStore}, g.links())),
-		PresetHandlers:   api.NewPresetHandlers(sch.presets, scheduleDevices{repo: g.deviceRepo}),
-		ScheduleHandlers: api.NewScheduleHandlers(sch.schedules, deviceScope{}),
 	}
 
 	router := httpserver.NewRouter(

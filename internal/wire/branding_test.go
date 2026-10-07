@@ -86,8 +86,8 @@ func TestReceiverImages(t *testing.T) {
 	}
 
 	// The API takes JSON bodies only.
-	if res, _ := admin.do(http.MethodPost, "/api/v1/presets", ctype, body, nil); res.StatusCode != http.StatusUnsupportedMediaType {
-		t.Errorf("multipart POST /presets = %d", res.StatusCode)
+	if res, _ := admin.do(http.MethodPost, "/api/v1/auth/token", ctype, body, nil); res.StatusCode != http.StatusUnsupportedMediaType {
+		t.Errorf("multipart POST /auth/token = %d", res.StatusCode)
 	}
 
 	if res, raw := admin.do(http.MethodPost, "/admin/site/images/remove", "application/x-www-form-urlencoded", "slot=avatar", htmx); res.StatusCode != http.StatusOK ||

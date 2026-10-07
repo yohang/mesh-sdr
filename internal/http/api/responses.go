@@ -31,12 +31,3 @@ func (r rateLimited) write(w http.ResponseWriter) error {
 
 	return nil
 }
-
-// optString is nil for an empty string.
-func optString(s string) *string {
-	if s == "" {
-		return nil
-	}
-
-	return &s
-}
