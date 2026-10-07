@@ -258,9 +258,20 @@ func TestLoadErrors(t *testing.T) {
 			code:  CodeInvalidValue, origin: "hub.toml",
 		},
 		{
-			name: "gateway sidecar", role: RoleHub,
-			files: map[string]string{"hub.toml": minimalHub + "[gateway]\nmode = \"sidecar\"\n"},
-			code:  CodeInvalidValue, origin: "hub.toml", message: "not implemented",
+			// Keys of the Caddy gateway, removed by ADR 0021.
+			name: "removed gateway key", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[gateway]\nstream_close_delay = \"2h\"\n"},
+			code:  CodeUnknownKey, origin: "hub.toml",
+		},
+		{
+			name: "tls internal without the hub CA", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[gateway]\ntls_mode = \"internal\"\n"},
+			code:  CodeRequired, origin: "hub.toml", message: "tls.ca_cert",
+		},
+		{
+			name: "acme without storage", role: RoleHub,
+			files: map[string]string{"hub.toml": minimalHub + "[gateway]\nstorage_dir = \"\"\n"},
+			code:  CodeRequired, origin: "hub.toml",
 		},
 		{
 			name: "tls off without a plain listener", role: RoleHub,

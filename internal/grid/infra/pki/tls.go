@@ -10,12 +10,12 @@ import (
 	"time"
 )
 
-// ClientSource mints and caches a client certificate (hub or gateway),
-// minting a new one when 2/3 of its validity has elapsed.
-type ClientSource struct {
-	ca   *CA
-	kind string
-	id   string
+// CertSource mints and caches an in-memory certificate: a client
+// certificate (hub or gateway) or the public server certificate of
+// gateway.tls_mode = internal. It mints a new one when 2/3 of its validity
+// has elapsed.
+type CertSource struct {
+	mint func(now time.Time) (tls.Certificate, error)
 	now  func() time.Time
 
 	mu   sync.Mutex
@@ -23,18 +23,24 @@ type ClientSource struct {
 }
 
 // NewClientSource returns a source of urn:rx:<kind>:<id> client certificates.
-func NewClientSource(ca *CA, kind, id string, now func() time.Time) *ClientSource {
-	return &ClientSource{ca: ca, kind: kind, id: id, now: now}
+func NewClientSource(ca *CA, kind, id string, now func() time.Time) *CertSource {
+	return &CertSource{mint: func(t time.Time) (tls.Certificate, error) { return ca.MintClient(kind, id, t) }, now: now}
+}
+
+// NewServerSource returns a source of server certificates for host (a DNS
+// name or an IP address).
+func NewServerSource(ca *CA, host string, now func() time.Time) *CertSource {
+	return &CertSource{mint: func(t time.Time) (tls.Certificate, error) { return ca.MintServer(host, t) }, now: now}
 }
 
 // Get returns the current certificate.
-func (s *ClientSource) Get() (*tls.Certificate, error) {
+func (s *CertSource) Get() (*tls.Certificate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := s.now()
 	if s.cert == nil || RenewalDue(s.cert.Leaf, now) {
-		c, err := s.ca.MintClient(s.kind, s.id, now)
+		c, err := s.mint(now)
 		if err != nil {
 			return nil, err
 		}
@@ -51,7 +57,7 @@ type LeafCheck func(leaf *x509.Certificate) error
 // HubDialConfig is the TLS config of a hub connection to node nodeID: TLS
 // 1.3, the node's server name, chain to the CA, the node URI SAN, then
 // check. The client certificate comes from client.
-func HubDialConfig(client *ClientSource, roots *x509.CertPool, nodeID string, check LeafCheck) *tls.Config {
+func HubDialConfig(client *CertSource, roots *x509.CertPool, nodeID string, check LeafCheck) *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS13,
 		RootCAs:    roots,

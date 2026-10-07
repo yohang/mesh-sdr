@@ -47,7 +47,7 @@ type hubGrid struct {
 	revocations   domain.RevocationRepository
 	nodeRepo      domain.NodeRepository
 	deviceRepo    domain.DeviceRepository
-	gatewayClient *pki.ClientSource
+	gatewayClient *pki.CertSource
 	ca            *pki.CA
 	hubID         string
 	nodes         *app.Nodes

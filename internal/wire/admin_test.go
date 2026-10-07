@@ -35,13 +35,9 @@ type adminHub struct {
 func newAdminHub(t *testing.T, env map[string]string) *adminHub {
 	t.Helper()
 
-	if !wire.GatewayAvailable() {
-		t.Skip("the hub needs the gateway (nogateway build)")
-	}
-
 	dir := t.TempDir()
 	toml := "schema_version = 1\n[hub]\nurl = \"http://127.0.0.1\"\nallow_insecure_url = true\n" +
-		"[gateway]\ntls_mode = \"off\"\nhttp_listen = \"127.0.0.1:0\"\nstorage_dir = \"" + filepath.Join(dir, "caddy") + "\"\n" +
+		"[gateway]\ntls_mode = \"off\"\nhttp_listen = \"127.0.0.1:0\"\nstorage_dir = \"" + filepath.Join(dir, "acme") + "\"\n" +
 		"[auth.argon2]\nmemory_kib = 19456\niterations = 2\nparallelism = 1\n"
 
 	if err := os.WriteFile(filepath.Join(dir, "hub.toml"), []byte(toml), 0o600); err != nil {

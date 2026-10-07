@@ -82,10 +82,6 @@ func (a *app) runAll(ctx context.Context) error {
 		return err
 	}
 
-	if !wire.GatewayAvailable() {
-		return errNoGateway
-	}
-
 	keyPath, ok := preHub.TLS.CAKey.FilePath(dir)
 	if !ok {
 		return fmt.Errorf("the all role needs tls.ca_key as a { file = \"…\" } reference")

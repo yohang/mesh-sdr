@@ -25,7 +25,7 @@ import (
 type HubOptions struct {
 	HubID             string
 	CA                *pki.CA
-	Client            *pki.ClientSource
+	Client            *pki.CertSource
 	Nodes             domain.NodeRepository
 	Revocations       domain.RevocationRepository
 	Control           *app.Control
@@ -528,7 +528,7 @@ func (m *Manager) pin(ctx context.Context, n *domain.Node) (pki.LeafCheck, error
 // id: TLS 1.3, the gateway client certificate of client, the node server
 // name and identity, its pinned certificate and the revocation list. The
 // node must be enrolled and enabled.
-func (m *Manager) GatewayDialConfig(ctx context.Context, client *pki.ClientSource, id string) (*tls.Config, error) {
+func (m *Manager) GatewayDialConfig(ctx context.Context, client *pki.CertSource, id string) (*tls.Config, error) {
 	nid, err := domain.NewNodeID(id)
 	if err != nil {
 		return nil, err

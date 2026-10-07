@@ -211,14 +211,6 @@ func (c *checker) smtp(s SMTP) {
 func (c *checker) gateway(h *Hub) {
 	g := h.Gateway
 
-	switch g.Mode {
-	case "embedded":
-	case "sidecar":
-		c.fail("gateway.mode", CodeInvalidValue, "gateway.mode = sidecar is not implemented (ADR 0002): use embedded")
-	default:
-		c.enum("gateway.mode", g.Mode, "embedded")
-	}
-
 	c.enum("gateway.tls_mode", g.TLSMode, TLSModeACME, TLSModeFiles, TLSModeInternal, TLSModeOff)
 
 	if g.TLSMode == TLSModeOff {
@@ -267,12 +259,12 @@ func (c *checker) gateway(h *Hub) {
 		}
 	}
 
-	if g.StorageDir == "" {
-		c.fail("gateway.storage_dir", CodeRequired, "gateway.storage_dir is required")
+	if g.TLSMode == TLSModeACME && g.StorageDir == "" {
+		c.fail("gateway.storage_dir", CodeRequired, "gateway.storage_dir is required with gateway.tls_mode = acme")
 	}
 
-	if g.StreamCloseDelay.Duration() <= 0 {
-		c.fail("gateway.stream_close_delay", CodeInvalidValue, "want a positive duration")
+	if g.TLSMode == TLSModeInternal && h.TLS.CACert == "" {
+		c.fail("gateway.tls_mode", CodeRequired, "gateway.tls_mode = internal needs the hub CA (tls.ca_cert)")
 	}
 
 	if g.StreamTimeout.Duration() <= 0 {

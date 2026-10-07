@@ -17,10 +17,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/wire"
 )
 
-// errNoGateway fails the hub and all roles fast in a nogateway build.
-var errNoGateway = errors.New("this meshsdr binary was built without the gateway (-tags nogateway): " +
-	"it can only run the node role; use the full binary for the hub and all roles")
-
 func (a *app) newHubCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hub",
@@ -60,10 +56,6 @@ func (a *app) runHub(ctx context.Context) error {
 	cfg, meta, logger, err := a.loadHub(ctx)
 	if err != nil {
 		return err
-	}
-
-	if !wire.GatewayAvailable() {
-		return errNoGateway
 	}
 
 	adapter, err := wire.OpenDB(ctx, cfg.DB, logger)

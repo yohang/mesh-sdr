@@ -173,10 +173,6 @@ func newGridEnv(t *testing.T, timings gridapp.Timings, tweaks ...func(*control.H
 func newGridEnvWith(t *testing.T, withGateway bool, timings gridapp.Timings, tweaks ...func(*control.HubOptions)) *gridEnv {
 	t.Helper()
 
-	if !GatewayAvailable() {
-		t.Skip("the hub needs the gateway (nogateway build)")
-	}
-
 	hubDir, nodeDir := t.TempDir(), t.TempDir()
 
 	hubURL, hubID, gatewayAddr, gatewayCfg := "https://hub.example.org", "hub.example.org", "", ""
@@ -184,7 +180,7 @@ func newGridEnvWith(t *testing.T, withGateway bool, timings gridapp.Timings, twe
 		gatewayAddr = freePort(t)
 		hubURL, hubID = "http://"+gatewayAddr, "127.0.0.1"
 		gatewayCfg = "[gateway]\ntls_mode = \"off\"\nhttp_listen = \"" + gatewayAddr + "\"\nstorage_dir = \"" +
-			filepath.Join(hubDir, "caddy") + "\"\n"
+			filepath.Join(hubDir, "acme") + "\"\n"
 	}
 
 	certPEM, keyPEM, err := pki.GenerateCA("test hub CA", time.Now())
@@ -447,7 +443,7 @@ func TestGridEndToEnd(t *testing.T) {
 
 // nodeGet calls the enrolled node API with a client certificate; it
 // returns 0 when the TLS handshake fails.
-func nodeGet(t *testing.T, e *gridEnv, client *pki.ClientSource, path string) int {
+func nodeGet(t *testing.T, e *gridEnv, client *pki.CertSource, path string) int {
 	t.Helper()
 
 	cfg := pki.HubDialConfig(client, e.ca.Pool(), "attic", nil)

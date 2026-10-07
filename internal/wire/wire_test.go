@@ -69,10 +69,6 @@ func serveOn(t *testing.T, p *wire.Process, ln net.Listener) string {
 func hub(t *testing.T, cfg config.Hub, a *db.DB) string {
 	t.Helper()
 
-	if !wire.GatewayAvailable() {
-		t.Skip("the hub needs the gateway (nogateway build)")
-	}
-
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

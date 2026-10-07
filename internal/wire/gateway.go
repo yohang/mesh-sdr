@@ -3,8 +3,10 @@ package wire
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -29,10 +31,6 @@ const (
 	mintBurst    = 30
 )
 
-// GatewayAvailable reports whether this build embeds the gateway: the hub
-// and all roles need it.
-func GatewayAvailable() bool { return gateway.Available() }
-
 // gatewayAddr is the main public address, for logs.
 func gatewayAddr(g config.Gateway) string {
 	if g.TLSMode == config.TLSModeOff {
@@ -42,22 +40,35 @@ func gatewayAddr(g config.Gateway) string {
 	return g.HTTPSListen
 }
 
-// newGateway builds the embedded gateway serving router.
+// newGateway builds the gateway serving router.
 func newGateway(cfg config.Hub, logger *slog.Logger, router http.Handler, g *hubGrid) (*gateway.Gateway, error) {
 	gw := cfg.Gateway
 
-	return gateway.New(gateway.Options{
+	o := gateway.Options{
 		Config: gateway.Config{
 			HTTPSListen: gw.HTTPSListen, HTTPListen: gw.HTTPListen, TLSMode: gw.TLSMode,
 			CertFile: gw.TLSCert, KeyFile: gw.TLSKey, PublicURL: cfg.Hub.URL,
 			ACMEEmail: gw.ACMEEmail, ACMECA: gw.ACMECA, StorageDir: gw.StorageDir,
-			StreamCloseDelay: gw.StreamCloseDelay.Duration(), StreamTimeout: gw.StreamTimeout.Duration(),
-			LogLevel: cfg.Log.Level,
+			StreamTimeout: gw.StreamTimeout.Duration(), MaxBody: gw.MaxBody.Bytes(),
 		},
 		Hub:     router,
 		NodeTLS: g.gatewayDialConfig,
-		Logger:  logger,
-	})
+		Logger:  component(logger, "grid.infra.gateway"),
+	}
+
+	// gateway.tls_mode = internal: the public certificate comes from the
+	// hub CA, for the host of hub.url.
+	if gw.TLSMode == config.TLSModeInternal && g.ca != nil {
+		u, err := url.Parse(cfg.Hub.URL)
+		if err != nil {
+			return nil, fmt.Errorf("hub.url: %w", err)
+		}
+
+		src := pki.NewServerSource(g.ca, u.Hostname(), time.Now)
+		o.InternalCert = src.Get
+	}
+
+	return gateway.New(o)
 }
 
 // gatewayDialConfig is the TLS config of a gateway connection to a node.

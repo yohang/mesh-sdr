@@ -150,7 +150,7 @@ func TestMutualTLS(t *testing.T) {
 	srv.StartTLS()
 	defer srv.Close()
 
-	get := func(client *pki.ClientSource, roots *x509.CertPool, node string, check pki.LeafCheck) (string, error) {
+	get := func(client *pki.CertSource, roots *x509.CertPool, node string, check pki.LeafCheck) (string, error) {
 		c := &http.Client{Transport: &http.Transport{TLSClientConfig: pki.HubDialConfig(client, roots, node, check)}}
 
 		resp, err := c.Get(srv.URL)
