@@ -137,9 +137,13 @@ func (e *Engine) Start(t domain.Tuning) {
 
 // bind builds the channel of d for ep outside the lock and installs it if
 // ep is still the current run. An offset that no longer fits leaves the
-// demodulator silent until it is changed.
+// demodulator silent until it is changed. The channel is installed only if
+// the parameters it was built for are still current (a Set meanwhile
+// builds its own).
 func (e *Engine) bind(d *demod, ep *epoch) {
-	b, err := newBinding(ep, d.Params())
+	p, gen := d.state()
+
+	b, err := newBinding(ep, p)
 	if err != nil {
 		e.log.Warn("demodulator does not fit the new sample rate", slog.Any("error", err))
 	}
@@ -147,12 +151,9 @@ func (e *Engine) bind(d *demod, ep *epoch) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if e.ep != ep {
-		return
-	}
-
-	if _, ok := e.demods[d]; ok {
-		d.setBinding(b)
+	_, live := e.demods[d]
+	if (e.ep != ep || !live || !d.installFor(b, gen)) && b != nil {
+		b.ring.Close()
 	}
 }
 

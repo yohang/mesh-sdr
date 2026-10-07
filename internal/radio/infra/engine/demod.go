@@ -254,31 +254,73 @@ func (d *demod) Set(p app.DemodParams) error {
 		}
 	}
 
-	d.mu.Lock()
-	d.params = p
-	d.gen++
-	d.mu.Unlock()
-
-	if !channel {
-		d.poke()
-
-		return nil
-	}
-
+	// The parameters and their channel are published in one step, so the
+	// run loop never pairs the new parameters with the old channel. When
+	// the channel cannot be installed now (the run changed meanwhile), the
+	// old one is dropped and bind builds the new one.
 	e.mu.Lock()
 	current := e.ep
 	_, live := e.demods[d]
+	install := channel && live && b != nil && b.ep == current
 
-	if live && b != nil && b.ep == current {
-		d.setBinding(b)
+	d.mu.Lock()
+	d.params = p
+	d.gen++
+
+	var stale *binding
+	if channel {
+		stale = d.b
+		d.b = nil
+
+		if install {
+			d.b = b
+		}
 	}
+	d.mu.Unlock()
 	e.mu.Unlock()
 
-	if live && current != nil && (b == nil || b.ep != current) {
+	if stale != nil {
+		stale.ring.Close()
+	}
+
+	d.poke()
+
+	if channel && !install && live && current != nil {
 		e.bind(d, current)
 	}
 
 	return nil
+}
+
+// state returns the parameters and their generation.
+func (d *demod) state() (app.DemodParams, int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return d.params, d.gen
+}
+
+// installFor installs b if the parameters are still those of generation
+// gen; it reports whether it did.
+func (d *demod) installFor(b *binding, gen int) bool {
+	d.mu.Lock()
+	if d.gen != gen {
+		d.mu.Unlock()
+
+		return false
+	}
+
+	old := d.b
+	d.b = b
+	d.mu.Unlock()
+
+	if old != nil {
+		old.ring.Close()
+	}
+
+	d.poke()
+
+	return true
 }
 
 // Params implements app.Demod.
