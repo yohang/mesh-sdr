@@ -26,3 +26,4 @@ ADRs are written with Status `Proposed` (spikes) and switch to `Accepted` once t
 | [0020](0020-presets-schedules-reporting.md) | Presets, schedules, desired state and the reporting engine | Accepted |
 | [0021](0021-gateway-on-net-http.md) | Gateway on net/http, without Caddy | Accepted |
 | [0022](0022-simplified-config-and-storage.md) | Simplified configuration and storage | Accepted |
+| [0024](0024-scope-trim.md) | Backlog scope trim for a hobbyist product | Accepted |
