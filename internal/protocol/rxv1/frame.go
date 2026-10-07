@@ -177,6 +177,20 @@ func AppendFrame(dst []byte, h FrameHeader, payload []byte) ([]byte, error) {
 	return append(dst, payload...), nil
 }
 
+// AppendHeader appends only the header of a frame whose payload of
+// payloadLen bytes is written separately (a payload shared between
+// connections is never copied). It validates h like AppendFrame.
+func AppendHeader(dst []byte, h FrameHeader, payloadLen int) ([]byte, error) {
+	if err := h.Validate(); err != nil {
+		return dst, err
+	}
+	if payloadLen < 0 || HeaderSize+payloadLen > MaxFrameBytes {
+		return dst, fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, HeaderSize+payloadLen)
+	}
+	h.PayloadLen = uint32(payloadLen)
+	return appendHeader(dst, h), nil
+}
+
 func appendHeader(dst []byte, h FrameHeader) []byte {
 	dst = append(dst, Magic, FrameVersion, byte(h.Type), byte(h.Codec))
 	dst = binary.LittleEndian.AppendUint16(dst, h.StreamID)
