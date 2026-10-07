@@ -18,6 +18,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite"
+	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
 	fileshttp "github.com/yohang/mesh-sdr/internal/files/http"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
@@ -326,9 +327,16 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	// Grid ↔ identity (ACC-007, GRID-011/012): revoked sessions and users
 	// go to the nodes, and POST /auth/token refreshes only connections the
 	// gateway authz issued to the caller.
+	// Revoked sessions and users also end their events sockets at once
+	// (ADR 0016 decision 4).
+	broker := eventsapp.NewBroker()
+	revocations := revocationFanout{brokerRevocations{b: broker}}
+
 	if g.manager != nil {
-		ideps.Revocations = nodeRevocations{b: g.manager, now: now}
+		revocations = append(revocations, nodeRevocations{b: g.manager, now: now})
 	}
+
+	ideps.Revocations = revocations
 
 	ideps.Binder = connectionBinder{repo: gridsqlite.NewConnectionRepository(adapter)}
 
@@ -376,6 +384,14 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 			}
 		})
 	}
+
+	// Hub events WebSocket (ADR 0016, ADR 0018) and its grid producers.
+	events := newEventsModule(cfg.Hub.URL, broker, idm.HTTP,
+		gridapp.NewListenPolicies(gridsqlite.NewDeviceRepository(adapter), storeListenPolicy{store: settingsModule.Store}),
+		g.presence, now, logger)
+	settingsModule.Store.Subscribe(listenPolicyWatch(broker, settingsModule.Store.String("listen_policy")))
+	ge := g.publishEvents(broker, now, logger)
+	workers = append(workers, events.Run, ge.runPresence)
 
 	scheduler, retention, err := jobs(adapter, idm, sch, settingsModule.Store, auditLog, logger)
 	if err != nil {
@@ -432,6 +448,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Logger: component(logger, "grid.http.admin"),
 		}),
 		routes(func(r chi.Router) { r.Method(http.MethodGet, gateway.AuthzPath, authz) }),
+		events,
 		shellModule.HTTP,
 	)
 

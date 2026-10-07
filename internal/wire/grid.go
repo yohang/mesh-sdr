@@ -12,6 +12,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
+	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
 	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
@@ -311,4 +312,38 @@ func (g *hubGrid) applySettings(base app.Timings, s gridSettings) {
 	}
 
 	g.presence.SetTimings(t)
+}
+
+// publishEvents connects the grid producers of hub events: status
+// transitions (after the device registry listener), committed node event
+// batches, admin node changes, enrollments, forgotten devices and presence
+// changes.
+func (g *hubGrid) publishEvents(b *eventsapp.Broker, now func() time.Time, logger *slog.Logger) *gridEvents {
+	ge := newGridEvents(b, g, now, logger)
+
+	if g.status != nil {
+		g.status.Listen(ge.statusChanged)
+	}
+
+	if g.control != nil {
+		g.control.OnApplied(ge.applied)
+		g.control.OnApplied(recheckOnDevices(b))
+	}
+
+	if g.enrollment != nil {
+		enrolled := g.enrollment.Enrolled
+		g.enrollment.Enrolled = func(ctx context.Context, id domain.NodeID) {
+			if enrolled != nil {
+				enrolled(ctx, id)
+			}
+
+			ge.node(ctx, id)
+		}
+	}
+
+	g.nodes.OnChange(ge.node)
+	g.devices.OnForget(ge.forgotten)
+	g.presence.OnChange(ge.presenceChanged)
+
+	return ge
 }
