@@ -66,6 +66,9 @@ type ConnectionInfo struct {
 	NodeID    string
 	DeviceID  string
 	Mode      string
+	// HubIssued marks a media connection the gateway authz issued, as
+	// opposed to one recorded from a node report.
+	HubIssued bool
 }
 
 // Connection is one presence registry row.

@@ -32,7 +32,7 @@ func (r *ConnectionRepository) Open(ctx context.Context, c *domain.Connection) (
 		DeviceID: nullString(i.DeviceID), PresetID: uuidBytes(s.PresetID), TunedFreq: nullPtr(s.TunedFreq),
 		Mode: nullString(i.Mode), SecondaryMode: nullString(s.SecondaryMode), OpenedAt: toMS(s.OpenedAt),
 		LastHeartbeatAt: toMS(s.LastHeartbeat), ClosedAt: nullMS(s.ClosedAt), CloseReason: nullString(string(s.CloseReason)),
-		BytesOut: s.BytesOut, BytesIn: s.BytesIn,
+		BytesOut: s.BytesOut, BytesIn: s.BytesIn, HubIssued: boolInt(i.HubIssued),
 	})
 	if err != nil {
 		return false, fmt.Errorf("open connection %s: %w", i.ID, err)
@@ -248,6 +248,7 @@ func connectionFromRow(row sqlc.Connection) (*domain.Connection, error) {
 		Info: domain.ConnectionInfo{
 			ID: id, Kind: domain.ConnectionKind(row.Kind), UserID: user, SessionID: session, RoleID: int(row.RoleID),
 			IP: row.Ip, UserAgent: row.UserAgent.String, NodeID: row.NodeID.String, DeviceID: row.DeviceID.String, Mode: row.Mode.String,
+			HubIssued: row.HubIssued == 1,
 		},
 		PresetID: preset, TunedFreq: tuned, SecondaryMode: row.SecondaryMode.String, OpenedAt: fromMS(row.OpenedAt),
 		LastHeartbeat: fromMS(row.LastHeartbeatAt), ClosedAt: fromNullMS(row.ClosedAt), CloseReason: domain.CloseReason(row.CloseReason.String),

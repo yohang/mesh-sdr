@@ -14,6 +14,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
@@ -273,6 +274,75 @@ func TestTokenRefreshFollowsListenPolicy(t *testing.T) {
 	}
 
 	_ = openRefreshed(t, e.signIn(t, "lis")).CloseNow()
+}
+
+// POST /api/v1/auth/token mints only for an open connection the gateway
+// authz issued on that node to the same caller.
+func TestTokenConnectionBinding(t *testing.T) {
+	e := newMediaEnv(t)
+	ctx := context.Background()
+	repo := gridsqlite.NewConnectionRepository(e.adapter)
+
+	first, second, anon := e.signIn(t, "lis"), e.signIn(t, "lis"), e.anonymous(t)
+	_, userCID := openMedia(t, first)
+	_, anonCID := openMedia(t, anon)
+
+	// row stores a presence row the way another path would have left it.
+	row := func(info domain.ConnectionInfo, closed bool) string {
+		t.Helper()
+
+		id, _ := shared.NewUUIDv7(time.Now())
+		info.ID, info.Kind, info.NodeID, info.IP = id, domain.ConnectionMedia, "attic", "192.0.2.1"
+
+		c, err := domain.NewConnection(info, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if closed {
+			c.Close(domain.CloseNodeLost, time.Now())
+		}
+
+		if _, err := repo.Open(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+
+		return id.String()
+	}
+
+	userRole := int(identitydomain.RoleListener.ID())
+
+	refused := []struct {
+		name string
+		b    *hubBrowser
+		node string
+		cid  string
+	}{
+		{"another session of the same user", second, "attic", userCID},
+		{"anonymous caller on a user's connection", anon, "attic", userCID},
+		{"user on an anonymous connection", first, "attic", anonCID},
+		{"another node", anon, "cellar", anonCID},
+		{"a cid the gateway never issued", anon, "attic", shared.UUID{}.String()},
+		{"a closed anonymous connection", anon, "attic", row(domain.ConnectionInfo{HubIssued: true}, true)},
+		{"an anonymous row reported by a node", anon, "attic", row(domain.ConnectionInfo{}, false)},
+		{"a row anonymised by an account erasure", anon, "attic", row(domain.ConnectionInfo{HubIssued: true, RoleID: userRole}, false)},
+	}
+
+	for _, tc := range refused {
+		st, body := tc.b.do(http.MethodPost, "/api/v1/auth/token", `{"node_id":"`+tc.node+`","cid":"`+tc.cid+`"}`)
+		if st != http.StatusForbidden {
+			t.Errorf("%s: %d %s, want 403", tc.name, st, body)
+		}
+	}
+
+	// The holders themselves get their tokens.
+	if st, body := first.mint(userCID); st != http.StatusOK {
+		t.Errorf("user's own connection: %d %s", st, body)
+	}
+
+	if st, body := anon.mint(anonCID); st != http.StatusOK {
+		t.Errorf("anonymous visitor's own connection: %d %s", st, body)
+	}
 }
 
 // TestIdentityTokensOnNodes wires identity (ACC-007) into the grid: a token

@@ -197,7 +197,7 @@ func (a *MediaAccess) Authorize(ctx context.Context, req AuthzRequest) (Grant, e
 
 	info := domain.ConnectionInfo{
 		ID: cid, Kind: domain.ConnectionMedia, RoleID: s.RoleRank(), IP: domain.NormalizeIP(req.IP),
-		UserAgent: truncate(req.UserAgent, 256), NodeID: id.String(),
+		UserAgent: truncate(req.UserAgent, 256), NodeID: id.String(), HubIssued: true,
 	}
 
 	claims := token.Claims{

@@ -463,7 +463,7 @@ func happyPaths(t *testing.T, h *contractHub) {
 	}
 
 	conn, err := domain.NewConnection(domain.ConnectionInfo{
-		ID: cid, Kind: domain.ConnectionMedia, IP: "10.0.0.1", NodeID: "attic",
+		ID: cid, Kind: domain.ConnectionMedia, IP: "10.0.0.1", NodeID: "attic", HubIssued: true,
 	}, now)
 	if err != nil {
 		t.Fatal(err)

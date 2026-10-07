@@ -67,7 +67,7 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
     The hub ports are `KeySource`, `TokenIssuer` and `RevocationBroadcaster`. The composition root wires them to identity (ACC-007, ADR 0011):
     - the identity keyring is the `KeySource` (its key changes push `ctl.keys.update`) and signs the tokens of the gateway authz;
     - identity's `RevocationPublisher` goes to the grid broadcaster, dated with the hub clock;
-    - the identity `ConnectionBinder` is the presence registry: `POST /api/v1/auth/token` refreshes only an open connection the gateway authz issued on that node to the same user and session, or to an anonymous caller for an anonymous row, so anonymous refreshes work;
+    - the identity `ConnectionBinder` is the presence registry: `POST /api/v1/auth/token` refreshes only an open connection the gateway authz issued on that node to the same user and session, or, for an anonymous caller, one it issued to an anonymous visitor (role 0), so anonymous refreshes work. The rows the authz issues carry `hub_issued`; rows recorded from node reports and rows anonymised by an account erasure (which keep their role) never qualify;
     - account deletion clears `connections.user_id` (the eraser of ADR 0011);
     - `Session.Ref`, the session handle and `sid`, is `token.SessionRef` of the session id, pinned by a test.
 11. **Distribution.**

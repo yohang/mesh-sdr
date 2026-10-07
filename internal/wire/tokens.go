@@ -9,6 +9,7 @@ import (
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
+	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/keyring"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -111,8 +112,11 @@ func (n nodeRevocations) PublishRevocation(ctx context.Context, r identityapp.Re
 }
 
 // connectionBinder lets POST /api/v1/auth/token refresh only connections
-// the gateway authz opened for the same caller: same node, still open, and
-// the same user and session (anonymous rows for anonymous callers only).
+// the gateway authz opened for the same caller: issued by the hub (not
+// recorded from a node report), same node, still open, and the same user
+// and session. An anonymous caller binds only a row the authz opened for an
+// anonymous visitor (role 0): a row anonymised by an account erasure keeps
+// the role of its user.
 type connectionBinder struct {
 	repo griddomain.ConnectionRepository
 }
@@ -134,7 +138,7 @@ func (b connectionBinder) Bound(ctx context.Context, cid, nodeID string, by iden
 	}
 
 	info := c.Info()
-	if info.NodeID != nodeID || info.Kind != griddomain.ConnectionMedia {
+	if !info.HubIssued || info.NodeID != nodeID || info.Kind != griddomain.ConnectionMedia {
 		return false, nil
 	}
 
@@ -144,7 +148,7 @@ func (b connectionBinder) Bound(ctx context.Context, cid, nodeID string, by iden
 
 	p := by.Principal
 	if p.IsAnonymous() {
-		return info.UserID.IsZero(), nil
+		return info.UserID.IsZero() && info.SessionID.IsZero() && info.RoleID == int(identitydomain.RoleAnonymous.ID()), nil
 	}
 
 	return info.UserID.String() == p.UserID().String() && info.SessionID.String() == p.SessionID().String(), nil
