@@ -156,11 +156,35 @@ type Node struct {
 	TLS      NodeTLS                 `toml:"tls" envPrefix:"TLS__" jsonschema:"description=Node certificate for hub <-> node mTLS\\, written by meshsdr node enroll."`
 	HubTrust HubTrust                `toml:"hub_trust" envPrefix:"HUB_TRUST__" jsonschema:"description=Trust in the hub: CA\\, expected hub identity\\, enrollment token."`
 	Devices  map[string]DeviceConfig `toml:"devices" env:"-" jsonschema:"description=SDR devices of this node\\, keyed by device id (^[a-z0-9][a-z0-9_-]{0\\,62}$\\, unique across the hub). Mirrored read-only into the hub device registry. File-only (no env override)."`
+	Tools    Tools                   `toml:"tools" envPrefix:"TOOLS__" jsonschema:"description=External programs run by the node (SDR connectors)."`
 	Log      Log                     `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
 }
 
-// DeviceConfig is one [devices.<id>] table (TECHNICAL_SPEC §7.4). Driver
-// settings arrive with the device epic.
+// Tools is the [tools] table of the node (TECHNICAL_SPEC §7.4, ADR 0017
+// decision 10): a tool is its tools.<name> absolute path when set,
+// otherwise found by name in tools.dirs, which is also the child's PATH.
+type Tools struct {
+	Dirs            []string `toml:"dirs" env:"DIRS" jsonschema:"description=Absolute directories searched for tools without a path; also the PATH of every tool. The node's own PATH is never used."`
+	RTLConnector    string   `toml:"rtl_connector" env:"RTL_CONNECTOR" jsonschema:"description=Absolute path of rtl_connector (owrx_connector\\, rtl_sdr devices)."`
+	RTLTCPConnector string   `toml:"rtl_tcp_connector" env:"RTL_TCP_CONNECTOR" jsonschema:"description=Absolute path of rtl_tcp_connector (owrx_connector\\, rtl_tcp devices)."`
+}
+
+// Paths returns the configured tool paths by tool name.
+func (t Tools) Paths() map[string]string {
+	out := map[string]string{}
+
+	if t.RTLConnector != "" {
+		out["rtl_connector"] = t.RTLConnector
+	}
+
+	if t.RTLTCPConnector != "" {
+		out["rtl_tcp_connector"] = t.RTLTCPConnector
+	}
+
+	return out
+}
+
+// DeviceConfig is one [devices.<id>] table (TECHNICAL_SPEC §7.4).
 type DeviceConfig struct {
 	Name              string    `toml:"name" env:"-" jsonschema:"description=Required. Display name."`
 	Type              string    `toml:"type" env:"-" jsonschema:"description=Required. Driver type\\, for example rtl_sdr or soapy:sdrplay."`
@@ -171,6 +195,16 @@ type DeviceConfig struct {
 	OperatorCanRetune bool      `toml:"operator_can_retune" env:"-" jsonschema:"description=Operators may retune the device."`
 	AlwaysOn          bool      `toml:"always_on" env:"-" jsonschema:"description=Keep the device running without listeners."`
 	SchedulerEnabled  bool      `toml:"scheduler_enabled" env:"-" jsonschema:"description=The hub scheduler may switch presets on this device."`
+	AutoRecover       *bool     `toml:"auto_recover" env:"-" jsonschema:"description=Restart a failed device every 15 minutes (default true)."`
+	Driver            Driver    `toml:"driver" env:"-" jsonschema:"description=Connector settings (rtl_sdr\\, rtl_tcp)."`
+}
+
+// Driver is the [devices.<id>.driver] table (§7.4 example).
+type Driver struct {
+	Device string `toml:"device" env:"-" jsonschema:"description=rtl_sdr: device index or serial (default 0); rtl_tcp: host:port of the rtl_tcp server."`
+	PPM    int    `toml:"ppm" env:"-" jsonschema:"minimum=-1000,maximum=1000,description=Frequency correction in ppm."`
+	RFGain Gain   `toml:"rf_gain" env:"-" jsonschema:"description=RF gain: auto (default) or a value in dB."`
+	IQSwap bool   `toml:"iqswap" env:"-" jsonschema:"description=Swap I and Q (reversed spectrum)."`
 }
 
 // FreqRange is a frequency range.
@@ -219,6 +253,10 @@ type NodeSection struct {
 	ID          string      `toml:"id" env:"ID" jsonschema:"pattern=^[a-z0-9][a-z0-9-]{1\\,62}$,description=Required (file or env). Stable node id (slug). Must not change after enrollment."`
 	Listen      string      `toml:"listen" env:"LISTEN" jsonschema:"description=Node API and WebSocket listen address (host:port). TLS only."`
 	EventBuffer EventBuffer `toml:"event_buffer" envPrefix:"EVENT_BUFFER__" jsonschema:"description=RAM buffer of node events while the hub is unreachable (dropped by priority on overflow)."`
+	RuntimeDir  string      `toml:"runtime_dir" env:"RUNTIME_DIR" jsonschema:"description=Private runtime directory (absolute\\, mode 0700\\, owned by the node user): the per-tool workdirs live in sessions/ under it. The only place the node writes."`
+	// IPCPortRange is "lo-hi".
+	IPCPortRange   string `toml:"ipc_port_range" env:"IPC_PORT_RANGE" jsonschema:"pattern=^[0-9]{4\\,5}-[0-9]{4\\,5}$,description=Loopback ports for the connector IQ and control sockets (lo-hi)."`
+	WSNotSentLowat Size   `toml:"ws_notsent_lowat" env:"WS_NOTSENT_LOWAT" jsonschema:"description=TCP_NOTSENT_LOWAT of the node API sockets: bounds the kernel send buffering of media WebSockets (ADR 0004)."`
 }
 
 // EventBuffer is the [node.event_buffer] table.
@@ -250,8 +288,12 @@ func DefaultHub() Hub {
 // DefaultNode returns the node defaults.
 func DefaultNode() Node {
 	return Node{
-		Node: NodeSection{Listen: "0.0.0.0:8074", EventBuffer: EventBuffer{MaxEvents: 10000, MaxBytes: MustSize("16MiB")}},
-		Log:  defaultLog(),
+		Node: NodeSection{
+			Listen: "0.0.0.0:8074", EventBuffer: EventBuffer{MaxEvents: 10000, MaxBytes: MustSize("16MiB")},
+			RuntimeDir: "/run/meshsdr-node", IPCPortRange: "40000-40999", WSNotSentLowat: MustSize("16KiB"),
+		},
+		Tools: Tools{Dirs: []string{"/usr/local/bin", "/usr/bin"}},
+		Log:   defaultLog(),
 	}
 }
 
