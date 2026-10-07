@@ -248,12 +248,12 @@ func (s *Server) extendUsed(cid string, exp time.Time) {
 	}
 }
 
-// keep records revocations with the hub time of each, never moving an
-// entry to a later time.
+// keep records revocations with the hub time of each, keeping the latest
+// one per id: a re-push carries the same time, a new revocation a later one.
 func keep(known map[string]time.Time, revoked []ctl.Revoked) {
 	for _, r := range revoked {
 		at := time.UnixMilli(r.At)
-		if first, ok := known[r.ID]; !ok || at.Before(first) {
+		if last, ok := known[r.ID]; !ok || at.After(last) {
 			known[r.ID] = at
 		}
 	}

@@ -72,7 +72,7 @@ Numbers refer to the questions of the design proposal; the owner accepted every 
     - `Session.Ref`, the session handle and `sid`, is `token.SessionRef` of the session id, pinned by a test.
 11. **Distribution.**
     - `ctl.keys.update {issuer, keys, revoked_kids}` is pushed on every control connect and on key changes.
-    - `ctl.revocations` now carries `sessions` and `users` as `{id, at}` entries, where `at` is the hub time of the revocation in Unix milliseconds. They are pushed to every channel and re-pushed for 15 minutes to channels that reconnect. The node refuses the tokens issued at or before `at` (`iat` uses the same hub clock), so a re-push never refuses a later sign-in and node clock skew does not matter. Neither side ever moves an entry to a later time.
+    - `ctl.revocations` now carries `sessions` and `users` as `{id, at}` entries, where `at` is the hub time of the revocation in Unix milliseconds. They are pushed to every channel and re-pushed for 15 minutes to channels that reconnect. The node refuses the tokens issued at or before `at` (`iat` uses the same hub clock), so a re-push never refuses a later sign-in and node clock skew does not matter. Both sides keep the latest time of each id, so a second revocation of the same user or session also refuses the tokens issued since the first; a re-push carries the stored time and changes nothing.
     - A node removed, revoked or disabled by another process (the CLI while the hub runs) is dropped by the next reconcile like an admin action in the hub: revocation list first, then 4403.
     - A dropped channel flushes its queue and finishes the close handshake before its context is cancelled.
 12. **Node media WebSocket (GRID-012).** `GET /ws` on the node does the following:

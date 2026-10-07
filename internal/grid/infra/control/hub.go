@@ -200,13 +200,14 @@ func (m *Manager) BroadcastRevocations(ctx context.Context, at time.Time, sessio
 	m.o.Logger.DebugContext(ctx, "revocations pushed to the nodes", slog.Int("sessions", len(sessions)), slog.Int("users", len(users)))
 }
 
-// remember records ids revoked at, keeping earlier times, and returns the
-// entries to push.
+// remember records ids revoked at, keeping the latest revocation of each
+// (a second revocation also refuses the tokens issued since the first),
+// and returns the entries to push.
 func remember(known map[string]time.Time, ids []string, at time.Time) []ctl.Revoked {
 	out := make([]ctl.Revoked, 0, len(ids))
 
 	for _, id := range ids {
-		if first, ok := known[id]; !ok || at.Before(first) {
+		if last, ok := known[id]; !ok || at.After(last) {
 			known[id] = at
 		}
 
