@@ -1,10 +1,12 @@
 package app
 
 import (
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -20,6 +22,12 @@ type LinkState struct {
 	ClockOffsetMS  int64
 	NTPSynced      bool
 	DialFailures   int
+	// StateRevision is the desired-state revision pushed on the current
+	// channel (0: none yet); AppliedRevision the last one the node
+	// answered, with the devices it refused (ADR 0020).
+	StateRevision   int64
+	AppliedRevision int64
+	StateErrors     []ctl.StateError
 }
 
 // Tracker holds the link state of every node (RAM only; rebuilt from the
@@ -49,6 +57,42 @@ func (t *Tracker) Welcomed(id domain.NodeID, boot shared.UUID, compat domain.Com
 
 	s := t.get(id)
 	s.Connected, s.EverWelcomed, s.Boot, s.Compat, s.WelcomedAt, s.DialFailures = true, true, boot, compat, now, 0
+	// Nothing is pushed on the new channel yet. The refusals of the last
+	// answer stay until the node accepts a state (the node degraded).
+	s.StateRevision = 0
+}
+
+// StatePushed records the desired-state revision sent on the channel.
+func (t *Tracker) StatePushed(id domain.NodeID, revision int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.get(id).StateRevision = revision
+}
+
+// StateApplied records the node's answer to a desired state.
+func (t *Tracker) StateApplied(id domain.NodeID, revision int64, errs []ctl.StateError) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	s := t.get(id)
+	s.AppliedRevision, s.StateErrors = revision, slices.Clone(errs)
+}
+
+// Connected returns the nodes whose channel is up.
+func (t *Tracker) Connected() []domain.NodeID {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	out := make([]domain.NodeID, 0, len(t.links))
+
+	for id, s := range t.links {
+		if s.Connected {
+			out = append(out, id)
+		}
+	}
+
+	return out
 }
 
 // Heartbeat records a heartbeat applied at now.
@@ -104,5 +148,8 @@ func (t *Tracker) State(id domain.NodeID) (LinkState, bool) {
 		return LinkState{}, false
 	}
 
-	return *s, true
+	c := *s
+	c.StateErrors = slices.Clone(s.StateErrors)
+
+	return c, true
 }

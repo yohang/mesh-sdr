@@ -84,3 +84,37 @@ func TestEraseUser(t *testing.T) {
 		t.Error("another user's row changed")
 	}
 }
+
+// TestDeviceActivePreset: a preset id the hub does not know is stored as
+// NULL (devices.active_preset_id references presets, ADR 0020).
+func TestDeviceActivePreset(t *testing.T) {
+	ctx := context.Background()
+	a := dbtest.NewSQLite(t)
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+
+	node := domain.NewNode(domain.MustNodeID("attic"), domain.MustNodeName("Attic"), domain.MustNodeURL("https://a:1"), now)
+	if err := sqlite.NewNodeRepository(a).Create(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := sqlite.NewDeviceRepository(a)
+
+	d, err := domain.NewReportedDevice(node.ID(), domain.DeviceSpec{
+		ID: domain.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000,
+		SampleRates: []int64{2_048_000},
+	}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d.ApplyState(domain.StateRunning, "", nil, shared.MustParseUUID("0192f2b4-0000-7000-8000-0000000000ff"), now)
+
+	if err := repo.Save(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.Get(ctx, d.ID())
+	if err != nil || !got.ActivePreset().IsZero() {
+		t.Errorf("active preset = %v, %v", got.ActivePreset(), err)
+	}
+}

@@ -176,6 +176,12 @@ func (s *Nodes) Update(ctx context.Context, actor, id string, name, url *string,
 	return n, nil
 }
 
+// OnDelete registers a handler run inside the transaction that deletes a
+// node, before its devices go with it (composition time only).
+func (s *Nodes) OnDelete(h func(ctx context.Context, id domain.NodeID) error) {
+	s.onDelete = append(s.onDelete, h)
+}
+
 // Delete removes an admin-managed node and revokes its certificate.
 func (s *Nodes) Delete(ctx context.Context, actor, id string) error {
 	n, err := s.Get(ctx, id)
@@ -203,6 +209,12 @@ func (s *Nodes) Delete(ctx context.Context, actor, id string) error {
 			}
 
 			if err := s.revocations.Add(ctx, r); err != nil {
+				return err
+			}
+		}
+
+		for _, h := range s.onDelete {
+			if err := h(ctx, n.ID()); err != nil {
 				return err
 			}
 		}

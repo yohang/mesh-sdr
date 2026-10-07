@@ -20,6 +20,7 @@ import (
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
 
@@ -57,8 +58,12 @@ type hubGrid struct {
 	devices       *app.Devices
 	presence      *app.Presence
 	manager       *control.Manager
-	startup       []func(ctx context.Context) error
-	workers       []func(ctx context.Context)
+	// states pushes the desired state of the devices (ADR 0020), from
+	// desired, filled by the scheduling modules; nil without the grid.
+	states  *app.States
+	desired *lazyDesired
+	startup []func(ctx context.Context) error
+	workers []func(ctx context.Context)
 }
 
 // HubID returns the hub id: the host of hub.url (ADR 0008 Q6).
@@ -180,11 +185,13 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		g.tracker = app.NewTracker()
 		g.control = app.NewControl(nodeRepo, revocations, gridsqlite.NewCursorRepository(adapter), adapter, audit, g.tracker,
 			version.String(), now, component(logger, "grid.app.control"))
+		g.desired = &lazyDesired{}
+		g.states = app.NewStates(g.desired, nil, g.tracker, component(logger, "grid.app.states"))
 		hubOpts := control.HubOptions{
 			HubID: hubID, CA: ca, Client: pki.NewClientSource(ca, pki.KindHub, hubID, now),
 			Nodes: nodeRepo, Revocations: revocations, Control: g.control,
 			HeartbeatInterval: timings.HeartbeatInterval, Now: now, Logger: component(logger, "grid.infra.control"),
-			Keys: keys, Issuer: cfg.Hub.URL,
+			Keys: keys, Issuer: cfg.Hub.URL, State: g.states,
 		}
 		for _, t := range tweaks {
 			t(&hubOpts)
@@ -192,15 +199,30 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 
 		g.manager = control.NewManager(hubOpts)
 		g.nodes.SetLinks(g.manager)
+		g.states.SetSender(g.manager)
 
 		g.status = app.NewStatus(nodeRepo, adapter, g.tracker, g.history, timings, now, component(logger, "grid.app.status"))
 		g.control.Handle(rxv1.TypeNodeHeartbeat, g.status.HeartbeatHandler())
 		g.control.OnLinkChange(g.status.Refresh)
+
+		statesLogger := component(logger, "grid.app.states")
+		g.control.OnLinkChange(func(ctx context.Context, id domain.NodeID) {
+			// After an ingested batch that changed the node's devices
+			// (MarkChanged below): heartbeats cost nothing.
+			if err := g.states.PublishChanged(ctx, id); err != nil && ctx.Err() == nil {
+				statesLogger.ErrorContext(ctx, "push desired state", slog.String("node_id", id.String()), slog.Any("error", err))
+			}
+		})
 		g.workers = append(g.workers, g.status.Run)
 
 		g.caps = app.NewCapabilities(capRepo, nodeRepo, g.manager, component(logger, "grid.app.capabilities"))
 		g.control.Handle(rxv1.TypeNodeCapabilities, g.caps.Handler())
 		g.caps.OnReport(g.devices.Sync)
+		g.caps.OnReport(func(_ context.Context, n *domain.Node, _ ctl.Capabilities, _ time.Time) error {
+			g.states.MarkChanged(n.ID())
+
+			return nil
+		})
 		g.control.Handle(rxv1.TypeDeviceState, g.devices.StateHandler())
 		g.status.Listen(g.devices.NodeStatusChanged)
 

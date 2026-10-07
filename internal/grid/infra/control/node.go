@@ -35,9 +35,18 @@ type Media interface {
 	Withdrawn()
 }
 
+// State is the desired state pushed by the hub (ctl.state.apply).
+type State interface {
+	// Revision is the last applied revision (ctl.welcome).
+	Revision() int64
+	Apply(st ctl.StateApply) ctl.StateApplied
+}
+
 // NodeOptions configures a NodeServer.
 type NodeOptions struct {
 	Agent *agent.Agent
+	// State receives the desired state; nil refuses ctl.state.apply.
+	State State
 	// Media receives keys, revocations and withdrawals; nil ignores them.
 	Media Media
 	// HubIdentity is the expected hub id; empty accepts any hub URI SAN.
@@ -288,6 +297,8 @@ func (n *nodeSession) handle(ctx context.Context, env rxv1.Envelope, hello *time
 		n.onKeys(ctx, env)
 	case rxv1.TypeCtlCertRenew:
 		n.onRenew(ctx, env)
+	case rxv1.TypeCtlStateApply:
+		n.onState(ctx, env)
 	case rxv1.TypeAck, rxv1.TypeError:
 		o.Logger.DebugContext(ctx, "hub answer", slog.String("type", string(t)), slog.String("payload", string(env.Payload())))
 	default:
@@ -319,6 +330,9 @@ func (n *nodeSession) onHello(ctx context.Context, env rxv1.Envelope, hello *tim
 
 	received := o.Now()
 	w := o.Agent.Welcome(h, received)
+	if o.State != nil {
+		w.LastAppliedRevision = o.State.Revision()
+	}
 
 	if err := send(n.conn, rxv1.TypeCtlWelcome, rxv1.CorrelationID{}, w); err != nil {
 		return
@@ -340,6 +354,34 @@ func (n *nodeSession) onHello(ctx context.Context, env rxv1.Envelope, hello *tim
 			o.Agent.SetClock(h.ServerTime, received, rtt)
 		}
 	}()
+}
+
+// onState applies a desired state and answers ctl.state.applied.
+func (n *nodeSession) onState(ctx context.Context, env rxv1.Envelope) {
+	o := n.s.o
+
+	if o.State == nil {
+		replyError(n.conn, env, rxv1.CodeUnsupportedType, "not implemented by this node")
+
+		return
+	}
+
+	st, err := decode[ctl.StateApply](env)
+	if err != nil {
+		sendError(n.conn, err)
+
+		return
+	}
+
+	applied := o.State.Apply(st)
+
+	for _, e := range applied.Errors {
+		o.Logger.WarnContext(ctx, "desired state of a device refused", slog.Int64("revision", st.Revision),
+			slog.String("device_id", e.DeviceID), slog.String("code", e.Code), slog.String("reason", e.Reason))
+	}
+
+	o.Logger.DebugContext(ctx, "desired state applied", slog.Int64("revision", st.Revision), slog.Int("devices", len(st.Devices)))
+	_ = send(n.conn, rxv1.TypeCtlStateApplied, rxv1.CorrelationID{}, applied)
 }
 
 func (n *nodeSession) onKeys(ctx context.Context, env rxv1.Envelope) {

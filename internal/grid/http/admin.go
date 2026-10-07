@@ -37,15 +37,32 @@ type Renderer interface {
 	Error(w http.ResponseWriter, r *http.Request, status int)
 }
 
+// ScheduleRow is one schedule of a device, as the device page shows it.
+type ScheduleRow struct {
+	ID, Preset, Window, Days string
+	Priority                 int
+	Enabled                  bool
+	// DisabledReason is set when the hub disabled the schedule (GRID-016).
+	DisabledReason string
+	DisabledAt     time.Time
+}
+
+// DeviceSchedules lists the schedules of a device (ADR 0020).
+type DeviceSchedules interface {
+	ForDevice(ctx context.Context, device string) ([]ScheduleRow, error)
+}
+
 // AdminDeps are the dependencies of the admin device pages.
 type AdminDeps struct {
-	Render   Renderer
-	Devices  Devices
-	Nodes    Nodes
-	Operator func(http.Handler) http.Handler // operator role (identity)
-	Admin    func(http.Handler) http.Handler // admin role and network (identity)
-	IsAdmin  func(r *http.Request) bool
-	Logger   *slog.Logger
+	Render  Renderer
+	Devices Devices
+	Nodes   Nodes
+	// Schedules lists the schedules of a device; nil shows none.
+	Schedules DeviceSchedules
+	Operator  func(http.Handler) http.Handler // operator role (identity)
+	Admin     func(http.Handler) http.Handler // admin role and network (identity)
+	IsAdmin   func(r *http.Request) bool
+	Logger    *slog.Logger
 }
 
 // AdminModule serves the read-only device pages of the admin area (ADM-008)
@@ -101,10 +118,13 @@ func (m *AdminModule) list(w http.ResponseWriter, r *http.Request) {
 
 // deviceView is the detail page of a device.
 type deviceView struct {
-	Device   *domain.Device
-	NodeName string
-	CanAdmin bool
-	Failure  string
+	Device    *domain.Device
+	NodeName  string
+	CanAdmin  bool
+	Failure   string
+	Schedules []ScheduleRow
+	// SchedulesUnavailable is set when the schedules could not be read.
+	SchedulesUnavailable bool
 }
 
 func (m *AdminModule) view(r *http.Request) (deviceView, int) {
@@ -123,6 +143,18 @@ func (m *AdminModule) view(r *http.Request) (deviceView, int) {
 
 	if n, err := m.d.Nodes.Get(r.Context(), d.Node().String()); err == nil {
 		v.NodeName = n.Name().String()
+	}
+
+	if m.d.Schedules != nil {
+		rows, err := m.d.Schedules.ForDevice(r.Context(), d.ID().String())
+		if err != nil {
+			m.d.Logger.WarnContext(r.Context(), "schedules of a device unavailable", slog.String("device_id", d.ID().String()),
+				slog.Any("error", err))
+
+			v.SchedulesUnavailable = true
+		}
+
+		v.Schedules = rows
 	}
 
 	return v, http.StatusOK
@@ -173,6 +205,20 @@ func (m *AdminModule) forget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.page(w, r, status, "Device "+v.Device.Name(), devicePage(v))
+}
+
+// disabledReason explains why the hub disabled a schedule.
+func disabledReason(reason string) string {
+	switch reason {
+	case "device_stale":
+		return "the node no longer reports this device"
+	case "device_removed":
+		return "the device was removed from the registry"
+	case "preset_incompatible":
+		return "its preset no longer fits this device"
+	default:
+		return reason
+	}
 }
 
 // frequency formats a frequency in Hz for people.

@@ -107,7 +107,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	})
 
 	ctlServer := control.NewNodeServer(control.NodeOptions{
-		Agent: ag, Media: mediaServer, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
+		Agent: ag, State: agent.NewDesiredState(o.devices()), Media: mediaServer, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
 		Renewer: &control.FileRenewer{NodeID: id.String(), CertFile: cfg.TLS.Cert, Roots: roots, Key: key, Holder: holder, Now: time.Now},
 		Now:     time.Now, Logger: component(logger, "grid.infra.control"),
 	})

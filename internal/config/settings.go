@@ -103,6 +103,15 @@ type SettingsAuthLockout struct {
 type SettingsRetention struct {
 	Sessions Duration `toml:"sessions" env:"SESSIONS" jsonschema_extras:"x-min-duration=1d,x-max-duration=3650d,x-label=Ended sessions" jsonschema_description:"Ended sessions (expired or revoked) are deleted after this long."`
 	AuditLog Duration `toml:"audit_log" env:"AUDIT_LOG" jsonschema_extras:"x-min-duration=30d,x-max-duration=3650d,x-label=Audit log" jsonschema_description:"Audit log entries are deleted after this long (at least 30 days)."`
+	// ReportingOutbox is the retention of the reporting outbox (ADR 0020).
+	ReportingOutbox SettingsRetentionOutbox `toml:"reporting_outbox" envPrefix:"REPORTING_OUTBOX__" jsonschema:"description=Retention of the reporting outbox."`
+}
+
+// SettingsRetentionOutbox is the [settings.retention.reporting_outbox]
+// table (TECHNICAL_SPEC §7.3 outbox.purge, ADR 0020 Q15).
+type SettingsRetentionOutbox struct {
+	Sent Duration `toml:"sent" env:"SENT" jsonschema_extras:"x-min-duration=1d,x-max-duration=3650d,x-label=Delivered reports" jsonschema_description:"Reports delivered to an external network are deleted from the outbox after this long."`
+	Dead Duration `toml:"dead" env:"DEAD" jsonschema_extras:"x-min-duration=1d,x-max-duration=3650d,x-label=Undeliverable reports" jsonschema_description:"Reports given up on (too many attempts, network disabled, outbox full) are deleted after this long."`
 }
 
 // SettingsInvitations is the [settings.invitations] table (ACC-002, ADR
@@ -136,7 +145,10 @@ func DefaultSettings() Settings {
 				DelayAfter: 5, LockAfter: 10, LockFor: MustDuration("15m"), MaxLock: MustDuration("24h"),
 			},
 		},
-		Retention:     SettingsRetention{Sessions: MustDuration("30d"), AuditLog: MustDuration("365d")},
+		Retention: SettingsRetention{
+			Sessions: MustDuration("30d"), AuditLog: MustDuration("365d"),
+			ReportingOutbox: SettingsRetentionOutbox{Sent: MustDuration("7d"), Dead: MustDuration("30d")},
+		},
 		Invitations:   SettingsInvitations{TTLHours: 168},
 		PasswordReset: SettingsPasswordReset{TTLMinutes: 30},
 	}

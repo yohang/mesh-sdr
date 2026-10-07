@@ -38,6 +38,7 @@ import (
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/mail"
 	"github.com/yohang/mesh-sdr/internal/settings"
+	settingsapp "github.com/yohang/mesh-sdr/internal/settings/app"
 	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shell"
@@ -341,7 +342,38 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	adminGate.authz = idm.HTTP
 	identityHTTP = idm.HTTP
 
-	scheduler, retention, err := jobs(adapter, idm, settingsModule.Store, auditLog, logger)
+	// Presets, schedules and reporting (ADR 0020), wired to the grid.
+	sch := newScheduling(adapter, g, settingsModule.Store, auditLog, now, logger)
+
+	if g.states != nil {
+		// The desired state carries listen_policy: a settings change is
+		// pushed to the nodes by one worker that coalesces the changes and
+		// stops with the hub.
+		changed := make(chan struct{}, 1)
+
+		settingsModule.Store.Subscribe(func(*settingsapp.Snapshot) {
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		})
+
+		statesLogger := component(logger, "grid.app.states")
+		workers = append(workers, func(ctx context.Context) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-changed:
+					if n := g.states.PublishAll(ctx); n > 0 {
+						statesLogger.DebugContext(ctx, "desired state pushed after a settings change", slog.Int("nodes", n))
+					}
+				}
+			}
+		})
+	}
+
+	scheduler, retention, err := jobs(adapter, idm, sch, settingsModule.Store, auditLog, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jobs: %w", err)
 	}
@@ -370,6 +402,9 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		TokenHandlers:      api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
 		FeatureHandlers: api.NewFeatureHandlers(idm.HTTP, gridapp.NewFeatures(gridsqlite.NewDeviceRepository(adapter),
 			gridsqlite.NewCapabilityRepository(adapter), storeListenPolicy{store: settingsModule.Store})),
+		PresetHandlers:    api.NewPresetHandlers(sch.presets, scheduleDevices{repo: g.deviceRepo}),
+		ScheduleHandlers:  api.NewScheduleHandlers(sch.schedules, deviceScope{}),
+		ReportingHandlers: api.NewReportingHandlers(sch.reporting),
 	}
 
 	router := httpserver.NewRouter(
@@ -382,12 +417,14 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		settingshttp.New(settingshttp.Deps{
 			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin),
 			Store: settingsModule.Store, Config: settingsModule.Effective, Retention: retentionRows{r: retention},
-			Actor: settingsActor, Images: imagesHTTP, Logger: component(logger, "settings.http"),
+			Actor: settingsActor, Images: imagesHTTP, Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets},
+			Logger: component(logger, "settings.http"),
 		}),
 		imagesHTTP,
 		gridhttp.NewAdminModule(gridhttp.AdminDeps{
 			Render: shellModule.Renderer, Devices: g.devices, Nodes: g.nodes,
-			Operator: idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
+			Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets},
+			Operator:  idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
 			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Logger: component(logger, "grid.http.admin"),
 		}),
 		routes(func(r chi.Router) { r.Method(http.MethodGet, gateway.AuthzPath, authz) }),
@@ -410,7 +447,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		front:    front,
 		logger:   component(logger, "http.server"),
 		startup:  g.startup,
-		workers:  append(append(workers, scheduler.Run), g.workers...),
+		workers:  append(append(workers, scheduler.Run, sch.reporting.Run), g.workers...),
 		setupURL: setupURL,
 	}, g, nil
 }

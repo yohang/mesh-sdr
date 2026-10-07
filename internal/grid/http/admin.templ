@@ -117,4 +117,51 @@ templ devicePage(v deviceView) {
 			<dd>{ strconv.Itoa(v.Device.SortOrder() + 1) }</dd>
 		</dl>
 	</section>
+	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-schedules">
+		<h2 id="title-schedules" class="text-lg font-semibold">Schedules</h2>
+		if !v.Device.Flags().SchedulerEnabled {
+			<p class="text-fg-muted">The node config does not enable the scheduler on this device: its schedules do not run.</p>
+		}
+		switch {
+			case v.SchedulesUnavailable:
+				<p>The schedules could not be read. Try again later.</p>
+			case len(v.Schedules) == 0:
+				<p>No schedule drives this device.</p>
+			default:
+				<div class="overflow-x-auto">
+					<table class="w-full text-left">
+						<caption class="sr-only">Schedules of { v.Device.Name() }, in UTC</caption>
+						<thead>
+							<tr>
+								<th scope="col" class="pr-4">Window</th>
+								<th scope="col" class="pr-4">Days</th>
+								<th scope="col" class="pr-4">Preset</th>
+								<th scope="col" class="pr-4">Priority</th>
+								<th scope="col">State</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, s := range v.Schedules {
+								<tr>
+									<td class="pr-4">{ s.Window }</td>
+									<td class="pr-4">{ s.Days }</td>
+									<td class="pr-4">{ s.Preset }</td>
+									<td class="pr-4">{ strconv.Itoa(s.Priority) }</td>
+									<td>
+										switch {
+											case s.Enabled:
+												Enabled
+											case s.DisabledReason != "":
+												<span class="font-semibold text-danger">Disabled by the hub on { utc(s.DisabledAt) }: { disabledReason(s.DisabledReason) }.</span> An admin re-enables it once fixed.
+											default:
+												Disabled
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+		}
+	</section>
 }
