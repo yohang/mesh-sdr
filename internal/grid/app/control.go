@@ -56,6 +56,7 @@ type Control struct {
 	handlers map[rxv1.MessageType]EventHandler
 	onBoot   []BootHandler
 	onLink   []func(ctx context.Context, id domain.NodeID)
+	applied  []func(ctx context.Context, id domain.NodeID, types []rxv1.MessageType)
 	links    *Tracker
 
 	mu     sync.Mutex
@@ -87,6 +88,13 @@ func (c *Control) OnLinkChange(f func(ctx context.Context, id domain.NodeID)) {
 // Touch runs the link-change callbacks of id (the node answered a
 // desired state, for example).
 func (c *Control) Touch(ctx context.Context, id domain.NodeID) { c.linkChanged(ctx, id) }
+
+// OnApplied registers a callback run after a batch of events committed,
+// with the distinct types the batch applied, after the link callbacks
+// (composition time only): consumers see the derived state.
+func (c *Control) OnApplied(f func(ctx context.Context, id domain.NodeID, types []rxv1.MessageType)) {
+	c.applied = append(c.applied, f)
+}
 
 func (c *Control) linkChanged(ctx context.Context, id domain.NodeID) {
 	for _, f := range c.onLink {
@@ -160,10 +168,13 @@ func (c *Control) Apply(ctx context.Context, id domain.NodeID, boot shared.UUID,
 
 	now := c.now()
 
-	var upto int64
+	var (
+		upto  int64
+		types []rxv1.MessageType
+	)
 
 	err := c.tx.WithinTx(ctx, func(ctx context.Context) error {
-		upto = 0
+		upto, types = 0, types[:0]
 
 		last, err := c.cursors.Last(ctx, id, boot)
 		if err != nil {
@@ -200,6 +211,10 @@ func (c *Control) Apply(ctx context.Context, id domain.NodeID, boot shared.UUID,
 			if err := h(ctx, n, ev, now); err != nil {
 				return fmt.Errorf("apply %s seq %d: %w", ev.Type, ev.Seq, err)
 			}
+
+			if !slices.Contains(types, ev.Type) {
+				types = append(types, ev.Type)
+			}
 		}
 
 		if applied == last {
@@ -217,6 +232,12 @@ func (c *Control) Apply(ctx context.Context, id domain.NodeID, boot shared.UUID,
 	}
 
 	c.linkChanged(ctx, id)
+
+	if len(types) > 0 {
+		for _, f := range c.applied {
+			f(ctx, id, types)
+		}
+	}
 
 	return upto, nil
 }

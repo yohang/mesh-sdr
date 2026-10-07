@@ -40,6 +40,8 @@ type DeviceRegistry interface {
 // ConnectionRegistry reads the presence registry.
 type ConnectionRegistry interface {
 	Count(ctx context.Context) (int, error)
+	// Listeners counts the open media connections.
+	Listeners(ctx context.Context) (int, error)
 	List(ctx context.Context) ([]*domain.Connection, error)
 }
 
@@ -343,7 +345,12 @@ func (h GridHandlers) ListConnections(ctx context.Context, _ ListConnectionsRequ
 		return nil, err
 	}
 
-	out := ListConnections200JSONResponse{Count: count}
+	listeners, err := h.conns.Listeners(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	out := ListConnections200JSONResponse{Count: count, Listeners: listeners}
 
 	if h.authz.Authorize(ctx, idomain.RoleAdmin) != nil {
 		return out, nil

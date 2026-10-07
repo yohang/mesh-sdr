@@ -133,3 +133,64 @@ func TestFeatures(t *testing.T) {
 		}
 	}
 }
+
+func TestListenPolicies(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0)
+
+	dev := func(id string, enabled bool, policy string) *domain.Device {
+		t.Helper()
+
+		d, err := domain.NewReportedDevice(domain.MustNodeID("n1"), domain.DeviceSpec{
+			ID: domain.MustDeviceID(id), Name: id, Type: "rtl_sdr", Enabled: enabled, FreqMin: 1, FreqMax: 2,
+			SampleRates: []int64{1}, ListenPolicy: policy,
+		}, 0, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return d
+	}
+
+	devices := deviceList{dev("open", true, "anonymous"), dev("closed", true, ""), dev("off", false, "anonymous")}
+
+	for _, tt := range []struct {
+		name          string
+		global        fixedPolicy
+		any           bool
+		open, closedD string
+	}{
+		{"registered globally", fixedPolicy{v: "registered"}, true, "anonymous", "registered"},
+		{"anonymous globally", fixedPolicy{v: "anonymous"}, true, "anonymous", "anonymous"},
+		{"unreadable global", fixedPolicy{err: errors.New("down")}, true, "anonymous", "registered"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := app.NewListenPolicies(devices, tt.global)
+
+			if got, err := p.AnyAnonymous(ctx); err != nil || got != tt.any {
+				t.Errorf("AnyAnonymous = %v, %v", got, err)
+			}
+
+			if got, ok, err := p.Device(ctx, "open"); err != nil || !ok || got != tt.open {
+				t.Errorf("open = %q %v %v", got, ok, err)
+			}
+
+			if got, ok, err := p.Device(ctx, "closed"); err != nil || !ok || got != tt.closedD {
+				t.Errorf("closed = %q %v %v", got, ok, err)
+			}
+
+			if _, ok, _ := p.Device(ctx, "off"); ok {
+				t.Error("a disabled device is listenable")
+			}
+
+			if _, ok, _ := p.Device(ctx, "nope"); ok {
+				t.Error("an unknown device is listenable")
+			}
+		})
+	}
+
+	none := app.NewListenPolicies(deviceList{dev("closed", true, "")}, fixedPolicy{v: "registered"})
+	if got, _ := none.AnyAnonymous(ctx); got {
+		t.Error("AnyAnonymous without an anonymous device")
+	}
+}

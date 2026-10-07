@@ -25,11 +25,18 @@ type DeviceListener interface {
 // Devices mirrors node device definitions and states into the read-only
 // device registry (§7.1 devices, GRID-016).
 type Devices struct {
-	repo     domain.DeviceRepository
-	audit    Auditor
-	logger   *slog.Logger
-	listener DeviceListener
-	tx       Transactor
+	repo      domain.DeviceRepository
+	audit     Auditor
+	logger    *slog.Logger
+	listener  DeviceListener
+	tx        Transactor
+	forgotten []func(ctx context.Context, d *domain.Device)
+}
+
+// OnForget registers a callback run after a device was forgotten
+// (composition time only).
+func (s *Devices) OnForget(f func(ctx context.Context, d *domain.Device)) {
+	s.forgotten = append(s.forgotten, f)
 }
 
 // NewDevices returns the service.
@@ -236,7 +243,16 @@ func (s *Devices) Forget(ctx context.Context, actor, id string) error {
 	s.audit.Record(ctx, AuditRecord{ActorKind: actor, Action: "device.forget", Target: d.ID().String(), Result: ResultOK,
 		Detail: map[string]string{"node_id": d.Node().String(), "missing_since": since.UTC().Format(time.RFC3339)}})
 
+	for _, f := range s.forgotten {
+		f(ctx, d)
+	}
+
 	return nil
+}
+
+// ListByNode returns the devices of a node.
+func (s *Devices) ListByNode(ctx context.Context, id domain.NodeID) ([]*domain.Device, error) {
+	return s.repo.ListByNode(ctx, id)
 }
 
 // List returns the registry.

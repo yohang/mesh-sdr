@@ -24,6 +24,18 @@ type Presence struct {
 	timings *timingsCell
 	now     Clock
 	logger  *slog.Logger
+	changed []func(ctx context.Context)
+}
+
+// OnChange registers a callback run after open rows may have changed:
+// opened, closed or reaped by this service (composition time only). Rows
+// written by control-channel events are reported by Control.OnApplied.
+func (s *Presence) OnChange(f func(ctx context.Context)) { s.changed = append(s.changed, f) }
+
+func (s *Presence) notify(ctx context.Context) {
+	for _, f := range s.changed {
+		f(ctx)
+	}
 }
 
 // NewPresence returns the service. tracker may be nil when the grid is
@@ -42,9 +54,25 @@ func (s *Presence) Open(ctx context.Context, info domain.ConnectionInfo) error {
 		return err
 	}
 
-	_, err = s.repo.Open(ctx, c)
+	if _, err := s.repo.Open(ctx, c); err != nil {
+		return err
+	}
 
-	return err
+	s.notify(ctx)
+
+	return nil
+}
+
+// Attach records the device a connection watches.
+func (s *Presence) Attach(ctx context.Context, id shared.UUID, deviceID string) error {
+	c, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	c.Attach(deviceID, "", s.now())
+
+	return s.repo.Save(ctx, c)
 }
 
 // Heartbeat refreshes the open connections ids in one statement.
@@ -61,9 +89,15 @@ func (s *Presence) Close(ctx context.Context, id shared.UUID, reason domain.Clos
 		return err
 	}
 
-	if c.Close(reason, s.now()) {
-		return s.repo.Save(ctx, c)
+	if !c.Close(reason, s.now()) {
+		return nil
 	}
+
+	if err := s.repo.Save(ctx, c); err != nil {
+		return err
+	}
+
+	s.notify(ctx)
 
 	return nil
 }
@@ -78,6 +112,7 @@ func (s *Presence) CloseAtStart(ctx context.Context) error {
 
 	if n > 0 {
 		s.logger.InfoContext(ctx, "connections left open by the previous hub closed", slog.Int64("count", n))
+		s.notify(ctx)
 	}
 
 	return nil
@@ -87,10 +122,12 @@ func (s *Presence) CloseAtStart(ctx context.Context) error {
 // stale delay. Closed rows are deleted by the connections.purge job.
 func (s *Presence) Reap(ctx context.Context) {
 	now := s.now()
+	closed := int64(0)
 
 	if n, err := s.repo.CloseStale(ctx, now.Add(-s.timings.get().PresenceStale)); err != nil {
 		s.logger.ErrorContext(ctx, "close stale connections", slog.Any("error", err))
 	} else if n > 0 {
+		closed += n
 		s.logger.DebugContext(ctx, "stale connections closed", slog.Int64("count", n))
 	}
 
@@ -103,11 +140,18 @@ func (s *Presence) Reap(ctx context.Context) {
 		for _, id := range nodes {
 			st, ok := s.tracker.State(id)
 			if ok && !st.Connected && !st.DisconnectedAt.IsZero() && now.Sub(st.DisconnectedAt) > s.timings.get().PresenceStale {
-				if _, err := s.repo.CloseNode(ctx, id, domain.CloseNodeLost, now); err != nil {
+				n, err := s.repo.CloseNode(ctx, id, domain.CloseNodeLost, now)
+				if err != nil {
 					s.logger.ErrorContext(ctx, "close connections of a lost node", slog.String("node_id", id.String()), slog.Any("error", err))
 				}
+
+				closed += n
 			}
 		}
+	}
+
+	if closed > 0 {
+		s.notify(ctx)
 	}
 }
 
@@ -245,6 +289,12 @@ func (s *Presence) ownedDevice(ctx context.Context, node domain.NodeID, id strin
 
 // Count returns the number of open connections.
 func (s *Presence) Count(ctx context.Context) (int, error) { return s.repo.CountOpen(ctx) }
+
+// Listeners returns the number of listeners: open media connections
+// (ADR 0018). Events sockets are viewers, not listeners.
+func (s *Presence) Listeners(ctx context.Context) (int, error) {
+	return s.repo.CountOpenKind(ctx, domain.ConnectionMedia)
+}
 
 // List returns the open connections.
 func (s *Presence) List(ctx context.Context) ([]*domain.Connection, error) {

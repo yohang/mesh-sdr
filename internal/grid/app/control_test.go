@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -45,12 +46,22 @@ func TestControlIdempotentIngestion(t *testing.T) {
 	n := enrolledNode(t, e)
 	c, tr := newControl(e, "1.4.0")
 
-	var applied []int64
+	var (
+		applied []int64
+		batches [][]rxv1.MessageType
+	)
 
 	c.Handle(rxv1.TypeConnectionOpened, func(_ context.Context, _ *domain.Node, ev app.Event, _ time.Time) error {
 		applied = append(applied, ev.Seq)
 
 		return nil
+	})
+	c.OnApplied(func(_ context.Context, id domain.NodeID, types []rxv1.MessageType) {
+		if id != n.ID() {
+			t.Errorf("applied for %s", id)
+		}
+
+		batches = append(batches, slices.Clone(types))
 	})
 
 	boot, _ := shared.NewUUIDv7(e.clock.now())
@@ -86,6 +97,12 @@ func TestControlIdempotentIngestion(t *testing.T) {
 	// Unknown catalogued events are acknowledged and ignored.
 	if upto, err := c.Apply(ctx, n.ID(), boot, false, []app.Event{{Seq: 5, Type: rxv1.TypeDecodeBatch, Payload: json.RawMessage(`{}`)}}); err != nil || upto != 5 {
 		t.Errorf("unknown = %d, %v", upto, err)
+	}
+
+	// Each committed batch that applied events is reported once, with its
+	// distinct types; a batch of ignored events is not.
+	if len(batches) != 2 || len(batches[0]) != 1 || batches[0][0] != rxv1.TypeConnectionOpened {
+		t.Errorf("applied batches = %v", batches)
 	}
 }
 
