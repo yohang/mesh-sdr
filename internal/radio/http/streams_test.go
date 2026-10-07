@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/media"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/sendq"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
@@ -46,6 +47,7 @@ type peer struct {
 	mu      sync.Mutex
 	replies []reply
 	sent    []rxv1.MessageType
+	payload []any
 	q       *sendq.Queue
 	claims  token.Claims
 }
@@ -78,9 +80,10 @@ func (p *peer) count(typ rxv1.MessageType) int {
 	return n
 }
 func (p *peer) Hello() media.Hello { return media.Hello{} }
-func (p *peer) Send(typ rxv1.MessageType, _ any) {
+func (p *peer) Send(typ rxv1.MessageType, payload any) {
 	p.mu.Lock()
 	p.sent = append(p.sent, typ)
+	p.payload = append(p.payload, payload)
 	p.mu.Unlock()
 }
 
@@ -289,5 +292,144 @@ func TestReauthorizeAfterRefresh(t *testing.T) {
 
 	if got := p.last(); got.code != rxv1.CodeNotFound {
 		t.Fatalf("device still attached: %+v", got)
+	}
+}
+
+// lastSent returns the payload of the last message of a type.
+func (p *peer) lastSent(typ rxv1.MessageType) any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for i := len(p.sent) - 1; i >= 0; i-- {
+		if p.sent[i] == typ {
+			return p.payload[i]
+		}
+	}
+
+	return nil
+}
+
+// desired is a desired state pushed by the hub.
+type desired struct {
+	devices map[string]ctl.DesiredDevice
+	presets map[string]ctl.Preset
+	policy  ctl.StatePolicy
+}
+
+func (d desired) Device(id string) (ctl.DesiredDevice, bool) { v, ok := d.devices[id]; return v, ok }
+func (d desired) Preset(id string) (ctl.Preset, bool)        { v, ok := d.presets[id]; return v, ok }
+func (d desired) Policy() ctl.StatePolicy                    { return d.policy }
+
+// TestPresetSelect: preset.select retunes the shared device, moves the
+// caller's demodulator to the preset's start, keeps the other listener's
+// frequency and sends device.config to both (shared centre). Without the
+// retune right, a switch that would leave another listener's demodulator
+// outside the new band is refused.
+func TestPresetSelect(t *testing.T) {
+	m := runManager(t)
+	ctx := context.Background()
+
+	squelch := -60
+	state := desired{
+		devices: map[string]ctl.DesiredDevice{"vhf": {Presets: []string{"near", "far"}}},
+		presets: map[string]ctl.Preset{
+			// The device starts at 144.125 MHz (250 kS/s).
+			"near": {Name: "Near", CenterFreq: 144_150_000, SampRate: 250_000, StartFreq: 144_160_000, StartMod: "nfm", TuningStep: 12_500, InitialSquelchLevel: &squelch},
+			"far":  {Name: "Far", CenterFreq: 145_000_000, SampRate: 250_000, StartFreq: 145_000_000, StartMod: "nfm", TuningStep: 1000},
+			"hf":   {Name: "HF", CenterFreq: 14_074_000, SampRate: 250_000, StartFreq: 14_074_000, StartMod: "usb", TuningStep: 1000},
+		},
+		policy: ctl.StatePolicy{ListenPolicy: "anonymous", Waterfall: &ctl.StateWaterfall{MinDB: -100, MaxDB: -30, Palette: "default"}},
+	}
+	streams := radiohttp.NewStreams(m, state, slog.New(slog.DiscardHandler))
+
+	newPeer := func(perms ...string) *peer {
+		return &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, perms...)}
+	}
+
+	op := newPeer(token.PermListen, token.PermDemod, token.PermPreset)
+	lis := newPeer(token.PermListen, token.PermDemod)
+	opSS, lisSS := streams.Open(op), streams.Open(lis)
+
+	defer opSS.Close()
+	defer lisSS.Close()
+
+	do := func(ss media.StreamSession, p *peer, typ rxv1.MessageType, payload any, want rxv1.ErrorCode) reply {
+		t.Helper()
+		ss.Handle(ctx, env(t, typ, payload))
+
+		got := p.last()
+		if want == "" && got.typ != rxv1.TypeAck || want != "" && got.code != want {
+			t.Fatalf("%s %v: got %+v, want %q", typ, payload, got, want)
+		}
+
+		return got
+	}
+
+	do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "near"}, rxv1.CodeConflict)
+
+	att := do(opSS, op, rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}, "")
+	if cfg := att.result.(media.AttachResult).Device; len(cfg.PresetsAvailable) != 2 || cfg.ActivePreset != nil ||
+		cfg.Waterfall.Levels != (media.Levels{Min: -100, Max: -30}) || cfg.Waterfall.Scheme != "default" || !cfg.Permissions.Preset {
+		t.Fatalf("device.config before a switch: %+v", cfg)
+	}
+
+	do(opSS, op, rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm"}, "")
+	do(lisSS, lis, rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}, "")
+	do(lisSS, lis, rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm", "offset_hz": 20_000}, "") // 144.145 MHz
+
+	do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "zz"}, rxv1.CodeNotFound)
+	do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "hf"}, rxv1.CodePresetIncompatible)
+
+	// The retune gate: far would leave the listener outside the band.
+	do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "far"}, rxv1.CodeForbidden)
+
+	if s := m.Devices()[0]; s.CenterHz != 144_125_000 {
+		t.Fatalf("a refused switch retuned the device: %d", s.CenterHz)
+	}
+
+	res := do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "near"}, "")
+	if res.result.(media.PresetSelected).ActivePresetID != "near" || m.Devices()[0].CenterHz != 144_150_000 {
+		t.Fatalf("switch: %+v, device %+v", res.result, m.Devices()[0])
+	}
+
+	applied := func(p *peer) media.Applied {
+		t.Helper()
+
+		u, ok := p.lastSent(rxv1.TypeStreamUpdate).(media.StreamUpdate)
+		if !ok || u.Applied == nil {
+			t.Fatalf("no demodulator update: %+v", p.lastSent(rxv1.TypeStreamUpdate))
+		}
+
+		return *u.Applied
+	}
+
+	// The caller starts at the preset; the listener keeps 144.145 MHz.
+	if a := applied(op); a.OffsetHz != 10_000 || a.Mode != "nfm" || a.SquelchDB == nil || *a.SquelchDB != -60 {
+		t.Errorf("caller demodulator: %+v", a)
+	}
+
+	if a := applied(lis); a.OffsetHz != -5_000 {
+		t.Errorf("listener demodulator: %+v", a)
+	}
+
+	for name, p := range map[string]*peer{"caller": op, "listener": lis} {
+		cfg, ok := p.lastSent(rxv1.TypeDeviceConfig).(media.DeviceConfig)
+		if !ok || cfg.ActivePreset == nil || cfg.ActivePreset.ID != "near" || cfg.CenterHz != 144_150_000 || cfg.Revision < 1 ||
+			cfg.Start.OffsetHz != 10_000 || cfg.TuningStepHz != 12_500 || cfg.Squelch.Initial != -60 {
+			t.Errorf("%s device.config: %+v", name, cfg)
+		}
+	}
+
+	// With the retune right the switch goes through; the listener's
+	// demodulator, now outside the band, moves to the preset's start.
+	op.setClaims(scoped(1, token.PermListen, token.PermDemod, token.PermPreset, token.PermRetune))
+	do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "far"}, "")
+
+	if a := applied(lis); a.OffsetHz != 0 {
+		t.Errorf("listener demodulator after a forced switch: %+v", a)
+	}
+
+	if cfg := lis.lastSent(rxv1.TypeDeviceConfig).(media.DeviceConfig); cfg.ActivePreset.ID != "far" || cfg.CenterHz != 145_000_000 {
+		t.Errorf("listener device.config after a forced switch: %+v", cfg)
 	}
 }

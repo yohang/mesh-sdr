@@ -32,8 +32,9 @@ type Streams interface {
 }
 
 // StreamSession handles the device messages of one connection: device.*,
-// stream.configure, audio.configure and demod.* (§6.4). Handle runs on the
-// connection's read loop; Close releases everything at the end.
+// stream.configure, audio.configure, demod.* and preset.select (§6.4).
+// Handle runs on the connection's read loop; Close releases everything at
+// the end.
 type StreamSession interface {
 	Handle(ctx context.Context, req rxv1.Envelope)
 	// Reauthorize applies the claims of a refreshed token: what they no

@@ -1,6 +1,7 @@
 // Package http serves the device messages of the node media WebSocket
 // (TECHNICAL_SPEC §6.4, §6.5): device.attach / detach, stream.configure,
-// audio.configure, demod.create / set / remove and device.retune. The
+// audio.configure, demod.create / set / remove, device.retune and
+// preset.select (shared centre: one tuning for every listener). The
 // grid media endpoint authenticates the connection, checks the token scope
 // and hands these messages over (media.Streams); this package turns them
 // into device manager and DSP engine calls, and the engine output into
@@ -66,12 +67,95 @@ type Streams struct {
 	devices Devices
 	state   DesiredState
 	log     *slog.Logger
+
+	// switching serialises the shared changes of the devices
+	// (preset.select).
+	switching sync.Mutex
+
+	mu       sync.Mutex
+	sessions map[*session]struct{}
+	// active is the preset each device was last switched to.
+	active map[string]string
 }
 
-// NewStreams returns the handler. state may be nil (no hub state: the
-// node defaults apply).
+// NewStreams returns the handler. state may be nil (no hub state: no
+// preset, the node defaults apply).
 func NewStreams(d Devices, state DesiredState, log *slog.Logger) *Streams {
-	return &Streams{devices: d, state: state, log: log}
+	return &Streams{devices: d, state: state, log: log, sessions: map[*session]struct{}{}, active: map[string]string{}}
+}
+
+// presets returns what device.config shows of the presets of a device: the
+// active preset (nil when none) and the presets it may switch to.
+func (s *Streams) presets(device string) (*media.PresetRef, *ctl.Preset, []media.PresetRef) {
+	avail := []media.PresetRef{}
+
+	if s.state == nil {
+		return nil, nil, avail
+	}
+
+	want, ok := s.state.Device(device)
+	if !ok {
+		return nil, nil, avail
+	}
+
+	s.mu.Lock()
+	activeID := s.active[device]
+	s.mu.Unlock()
+
+	var (
+		ref    *media.PresetRef
+		active *ctl.Preset
+	)
+
+	for _, id := range want.Presets {
+		p, ok := s.state.Preset(id)
+		if !ok {
+			continue
+		}
+
+		avail = append(avail, media.PresetRef{ID: id, Name: p.Name})
+
+		if id == activeID {
+			ref, active = &media.PresetRef{ID: id, Name: p.Name}, &p
+		}
+	}
+
+	return ref, active, avail
+}
+
+// resolve returns a preset of the desired state that the device may run.
+func (s *Streams) resolve(device, id string) (ctl.Preset, error) {
+	if s.state == nil {
+		return ctl.Preset{}, &rxv1.Error{Code: rxv1.CodeNotFound, Reason: "no preset received from the hub"}
+	}
+
+	p, ok := s.state.Preset(id)
+	if !ok {
+		return ctl.Preset{}, &rxv1.Error{Code: rxv1.CodeNotFound, Reason: "unknown preset"}
+	}
+
+	if want, ok := s.state.Device(device); !ok || !slices.Contains(want.Presets, id) {
+		return ctl.Preset{}, &rxv1.Error{Code: rxv1.CodePresetIncompatible, Reason: "the preset does not fit this device"}
+	}
+
+	return p, nil
+}
+
+// listeners returns the sessions attached to a device.
+func (s *Streams) listeners(device string) []*session {
+	s.mu.Lock()
+	all := slices.Collect(maps.Keys(s.sessions))
+	s.mu.Unlock()
+
+	out := all[:0]
+
+	for _, ss := range all {
+		if ss.attachedTo(device) != nil {
+			out = append(out, ss)
+		}
+	}
+
+	return out
 }
 
 // waterfall returns the waterfall defaults of device.config: the hub
@@ -92,11 +176,17 @@ func (s *Streams) waterfall() media.Waterfall {
 
 // Open implements media.Streams.
 func (s *Streams) Open(p media.Peer) media.StreamSession {
-	return &session{
+	ss := &session{
 		s: s, peer: p, q: p.Queue(), next: 1,
 		devices: map[string]*attached{}, demods: map[string]*demodState{},
 		audio: audioConfig{codec: preferredCodec(p.Hello()), rate: dsp.DefaultOutputRate},
 	}
+
+	s.mu.Lock()
+	s.sessions[ss] = struct{}{}
+	s.mu.Unlock()
+
+	return ss
 }
 
 type audioConfig struct {
@@ -125,6 +215,7 @@ type attached struct {
 	unwatch  func()
 	revision int
 	center   int64
+	rate     int
 	state    domain.State
 }
 
@@ -187,6 +278,8 @@ func (ss *session) Handle(_ context.Context, req rxv1.Envelope) {
 		ss.removeDemod(req)
 	case rxv1.TypeDeviceRetune:
 		ss.retune(req)
+	case rxv1.TypePresetSelect:
+		ss.selectPreset(req)
 	default:
 		ss.peer.Fail(req, rxv1.CodeUnsupportedType, "not a device message")
 	}
@@ -235,13 +328,17 @@ func (ss *session) fail(req rxv1.Envelope, err error) {
 	ss.peer.Fail(req, rxv1.CodeInternal, "internal error")
 }
 
-func (ss *session) deviceConfig(a *attached, snap domain.Snapshot, info app.SpectrumInfo) media.DeviceConfig {
+// deviceConfig builds device.config at revision rev. The start
+// demodulator, tuning step and initial squelch and NR come from the active
+// preset, if any.
+func (ss *session) deviceConfig(rev int, snap domain.Snapshot, info app.SpectrumInfo) media.DeviceConfig {
 	c := ss.peer.Claims()
 	perm := c.Allows(snap.ID, token.PermRetune)
+	ref, active, avail := ss.s.presets(snap.ID)
 
-	return media.DeviceConfig{
-		DeviceID: snap.ID, Revision: a.revision, CenterHz: snap.CenterHz, SampleRate: snap.RateHz,
-		PresetsAvailable: []media.PresetRef{}, TuningStepHz: tuningStepHz,
+	cfg := media.DeviceConfig{
+		DeviceID: snap.ID, Revision: rev, CenterHz: snap.CenterHz, SampleRate: snap.RateHz,
+		ActivePreset: ref, PresetsAvailable: avail, TuningStepHz: tuningStepHz,
 		Start:     media.Start{Mode: media.ModeNFM},
 		Waterfall: ss.s.waterfall(),
 		FFT:       media.FFTConfig{Size: info.Size, FPS: info.FPS},
@@ -251,6 +348,21 @@ func (ss *session) deviceConfig(a *attached, snap domain.Snapshot, info app.Spec
 			Preset: c.Allows(snap.ID, token.PermPreset), Retune: perm,
 		},
 	}
+
+	if p := active; p != nil {
+		cfg.Start = media.Start{Mode: p.StartMod, OffsetHz: p.StartFreq - snap.CenterHz}
+		cfg.TuningStepHz = int(p.TuningStep)
+
+		if p.InitialSquelchLevel != nil {
+			cfg.Squelch.Initial = float64(*p.InitialSquelchLevel)
+		}
+
+		if p.InitialNRLevel != nil {
+			cfg.NRInitial = *p.InitialNRLevel
+		}
+	}
+
+	return cfg
 }
 
 func fftOf(info app.SpectrumInfo) *media.StreamFFT {
@@ -304,12 +416,12 @@ func (ss *session) attach(req rxv1.Envelope) {
 	}
 
 	ss.mu.Lock()
-	a := &attached{id: p.DeviceID, lease: lease, stream: ss.streamID(), fps: fps, center: snap.CenterHz, state: snap.State}
+	a := &attached{id: p.DeviceID, lease: lease, stream: ss.streamID(), fps: fps, center: snap.CenterHz, rate: snap.RateHz, state: snap.State}
 	ss.devices[p.DeviceID] = a
 	ss.mu.Unlock()
 
 	open := media.StreamOpen{StreamID: a.stream, Kind: media.KindFFT, Codec: media.CodecFFTU8, FFT: fftOf(info), FPS: fps}
-	cfg := ss.deviceConfig(a, snap, info)
+	cfg := ss.deviceConfig(0, snap, info)
 
 	ss.peer.Ack(req, media.AttachResult{Device: cfg, Streams: []media.StreamOpen{open}})
 	ss.peer.Send(rxv1.TypeDeviceConfig, cfg)
@@ -346,8 +458,8 @@ func (ss *session) onState(a *attached, s domain.Snapshot) {
 	}
 
 	stateChanged := s.State != a.state
-	retuned := s.CenterHz != a.center
-	a.state, a.center = s.State, s.CenterHz
+	retuned := s.CenterHz != a.center || s.RateHz != a.rate
+	a.state, a.center, a.rate = s.State, s.CenterHz, s.RateHz
 
 	if retuned {
 		a.revision++
@@ -362,7 +474,7 @@ func (ss *session) onState(a *attached, s domain.Snapshot) {
 
 	if retuned {
 		ss.peer.Send(rxv1.TypeDeviceConfigPatch, media.DeviceConfigPatch{
-			DeviceID: s.ID, Revision: rev, Set: map[string]any{"center_hz": s.CenterHz}, Unset: []string{},
+			DeviceID: s.ID, Revision: rev, Set: map[string]any{"center_hz": s.CenterHz, "sample_rate": s.RateHz}, Unset: []string{},
 		})
 		ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: a.stream, FFT: fftOf(a.lease.Engine().Spectrum())})
 	}
@@ -799,6 +911,175 @@ func (ss *session) retune(req rxv1.Envelope) {
 	ss.peer.Ack(req, media.DeviceRetune{CenterHz: snap.CenterHz})
 }
 
+// attachedTo returns the attachment of a device (nil: not attached).
+func (ss *session) attachedTo(device string) *attached {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.closed {
+		return nil
+	}
+
+	return ss.devices[device]
+}
+
+// demodsOn returns the demodulators of the session on a device.
+func (ss *session) demodsOn(device string) []*demodState {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	var out []*demodState
+
+	for _, d := range ss.demods {
+		if d.device == device {
+			out = append(out, d)
+		}
+	}
+
+	return out
+}
+
+// selectPreset switches the shared preset of a device (preset.select,
+// §6.4): the device is retuned to the preset's centre and sample rate for
+// every listener, the caller's demodulators take the preset's start mode,
+// frequency and squelch, and every listener gets the new device.config.
+// The token scope (preset) was checked by the media endpoint.
+//
+// Retune gate: without the retune right, the switch is refused when it
+// would leave another listener's demodulator outside the new capture band.
+// The other demodulators keep their frequency; with the retune right, one
+// that falls outside the band moves to the preset's start frequency.
+func (ss *session) selectPreset(req rxv1.Envelope) {
+	p, err := decode[media.PresetSelect](req)
+	if err != nil {
+		ss.fail(req, err)
+
+		return
+	}
+
+	preset, err := ss.s.resolve(p.DeviceID, p.PresetID)
+	if err != nil {
+		ss.fail(req, err)
+
+		return
+	}
+
+	s := ss.s
+
+	s.switching.Lock()
+	defer s.switching.Unlock()
+
+	a := ss.attachedTo(p.DeviceID)
+	if a == nil {
+		ss.peer.Fail(req, rxv1.CodeConflict, "attach the device first")
+
+		return
+	}
+
+	before := a.lease.Snapshot()
+	listeners := s.listeners(p.DeviceID)
+
+	if !ss.peer.Claims().Allows(p.DeviceID, token.PermRetune) && outside(listeners, ss, p.DeviceID, before.CenterHz, preset) {
+		ss.peer.Fail(req, rxv1.CodeForbidden,
+			"another listener's demodulator would be outside the new capture band: the retune permission is required")
+
+		return
+	}
+
+	snap, err := s.devices.Retune(p.DeviceID, preset.CenterFreq, preset.SampRate)
+	if err != nil {
+		ss.fail(req, err)
+
+		return
+	}
+
+	s.mu.Lock()
+	s.active[p.DeviceID] = p.PresetID
+	s.mu.Unlock()
+
+	s.log.Info("preset selected", slog.String("device_id", p.DeviceID), slog.String("preset_id", p.PresetID),
+		slog.Int64("center_hz", snap.CenterHz), slog.Int("sample_rate", snap.RateHz))
+
+	for _, l := range listeners {
+		l.presetApplied(p.DeviceID, before.CenterHz, preset, l == ss)
+	}
+
+	ss.peer.Ack(req, media.PresetSelected{ActivePresetID: p.PresetID})
+}
+
+// outside reports whether a demodulator of another listener than caller,
+// tuned against centre, would fall outside the capture band of preset.
+func outside(listeners []*session, caller *session, device string, center int64, preset ctl.Preset) bool {
+	half := preset.SampRate / 2
+
+	for _, l := range listeners {
+		if l == caller {
+			continue
+		}
+
+		for _, d := range l.demodsOn(device) {
+			if f := center + d.demod.Params().OffsetHz - preset.CenterFreq; f < -half || f > half {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// presetApplied moves the session's demodulators of a device after a
+// preset switch (see selectPreset) and sends the new device.config.
+func (ss *session) presetApplied(device string, oldCenter int64, preset ctl.Preset, caller bool) {
+	a := ss.attachedTo(device)
+	if a == nil {
+		return
+	}
+
+	snap := a.lease.Snapshot()
+	half := int64(snap.RateHz) / 2
+	start := preset.StartFreq - snap.CenterHz
+
+	for _, d := range ss.demodsOn(device) {
+		cur := d.demod.Params()
+		params := cur
+
+		if caller {
+			params.Mode, params.OffsetHz = preset.StartMod, start
+
+			if q := preset.InitialSquelchLevel; q != nil {
+				params.SquelchDB = new(float64(*q))
+			}
+		} else if params.OffsetHz = oldCenter + cur.OffsetHz - snap.CenterHz; params.OffsetHz < -half || params.OffsetHz > half {
+			params.OffsetHz = start
+		}
+
+		err := d.demod.Set(params)
+		if err != nil && params.Mode != cur.Mode {
+			// The preset's mode is not provided by this node: keep the
+			// current one.
+			params.Mode = cur.Mode
+			err = d.demod.Set(params)
+		}
+
+		if err != nil {
+			ss.s.log.Warn("demodulator not moved after a preset switch", slog.String("device_id", device),
+				slog.String("demod_id", d.id), slog.Any("error", err))
+
+			continue
+		}
+
+		res := applied(params)
+		ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: d.stream, Applied: &res})
+	}
+
+	ss.mu.Lock()
+	a.revision++
+	rev := a.revision
+	ss.mu.Unlock()
+
+	ss.peer.Send(rxv1.TypeDeviceConfig, ss.deviceConfig(rev, snap, a.lease.Engine().Spectrum()))
+}
+
 // Reauthorize implements media.StreamSession: after auth.refresh, devices
 // the new token no longer lets the connection listen to are detached, and
 // demodulators it no longer allows (scope, or beyond lim.max_demods,
@@ -863,6 +1144,10 @@ func demodSeq(id string) int {
 
 // Close implements media.StreamSession.
 func (ss *session) Close() {
+	ss.s.mu.Lock()
+	delete(ss.s.sessions, ss)
+	ss.s.mu.Unlock()
+
 	ss.mu.Lock()
 	ss.closed = true
 	devices := ss.devices

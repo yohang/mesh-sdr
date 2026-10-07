@@ -409,12 +409,6 @@ func (ss *session) scoped(ctx context.Context, env rxv1.Envelope, perm string) {
 		return
 	}
 
-	if env.Type() == rxv1.TypePresetSelect {
-		ss.reply(env, rxv1.CodeUnsupportedType, "presets are not implemented by this node yet")
-
-		return
-	}
-
 	ss.stream(ctx, env)
 }
 

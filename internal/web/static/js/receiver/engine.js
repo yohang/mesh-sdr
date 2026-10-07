@@ -334,6 +334,18 @@ class Engine extends EventTarget {
       if (p.sample_rate) this.audioStream.rate = p.sample_rate;
       if (p.codec) this.audioStream.codec = p.codec;
     }
+    // A shared preset switch moved the demodulator (applied parameters).
+    const a = p.applied;
+    if (a && this.demod?.streamId === p.stream_id) {
+      Object.assign(this.demod, {
+        mode: a.mode ?? this.demod.mode,
+        offsetHz: a.offset_hz ?? this.demod.offsetHz,
+        lowHz: a.bandpass?.low_hz ?? this.demod.lowHz,
+        highHz: a.bandpass?.high_hz ?? this.demod.highHz,
+      });
+      this.sentOffset = this.keptOffset = this.demod.offsetHz;
+      this.emit("tune");
+    }
     this.emit("config");
   }
 
