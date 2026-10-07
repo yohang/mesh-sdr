@@ -1,6 +1,7 @@
 // Frequency scale (RX-019): tick labels for the visible span and the filter
-// envelope of the tuned demodulator. Colours come from the theme tokens, so
-// they meet the contrast targets in both themes (UI-008, UI-009).
+// envelope of the tuned demodulator, whose edges can be dragged (RX-020:
+// edgeAt finds the edge under the pointer). Colours come from the theme
+// tokens, so they meet the contrast targets in both themes (UI-008, UI-009).
 
 import { readToken } from "../tokens.js";
 
@@ -15,6 +16,8 @@ export class FreqScale {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
+    /** @type {{x0: number, x1: number} | null} envelope edges, canvas pixels */
+    this.edges = null;
     this.readColors();
   }
 
@@ -38,6 +41,7 @@ export class FreqScale {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     c.fillStyle = this.bg;
     c.fillRect(0, 0, w, h);
+    this.edges = null;
     if (!(spanHz > 0)) return;
     const x = (/** @type {number} */ hz) => ((hz - startHz) / spanHz) * w;
 
@@ -55,6 +59,11 @@ export class FreqScale {
       c.lineTo(x1, top);
       c.lineTo(x1 + 3 * dpr, foot);
       c.stroke();
+      // Grips: the edges can be dragged.
+      c.fillStyle = this.accent;
+      c.fillRect(x0 - 2 * dpr, top, 4 * dpr, 8 * dpr);
+      c.fillRect(x1 - 2 * dpr, top, 4 * dpr, 8 * dpr);
+      this.edges = { x0, x1 };
     }
 
     const minStep = (spanHz * MIN_LABEL_CSS_PX * dpr) / w;
@@ -77,5 +86,23 @@ export class FreqScale {
       c.fillStyle = this.fg;
       c.fillText(label, px, h - dpr);
     }
+  }
+
+  /**
+   * edgeAt returns the envelope edge within tolerance CSS pixels of
+   * clientX: "low", "high" or null. The nearest edge wins.
+   * @param {number} clientX @param {number} tolerance
+   * @returns {"low" | "high" | null}
+   */
+  edgeAt(clientX, tolerance) {
+    if (!this.edges) return null;
+    const r = this.canvas.getBoundingClientRect();
+    if (!(r.width > 0)) return null;
+    const scale = this.canvas.width / r.width;
+    const x = (clientX - r.left) * scale;
+    const d0 = Math.abs(x - this.edges.x0);
+    const d1 = Math.abs(x - this.edges.x1);
+    if (Math.min(d0, d1) > tolerance * scale) return null;
+    return d0 <= d1 ? "low" : "high";
   }
 }

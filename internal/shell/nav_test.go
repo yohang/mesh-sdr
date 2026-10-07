@@ -276,6 +276,8 @@ func TestReceiverStation(t *testing.T) {
 		`<img src="/api/v1/branding/avatar" alt=""`, `<h1 class="text-2xl font-semibold">F4XYZ SDR</h1>`,
 		`<p class="text-fg-muted">Lille, France</p>`, `<img src="/api/v1/branding/panorama" alt="The &lt;antenna&gt;"`,
 		`<p class="font-semibold">The &lt;antenna&gt;</p>`, `<strong>loop</strong>`,
+		// The station block the island moves into its Info panel (RX-036).
+		`<div data-rx-station`, `<dd class="min-w-0 break-words">Lille, France</dd>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("receiver page lacks %s", want)

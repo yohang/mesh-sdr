@@ -117,14 +117,13 @@ class Engine extends EventTarget {
     this.offsetMs = 0; // node clock − client clock
     // Display settings, kept across navigation (per-session runtime state):
     // zoom factor and first visible bin, spectrum visibility (RX-016), manual
-    // levels (null: the device defaults, RX-017/018), waterfall palette
-    // (null: the device default, UI-013), side panel open (UI-019).
+    // levels (null: the device defaults, RX-017/018), side panel open
+    // (UI-019).
     this.display = {
       zoom: 1,
       start: 0,
       spectrum: true,
       /** @type {{min: number, max: number} | null} */ levels: null,
-      /** @type {string | null} */ palette: null,
       panel: true,
     };
     this.reset();

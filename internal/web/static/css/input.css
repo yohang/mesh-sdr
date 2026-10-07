@@ -2,6 +2,7 @@
 
 @source "../../layout";
 @source "../../../*/http";
+@source "../../../shell";
 @source "../js";
 
 /*
