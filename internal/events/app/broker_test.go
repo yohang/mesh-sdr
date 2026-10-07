@@ -316,3 +316,29 @@ func TestSubscribeDedupAndLimitFirst(t *testing.T) {
 		t.Fatalf("33rd topic = %v", err)
 	}
 }
+
+func TestAddressKey(t *testing.T) {
+	for in, want := range map[string]string{
+		"192.0.2.1":            "192.0.2.1",
+		"::ffff:192.0.2.1":     "192.0.2.1",
+		"2001:db8:1:2:3:4:5:6": "2001:db8:1:2::/64",
+		"2001:db8:1:2:ffff::1": "2001:db8:1:2::/64",
+		"not an address":       "not an address",
+	} {
+		if got := app.AddressKey(in); got != want {
+			t.Errorf("AddressKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// Two addresses of one /64 share the per-address cap.
+	a := app.NewAdmission(app.Limits{PerSession: 10, PerAddress: 1, Total: 10, UpgradesPerMinute: 100})
+	now := time.Unix(1_800_000_000, 0)
+
+	if _, _, err := a.Admit("", "2001:db8:1:2::1", now); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := a.Admit("", "2001:db8:1:2::2", now); !errors.Is(err, domain.ErrTooManyConnections) {
+		t.Errorf("second address of the /64 = %v", err)
+	}
+}

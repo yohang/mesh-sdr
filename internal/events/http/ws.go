@@ -87,8 +87,11 @@ type Timings struct {
 	// (5 s), even when the session's known expiry is closer or past.
 	MinSessionCheck time.Duration
 	Ping            time.Duration // WS ping period, 20 s
-	Pong         time.Duration // pong timeout, 30 s
-	Heartbeat    time.Duration // presence refresh of the live rows, 15 s
+	Pong            time.Duration // pong timeout, 30 s
+	Heartbeat       time.Duration // presence refresh of the live rows, 15 s
+	// EmptyGrace is how long an anonymous socket may hold no topic before
+	// it is closed (30 s): a visitor's socket must follow something.
+	EmptyGrace time.Duration
 }
 
 func (t Timings) withDefaults() Timings {
@@ -114,6 +117,10 @@ func (t Timings) withDefaults() Timings {
 
 	if t.Heartbeat <= 0 {
 		t.Heartbeat = 15 * time.Second
+	}
+
+	if t.EmptyGrace <= 0 {
+		t.EmptyGrace = 30 * time.Second
 	}
 
 	return t
@@ -441,6 +448,17 @@ func (cn *conn) watch(ctx context.Context, signedIn bool) {
 		check = timer.C
 	}
 
+	// An anonymous socket without topics is closed after a grace period:
+	// it still counts against the caps meanwhile (ADR 0018).
+	var empty <-chan time.Time
+
+	if !signedIn {
+		grace := time.NewTicker(cn.m.d.Timings.EmptyGrace)
+		defer grace.Stop()
+
+		empty = grace.C
+	}
+
 	if signedIn {
 		until, err := cn.m.d.Session.Check(ctx, cn.r)
 		if errors.Is(err, domain.ErrUnauthenticated) {
@@ -468,6 +486,13 @@ func (cn *conn) watch(ctx context.Context, signedIn bool) {
 			return
 		case <-cn.sub.Rechecks():
 			if cn.recheck(ctx) {
+				return
+			}
+		case <-empty:
+			if len(cn.sub.Topics()) == 0 {
+				cn.logger.DebugContext(ctx, "anonymous events ws closed without topics")
+				cn.c.Close(rxv1.CloseNormal, "no topics")
+
 				return
 			}
 		case <-check:

@@ -140,8 +140,12 @@ func TestEventsEndToEnd(t *testing.T) {
 	awaitEvent(t, ws, rxv1.TypeNodeStatus, func(p map[string]any) bool { return p["node_id"] == "attic" && p["status"] == "online" })
 	awaitEvent(t, ws, rxv1.TypeDeviceStatus, func(p map[string]any) bool { return p["device_id"] == "hf" && p["node_id"] == "attic" })
 
-	// The device is anonymous-listenable under the default policy: the
-	// anonymous socket may now follow the nodes.
+	// The device is anonymous-listenable under the default policy: an
+	// anonymous socket may now follow the nodes (a fresh one: a visitor's
+	// socket without topics is closed after a grace period).
+	_ = a.CloseNow()
+	a, _ = anon.events(t, origin)
+
 	if typ, p := sub(t, a, "nodes", "decodes:device=hf"); typ != rxv1.TypeAck {
 		t.Fatalf("anonymous sub with a listenable device = %s %v", typ, p)
 	}

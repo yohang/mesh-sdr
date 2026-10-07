@@ -28,12 +28,21 @@ const hubOrigin = "https://hub.example.org"
 // session is a signed-in user whose session can end or expire.
 type session struct {
 	mu     sync.Mutex
+	anon   bool
 	ended  bool
 	until  time.Time
 	checks int
 }
 
 func (s *session) Identify(context.Context) eventshttp.Identity {
+	s.mu.Lock()
+	anon := s.anon
+	s.mu.Unlock()
+
+	if anon {
+		return eventshttp.Identity{}
+	}
+
 	return eventshttp.Identity{
 		Viewer: domain.Viewer{UserID: "u1", SessionRef: "ref1"}, Name: "alice", Roles: []string{"listener"}, RoleRank: 1,
 		UserID: shared.MustParseUUID("01890000-0000-7000-8000-000000000001"), SessionID: shared.MustParseUUID("01890000-0000-7000-8000-000000000002"),
@@ -617,5 +626,33 @@ func TestSessionCheckFloor(t *testing.T) {
 
 	if checks > 1 {
 		t.Errorf("%d session checks in a second, want the first only", checks)
+	}
+}
+
+// TestAnonymousWithoutTopics: an anonymous socket that follows nothing is
+// closed after the grace period; one with topics stays open.
+func TestAnonymousWithoutTopics(t *testing.T) {
+	f := newFixture(t, eventshttp.Timings{EmptyGrace: 200 * time.Millisecond})
+	f.session.anon = true
+
+	idle := f.dial(t, "")
+	busy := f.dial(t, "")
+
+	for _, ws := range []*websocket.Conn{idle, busy} {
+		send(t, ws, "session.hello", "h", map[string]any{"client": map[string]any{"name": "test", "version": "1"}})
+		recv(t, ws)
+	}
+
+	send(t, busy, "sub", "s", map[string]any{"topics": []string{"nodes"}})
+	recv(t, busy)
+
+	expectClose(t, idle, rxv1.CloseNormal)
+
+	time.Sleep(500 * time.Millisecond)
+
+	send(t, busy, "unsub", "u", map[string]any{"topics": []string{"presence"}})
+
+	if a := recv(t, busy); a.Type != "ack" {
+		t.Fatalf("socket with topics = %+v", a)
 	}
 }

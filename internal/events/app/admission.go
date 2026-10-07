@@ -2,6 +2,7 @@ package app
 
 import (
 	"container/list"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -58,10 +59,12 @@ func NewAdmission(limits Limits) *Admission {
 }
 
 // Admit admits a socket of session (its public handle, "" when anonymous)
-// from address at now. It returns the release function to call when the
+// from address at now (IPv6 addresses count per /64, AddressKey). It returns the release function to call when the
 // socket ends, or domain.ErrUpgradeRate with the wait before the next
 // allowed upgrade, domain.ErrTooManyConnections or domain.ErrHubFull.
 func (a *Admission) Admit(session, address string, now time.Time) (release func(), retryAfter time.Duration, err error) {
+	address = AddressKey(address)
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -105,6 +108,28 @@ func (a *Admission) release(session, address string) {
 			delete(a.sessions, session)
 		}
 	}
+}
+
+// AddressKey is the key of a client address for the caps: the address for
+// IPv4, its /64 network for IPv6, since one client usually holds a whole
+// /64.
+func AddressKey(address string) string {
+	ip, err := netip.ParseAddr(address)
+	if err != nil {
+		return address
+	}
+
+	ip = ip.Unmap()
+	if ip.Is4() {
+		return ip.String()
+	}
+
+	p, err := ip.Prefix(64)
+	if err != nil {
+		return address
+	}
+
+	return p.String()
 }
 
 // Open returns the number of admitted sockets.
