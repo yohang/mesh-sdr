@@ -66,6 +66,11 @@ dirs = ["/usr/local/bin", "/usr/bin"]
 # rtl_connector = "/usr/local/bin/rtl_connector"
 # rtl_tcp_connector = "/usr/local/bin/rtl_tcp_connector"
 
+# USB devices in a container: pass the bus (compose
+# devices: ["/dev/bus/usb:/dev/bus/usb"]) and the group owning it to the
+# nonroot user (group_add: ["<gid>"]); blacklist the dvb_usb_rtl28xxu
+# kernel driver on the host. rtl_tcp devices need no USB access.
+
 # SDR devices of this node (GRID-016), keyed by a hub-wide unique id
 # (^[a-z0-9][a-z0-9_-]{0,62}$). The hub mirrors them read-only into its
 # device registry; they are configured here only. File-only: no env
