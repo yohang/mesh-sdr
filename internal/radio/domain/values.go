@@ -1,0 +1,290 @@
+// Package domain models the SDR devices of a node (TECHNICAL_SPEC §8.2):
+// their configuration, tuning and runtime lifecycle. It is pure: no I/O,
+// no logging.
+package domain
+
+import (
+	"fmt"
+	"math"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+)
+
+// Radio domain errors. Codes are part of the public API.
+var (
+	ErrInvalidDeviceID   = shared.NewError(shared.KindInvalid, "invalid_device_id", "device id must match ^[a-z0-9][a-z0-9_-]{0,62}$")
+	ErrInvalidFrequency  = shared.NewError(shared.KindInvalid, "invalid_frequency", "invalid frequency")
+	ErrInvalidSampleRate = shared.NewError(shared.KindInvalid, "invalid_sample_rate", "invalid sample rate")
+	ErrInvalidDeviceType = shared.NewError(shared.KindInvalid, "invalid_device_type", "invalid device type")
+	ErrInvalidDriver     = shared.NewError(shared.KindInvalid, "invalid_driver", "invalid driver settings")
+	ErrInvalidDevice     = shared.NewError(shared.KindInvalid, "invalid_device", "invalid device")
+	ErrOutOfRange        = shared.NewError(shared.KindInvalid, "out_of_range", "value out of range")
+	ErrDeviceNotFound    = shared.NewError(shared.KindNotFound, "device_not_found", "device not found")
+	ErrDeviceUnavailable = shared.NewError(shared.KindUnavailable, "device_unavailable", "the device is not available")
+	ErrInvalidTransition = shared.NewError(shared.KindConflict, "invalid_device_transition", "invalid device state transition")
+	ErrUnsupportedMode   = shared.NewError(shared.KindInvalid, "unsupported_mode", "demodulation mode not supported by this node")
+	ErrCapacityExceeded  = shared.NewError(shared.KindConflict, "capacity_exceeded", "demodulator capacity exceeded")
+)
+
+var deviceIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
+// DeviceID is the hub-wide unique device slug.
+type DeviceID struct{ value string }
+
+// NewDeviceID validates s.
+func NewDeviceID(s string) (DeviceID, error) {
+	if !deviceIDPattern.MatchString(s) {
+		return DeviceID{}, ErrInvalidDeviceID.WithDetail("invalid device id " + strconv.Quote(s))
+	}
+
+	return DeviceID{value: s}, nil
+}
+
+// MustDeviceID is NewDeviceID that panics. Tests and constants only.
+func MustDeviceID(s string) DeviceID {
+	id, err := NewDeviceID(s)
+	if err != nil {
+		panic(err)
+	}
+
+	return id
+}
+
+// String returns the slug.
+func (id DeviceID) String() string { return id.value }
+
+// MaxFrequency bounds frequencies (100 GHz).
+const MaxFrequency = 100_000_000_000
+
+// Frequency is a frequency in Hz.
+type Frequency struct{ hz int64 }
+
+// NewFrequency validates hz (0 < hz ≤ 100 GHz).
+func NewFrequency(hz int64) (Frequency, error) {
+	if hz <= 0 || hz > MaxFrequency {
+		return Frequency{}, ErrInvalidFrequency.WithDetail("invalid frequency " + strconv.FormatInt(hz, 10) + " Hz")
+	}
+
+	return Frequency{hz: hz}, nil
+}
+
+// MustFrequency is NewFrequency that panics. Tests and constants only.
+func MustFrequency(hz int64) Frequency {
+	f, err := NewFrequency(hz)
+	if err != nil {
+		panic(err)
+	}
+
+	return f
+}
+
+// Hz returns the value.
+func (f Frequency) Hz() int64 { return f.hz }
+
+// MaxSampleRate bounds device sample rates (§2.3 reference hardware B
+// stops at 10 MS/s; 100 MS/s leaves room).
+const MaxSampleRate = 100_000_000
+
+// SampleRate is a device sample rate in samples per second.
+type SampleRate struct{ v int }
+
+// NewSampleRate validates v.
+func NewSampleRate(v int64) (SampleRate, error) {
+	if v <= 0 || v > MaxSampleRate {
+		return SampleRate{}, ErrInvalidSampleRate.WithDetail("invalid sample rate " + strconv.FormatInt(v, 10))
+	}
+
+	return SampleRate{v: int(v)}, nil
+}
+
+// MustSampleRate is NewSampleRate that panics. Tests and constants only.
+func MustSampleRate(v int64) SampleRate {
+	r, err := NewSampleRate(v)
+	if err != nil {
+		panic(err)
+	}
+
+	return r
+}
+
+// PerSecond returns the value.
+func (r SampleRate) PerSecond() int { return r.v }
+
+// FreqRange is a tunable range.
+type FreqRange struct{ min, max Frequency }
+
+// NewFreqRange validates min < max.
+func NewFreqRange(lo, hi Frequency) (FreqRange, error) {
+	if lo.hz >= hi.hz {
+		return FreqRange{}, ErrOutOfRange.WithDetail("frequency range: want min < max")
+	}
+
+	return FreqRange{min: lo, max: hi}, nil
+}
+
+// Min returns the lowest frequency.
+func (r FreqRange) Min() Frequency { return r.min }
+
+// Max returns the highest frequency.
+func (r FreqRange) Max() Frequency { return r.max }
+
+// Contains reports whether f lies in the range.
+func (r FreqRange) Contains(f Frequency) bool { return f.hz >= r.min.hz && f.hz <= r.max.hz }
+
+// DeviceType is the driver type of a device (§8.2 "Driver strategy").
+type DeviceType struct{ value string }
+
+// Device types this node can run.
+const (
+	TypeRTLSDR = "rtl_sdr"
+	TypeRTLTCP = "rtl_tcp"
+)
+
+var deviceTypePattern = regexp.MustCompile(`^[a-z0-9_]{1,24}(:[a-z0-9_]{1,23})?$`)
+
+// NewDeviceType validates the syntax of s. Supported tells whether this
+// node has a driver for it.
+func NewDeviceType(s string) (DeviceType, error) {
+	if !deviceTypePattern.MatchString(s) {
+		return DeviceType{}, ErrInvalidDeviceType.WithDetail("invalid device type " + strconv.Quote(s))
+	}
+
+	return DeviceType{value: s}, nil
+}
+
+// String returns the type.
+func (t DeviceType) String() string { return t.value }
+
+// Supported reports whether the node implements this type (rtl_sdr and
+// rtl_tcp through owrx_connector; the others come with later tickets).
+func (t DeviceType) Supported() bool { return t.value == TypeRTLSDR || t.value == TypeRTLTCP }
+
+// driverDevicePattern bounds the connector device string (§8.2 rule 2): a
+// serial, an index or host:port, no control characters.
+var driverDevicePattern = regexp.MustCompile(`^[A-Za-z0-9._:=-]{1,64}$`)
+
+// Gain is the RF gain: automatic or a value in dB.
+type Gain struct {
+	auto bool
+	db   float64
+}
+
+// AutoGain is the automatic gain.
+func AutoGain() Gain { return Gain{auto: true} }
+
+// NewGain validates a manual gain (0..100 dB).
+func NewGain(db float64) (Gain, error) {
+	if math.IsNaN(db) || db < 0 || db > 100 {
+		return Gain{}, ErrInvalidDriver.WithDetail("rf_gain: want auto or 0..100 dB")
+	}
+
+	return Gain{db: db}, nil
+}
+
+// Auto reports whether the gain is automatic.
+func (g Gain) Auto() bool { return g.auto }
+
+// String returns the connector form: "auto" or the dB value.
+func (g Gain) String() string {
+	if g.auto {
+		return "auto"
+	}
+
+	return strconv.FormatFloat(g.db, 'f', -1, 64)
+}
+
+// Driver is the validated driver table of a device (devices.<id>.driver).
+type Driver struct {
+	device string
+	ppm    int
+	gain   Gain
+	iqSwap bool
+}
+
+// NewDriver validates the driver settings. device is the connector device
+// (rtl_sdr: index or serial; rtl_tcp: host:port).
+func NewDriver(t DeviceType, device string, ppm int, gain Gain, iqSwap bool) (Driver, error) {
+	if device == "" && t.value == TypeRTLSDR {
+		device = "0"
+	}
+
+	if !driverDevicePattern.MatchString(device) {
+		return Driver{}, ErrInvalidDriver.WithDetail("driver.device: want 1..64 characters of [A-Za-z0-9._:=-]")
+	}
+
+	if t.value == TypeRTLTCP {
+		host, port, ok := strings.Cut(device, ":")
+		if p, err := strconv.Atoi(port); !ok || host == "" || err != nil || p < 1 || p > 65535 {
+			return Driver{}, ErrInvalidDriver.WithDetail("driver.device: rtl_tcp needs host:port")
+		}
+	}
+
+	if ppm < -1000 || ppm > 1000 {
+		return Driver{}, ErrInvalidDriver.WithDetail("driver.ppm: want -1000..1000")
+	}
+
+	return Driver{device: device, ppm: ppm, gain: gain, iqSwap: iqSwap}, nil
+}
+
+// Device returns the connector device string.
+func (d Driver) Device() string { return d.device }
+
+// PPM returns the frequency correction.
+func (d Driver) PPM() int { return d.ppm }
+
+// Gain returns the RF gain.
+func (d Driver) Gain() Gain { return d.gain }
+
+// IQSwap reports whether I and Q are swapped.
+func (d Driver) IQSwap() bool { return d.iqSwap }
+
+// Tuning is the capture band of a running device.
+type Tuning struct {
+	center Frequency
+	rate   SampleRate
+}
+
+// NewTuning returns a tuning.
+func NewTuning(center Frequency, rate SampleRate) Tuning { return Tuning{center: center, rate: rate} }
+
+// Center returns the centre frequency.
+func (t Tuning) Center() Frequency { return t.center }
+
+// Rate returns the sample rate.
+func (t Tuning) Rate() SampleRate { return t.rate }
+
+// Start returns the lowest frequency of the capture band.
+func (t Tuning) Start() int64 { return t.center.hz - int64(t.rate.v)/2 }
+
+// ContainsOffset reports whether offsetHz from the centre is inside the
+// capture band (§6.9: ±sample_rate/2).
+func (t Tuning) ContainsOffset(offsetHz int64) bool {
+	half := int64(t.rate.v) / 2
+
+	return offsetHz >= -half && offsetHz <= half
+}
+
+// defaultTuning derives the tuning of a device without preset: the first
+// sample rate, centred so that the capture band starts at the bottom of
+// the range (ADR 0019, until presets come from the hub).
+func defaultTuning(r FreqRange, rates []SampleRate) Tuning {
+	rate := rates[0]
+	half := int64(rate.v) / 2
+	center := r.min.hz + half
+
+	if r.max.hz-r.min.hz < 2*half || center > r.max.hz {
+		center = r.min.hz + (r.max.hz-r.min.hz)/2
+	}
+
+	return Tuning{center: Frequency{hz: center}, rate: rate}
+}
+
+func containsRate(rates []SampleRate, r SampleRate) bool {
+	return slices.Contains(rates, r)
+}
+
+func fmtHz(hz int64) string { return fmt.Sprintf("%d Hz", hz) }

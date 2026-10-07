@@ -11,3 +11,17 @@ listen = "127.0.0.1:8074"
 [log]
 level = "debug"
 format = "text"
+
+# The dev image has no SDR hardware: the device below runs the fake
+# owrx_connector (built by Air into tmp/), which synthesises an NFM
+# carrier at centre + 128 kHz modulated by a 1 kHz tone.
+[tools]
+rtl_connector = "/app/tmp/fakeconnector"
+
+[devices.dev-rtl]
+name = "Synthetic RTL-SDR"
+type = "rtl_sdr"
+freq_range = { min = "144MHz", max = "146MHz" }
+sample_rates = [1_024_000]
+listen_policy = "anonymous"
+operator_can_retune = true

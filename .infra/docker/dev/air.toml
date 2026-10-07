@@ -6,7 +6,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-cmd = "go generate ./... && go build -o ./tmp/meshsdr ./cmd/meshsdr"
+cmd = "go generate ./... && go build -o ./tmp/meshsdr ./cmd/meshsdr && go build -o ./tmp/fakeconnector ./internal/radio/infra/connector/fakeconnector"
 entrypoint = ["./tmp/meshsdr", "all"]
 include_ext = ["go", "templ", "sql", "css", "js", "yaml", "toml"]
 exclude_dir = ["tmp", "var", "internal/db/sqlite/sqlc"]

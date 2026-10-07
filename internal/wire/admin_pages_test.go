@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func (b *browser) form(path string, values url.Values, htmx bool) (*http.Response, string) {
@@ -173,7 +174,19 @@ func TestAdminPurgeNow(t *testing.T) {
 	h := newAdminHub(t, nil)
 	b := h.browser("root")
 
-	res, body := b.form("/admin/retention/purge", url.Values{"store": {"audit_log"}}, true)
+	// The hub runs its scheduled purges at start; a purge requested while
+	// that run is in progress is refused with 409 until it ends.
+	var (
+		res  *http.Response
+		body string
+	)
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		res, body = b.form("/admin/retention/purge", url.Values{"store": {"audit_log"}}, true)
+		if res.StatusCode != http.StatusConflict || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if res.StatusCode != http.StatusOK || !strings.Contains(body, "Purged audit_log: 0 rows deleted.") || !strings.Contains(body, `id="retention-stores"`) {
 		t.Errorf("purge = %d %s", res.StatusCode, body)
 	}

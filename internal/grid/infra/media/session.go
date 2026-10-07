@@ -11,6 +11,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/media"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/sendq"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/wsconn"
 )
@@ -26,8 +27,13 @@ type session struct {
 	pending *closeReq
 
 	// forbidden counts the forbidden messages of the last minute (read
-	// loop only).
+	// loop only). It is separate from the inbound rate limiter of run
+	// (msgLimiter): a scope violation closes with 4403, a flood with 4429.
 	forbidden strikes
+
+	hello   media.Hello
+	queue   *sendq.Queue
+	streams media.StreamSession
 }
 
 // strikes is a sliding one-minute window of violations.
@@ -156,12 +162,29 @@ func (ss *session) run(ctx context.Context) {
 
 	started := false
 	reason := "client"
+	limiter := newMsgLimiter(defaultMsgRate)
 
 	for {
 		env, err := ss.conn.Read(ctx)
+
+		var pe *rxv1.Error
+		if err == nil || errors.As(err, &pe) {
+			if ok, retry, escalate := limiter.allow(o.Now()); !ok {
+				if escalate {
+					ss.logger.WarnContext(ctx, "media connection closed: inbound message rate exceeded repeatedly")
+					ss.conn.Close(rxv1.CloseRateLimited, "rate_limited")
+
+					continue
+				}
+
+				ss.rateLimited(env, retry)
+
+				continue
+			}
+		}
+
 		if err != nil {
-			var pe *rxv1.Error
-			if errors.As(err, &pe) {
+			if pe != nil {
 				ss.sendError(err)
 
 				continue
@@ -196,13 +219,23 @@ func (ss *session) run(ctx context.Context) {
 				continue
 			}
 
-			if _, err := decode[media.Hello](env); err != nil {
+			h, err := decode[media.Hello](env)
+			if err != nil {
 				ss.sendError(err)
 
 				continue
 			}
 
 			hello.Stop()
+
+			ss.mu.Lock()
+			ss.hello = h
+			ss.mu.Unlock()
+
+			if o.Streams != nil {
+				ss.streams = o.Streams.Open(ss)
+				defer ss.streams.Close()
+			}
 
 			started = true
 			cur := ss.claims()
@@ -225,14 +258,18 @@ func (ss *session) run(ctx context.Context) {
 			ss.refresh(ctx, env, expire)
 		case rxv1.TypeBye:
 			ss.conn.Close(rxv1.CloseNormal, "bye")
+		case rxv1.TypeTimeSync:
+			ss.timeSync(env)
 		case rxv1.TypeDeviceAttach:
-			ss.scoped(env, token.PermListen)
-		case rxv1.TypeDemodCreate:
-			ss.scoped(env, token.PermDemod)
+			ss.scoped(ctx, env, token.PermListen)
 		case rxv1.TypePresetSelect:
-			ss.scoped(env, token.PermPreset)
+			ss.scoped(ctx, env, token.PermPreset)
 		case rxv1.TypeDeviceRetune:
-			ss.scoped(env, token.PermRetune)
+			ss.scoped(ctx, env, token.PermRetune)
+		case rxv1.TypeDemodCreate:
+			ss.scoped(ctx, env, token.PermDemod)
+		case rxv1.TypeDeviceDetach, rxv1.TypeStreamConfigure, rxv1.TypeAudioConfigure, rxv1.TypeDemodSet, rxv1.TypeDemodRemove:
+			ss.stream(ctx, env)
 		case rxv1.TypeAck, rxv1.TypeError:
 		default:
 			ss.reply(env, rxv1.CodeUnsupportedType, "not implemented by this node yet")
@@ -318,6 +355,10 @@ func (ss *session) refresh(ctx context.Context, env rxv1.Envelope, expire *time.
 
 	ss.s.extendUsed(c.ConnectionID, c.ExpiresAt)
 
+	if ss.streams != nil {
+		ss.streams.Reauthorize()
+	}
+
 	expire.Reset(ss.expiry())
 	ss.logger.DebugContext(ctx, "access token refreshed", slog.Time("exp", c.ExpiresAt))
 	ss.ack(env)
@@ -333,10 +374,9 @@ func sameHolder(cur, next token.Claims) bool {
 	return next.Subject == cur.Subject && next.SessionID == cur.SessionID
 }
 
-// scoped checks a device-scoped message against the token scope. Device
-// streaming is not implemented yet: an allowed message is answered
-// unsupported_type.
-func (ss *session) scoped(env rxv1.Envelope, perm string) {
+// scoped checks a device-scoped message against the token scope, then
+// hands it to the stream handler.
+func (ss *session) scoped(ctx context.Context, env rxv1.Envelope, perm string) {
 	ref, err := decode[media.DeviceRef](env)
 	if err != nil {
 		ss.sendError(err)
@@ -356,8 +396,90 @@ func (ss *session) scoped(env rxv1.Envelope, perm string) {
 		return
 	}
 
-	ss.reply(env, rxv1.CodeUnsupportedType, "device streaming is not implemented by this node yet")
+	if env.Type() == rxv1.TypePresetSelect {
+		ss.reply(env, rxv1.CodeUnsupportedType, "presets are not implemented by this node yet")
+
+		return
+	}
+
+	ss.stream(ctx, env)
 }
+
+// stream hands a device message to the stream handler.
+func (ss *session) stream(ctx context.Context, env rxv1.Envelope) {
+	if ss.streams == nil {
+		ss.reply(env, rxv1.CodeUnsupportedType, "device streaming is not available on this node")
+
+		return
+	}
+
+	ss.streams.Handle(ctx, env)
+}
+
+// rateLimited answers a message over the inbound rate (§6.9).
+func (ss *session) rateLimited(env rxv1.Envelope, retry time.Duration) {
+	ms := retry.Milliseconds()
+	p := rxv1.ErrorPayload{Code: rxv1.CodeRateLimited, Message: "too many messages", Retryable: true, RetryAfterMS: &ms}
+
+	if id, ok := env.ID(); ok {
+		p.Re = &id
+	}
+
+	if e, err := rxv1.NewErrorEnvelope(time.Now().UnixMilli(), p); err == nil {
+		_ = ss.conn.Send(e)
+	}
+}
+
+// timeSync answers time.sync with the node clock (§6.4).
+func (ss *session) timeSync(env rxv1.Envelope) {
+	t1 := ss.s.o.Now().UnixMilli()
+
+	p, err := decode[media.TimeSync](env)
+	if err != nil {
+		ss.sendError(err)
+
+		return
+	}
+
+	id, _ := env.ID()
+	ss.send(rxv1.TypeTimeSyncReply, id, media.TimeSyncReply{T0: p.T0, T1: t1, T2: ss.s.o.Now().UnixMilli()})
+}
+
+// Claims implements media.Peer.
+func (ss *session) Claims() token.Claims { return ss.claims() }
+
+// Hello implements media.Peer.
+func (ss *session) Hello() media.Hello {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	return ss.hello
+}
+
+// Send implements media.Peer.
+func (ss *session) Send(typ rxv1.MessageType, payload any) {
+	ss.send(typ, rxv1.CorrelationID{}, payload)
+}
+
+// Ack implements media.Peer.
+func (ss *session) Ack(req rxv1.Envelope, result any) {
+	id, ok := req.ID()
+	if !ok {
+		return
+	}
+
+	if a, err := rxv1.NewAckEnvelope(time.Now().UnixMilli(), id, result); err == nil {
+		_ = ss.conn.Send(a)
+	}
+}
+
+// Fail implements media.Peer.
+func (ss *session) Fail(req rxv1.Envelope, code rxv1.ErrorCode, reason string) {
+	ss.reply(req, code, reason)
+}
+
+// Queue implements media.Peer.
+func (ss *session) Queue() *sendq.Queue { return ss.queue }
 
 // emit reports the connection to the hub over the control channel
 // (presence, §7.3).

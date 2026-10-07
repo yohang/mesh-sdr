@@ -6,8 +6,14 @@ import (
 	"os"
 
 	"github.com/yohang/mesh-sdr/internal/cli"
+	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
 )
 
 func main() {
+	// The node re-executes itself as the exec helper of the tools it
+	// supervises (ADR 0017): it must run before anything else, cobra
+	// included, and never returns in that mode.
+	process.MaybeRunExecHelper()
+
 	os.Exit(cli.Execute(context.Background(), os.Args[1:]))
 }

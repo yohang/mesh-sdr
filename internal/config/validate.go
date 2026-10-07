@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
+	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -346,6 +348,34 @@ func (n *Node) validate(o Origins) []Problem {
 		c.fail("node.event_buffer.max_bytes", CodeInvalidValue, "want 64KiB..4GiB")
 	}
 
+	if d := n.Node.RuntimeDir; !filepath.IsAbs(d) || filepath.Clean(d) != d {
+		c.fail("node.runtime_dir", CodeInvalidValue, "want an absolute, clean path")
+	}
+
+	if _, _, err := ParsePortRange(n.Node.IPCPortRange); err != nil {
+		c.fail("node.ipc_port_range", CodeInvalidValue, err.Error())
+	}
+
+	if v := n.Node.MaxDemods; v < 1 || v > 1000 {
+		c.fail("node.max_demods", CodeInvalidValue, "want 1..1000")
+	}
+
+	if v := n.Node.WSNotSentLowat.Bytes(); v < 1<<10 || v > 1<<20 {
+		c.fail("node.ws_notsent_lowat", CodeInvalidValue, "want 1KiB..1MiB")
+	}
+
+	for i, d := range n.Tools.Dirs {
+		if !filepath.IsAbs(d) || strings.Contains(d, ":") {
+			c.fail("tools.dirs["+strconv.Itoa(i)+"]", CodeInvalidValue, "want an absolute path without ':'")
+		}
+	}
+
+	for name, p := range n.Tools.Paths() {
+		if !filepath.IsAbs(p) {
+			c.fail("tools."+name, CodeInvalidValue, "want an absolute path")
+		}
+	}
+
 	for _, id := range slices.Sorted(maps.Keys(n.Devices)) {
 		d := n.Devices[id]
 		key := "devices." + id
@@ -373,6 +403,12 @@ func (n *Node) validate(o Origins) []Problem {
 		if d.ListenPolicy != "" {
 			c.enum(key+".listen_policy", d.ListenPolicy, "anonymous", "registered")
 		}
+
+		if d.MaxDemods < 0 || d.MaxDemods > 1000 {
+			c.fail(key+".max_demods", CodeInvalidValue, "want 0..1000 (0: default 16)")
+		}
+
+		c.driver(key, d)
 	}
 
 	if (n.TLS.Cert == "") != (n.TLS.Key == "") {
@@ -386,6 +422,29 @@ func (n *Node) validate(o Origins) []Problem {
 	c.log(n.Log)
 
 	return c.problems
+}
+
+// driver validates the driver table of a device the node can run, with the
+// rules of the radio domain (§8.2 rule 2).
+func (c *checker) driver(key string, d DeviceConfig) {
+	typ, err := radiodomain.NewDeviceType(d.Type)
+	if err != nil || !typ.Supported() {
+		return
+	}
+
+	gain := radiodomain.AutoGain()
+
+	if !d.Driver.RFGain.Auto() {
+		if gain, err = radiodomain.NewGain(d.Driver.RFGain.DB()); err != nil {
+			c.domainError(key+".driver.rf_gain", err)
+
+			return
+		}
+	}
+
+	if _, err := radiodomain.NewDriver(typ, d.Driver.Device, d.Driver.PPM, gain, d.Driver.IQSwap); err != nil {
+		c.domainError(key+".driver", err)
+	}
 }
 
 func validFingerprint(s string) bool {
