@@ -38,7 +38,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/mail"
-	"github.com/yohang/mesh-sdr/internal/settings"
 	settingsapp "github.com/yohang/mesh-sdr/internal/settings/app"
 	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -289,26 +288,23 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return identityHTTP.ShellUser(r)
 	}
 
-	settingsModule, err := settings.Wire(ctx, settings.Deps{
-		Config: cfg, Origins: origins, DB: adapter, Now: now, Logger: logger,
-		Audit: auditLog,
-	})
+	settingsStore, effective, err := newSettings(ctx, cfg, origins, adapter, auditLog, now, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("settings: %w", err)
 	}
 
 	// grid.heartbeat_interval_s and grid.offline_after_s apply live.
-	g.applySettings(timings, settingsModule.Store.Snapshot())
-	settingsModule.Store.Subscribe(func(s *settingsapp.Snapshot) { g.applySettings(timings, s) })
+	g.applySettings(timings, settingsStore.Snapshot())
+	settingsStore.Subscribe(func(s *settingsapp.Snapshot) { g.applySettings(timings, s) })
 
 	adminGate := &roleGate{role: identitydomain.RoleAdmin}
-	shellModule := shell.Wire(shell.Deps{
-		Settings: settingsModule.Store, AdminGate: adminGate, User: userOf, Logger: logger,
+	shellModule := shell.New(shell.Deps{
+		Settings: settingsStore, AdminGate: adminGate, User: userOf, Logger: logger,
 		Images: stationImages{b: images, logger: component(logger, "shell.infra.station_images")},
 	})
 
 	ideps := identityDeps(cfg, logger, adapter)
-	ideps.Settings = settingsModule.Store
+	ideps.Settings = settingsStore
 	ideps.Devices = gridDevices{g.devices}
 
 	var workers []func(context.Context)
@@ -349,7 +345,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	identityHTTP = idm.HTTP
 
 	// Presets and schedules (ADR 0020), wired to the grid.
-	sch := newScheduling(adapter, g, settingsModule.Store, auditLog, now, logger)
+	sch := newScheduling(adapter, g, settingsStore, auditLog, now, logger)
 
 	if g.states != nil {
 		// The desired state carries listen_policy: a settings change is
@@ -357,7 +353,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		// stops with the hub.
 		changed := make(chan struct{}, 1)
 
-		settingsModule.Store.Subscribe(func(*settingsapp.Snapshot) {
+		settingsStore.Subscribe(func(*settingsapp.Snapshot) {
 			select {
 			case changed <- struct{}{}:
 			default:
@@ -381,22 +377,22 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	// Hub events WebSocket (ADR 0016, ADR 0018) and its grid producers.
 	policies := &policyCache{
-		policies: gridapp.NewListenPolicies(gridsqlite.NewDeviceRepository(adapter), storeListenPolicy{store: settingsModule.Store}),
+		policies: gridapp.NewListenPolicies(gridsqlite.NewDeviceRepository(adapter), storeListenPolicy{store: settingsStore}),
 		broker:   broker, logger: component(logger, "events.wire.policies"),
 	}
 	events := newEventsModule(cfg.Hub.URL, broker, idm.HTTP, policies, g.presence, now, logger)
-	settingsModule.Store.Subscribe(listenPolicyWatch(policies, settingsModule.Store.String("listen_policy")))
+	settingsStore.Subscribe(listenPolicyWatch(policies, settingsStore.String("listen_policy")))
 	ge := g.publishEvents(broker, policies, now, logger)
 	workers = append(workers, events.Run, ge.runPresence)
 
-	scheduler, retention, err := newJobs(adapter, idm, sch, settingsModule.Store, auditLog, logger)
+	scheduler, retention, err := newJobs(adapter, idm, sch, settingsStore, auditLog, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jobs: %w", err)
 	}
 
 	imagesHTTP := files.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), currentUser,
 		shellModule.Renderer.Error, component(logger, "files.http"))
-	access, err := g.mediaAccess(cfg, listenPolicy{settingsrc.New(settingsModule.Store, component(logger, "grid.infra.settings"))}, logger)
+	access, err := g.mediaAccess(cfg, listenPolicy{settingsrc.New(settingsStore, component(logger, "grid.infra.settings"))}, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -407,11 +403,11 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	apiServer := api.Server{
 		HealthHandlers:   api.NewHealthHandlers(adapter, component(logger, "http.api.health")),
 		AuthHandlers:     api.NewAuthHandlers(idm.HTTP),
-		ConfigHandlers:   api.NewConfigHandlers(settingsModule.Effective),
+		ConfigHandlers:   api.NewConfigHandlers(effective),
 		BrandingHandlers: api.NewBrandingHandlers(images),
 		TokenHandlers:    api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
 		FeatureHandlers: api.NewFeatureHandlers(idm.HTTP, gridapp.NewFeatures(gridsqlite.NewDeviceRepository(adapter),
-			gridsqlite.NewCapabilityRepository(adapter), storeListenPolicy{store: settingsModule.Store})),
+			gridsqlite.NewCapabilityRepository(adapter), storeListenPolicy{store: settingsStore})),
 		PresetHandlers:   api.NewPresetHandlers(sch.presets, scheduleDevices{repo: g.deviceRepo}),
 		ScheduleHandlers: api.NewScheduleHandlers(sch.schedules, deviceScope{}),
 	}
@@ -425,7 +421,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		idm.HTTP,
 		settingshttp.New(settingshttp.Deps{
 			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin),
-			Store: settingsModule.Store, Config: settingsModule.Effective, Retention: retentionRows{r: retention},
+			Store: settingsStore, Config: effective, Retention: retentionRows{r: retention},
 			User: currentUser, Images: imagesHTTP, Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets},
 			Logger: component(logger, "settings.http"),
 		}),

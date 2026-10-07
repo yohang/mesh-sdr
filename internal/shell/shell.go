@@ -41,8 +41,8 @@ type Wired struct {
 	HTTP *Module
 }
 
-// Wire builds the shell module.
-func Wire(d Deps) Wired {
+// New builds the shell module.
+func New(d Deps) Wired {
 	component := func(name string) *slog.Logger { return d.Logger.With(slog.String("component", name)) }
 
 	settings := NewStoreSettings(d.Settings)

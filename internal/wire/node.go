@@ -26,7 +26,6 @@ import (
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
-	"github.com/yohang/mesh-sdr/internal/radio"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
@@ -111,14 +110,14 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	holder := pki.NewCertHolder(cert)
 	revoked := pki.NewRevokedSet()
 
-	devices, err := radio.Wire(radio.Deps{Config: cfg, Logger: logger, Reporter: deviceReporter{ag}})
+	manager, streams, err := newRadio(cfg, logger, deviceReporter{ag})
 	if err != nil {
 		return nil, err
 	}
 
 	mediaServer := media.NewServer(media.Options{
 		NodeID: id.String(), Version: version.String(), GatewayIdentity: cfg.HubTrust.HubIdentity,
-		OwnSerial: holder.Serial, Agent: ag, HeartbeatInterval: o.mediaHeartbeat, Streams: devices.Streams, Now: time.Now,
+		OwnSerial: holder.Serial, Agent: ag, HeartbeatInterval: o.mediaHeartbeat, Streams: streams, Now: time.Now,
 		Logger: component(logger, "grid.infra.media"),
 	})
 
@@ -136,7 +135,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 
 	return &Process{
 		addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server"),
-		workers: []func(context.Context){ag.Run, ctlServer.Run, mediaServer.Run, devices.Manager.Run},
+		workers: []func(context.Context){ag.Run, ctlServer.Run, mediaServer.Run, manager.Run},
 	}, nil
 }
 
