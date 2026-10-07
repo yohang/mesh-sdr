@@ -88,7 +88,7 @@ func Wire(d Deps) (*Module, error) {
 
 	m, err := app.NewManager(app.Options{
 		Devices: devices, Sources: sources, Engines: engine.Factory{Logger: component(d.Logger, "radio.infra.engine")},
-		Reporter: d.Reporter, Logger: component(d.Logger, "radio.app.manager"),
+		Reporter: d.Reporter, Logger: component(d.Logger, "radio.app.manager"), MaxDemods: cfg.Node.MaxDemods,
 	})
 	if err != nil {
 		return nil, err
@@ -168,6 +168,6 @@ func device(id string, c config.DeviceConfig) (*domain.Device, error) {
 	return domain.NewDevice(domain.DeviceParams{
 		ID: did, Name: c.Name, Type: typ, Enabled: c.Enabled == nil || *c.Enabled, Range: rng, Rates: rates,
 		AlwaysOn: c.AlwaysOn, OperatorCanRetune: c.OperatorCanRetune, AutoRecover: c.AutoRecover == nil || *c.AutoRecover,
-		Driver: drv,
+		Driver: drv, MaxDemods: c.MaxDemods,
 	})
 }

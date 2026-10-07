@@ -356,6 +356,10 @@ func (n *Node) validate(o Origins) []Problem {
 		c.fail("node.ipc_port_range", CodeInvalidValue, err.Error())
 	}
 
+	if v := n.Node.MaxDemods; v < 1 || v > 1000 {
+		c.fail("node.max_demods", CodeInvalidValue, "want 1..1000")
+	}
+
 	if v := n.Node.WSNotSentLowat.Bytes(); v < 1<<10 || v > 1<<20 {
 		c.fail("node.ws_notsent_lowat", CodeInvalidValue, "want 1KiB..1MiB")
 	}
@@ -398,6 +402,10 @@ func (n *Node) validate(o Origins) []Problem {
 
 		if d.ListenPolicy != "" {
 			c.enum(key+".listen_policy", d.ListenPolicy, "anonymous", "registered")
+		}
+
+		if d.MaxDemods < 0 || d.MaxDemods > 1000 {
+			c.fail(key+".max_demods", CodeInvalidValue, "want 0..1000 (0: default 16)")
 		}
 
 		c.driver(key, d)

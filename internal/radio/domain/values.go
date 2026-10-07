@@ -27,6 +27,7 @@ var (
 	ErrDeviceUnavailable = shared.NewError(shared.KindUnavailable, "device_unavailable", "the device is not available")
 	ErrInvalidTransition = shared.NewError(shared.KindConflict, "invalid_device_transition", "invalid device state transition")
 	ErrUnsupportedMode   = shared.NewError(shared.KindInvalid, "unsupported_mode", "demodulation mode not supported by this node")
+	ErrCapacityExceeded  = shared.NewError(shared.KindConflict, "capacity_exceeded", "demodulator capacity exceeded")
 )
 
 var deviceIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)

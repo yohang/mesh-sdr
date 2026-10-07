@@ -192,6 +192,8 @@ func (ss *session) fail(req rxv1.Envelope, err error) {
 			code = rxv1.CodeDeviceUnavailable
 		case errors.Is(err, domain.ErrUnsupportedMode):
 			code = rxv1.CodeDemodError
+		case errors.Is(err, domain.ErrCapacityExceeded):
+			code = rxv1.CodeCapacityExceeded
 		case de.Kind() == shared.KindInvalid:
 			code = rxv1.CodeOutOfRange
 		}
@@ -557,7 +559,7 @@ func (ss *session) createDemod(req rxv1.Envelope) {
 
 	meterKey := "meter:" + id
 
-	d, err := a.lease.Engine().NewDemod(params, func(out app.AudioOut) {
+	d, err := a.lease.NewDemod(params, func(out app.AudioOut) {
 		f := sendq.Frame{
 			Type: rxv1.FrameAudio, StreamID: stream, TimestampUS: out.TimestampUS,
 			Payload: out.Payload, Duration: out.Duration,
