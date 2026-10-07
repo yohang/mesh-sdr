@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/sendq"
@@ -22,6 +23,8 @@ type Peer interface {
 	Ack(req rxv1.Envelope, result any)
 	// Fail answers a request with an error frame.
 	Fail(req rxv1.Envelope, code rxv1.ErrorCode, reason string)
+	// RateLimited answers a request with rate_limited and its retry delay.
+	RateLimited(req rxv1.Envelope, retry time.Duration)
 	// Queue is the connection's send queue for binary frames and meters.
 	Queue() *sendq.Queue
 }

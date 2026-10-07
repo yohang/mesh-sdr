@@ -160,7 +160,7 @@ func (r deviceReporter) DeviceState(s radiodomain.Snapshot) {
 
 	r.ag.Emit(rxv1.TypeDeviceState, "device:"+s.ID, agent.ClassState, func(seq int64) any {
 		return ctl.DeviceState{
-			Seq: seq, DeviceID: s.ID, State: string(s.State), Reason: s.Reason,
+			Seq: seq, DeviceID: s.ID, State: string(s.State), Reason: s.Reason, ActivePresetID: s.ActivePreset,
 			CenterFreq: center, SampleRate: rate, Listeners: s.Listeners,
 		}
 	})

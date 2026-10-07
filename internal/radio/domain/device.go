@@ -78,6 +78,9 @@ type Device struct {
 	attempt   int
 	tuning    Tuning
 	listeners int
+	// preset is the shared preset last switched to (preset.select); empty
+	// when none.
+	preset string
 }
 
 // NewDevice checks the invariants of p. The device starts disabled when
@@ -155,6 +158,13 @@ func (d *Device) State() (State, string) { return d.state, d.reason }
 
 // Tuning returns the current capture band.
 func (d *Device) Tuning() Tuning { return d.tuning }
+
+// ActivePreset returns the shared preset last switched to ("" if none).
+func (d *Device) ActivePreset() string { return d.preset }
+
+// SetActivePreset records the shared preset of the device (the hub
+// validated the id; "" clears it).
+func (d *Device) SetActivePreset(id string) { d.preset = id }
 
 // Listeners returns the USER demand (attached media sessions).
 func (d *Device) Listeners() int { return d.listeners }
@@ -243,6 +253,8 @@ type Snapshot struct {
 	// MinHz and MaxHz are the device range.
 	MinHz, MaxHz      int64
 	OperatorCanRetune bool
+	// ActivePreset is the shared preset last switched to ("" if none).
+	ActivePreset string
 }
 
 // Snapshot returns the status.
@@ -251,5 +263,6 @@ func (d *Device) Snapshot() Snapshot {
 		ID: d.p.ID.String(), Name: d.p.Name, State: d.state, Reason: d.reason, Attempt: d.attempt,
 		CenterHz: d.tuning.center.hz, RateHz: d.tuning.rate.v, Listeners: d.listeners,
 		MinHz: d.p.Range.min.hz, MaxHz: d.p.Range.max.hz, OperatorCanRetune: d.p.OperatorCanRetune,
+		ActivePreset: d.preset,
 	}
 }

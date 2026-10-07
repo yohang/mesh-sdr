@@ -99,6 +99,12 @@ func (p *peer) Fail(_ rxv1.Envelope, code rxv1.ErrorCode, _ string) {
 	p.mu.Unlock()
 }
 
+func (p *peer) RateLimited(rxv1.Envelope, time.Duration) {
+	p.mu.Lock()
+	p.replies = append(p.replies, reply{typ: rxv1.TypeError, code: rxv1.CodeRateLimited})
+	p.mu.Unlock()
+}
+
 func (p *peer) Queue() *sendq.Queue { return p.q }
 
 func (p *peer) last() reply {
@@ -329,18 +335,20 @@ func TestPresetSelect(t *testing.T) {
 	m := runManager(t)
 	ctx := context.Background()
 
-	squelch := -60
+	squelch, nr := -60, 6
 	state := desired{
 		devices: map[string]ctl.DesiredDevice{"vhf": {Presets: []string{"near", "far"}}},
 		presets: map[string]ctl.Preset{
 			// The device starts at 144.125 MHz (250 kS/s).
-			"near": {Name: "Near", CenterFreq: 144_150_000, SampRate: 250_000, StartFreq: 144_160_000, StartMod: "nfm", TuningStep: 12_500, InitialSquelchLevel: &squelch},
+			"near": {Name: "Near", CenterFreq: 144_150_000, SampRate: 250_000, StartFreq: 144_160_000, StartMod: "nfm", TuningStep: 12_500, InitialSquelchLevel: &squelch, InitialNRLevel: &nr},
 			"far":  {Name: "Far", CenterFreq: 145_000_000, SampRate: 250_000, StartFreq: 145_000_000, StartMod: "nfm", TuningStep: 1000},
 			"hf":   {Name: "HF", CenterFreq: 14_074_000, SampRate: 250_000, StartFreq: 14_074_000, StartMod: "usb", TuningStep: 1000},
 		},
 		policy: ctl.StatePolicy{ListenPolicy: "anonymous", Waterfall: &ctl.StateWaterfall{MinDB: -100, MaxDB: -30, Palette: "default"}},
 	}
 	streams := radiohttp.NewStreams(m, state, slog.New(slog.DiscardHandler))
+	now := time.Now()
+	streams.SetNow(func() time.Time { return now })
 
 	newPeer := func(perms ...string) *peer {
 		return &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, perms...)}
@@ -388,7 +396,8 @@ func TestPresetSelect(t *testing.T) {
 	}
 
 	res := do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "near"}, "")
-	if res.result.(media.PresetSelected).ActivePresetID != "near" || m.Devices()[0].CenterHz != 144_150_000 {
+	if res.result.(media.PresetSelected).ActivePresetID != "near" || m.Devices()[0].CenterHz != 144_150_000 ||
+		m.Devices()[0].ActivePreset != "near" {
 		t.Fatalf("switch: %+v, device %+v", res.result, m.Devices()[0])
 	}
 
@@ -404,7 +413,8 @@ func TestPresetSelect(t *testing.T) {
 	}
 
 	// The caller starts at the preset; the listener keeps 144.145 MHz.
-	if a := applied(op); a.OffsetHz != 10_000 || a.Mode != "nfm" || a.SquelchDB == nil || *a.SquelchDB != -60 {
+	if a := applied(op); a.OffsetHz != 10_000 || a.Mode != "nfm" || a.SquelchDB == nil || *a.SquelchDB != -60 ||
+		!a.NR.Enabled || a.NR.Threshold != 6 {
 		t.Errorf("caller demodulator: %+v", a)
 	}
 
@@ -423,6 +433,11 @@ func TestPresetSelect(t *testing.T) {
 	// With the retune right the switch goes through; the listener's
 	// demodulator, now outside the band, moves to the preset's start.
 	op.setClaims(scoped(1, token.PermListen, token.PermDemod, token.PermPreset, token.PermRetune))
+
+	// One switch per device every 5 s (§5.11).
+	do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "far"}, rxv1.CodeRateLimited)
+
+	now = now.Add(radiohttp.PresetSwitchEvery)
 	do(opSS, op, rxv1.TypePresetSelect, map[string]any{"device_id": "vhf", "preset_id": "far"}, "")
 
 	if a := applied(lis); a.OffsetHz != 0 {
@@ -431,5 +446,19 @@ func TestPresetSelect(t *testing.T) {
 
 	if cfg := lis.lastSent(rxv1.TypeDeviceConfig).(media.DeviceConfig); cfg.ActivePreset.ID != "far" || cfg.CenterHz != 145_000_000 {
 		t.Errorf("listener device.config after a forced switch: %+v", cfg)
+	}
+
+	// device.retune: the listener keeps 145 MHz while it stays in the band,
+	// then moves to the new centre (far's start is outside the new band).
+	do(opSS, op, rxv1.TypeDeviceRetune, map[string]any{"device_id": "vhf", "center_hz": 145_050_000}, "")
+
+	if a := applied(lis); a.OffsetHz != -50_000 {
+		t.Errorf("listener demodulator after a retune: %+v", a)
+	}
+
+	do(opSS, op, rxv1.TypeDeviceRetune, map[string]any{"device_id": "vhf", "center_hz": 145_500_000}, "")
+
+	if a := applied(lis); a.OffsetHz != 0 {
+		t.Errorf("listener demodulator after a retune out of its band: %+v", a)
 	}
 }

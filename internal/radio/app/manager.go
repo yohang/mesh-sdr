@@ -307,6 +307,23 @@ func (m *Manager) Retune(id string, hz, rate int64) (domain.Snapshot, error) {
 	return r.snapshot(), nil
 }
 
+// SetActivePreset records the shared preset of a device and reports it
+// (device.state active_preset_id).
+func (m *Manager) SetActivePreset(id, preset string) error {
+	r, err := m.runner(id)
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	r.dev.SetActivePreset(preset)
+	r.mu.Unlock()
+
+	r.publish()
+
+	return nil
+}
+
 // Watch calls fn with every status of a device until cancel. fn must not
 // block.
 func (m *Manager) Watch(id string, fn func(domain.Snapshot)) (cancel func(), err error) {

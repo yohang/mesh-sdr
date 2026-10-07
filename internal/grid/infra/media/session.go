@@ -499,6 +499,9 @@ func (ss *session) Fail(req rxv1.Envelope, code rxv1.ErrorCode, reason string) {
 	ss.reply(req, code, reason)
 }
 
+// RateLimited implements media.Peer.
+func (ss *session) RateLimited(req rxv1.Envelope, retry time.Duration) { ss.rateLimited(req, retry) }
+
 // Queue implements media.Peer.
 func (ss *session) Queue() *sendq.Queue { return ss.queue }
 
