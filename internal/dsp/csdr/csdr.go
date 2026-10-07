@@ -231,7 +231,8 @@ func NewRealPart() (*Stage[complex64, float32], error) {
 // relative to the sample rate. It works on whole FFT blocks and holds one
 // block back.
 func NewBandPass(low, high, transition float32) (*Stage[complex64, complex64], error) {
-	if low >= high || low < -0.5 || high > 0.5 || transition <= 0 || transition > 0.5 {
+	// Written so that NaN fails every comparison.
+	if !(low >= -0.5 && low < high && high <= 0.5 && transition > 0 && transition <= 0.5) {
 		return nil, fmt.Errorf("%w: band-pass [%g, %g] transition %g", ErrBuild, low, high, transition)
 	}
 

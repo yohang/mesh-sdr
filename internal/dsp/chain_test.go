@@ -256,6 +256,64 @@ func TestChainNR(t *testing.T) {
 	}
 }
 
+// TestChainNRMidStream switches the noise filter on, then off, while a
+// tone streams through: the audio keeps flowing (the filter's held block
+// is dropped when it goes) and the tone survives each switch.
+func TestChainNRMidStream(t *testing.T) {
+	const offset = 70_000.0
+
+	p, err := NewChannelPlan(goldenFS, NarrowChannelRate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	chIQ, ch := channelOut(t, p, toneAt(0, goldenFS*9/10, goldenFS, offset+1000, 0.05, 0, nil), NarrowChannelRate, offset, 300, 2700)
+
+	c, err := NewChain(ChainConfig{
+		Demod: DemodSSB, ChannelRate: ch.Rate(), OutputRate: DefaultOutputRate, ResidualHz: ch.Residual(), LowHz: 300, HighHz: 2700, AGC: AGCFast,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	block := int(ch.Rate() / 50)
+	thirds := [3][]float32{}
+
+	for off := 0; off < len(chIQ); off += block {
+		third := min(3*off/len(chIQ), 2)
+
+		switch {
+		case third == 1 && c.Config().NR == (NR{}):
+			err = c.SetNR(NR{Enabled: true, ThresholdDB: 3})
+		case third == 2 && c.Config().NR.Enabled:
+			err = c.SetNR(NR{})
+		}
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		res, err := c.Process(chIQ[off:min(off+block, len(chIQ))])
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		thirds[third] = append(thirds[third], res.Audio...)
+	}
+
+	for i, a := range thirds {
+		// 0.3 s each, minus the delays and the dropped NR block.
+		if got := float64(len(a)) / DefaultOutputRate; got < 0.2 || got > 0.33 {
+			t.Fatalf("third %d: %.3f s of audio", i, got)
+		}
+
+		if e := toneEnergy(a[len(a)/2:], DefaultOutputRate, 1000); e < 0.8 || rms(a[len(a)/2:]) < 0.1 {
+			t.Fatalf("third %d: tone energy %.2f, RMS %.3f", i, e, rms(a[len(a)/2:]))
+		}
+	}
+}
+
 func TestChainConfigValidation(t *testing.T) {
 	bad := 5.0
 
@@ -269,6 +327,9 @@ func TestChainConfigValidation(t *testing.T) {
 		{Demod: DemodWFM, ChannelRate: 24000, OutputRate: 48000},
 		{Demod: DemodSSB, ChannelRate: 24000, OutputRate: 12000, LowHz: 2700, HighHz: 300},
 		{Demod: DemodAM, ChannelRate: 24000, OutputRate: 12000, NR: NR{Enabled: true, ThresholdDB: -21}},
+		{Demod: DemodSSB, ChannelRate: 24000, OutputRate: 12000, LowHz: math.NaN(), HighHz: 300},
+		{Demod: DemodNFM, ChannelRate: math.Inf(1), OutputRate: 12000},
+		{Demod: DemodNFM, ChannelRate: 24000, OutputRate: 12000, ResidualHz: math.NaN()},
 	} {
 		if _, err := NewChain(c); !errors.Is(err, ErrChain) {
 			t.Fatalf("%+v: %v", c, err)

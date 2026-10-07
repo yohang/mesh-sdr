@@ -278,6 +278,10 @@ func TestBandPassKeepsBand(t *testing.T) {
 		t.Fatal("inverted band accepted")
 	}
 
+	if _, err := NewBandPass(float32(math.NaN()), 0.1, 0.01); err == nil {
+		t.Fatal("NaN band accepted")
+	}
+
 	run := func(cycles float64) float64 {
 		bp, err := NewBandPass(0.01, 0.1, 0.01)
 		if err != nil {

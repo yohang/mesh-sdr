@@ -152,11 +152,15 @@ func validDeemphasis(us int) error {
 	return nil
 }
 
+func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
 // Validate checks the ranges of §8.3 rule 4.
 func (c ChainConfig) Validate() error {
 	switch {
 	case !slices.Contains([]Demodulator{DemodAM, DemodSAM, DemodNFM, DemodSSB, DemodWFM}, c.Demod):
 		return fmt.Errorf("%w: demodulator %q", ErrChain, c.Demod)
+	case !finite(c.ChannelRate) || !finite(c.ResidualHz) || !finite(c.LowHz) || !finite(c.HighHz):
+		return fmt.Errorf("%w: non-finite rate, residual or band", ErrChain)
 	case c.ChannelRate < 8000:
 		return fmt.Errorf("%w: channel rate %g", ErrChain, c.ChannelRate)
 	case !slices.Contains(OutputRates, c.OutputRate):
