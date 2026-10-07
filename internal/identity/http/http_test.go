@@ -91,6 +91,7 @@ type hub struct {
 	t       *testing.T
 	logs    *syncBuffer
 	mail    *outbox
+	revoked *revocations
 	handler http.Handler
 	admin   *app.UserAdmin
 	setup   *app.Setup
@@ -113,7 +114,11 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	mails := &outbox{}
-	d := identity.Deps{Mail: mails, Devices: testDevices{}, Config: cfg, Logger: logger, DB: dbtest.NewSQLite(t), IDs: shared.NewUUIDv7Generator(), Now: time.Now}
+	revoked := &revocations{}
+	d := identity.Deps{
+		Mail: mails, Devices: testDevices{}, Config: cfg, Logger: logger, DB: dbtest.NewSQLite(t), IDs: shared.NewUUIDv7Generator(), Now: time.Now,
+		Revocations: revoked,
+	}
 
 	m, err := identity.Wire(ctx, d, pages{})
 	if err != nil {
@@ -130,10 +135,37 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 		t:       t,
 		logs:    logs,
 		mail:    mails,
+		revoked: revoked,
 		handler: httpserver.NewRouter(logger, api.NewHandler(srv, m.HTTP, logger), m.HTTP, adminPage{m.HTTP}),
 		admin:   identity.UserAdmin(d),
 		setup:   m.Setup,
 	}
+}
+
+// revocations records the published revocations.
+type revocations struct {
+	mu   sync.Mutex
+	list []app.Revocation
+}
+
+func (r *revocations) PublishRevocation(_ context.Context, rev app.Revocation) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.list = append(r.list, rev)
+}
+
+// sessions returns the session handles published so far.
+func (r *revocations) sessions() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var out []string
+	for _, rev := range r.list {
+		out = append(out, rev.Sessions...)
+	}
+
+	return out
 }
 
 // outbox records the queued e-mails.

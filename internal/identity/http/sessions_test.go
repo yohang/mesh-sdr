@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
@@ -107,5 +108,65 @@ func TestSessionForms(t *testing.T) {
 
 	if s := alice.session(); s["authenticated"] != false {
 		t.Error("session survived sign-out everywhere")
+	}
+}
+
+// TestSignOutEverywhere: the account page signs out every session of the
+// user, the current one included, publishes the revocation and goes to the
+// login page.
+func TestSignOutEverywhere(t *testing.T) {
+	h := newHub(t)
+	h.addUser("alice", domain.RoleListener)
+	h.addUser("bob", domain.RoleListener)
+
+	alice := h.signedIn("alice")
+	alice2 := h.signedIn("alice")
+	bob := h.signedIn("bob")
+
+	if b := body(t, alice.do(http.MethodGet, "/account", "", "", nil)); !strings.Contains(b, `action="/account/sessions/revoke-all"`) {
+		t.Fatalf("no Sign out everywhere form: %s", b)
+	}
+
+	if res := alice.do(http.MethodPost, "/account/sessions/revoke-all", "", "", nil); res.StatusCode != http.StatusForbidden {
+		t.Errorf("without CSRF = %d", res.StatusCode)
+	}
+
+	anon := h.client()
+	anon.session()
+
+	if res := anon.form("/account/sessions/revoke-all", nil, false); res.StatusCode != http.StatusSeeOther ||
+		!strings.HasPrefix(res.Header.Get("Location"), "/login?next=") {
+		t.Errorf("anonymous = %d %q", res.StatusCode, res.Header.Get("Location"))
+	}
+
+	before := len(h.revoked.sessions())
+
+	res := alice.form("/account/sessions/revoke-all", nil, false)
+	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/login" {
+		t.Fatalf("sign out everywhere = %d %q", res.StatusCode, res.Header.Get("Location"))
+	}
+
+	if ck := setCookie(res, "__Host-rx_session"); ck == nil || ck.MaxAge >= 0 {
+		t.Errorf("cookie not cleared: %+v", ck)
+	}
+
+	if n := len(h.revoked.sessions()) - before; n != 2 {
+		t.Errorf("published %d revoked sessions, want 2", n)
+	}
+
+	for name, c := range map[string]*client{"current": alice, "other": alice2} {
+		if s := c.session(); s["authenticated"] != false {
+			t.Errorf("%s session survived", name)
+		}
+	}
+
+	if s := bob.session(); s["authenticated"] != true {
+		t.Error("another user was signed out")
+	}
+
+	// htmx (boosted form) follows HX-Redirect.
+	again := h.signedIn("alice")
+	if res := again.form("/account/sessions/revoke-all", nil, true); res.StatusCode != http.StatusNoContent || res.Header.Get("HX-Redirect") != "/login" {
+		t.Errorf("htmx = %d %q", res.StatusCode, res.Header.Get("HX-Redirect"))
 	}
 }

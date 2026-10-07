@@ -82,6 +82,7 @@ type AccountService interface {
 	OwnSessions(ctx context.Context, by app.Actor) ([]app.SessionView, error)
 	RevokeOwnSession(ctx context.Context, by app.Actor, ref string) error
 	RevokeOtherSessions(ctx context.Context, by app.Actor) (int, error)
+	RevokeAllOwnSessions(ctx context.Context, by app.Actor) (int, error)
 
 	Search(ctx context.Context, q domain.UserQuery) ([]*domain.User, error)
 	User(ctx context.Context, id domain.UserID) (*domain.User, error)
@@ -255,6 +256,7 @@ func (m *Module) Routes(r chi.Router) {
 	listener.Post(AccountPath+"/profile", m.profileAction)
 	listener.Post(AccountPath+"/email", m.emailAction)
 	listener.Post(AccountPath+"/sessions/revoke-others", m.revokeOthersAction)
+	listener.Post(AccountPath+"/sessions/revoke-all", m.revokeAllAction)
 	listener.Post(AccountPath+"/sessions/{ref}/revoke", m.revokeSessionAction)
 	listener.Post(AccountPath+"/export", m.exportOwnAction)
 	listener.Post(AccountPath+"/delete", m.deleteOwnAction)

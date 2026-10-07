@@ -136,6 +136,16 @@ func (s *Accounts) RevokeOtherSessions(ctx context.Context, by Actor) (int, erro
 	return s.revoke(ctx, by, by.Principal.UserID(), domain.RevokeLogout, true, func(x *domain.Session) bool { return x.ID() != current })
 }
 
+// RevokeAllOwnSessions signs out every session of the actor, the request's
+// included ("Sign out everywhere" on the account page).
+func (s *Accounts) RevokeAllOwnSessions(ctx context.Context, by Actor) (int, error) {
+	if by.Principal.IsAnonymous() {
+		return 0, domain.ErrUnauthenticated
+	}
+
+	return s.revoke(ctx, by, by.Principal.UserID(), domain.RevokeLogout, true, func(*domain.Session) bool { return true })
+}
+
 // RevokeUserSession signs out one session of a user (admin).
 func (s *Accounts) RevokeUserSession(ctx context.Context, by Actor, id domain.UserID, ref string) error {
 	return oneRevoked(s.revoke(ctx, by, id, domain.RevokeAdmin, false, func(x *domain.Session) bool { return x.Ref() == ref }))
