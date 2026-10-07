@@ -162,12 +162,29 @@ func (ss *session) run(ctx context.Context) {
 
 	started := false
 	reason := "client"
+	limiter := newMsgLimiter(defaultMsgRate)
 
 	for {
 		env, err := ss.conn.Read(ctx)
+
+		var pe *rxv1.Error
+		if err == nil || errors.As(err, &pe) {
+			if ok, retry, escalate := limiter.allow(o.Now()); !ok {
+				if escalate {
+					ss.logger.WarnContext(ctx, "media connection closed: inbound message rate exceeded repeatedly")
+					ss.conn.Close(rxv1.CloseRateLimited, "rate_limited")
+
+					continue
+				}
+
+				ss.rateLimited(env, retry)
+
+				continue
+			}
+		}
+
 		if err != nil {
-			var pe *rxv1.Error
-			if errors.As(err, &pe) {
+			if pe != nil {
 				ss.sendError(err)
 
 				continue
@@ -393,6 +410,20 @@ func (ss *session) stream(ctx context.Context, env rxv1.Envelope) {
 	}
 
 	ss.streams.Handle(ctx, env)
+}
+
+// rateLimited answers a message over the inbound rate (§6.9).
+func (ss *session) rateLimited(env rxv1.Envelope, retry time.Duration) {
+	ms := retry.Milliseconds()
+	p := rxv1.ErrorPayload{Code: rxv1.CodeRateLimited, Message: "too many messages", Retryable: true, RetryAfterMS: &ms}
+
+	if id, ok := env.ID(); ok {
+		p.Re = &id
+	}
+
+	if e, err := rxv1.NewErrorEnvelope(time.Now().UnixMilli(), p); err == nil {
+		_ = ss.conn.Send(e)
+	}
 }
 
 // timeSync answers time.sync with the node clock (§6.4).
