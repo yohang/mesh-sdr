@@ -145,11 +145,13 @@ func (s *DesiredState) Apply(st ctl.StateApply) ctl.StateApplied {
 		}
 	}
 
-	switch st.Policy.ListenPolicy {
-	case "anonymous", "registered":
-		s.policy = st.Policy
-	default:
+	switch {
+	case st.Policy.ListenPolicy != "anonymous" && st.Policy.ListenPolicy != "registered":
 		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: "invalid listen_policy"})
+	case st.Policy.WFMDeemphasis != 50 && st.Policy.WFMDeemphasis != 75:
+		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: "invalid wfm_deemphasis"})
+	default:
+		s.policy = st.Policy
 	}
 
 	s.presets, s.devices = presets, devices

@@ -36,6 +36,7 @@ type scheduling struct {
 // settingsReader reads the effective settings (settings/app.Store).
 type settingsReader interface {
 	String(key string) string
+	Int(key string) int
 	Duration(key string) time.Duration
 }
 
@@ -290,7 +291,8 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 	}
 
 	st := ctl.StateApply{
-		Presets: map[string]ctl.Preset{}, Devices: map[string]ctl.DesiredDevice{}, Policy: ctl.StatePolicy{ListenPolicy: policy},
+		Presets: map[string]ctl.Preset{}, Devices: map[string]ctl.DesiredDevice{},
+		Policy: ctl.StatePolicy{ListenPolicy: policy, WFMDeemphasis: s.settings.Int("wfm_deemphasis")},
 	}
 
 	for _, plan := range plans {

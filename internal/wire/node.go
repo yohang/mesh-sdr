@@ -111,7 +111,11 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	holder := pki.NewCertHolder(cert)
 	revoked := pki.NewRevokedSet()
 
-	manager, streams, err := newRadio(cfg, logger, deviceReporter{ag})
+	// The desired state pushed by the hub carries the WFM de-emphasis the
+	// engines apply.
+	state := agent.NewDesiredState(o.devices())
+
+	manager, streams, err := newRadio(cfg, logger, deviceReporter{ag}, func() int { return state.Policy().WFMDeemphasis })
 	if err != nil {
 		return nil, err
 	}
