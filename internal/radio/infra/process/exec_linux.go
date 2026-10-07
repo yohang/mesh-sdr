@@ -114,6 +114,12 @@ func MaybeRunExecHelper() {
 	if len(os.Args) < 2 || os.Args[1] != ExecHelperArg {
 		return
 	}
+	// prctl(PR_SET_NO_NEW_PRIVS) and setpriority(PRIO_PROCESS, 0) apply to
+	// the calling thread on Linux: every call, and the execve that inherits
+	// them, must run on the same OS thread. The helper never returns, so
+	// the thread is never unlocked.
+	runtime.LockOSThread()
+	nnp := false
 	args := os.Args[2:]
 	i := 0
 	for ; i < len(args) && args[i] != "--"; i++ {
@@ -136,16 +142,22 @@ func MaybeRunExecHelper() {
 				helperFail(126, "setpriority: "+err.Error())
 			}
 		case "nnp":
-			const prSetNoNewPrivs = 38
 			if _, _, e := syscall.RawSyscall(syscall.SYS_PRCTL, prSetNoNewPrivs, 1, 0); e != 0 {
 				helperFail(126, "prctl no_new_privs: "+e.Error())
 			}
+			nnp = true
 		default:
 			helperFail(126, "unknown limit "+k)
 		}
 	}
 	if i+1 >= len(args) {
 		helperFail(126, "missing tool path")
+	}
+	// Never exec a tool without the restriction it was asked for.
+	if nnp {
+		if v, _, e := syscall.RawSyscall(syscall.SYS_PRCTL, prGetNoNewPrivs, 0, 0); e != 0 || v != 1 {
+			helperFail(126, "no_new_privs not in effect")
+		}
 	}
 	path, argv := args[i+1], args[i+2:]
 	err := syscall.Exec(path, argv, os.Environ())
@@ -154,6 +166,12 @@ func MaybeRunExecHelper() {
 	}
 	helperFail(126, "exec: "+err.Error())
 }
+
+// prctl options (linux/prctl.h).
+const (
+	prSetNoNewPrivs = 38
+	prGetNoNewPrivs = 39
+)
 
 func setrlimit(res int, v uint64) {
 	if err := syscall.Setrlimit(res, &syscall.Rlimit{Cur: v, Max: v}); err != nil {
