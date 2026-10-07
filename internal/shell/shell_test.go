@@ -35,7 +35,7 @@ func router(settings values) http.Handler {
 	m := shell.New(shell.Deps{Settings: settings, Logger: discard})
 	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 
-	return httpserver.NewRouter(discard, api, m.HTTP)
+	return httpserver.NewRouter(discard, "", api, m.HTTP)
 }
 
 func do(t *testing.T, h http.Handler, method, path string, headers map[string]string) (*http.Response, string) {

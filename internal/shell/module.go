@@ -141,9 +141,16 @@ func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	m.render.MethodNotAllowed(w, r)
 }
 
-// receiver is the Receiver section's entry page. Until the receiver exists
-// (M1), it presents the station (name, location, images, description) and
-// says that listening is not available yet.
+// receiverConfig is the initial state of the <msdr-receiver> island
+// (templ.JSONScript): the island lists the devices itself (GET
+// /api/v1/features) and offers to sign in when it may list none.
+type receiverConfig struct {
+	SignedIn bool   `json:"signed_in"`
+	LoginURL string `json:"login_url"`
+}
+
+// receiver is the Receiver section's entry page: the station (name,
+// location, images, description) and the receiver island.
 func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
 	st := m.station.View(r.Context())
 
@@ -154,8 +161,11 @@ func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
 		desc = ""
 	}
 
+	sh := m.shell.Shell(r)
+	rx := receiverConfig{SignedIn: sh.User != nil, LoginURL: "/login"}
+
 	page := layout.Page{Section: SectionReceiver.ID()}
-	m.render.Page(w, r, http.StatusOK, page, receiverPage(m.shell.Shell(r).SiteName, st, desc), nil)
+	m.render.Page(w, r, http.StatusOK, page, receiverPage(sh.SiteName, st, desc, rx), nil)
 }
 
 // placeholder serves the entry page of a section whose module does not

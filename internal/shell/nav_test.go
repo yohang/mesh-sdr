@@ -20,7 +20,7 @@ func navRouter(admin bool) http.Handler {
 	m := shell.New(shell.Deps{Settings: values{}, AdminGate: gate, Logger: discard})
 	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 
-	return httpserver.NewRouter(discard, api, m.HTTP)
+	return httpserver.NewRouter(discard, "", api, m.HTTP)
 }
 
 var navLink = regexp.MustCompile(`<a href="([^"]+)" data-section="([a-z]+)" class="nav-link"( aria-current="page")?>`)
@@ -80,13 +80,14 @@ func TestNavigation(t *testing.T) {
 	}
 }
 
-// TestSectionPages covers the placeholder pages of the sections whose
-// modules come later: in the shell, in their section, with GET and HEAD.
+// TestSectionPages covers the section entry pages (the receiver island, and
+// the placeholders of the sections whose modules come later): in the shell,
+// in their section, with GET and HEAD.
 func TestSectionPages(t *testing.T) {
 	h := navRouter(false)
 
 	tests := []struct{ path, title, section, text string }{
-		{"/", "<title>MeshSDR</title>", "receiver", "Live listening is not available yet."},
+		{"/", "<title>MeshSDR</title>", "receiver", `<script id="msdr-receiver-config" type="application/json"`},
 		{"/map", "<title>Map · MeshSDR</title>", "map", "The live map is not available yet."},
 		{"/decodes", "<title>Decodes · MeshSDR</title>", "decodes", "Decoded messages are not available yet."},
 		{"/files", "<title>Files · MeshSDR</title>", "files", "Received files are not available yet."},
@@ -123,7 +124,7 @@ func TestSectionPages(t *testing.T) {
 func TestUTCClock(t *testing.T) {
 	now := func() time.Time { return time.Date(2026, 10, 6, 21, 7, 59, 0, time.FixedZone("CEST", 2*3600)) }
 	m := shell.New(shell.Deps{Settings: values{}, Now: now, Logger: discard})
-	h := httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP)
+	h := httpserver.NewRouter(discard, "", http.NotFoundHandler(), m.HTTP)
 
 	_, body := do(t, h, http.MethodGet, "/policy", nil)
 
@@ -146,7 +147,7 @@ func TestUserMenu(t *testing.T) {
 	}
 
 	m := shell.New(shell.Deps{Settings: values{}, User: user, Logger: discard})
-	h := httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP)
+	h := httpserver.NewRouter(discard, "", http.NotFoundHandler(), m.HTTP)
 
 	_, anon := do(t, h, http.MethodGet, "/", nil)
 	for _, want := range []string{`<a href="/login" class="font-medium">Sign in</a>`, `popovertarget="msdr-notifications"`, `id="msdr-notifications" popover`} {
@@ -224,7 +225,7 @@ func TestHelp(t *testing.T) {
 		t.Helper()
 
 		m := shell.New(shell.Deps{Settings: v, User: user, Logger: discard})
-		_, body := do(t, httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP), http.MethodGet, "/map", nil)
+		_, body := do(t, httpserver.NewRouter(discard, "", http.NotFoundHandler(), m.HTTP), http.MethodGet, "/map", nil)
 
 		return body
 	}
@@ -269,7 +270,7 @@ func TestReceiverStation(t *testing.T) {
 	}
 
 	m := shell.New(shell.Deps{Settings: v, Images: images{"avatar": true, "panorama": true}, Logger: discard})
-	_, body := do(t, httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP), http.MethodGet, "/", nil)
+	_, body := do(t, httpserver.NewRouter(discard, "", http.NotFoundHandler(), m.HTTP), http.MethodGet, "/", nil)
 
 	for _, want := range []string{
 		`<img src="/api/v1/branding/avatar" alt=""`, `<h1 class="text-2xl font-semibold">F4XYZ SDR</h1>`,
@@ -287,7 +288,7 @@ func TestReceiverStation(t *testing.T) {
 
 	// Without images nor description, only the name and the notice.
 	m = shell.New(shell.Deps{Settings: values{}, Logger: discard})
-	_, body = do(t, httpserver.NewRouter(discard, http.NotFoundHandler(), m.HTTP), http.MethodGet, "/", nil)
+	_, body = do(t, httpserver.NewRouter(discard, "", http.NotFoundHandler(), m.HTTP), http.MethodGet, "/", nil)
 
 	if strings.Contains(body, "/api/v1/branding/") || strings.Contains(body, "<figure") {
 		t.Error("empty station shows images or a description")

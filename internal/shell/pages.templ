@@ -4,10 +4,11 @@ import (
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
-// receiverPage is the Receiver section until the receiver exists (M1): the
-// station and a notice. descHTML is goldmark output, which carries no raw
-// HTML nor dangerous URLs (see markdown.go).
-templ receiverPage(siteName string, st StationView, descHTML string) {
+// receiverPage is the Receiver section: the station, the receiver island
+// (static/js/receiver/island.js, ADR 0015) with its initial state, then the
+// station panorama and description. descHTML is goldmark output, which
+// carries no raw HTML nor dangerous URLs (see markdown.go).
+templ receiverPage(siteName string, st StationView, descHTML string, rx receiverConfig) {
 	<div class="flex items-center gap-3">
 		if st.HasAvatar {
 			<img src="/api/v1/branding/avatar" alt="" width="48" height="48" class="size-12 rounded-md object-cover"/>
@@ -19,7 +20,10 @@ templ receiverPage(siteName string, st StationView, descHTML string) {
 			}
 		</div>
 	</div>
-	<p class="mt-4 text-fg-muted">Live listening is not available yet.</p>
+	<msdr-receiver class="block">
+		@templ.JSONScript("msdr-receiver-config", rx)
+		<p class="mt-4 text-fg-muted">The receiver needs JavaScript to play audio and draw the waterfall.</p>
+	</msdr-receiver>
 	if st.HasPanorama || st.PhotoTitle != "" || descHTML != "" {
 		<figure class="mt-6 flex max-w-4xl flex-col gap-2">
 			if st.HasPanorama {

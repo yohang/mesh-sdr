@@ -30,6 +30,10 @@ type DeviceFeatures struct {
 	Node   domain.NodeID
 	Name   string
 	Online bool
+	// NodeOnline reports whether the device's node has its control channel
+	// up (hub presence): Online is false for an idle device, which only
+	// runs while someone listens.
+	NodeOnline bool
 	// Modes are the modes the device's node reports available (mode:*
 	// capabilities), sorted; empty when the node has not reported or the
 	// device's driver is missing.
@@ -50,17 +54,24 @@ type CapabilityReader interface {
 	Get(ctx context.Context, id domain.NodeID) (domain.CapabilityReport, error)
 }
 
-// Features builds the public feature summary from the device registry and
-// the capability reports.
+// NodeLinks lists the nodes whose control channel is up (Tracker).
+type NodeLinks interface {
+	Connected() []domain.NodeID
+}
+
+// Features builds the public feature summary from the device registry, the
+// capability reports and the node links.
 type Features struct {
 	devices DeviceLister
 	caps    CapabilityReader
 	policy  GlobalListenPolicy
+	links   NodeLinks
 }
 
-// NewFeatures returns the use case.
-func NewFeatures(devices DeviceLister, caps CapabilityReader, policy GlobalListenPolicy) *Features {
-	return &Features{devices: devices, caps: caps, policy: policy}
+// NewFeatures returns the use case. links may be nil (no node can connect):
+// every node is then offline.
+func NewFeatures(devices DeviceLister, caps CapabilityReader, policy GlobalListenPolicy, links NodeLinks) *Features {
+	return &Features{devices: devices, caps: caps, policy: policy, links: links}
 }
 
 // Summary returns the enabled devices in registry order with their modes.
@@ -75,6 +86,13 @@ func (f *Features) Summary(ctx context.Context) ([]DeviceFeatures, error) {
 	global, err := f.policy.ListenPolicy(ctx)
 	if err != nil || (global != ListenAnonymous && global != ListenRegistered) {
 		global = ListenRegistered
+	}
+
+	connected := map[domain.NodeID]bool{}
+	if f.links != nil {
+		for _, id := range f.links.Connected() {
+			connected[id] = true
+		}
 	}
 
 	reports := map[domain.NodeID][]domain.Capability{}
@@ -103,7 +121,7 @@ func (f *Features) Summary(ctx context.Context) ([]DeviceFeatures, error) {
 		}
 
 		out = append(out, DeviceFeatures{
-			ID: d.ID(), Node: d.Node(), Name: d.Name(), Online: d.Online(),
+			ID: d.ID(), Node: d.Node(), Name: d.Name(), Online: d.Online(), NodeOnline: connected[d.Node()],
 			Modes: modes(caps, d.Type()), ListenPolicy: policy,
 		})
 	}

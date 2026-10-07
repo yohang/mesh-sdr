@@ -480,7 +480,7 @@ components:
     DeviceFeatures:
       type: object
       additionalProperties: false
-      required: [id, node_id, name, online, modes]
+      required: [id, node_id, name, online, node_online, modes]
       properties:
         id:
           type: string
@@ -490,6 +490,10 @@ components:
           type: string
         online:
           type: boolean
+          description: The device runs; an idle device only runs while someone listens.
+        node_online:
+          type: boolean
+          description: The device's node has its control channel to the hub up.
         modes:
           type: array
           description: Modes the device's node reports available, sorted.

@@ -406,13 +406,14 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		BrandingHandlers: api.NewBrandingHandlers(images),
 		TokenHandlers:    api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
 		FeatureHandlers: api.NewFeatureHandlers(idm.HTTP, gridapp.NewFeatures(gridsqlite.NewDeviceRepository(adapter),
-			gridsqlite.NewCapabilityRepository(adapter), storeListenPolicy{store: settingsStore})),
+			gridsqlite.NewCapabilityRepository(adapter), storeListenPolicy{store: settingsStore}, g.links())),
 		PresetHandlers:   api.NewPresetHandlers(sch.presets, scheduleDevices{repo: g.deviceRepo}),
 		ScheduleHandlers: api.NewScheduleHandlers(sch.schedules, deviceScope{}),
 	}
 
 	router := httpserver.NewRouter(
 		component(logger, "http.router"),
+		cfg.Hub.URL,
 		api.NewHandler(apiServer, idm.HTTP, component(logger, "http.api")),
 		// Every request body, API and forms, is capped (gateway.max_body)
 		// before any module reads it.

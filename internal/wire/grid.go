@@ -343,3 +343,13 @@ func (g *hubGrid) publishEvents(b *events.Broker, policies *policyCache, now fun
 
 	return ge
 }
+
+// links returns the node links of the features summary: the tracker, or
+// nil when no node can connect (no hub CA).
+func (g *hubGrid) links() app.NodeLinks {
+	if g.tracker == nil {
+		return nil
+	}
+
+	return g.tracker
+}
