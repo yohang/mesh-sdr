@@ -73,6 +73,11 @@ templ Document(s Shell, p Page, content templ.Component) {
 					</div>
 				</div>
 			</header>
+			<div id="msdr-session-ended" class="border-b border-warning bg-surface px-4 py-2" role="alert" hidden>
+				<p class="mx-auto max-w-screen-2xl">
+					Your session has ended. <a href="" hx-boost="false">Reload the page</a> to continue.
+				</p>
+			</div>
 			@Main(p, content)
 			<footer class="border-t border-border bg-surface px-4 py-3 text-sm text-fg-muted">
 				<ul class="mx-auto flex max-w-screen-2xl flex-wrap gap-x-4 gap-y-1">
