@@ -48,7 +48,7 @@ const (
 // Devices is the device manager seen by the handler.
 type Devices interface {
 	Attach(id string) (*app.Lease, error)
-	Retune(id string, hz int64) (domain.Snapshot, error)
+	Retune(id string, hz, rate int64) (domain.Snapshot, error)
 	Watch(id string, fn func(domain.Snapshot)) (func(), error)
 }
 
@@ -789,7 +789,7 @@ func (ss *session) retune(req rxv1.Envelope) {
 		return
 	}
 
-	snap, err := ss.s.devices.Retune(p.DeviceID, p.CenterHz)
+	snap, err := ss.s.devices.Retune(p.DeviceID, p.CenterHz, 0)
 	if err != nil {
 		ss.fail(req, err)
 

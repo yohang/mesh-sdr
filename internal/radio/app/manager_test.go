@@ -185,7 +185,7 @@ func TestAttachLingerAndRetune(t *testing.T) {
 	})
 
 	// Retune live, then a refused retune is rolled back.
-	if s, err := m.Retune("rtl", 145_000_000); err != nil || s.CenterHz != 145_000_000 {
+	if s, err := m.Retune("rtl", 145_000_000, 0); err != nil || s.CenterHz != 145_000_000 {
 		t.Fatal(s, err)
 	}
 
@@ -193,7 +193,7 @@ func TestAttachLingerAndRetune(t *testing.T) {
 	src.setErr = errors.New("control socket down")
 	src.mu.Unlock()
 
-	if _, err := m.Retune("rtl", 146_000_000); err == nil {
+	if _, err := m.Retune("rtl", 146_000_000, 0); err == nil {
 		t.Fatal("failed retune reported success")
 	}
 
@@ -259,7 +259,7 @@ func TestProbeFailureMakesUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := m.Retune("rtl", 145_000_000); !errors.Is(err, domain.ErrDeviceUnavailable) {
+	if _, err := m.Retune("rtl", 145_000_000, 0); !errors.Is(err, domain.ErrDeviceUnavailable) {
 		t.Fatal(err)
 	}
 
@@ -387,5 +387,62 @@ func TestDemodCaps(t *testing.T) {
 
 	if _, err := lb.NewDemod(p, nil, nil); err != nil {
 		t.Fatalf("capacity not released: %v", err)
+	}
+}
+
+// TestRetuneSampleRate: a new sample rate restarts a running source at the
+// new tuning; an unsupported rate is refused and changes nothing.
+func TestRetuneSampleRate(t *testing.T) {
+	typ, _ := domain.NewDeviceType(domain.TypeRTLSDR)
+	drv, _ := domain.NewDriver(typ, domain.DriverSettings{Device: "0", Gain: domain.AutoGain()})
+	r, _ := domain.NewFreqRange(domain.MustFrequency(24_000_000), domain.MustFrequency(1_766_000_000))
+
+	dev, err := domain.NewDevice(domain.DeviceParams{
+		ID: shared.MustDeviceID("rtl"), Name: "RTL", Type: typ, Enabled: true, Range: r, Driver: drv,
+		Rates: []domain.SampleRate{domain.MustSampleRate(2_400_000), domain.MustSampleRate(1_024_000)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	src, eng, rep := &fakeSource{}, &fakeEngine{}, &reporter{}
+	m := run(t, src, eng, rep, dev)
+
+	lease, err := m.Attach("rtl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+
+	eventually(t, "running", func() bool {
+		return rep.has(func(s domain.Snapshot) bool { return s.State == domain.StateRunning })
+	})
+
+	if _, err := m.Retune("rtl", 145_000_000, 3_200_000); !errors.Is(err, domain.ErrOutOfRange) {
+		t.Fatalf("unsupported rate: %v", err)
+	}
+
+	if s := lease.Snapshot(); s.CenterHz == 145_000_000 || s.RateHz != 2_400_000 {
+		t.Fatalf("tuning after a refused rate: %+v", s)
+	}
+
+	s, err := m.Retune("rtl", 145_000_000, 1_024_000)
+	if err != nil || s.CenterHz != 145_000_000 || s.RateHz != 1_024_000 {
+		t.Fatal(s, err)
+	}
+
+	eventually(t, "restarted", func() bool {
+		src.mu.Lock()
+		defer src.mu.Unlock()
+
+		return src.runs == 2
+	})
+	eventually(t, "running again", func() bool { return lease.Snapshot().State == domain.StateRunning })
+
+	src.mu.Lock()
+	defer src.mu.Unlock()
+
+	if len(src.centers) != 0 {
+		t.Errorf("a restart retuned live too: %v", src.centers)
 	}
 }
