@@ -326,3 +326,94 @@ func (Frequency) JSONSchema() *jsonschema.Schema {
 		Examples: []any{"145.800MHz", 7074000},
 	}
 }
+
+// Gain is an RF gain: "auto" (the zero value) or a value in dB.
+type Gain struct {
+	set bool
+	db  float64
+}
+
+// ParseGain parses "auto" or a number of dB.
+func ParseGain(s string) (Gain, error) {
+	if s == "" || s == "auto" {
+		return Gain{}, nil
+	}
+
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		return Gain{}, fmt.Errorf("invalid gain %q: want auto or a number of dB", s)
+	}
+
+	return Gain{set: true, db: v}, nil
+}
+
+// Auto reports whether the gain is automatic.
+func (g Gain) Auto() bool { return !g.set }
+
+// DB returns the manual gain.
+func (g Gain) DB() float64 { return g.db }
+
+// String returns "auto" or the value in dB.
+func (g Gain) String() string {
+	if !g.set {
+		return "auto"
+	}
+
+	return strconv.FormatFloat(g.db, 'f', -1, 64)
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (g *Gain) UnmarshalText(text []byte) error {
+	v, err := ParseGain(string(text))
+	if err != nil {
+		return err
+	}
+
+	*g = v
+
+	return nil
+}
+
+// UnmarshalTOML implements toml.Unmarshaler: "auto" or a number.
+func (g *Gain) UnmarshalTOML(data any) error {
+	switch v := data.(type) {
+	case int64:
+		*g = Gain{set: true, db: float64(v)}
+	case float64:
+		*g = Gain{set: true, db: v}
+	case string:
+		return g.UnmarshalText([]byte(v))
+	default:
+		return fmt.Errorf("invalid gain %v: want auto or a number of dB", data)
+	}
+
+	return nil
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (g Gain) MarshalText() ([]byte, error) { return []byte(g.String()), nil }
+
+// JSONSchema describes the type in the generated config schema.
+func (Gain) JSONSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		OneOf:    []*jsonschema.Schema{{Type: "number", Minimum: "0", Maximum: "100"}, {Type: "string", Enum: []any{"auto"}}},
+		Examples: []any{"auto", 29.7},
+	}
+}
+
+// ParsePortRange parses "lo-hi".
+func ParsePortRange(s string) (lo, hi int, err error) {
+	a, b, ok := strings.Cut(s, "-")
+	if !ok {
+		return 0, 0, fmt.Errorf("invalid port range %q: want lo-hi", s)
+	}
+
+	lo, err1 := strconv.Atoi(a)
+	hi, err2 := strconv.Atoi(b)
+
+	if err1 != nil || err2 != nil || lo < 1024 || hi > 65535 || hi <= lo {
+		return 0, 0, fmt.Errorf("invalid port range %q: want 1024 <= lo < hi <= 65535", s)
+	}
+
+	return lo, hi, nil
+}

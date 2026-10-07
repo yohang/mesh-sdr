@@ -144,3 +144,35 @@ fi = 7074000
 		t.Error("integer duration accepted")
 	}
 }
+
+func TestGainAndPortRange(t *testing.T) {
+	for in, want := range map[string]string{"": "auto", "auto": "auto", "29.7": "29.7", "0": "0"} {
+		g, err := ParseGain(in)
+		if err != nil || g.String() != want {
+			t.Fatalf("%q: %v %v", in, g, err)
+		}
+	}
+
+	if _, err := ParseGain("loud"); err == nil {
+		t.Fatal("bad gain accepted")
+	}
+
+	var g Gain
+	if err := g.UnmarshalTOML(int64(20)); err != nil || g.Auto() || g.DB() != 20 {
+		t.Fatal(g, err)
+	}
+
+	if err := g.UnmarshalTOML(true); err == nil {
+		t.Fatal("bool gain accepted")
+	}
+
+	if lo, hi, err := ParsePortRange("40000-40999"); err != nil || lo != 40000 || hi != 40999 {
+		t.Fatal(lo, hi, err)
+	}
+
+	for _, s := range []string{"40000", "80-90", "50000-40000", "a-b"} {
+		if _, _, err := ParsePortRange(s); err == nil {
+			t.Fatalf("%q accepted", s)
+		}
+	}
+}

@@ -5,11 +5,12 @@
 // in-band token refresh and the expiry, and closes connections revoked by
 // the hub.
 //
-// Streaming (device attach, demodulators, FFT) comes with the DSP epics;
-// device-scoped messages (device.attach, demod.create, preset.select,
-// device.retune) are checked against the token scope and answered
-// unsupported_type. More than MaxForbiddenPerMinute refusals in a minute
-// close the connection with 4403 (§5.9).
+// Device-scoped messages are checked against the token scope, then handed
+// to the device stream handler (Options.Streams, the radio module), which
+// serves the spectrum, the demodulators and their binary frames through
+// the §6.8 send queue of the connection. Without a handler they are
+// answered unsupported_type. More than MaxForbiddenPerMinute scope
+// refusals in a minute close the connection with 4403 (§5.9).
 package media
 
 import (
@@ -28,6 +29,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/http/problem"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/media"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/sendq"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/wsconn"
 )
@@ -77,8 +80,10 @@ type Options struct {
 	// HeartbeatInterval overrides the connection.heartbeat period (tests);
 	// zero means HeartbeatInterval.
 	HeartbeatInterval time.Duration
-	Now               func() time.Time
-	Logger            *slog.Logger
+	// Streams serves the device messages; nil answers unsupported_type.
+	Streams media.Streams
+	Now     func() time.Time
+	Logger  *slog.Logger
 }
 
 func (s *Server) heartbeatInterval() time.Duration {
@@ -287,6 +292,22 @@ func originOf(issuer string) (string, error) {
 	return u.Scheme + "://" + u.Host, nil
 }
 
+// streamUpdate is the stream.update the send queue emits when it changes
+// the rate of an FFT stream (§6.8).
+func streamUpdate(id uint16, fps int) []byte {
+	env, err := rxv1.NewEnvelope(rxv1.TypeStreamUpdate, rxv1.CorrelationID{}, time.Now().UnixMilli(), media.StreamUpdate{StreamID: id, FPS: fps})
+	if err != nil {
+		return nil
+	}
+
+	b, err := env.MarshalJSON()
+	if err != nil {
+		return nil
+	}
+
+	return b
+}
+
 func refuse(w http.ResponseWriter, status int, code, detail string) {
 	problem.Write(w, problem.New(status, code, detail))
 }
@@ -403,8 +424,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ss.queue = sendq.New(sendq.DefaultConfig(), s.o.Now, streamUpdate)
 	conn := wsconn.New(base, ws, wsconn.Options{
-		ReadLimit: rxv1.MaxInboundTextBytes, MaxQueueBytes: MaxQueueBytes, PingInterval: PingInterval, PongTimeout: PongTimeout,
+		ReadLimit: rxv1.MaxInboundTextBytes, PingInterval: PingInterval, PongTimeout: PongTimeout, Queue: ss.queue,
 	})
 
 	if !ss.attach(conn) {

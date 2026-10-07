@@ -4,6 +4,9 @@ services:
       context: .
       dockerfile: .infra/docker/Dockerfile
       target: prod
+    # The node supervises connector processes: docker-init reaps orphans
+    # (ADR 0017).
+    init: true
     # Production-like settings come from .env (MESHSDR_* vars, at least
     # MESHSDR_HUB__URL); development defaults live in compose.override.yaml.
     env_file:

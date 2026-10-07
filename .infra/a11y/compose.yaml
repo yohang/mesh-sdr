@@ -14,7 +14,9 @@ x-hub: &hub
     context: ../..
     dockerfile: .infra/docker/Dockerfile
     target: prod
-  image: meshsdr-a11y-hub
+  # Named after the compose project, so parallel runs (-p) do not
+  # overwrite each other's image.
+  image: ${COMPOSE_PROJECT_NAME:-meshsdr-a11y}-hub
   environment: &hub-env
     MESHSDR_HUB__URL: http://hub-auto:8073
     MESHSDR_HUB__ALLOW_INSECURE_URL: "true"

@@ -24,7 +24,10 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/probe"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/radio"
+	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
 
@@ -108,9 +111,14 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	holder := pki.NewCertHolder(cert)
 	revoked := pki.NewRevokedSet()
 
+	devices, err := radio.Wire(radio.Deps{Config: cfg, Logger: logger, Reporter: deviceReporter{ag}})
+	if err != nil {
+		return nil, err
+	}
+
 	mediaServer := media.NewServer(media.Options{
 		NodeID: id.String(), Version: version.String(), GatewayIdentity: cfg.HubTrust.HubIdentity,
-		OwnSerial: holder.Serial, Agent: ag, HeartbeatInterval: o.mediaHeartbeat, Now: time.Now,
+		OwnSerial: holder.Serial, Agent: ag, HeartbeatInterval: o.mediaHeartbeat, Streams: devices.Streams, Now: time.Now,
 		Logger: component(logger, "grid.infra.media"),
 	})
 
@@ -121,14 +129,30 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	})
 
 	srv := httpserver.NewServer(cfg.Node.Listen, gridhttp.NewNodeRouter(ctlServer, mediaServer, component(logger, "grid.http.node")))
+	srv.ConnContext = httpserver.NotSentLowat(int(cfg.Node.WSNotSentLowat.Bytes()))
 	srv.TLSConfig = pki.NodeServerConfig(holder, roots, revoked)
 	// Refused handshakes (foreign CA, revoked peer) are expected noise.
 	srv.ErrorLog = slog.NewLogLogger(component(logger, "grid.http.server").Handler(), slog.LevelDebug)
 
 	return &Process{
 		addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server"),
-		workers: []func(context.Context){ag.Run, ctlServer.Run, mediaServer.Run},
+		workers: []func(context.Context){ag.Run, ctlServer.Run, mediaServer.Run, devices.Manager.Run},
 	}, nil
+}
+
+// deviceReporter sends device states to the hub (device.state, coalesced
+// per device in the event buffer, ADR 0008).
+type deviceReporter struct{ ag *agent.Agent }
+
+func (r deviceReporter) DeviceState(s radiodomain.Snapshot) {
+	center, rate := s.CenterHz, int64(s.RateHz)
+
+	r.ag.Emit(rxv1.TypeDeviceState, "device:"+s.ID, agent.ClassState, func(seq int64) any {
+		return ctl.DeviceState{
+			Seq: seq, DeviceID: s.ID, State: string(s.State), Reason: s.Reason,
+			CenterFreq: &center, SampleRate: &rate, Listeners: s.Listeners,
+		}
+	})
 }
 
 // Enrollment is the one-off process of `meshsdr node enroll`.
