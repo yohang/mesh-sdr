@@ -253,6 +253,36 @@ func (d *Device) SortOrder() int { return d.sortOrder }
 // ReportedAt returns the time of the last report.
 func (d *Device) ReportedAt() time.Time { return d.reportedAt }
 
+// DeviceStatus summarises a device for admins (Admin › Nodes): ready,
+// busy, failed or absent. It is derived from the reported state, the node
+// health and the listeners; the state and its reason give the detail.
+type DeviceStatus string
+
+// Device statuses.
+const (
+	DeviceReady  DeviceStatus = "ready"
+	DeviceBusy   DeviceStatus = "busy"
+	DeviceFailed DeviceStatus = "failed"
+	DeviceAbsent DeviceStatus = "absent"
+)
+
+// Status summarises the device: absent when its node is not up or the
+// device cannot run (unavailable, disabled, no longer reported), failed
+// when it failed or waits for a restart, busy while listeners are attached
+// (SVC-001), ready otherwise.
+func (d *Device) Status(nodeUp bool, listeners int) DeviceStatus {
+	switch {
+	case !nodeUp || d.state == StateUnavailable || d.state == StateDisabled:
+		return DeviceAbsent
+	case d.state == StateFailed || d.state == StateRetryWait:
+		return DeviceFailed
+	case listeners > 0:
+		return DeviceBusy
+	default:
+		return DeviceReady
+	}
+}
+
 // DeviceSnapshot is the persisted form of a Device.
 type DeviceSnapshot struct {
 	ID, Node, Name, Type string
