@@ -14,18 +14,23 @@ import (
 	jobsapp "github.com/yohang/mesh-sdr/internal/jobs/app"
 	jobsdomain "github.com/yohang/mesh-sdr/internal/jobs/domain"
 	jobssqlite "github.com/yohang/mesh-sdr/internal/jobs/infra/sqlite"
+	reportingapp "github.com/yohang/mesh-sdr/internal/reporting/app"
 	settingsapp "github.com/yohang/mesh-sdr/internal/settings/app"
 	settingshttp "github.com/yohang/mesh-sdr/internal/settings/http"
 )
 
 // jobs builds the hub's jobs scheduler with the retention jobs, and the
 // retention view (ADM-011, ADR 0010).
-func jobs(adapter db.Adapter, idm *identity.Module, values jobsapp.RetentionValues, audit identitydomain.AuditLog,
+func jobs(adapter db.Adapter, idm *identity.Module, sch *scheduling, values jobsapp.RetentionValues, audit identitydomain.AuditLog,
 	logger *slog.Logger,
 ) (*jobsapp.Scheduler, *jobsapp.Retention, error) {
 	sched := jobsapp.NewScheduler(jobssqlite.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.app.scheduler"))
 	sched.Register(idm.Reaper, identityapp.SessionReapEvery)
 	sched.Register(idm.AuditPurger, identityapp.AuditPurgeEvery)
+	// ADR 0020: the schedules' safety net and hourly push, and the
+	// reporting outbox retention.
+	sched.Register(sch.publish, SchedulesPublishEvery)
+	sched.Register(sch.outbox, reportingapp.OutboxPurgeEvery)
 
 	for _, j := range idm.Purges {
 		sched.Register(j, identityapp.LinkPurgeEvery)
@@ -41,9 +46,18 @@ func jobs(adapter db.Adapter, idm *identity.Module, values jobsapp.RetentionValu
 		return nil, nil, err
 	}
 
+	outbox, err := jobssqlite.NewTableStats(adapter, "reporting_outbox")
+	if err != nil {
+		return nil, nil, err
+	}
+
 	stores := []jobsapp.Store{
 		{Name: "sessions", Label: "Ended sessions", SettingKey: "retention.sessions", Job: identityapp.JobSessionsReap, Stats: sessions},
 		{Name: "audit_log", Label: "Audit log", SettingKey: "retention.audit_log", Job: identityapp.JobAuditPurge, Stats: auditLog},
+		{
+			Name: "reporting_outbox", Label: "Reporting outbox (delivered reports)", SettingKey: reportingapp.KeySentRetention,
+			Job: reportingapp.JobOutboxPurge, Stats: outbox,
+		},
 	}
 
 	return sched, jobsapp.NewRetention(stores, sched, values, purgeAuditor{log: audit}, time.Now), nil

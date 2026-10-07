@@ -454,6 +454,8 @@ func happyPaths(t *testing.T, h *contractHub) {
 	expect(admin, http.MethodGet, "/nodes/attic/capabilities", nil, http.StatusOK)
 	expect(admin, http.MethodGet, "/devices", nil, http.StatusOK)
 	expect(admin, http.MethodGet, "/devices/hf", nil, http.StatusOK)
+
+	schedulingPaths(t, h, admin, expect)
 	// POST /auth/token refreshes a media connection the gateway authz
 	// issued to the caller (ADR 0012): here an anonymous one, so another
 	// caller is refused.
@@ -534,6 +536,72 @@ func happyPaths(t *testing.T, h *contractHub) {
 	accountPaths(t, h, admin, expect)
 
 	expect(admin, http.MethodPost, "/auth/logout", nil, http.StatusNoContent)
+}
+
+// schedulingPaths runs the preset, schedule and reporting operations (ADR
+// 0020) against the device hf (100 kHz–30 MHz, 2.048 MS/s).
+func schedulingPaths(t *testing.T, h *contractHub, admin *apiClient, expect func(*apiClient, string, string, any, int) map[string]any) {
+	t.Helper()
+
+	preset := expect(admin, http.MethodPost, "/presets", map[string]any{
+		"name": "20 m FT8", "center_freq": 14_074_000, "samp_rate": 2_048_000, "start_mod": "usb", "tags": []any{"ft8"},
+		"waterfall_levels": map[string]any{"min": -110, "max": -30},
+	}, http.StatusCreated)
+	pid, _ := preset["id"].(string)
+
+	expect(admin, http.MethodGet, "/presets", nil, http.StatusOK)
+
+	if list := expect(admin, http.MethodGet, "/presets?device_id=hf", nil, http.StatusOK); len(list["items"].([]any)) != 1 {
+		t.Errorf("presets of hf = %v", list)
+	}
+
+	expect(admin, http.MethodGet, "/presets/"+pid, nil, http.StatusOK)
+
+	sched := expect(admin, http.MethodPost, "/schedules", map[string]any{
+		"device_id": "hf", "preset_id": pid, "start_minute": 1320, "end_minute": 360,
+	}, http.StatusCreated)
+	sid, _ := sched["id"].(string)
+
+	expect(admin, http.MethodGet, "/schedules", nil, http.StatusOK)
+	expect(admin, http.MethodGet, "/schedules/"+sid, nil, http.StatusOK)
+
+	// Operators read the schedules of the devices they operate; other
+	// users see none.
+	if list := expect(h.signedIn("operator", 10), http.MethodGet, "/schedules", nil, http.StatusOK); len(list["items"].([]any)) != 1 {
+		t.Errorf("operator schedules = %v", list)
+	}
+
+	if list := expect(h.signedIn("listener", 10), http.MethodGet, "/schedules", nil, http.StatusOK); len(list["items"].([]any)) != 0 {
+		t.Errorf("listener schedules = %v", list)
+	}
+
+	expect(admin, http.MethodPut, "/schedules/"+sid, map[string]any{
+		"version": 1, "device_id": "hf", "preset_id": pid, "start_minute": 0, "end_minute": 60, "priority": 2, "days_of_week": 31,
+	}, http.StatusOK)
+
+	// A preset that no longer fits its schedule's device disables the
+	// schedule (GRID-016).
+	updated := expect(admin, http.MethodPut, "/presets/"+pid, map[string]any{
+		"version": 1, "name": "2 m APRS", "center_freq": 144_800_000, "samp_rate": 2_048_000,
+	}, http.StatusOK)
+	if disabled, _ := updated["disabled_schedules"].([]any); len(disabled) != 1 || disabled[0] != sid {
+		t.Errorf("replaced preset = %v", updated)
+	}
+
+	if got := expect(admin, http.MethodGet, "/schedules/"+sid, nil, http.StatusOK); got["enabled"] != false || got["disabled_reason"] != "preset_incompatible" {
+		t.Errorf("disabled schedule = %v", got)
+	}
+
+	if _, res := admin.do(http.MethodDelete, "/presets/"+pid, nil); res["code"] != "preset_in_use" {
+		t.Errorf("deleting a preset in use = %v", res)
+	}
+
+	if status := expect(admin, http.MethodGet, "/reporting/status", nil, http.StatusOK); len(status["networks"].([]any)) != 7 {
+		t.Errorf("reporting status = %v", status)
+	}
+
+	expect(admin, http.MethodDelete, "/schedules/"+sid, nil, http.StatusNoContent)
+	expect(admin, http.MethodDelete, "/presets/"+pid, nil, http.StatusNoContent)
 }
 
 // accountPaths runs the account, user, invitation and password reset

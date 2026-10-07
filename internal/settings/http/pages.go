@@ -103,6 +103,16 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if m.d.Schedules != nil {
+		sum.ShowSchedules = true
+
+		if sum.DisabledSchedules, err = m.d.Schedules.NeedingAttention(r.Context()); err != nil {
+			m.d.Logger.WarnContext(r.Context(), "schedules unavailable", slog.Any("error", err))
+
+			sum.SchedulesUnavailable = true
+		}
+	}
+
 	m.page(w, r, http.StatusOK, "Administration", "overview", overviewPage(sum), nil)
 }
 
@@ -111,6 +121,9 @@ type overviewSummary struct {
 	Settings, Locked, DB int
 	FailedJobs           []string
 	JobsUnavailable      bool
+	ShowSchedules        bool
+	DisabledSchedules    int
+	SchedulesUnavailable bool
 }
 
 // system serves the effective configuration (ADM-010).

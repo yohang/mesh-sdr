@@ -71,7 +71,16 @@ type Deps struct {
 	Retention Retention
 	Actor     func(ctx context.Context) app.Actor
 	Images    ImagesSection // receiver images of the Site page; nil: none
+	// Schedules counts the schedules the hub disabled, for the overview;
+	// nil: not shown.
+	Schedules ScheduleHealth
 	Logger    *slog.Logger
+}
+
+// ScheduleHealth counts the schedules the hub disabled (GRID-016): they
+// need an admin.
+type ScheduleHealth interface {
+	NeedingAttention(ctx context.Context) (int, error)
 }
 
 // ImagesSection renders the receiver images section of the Site page.

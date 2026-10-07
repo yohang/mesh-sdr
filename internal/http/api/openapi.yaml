@@ -1504,8 +1504,256 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /presets:
+    get:
+      operationId: listPresets
+      x-meshsdr-access: admin
+      summary: List the presets, by sort order (admin)
+      description: |
+        Presets are device-independent hub data (TECHNICAL_SPEC §7.1). With
+        `device_id`, only the presets that fit that device's reported
+        frequency range and sample rates are listed (422 `unknown_device`
+        for a device the registry lacks).
+      tags: [presets]
+      parameters:
+        - name: device_id
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"
+      responses:
+        "200":
+          description: Presets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresetList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createPreset
+      x-meshsdr-access: admin
+      summary: Create a preset (admin)
+      description: |
+        Field syntax is checked here (422 `invalid_preset` with one error per
+        field); compatibility with a device is checked when the preset is
+        applied. Without `slug`, one is derived from the name. Audited.
+      tags: [presets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresetInput"
+      responses:
+        "201":
+          description: Created preset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Preset"
+        default:
+          $ref: "#/components/responses/Problem"
+  /presets/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PresetID"
+    get:
+      operationId: getPreset
+      x-meshsdr-access: admin
+      summary: One preset (admin)
+      tags: [presets]
+      responses:
+        "200":
+          description: Preset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Preset"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: replacePreset
+      x-meshsdr-access: admin
+      summary: Replace a preset (admin)
+      description: |
+        Carries the expected `version` (409 `version_conflict`). The enabled
+        schedules the new definition no longer fits are disabled with the
+        reason `preset_incompatible` and listed in `disabled_schedules`
+        (ADR 0020). Audited.
+      tags: [presets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresetReplace"
+      responses:
+        "200":
+          description: Replaced preset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresetUpdate"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deletePreset
+      x-meshsdr-access: admin
+      summary: Delete a preset (admin; 409 preset_in_use while schedules reference it)
+      description: |
+        Deleting a preset never retunes a device: a device on which it is
+        active keeps its tuning (ADM-020). Audited.
+      tags: [presets]
+      responses:
+        "204":
+          description: Deleted
+        default:
+          $ref: "#/components/responses/Problem"
+  /schedules:
+    get:
+      operationId: listSchedules
+      x-meshsdr-access: listener
+      summary: List the schedules (admins; operators see those of the devices they operate)
+      description: |
+        Read-only for operators, who see the schedules of the devices they
+        hold the operator role on (globally or per device); other users get
+        an empty list. A schedule the hub disabled carries
+        `disabled_reason` (GRID-016).
+      tags: [schedules]
+      parameters:
+        - name: device_id
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"
+      responses:
+        "200":
+          description: Schedules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createSchedule
+      x-meshsdr-access: admin
+      summary: Create a schedule (admin)
+      description: |
+        A static UTC window `(start_minute, end_minute)`; `end_minute` before
+        `start_minute` wraps over midnight. Daylight windows answer 422
+        `schedule_kind_unsupported` (SVC-011). The device must be in the
+        registry (422 `unknown_device`) and the preset must exist (422
+        `unknown_preset`); an enabled schedule also needs a device its node
+        still reports (422 `device_unavailable`) and a preset that fits it
+        (422 `preset_incompatible`). Overlapping windows are resolved by
+        `priority`. Audited.
+      tags: [schedules]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleInput"
+      responses:
+        "201":
+          description: Created schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        default:
+          $ref: "#/components/responses/Problem"
+  /schedules/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ScheduleID"
+    get:
+      operationId: getSchedule
+      x-meshsdr-access: listener
+      summary: One schedule (admins; operators of its device)
+      tags: [schedules]
+      responses:
+        "200":
+          description: Schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: replaceSchedule
+      x-meshsdr-access: admin
+      summary: Replace a schedule (admin)
+      description: |
+        Carries the expected `version` (409 `version_conflict`). Enabling a
+        schedule the hub disabled clears its `disabled_reason` and checks it
+        again like a creation. Audited.
+      tags: [schedules]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleReplace"
+      responses:
+        "200":
+          description: Replaced schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteSchedule
+      x-meshsdr-access: admin
+      summary: Delete a schedule (admin)
+      tags: [schedules]
+      responses:
+        "204":
+          description: Deleted
+        default:
+          $ref: "#/components/responses/Problem"
+  /reporting/status:
+    get:
+      operationId: getReportingStatus
+      x-meshsdr-access: admin
+      summary: Reporting outbox queue per network and last delivery (admin)
+      description: |
+        One entry per external network (TECHNICAL_SPEC §7.1
+        `reporting_outbox`): whether a transport is enabled, the entries per
+        status, the last delivery and the oldest entry waiting.
+      tags: [reporting]
+      responses:
+        "200":
+          description: Outbox status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingStatus"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
+    PresetID:
+      name: id
+      in: path
+      required: true
+      description: Preset id (UUID).
+      schema:
+        type: string
+        maxLength: 36
+    ScheduleID:
+      name: id
+      in: path
+      required: true
+      description: Schedule id (UUID).
+      schema:
+        type: string
+        maxLength: 36
     LinkToken:
       name: token
       in: path
@@ -2632,6 +2880,322 @@ components:
         sha256:
           type: string
           description: Hex SHA-256 of the stored image.
+    PresetList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Preset"
+    WaterfallLevels:
+      type: object
+      additionalProperties: false
+      required: [min, max]
+      properties:
+        min:
+          type: integer
+          description: dB, -200 to 50, below max.
+        max:
+          type: integer
+          description: dB, -200 to 50.
+    Preset:
+      type: object
+      required: [id, slug, name, tags, center_freq, samp_rate, start_freq, start_mod, tuning_step, sort_order, created_at, updated_at, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          example: 2m-aprs
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        center_freq:
+          type: integer
+          format: int64
+          description: Hz
+        samp_rate:
+          type: integer
+          format: int64
+          description: S/s
+        start_freq:
+          type: integer
+          format: int64
+          description: Initial listener frequency, Hz, within half the sample rate of the centre.
+        start_mod:
+          type: string
+          description: Initial mode id.
+        tuning_step:
+          type: integer
+          format: int64
+          description: Hz
+        initial_squelch_level:
+          type: integer
+          description: dBFS
+        initial_nr_level:
+          type: integer
+          description: dB, -20 to 20
+        waterfall_levels:
+          $ref: "#/components/schemas/WaterfallLevels"
+        sort_order:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+    PresetInput:
+      type: object
+      additionalProperties: false
+      required: [name, center_freq, samp_rate]
+      properties:
+        slug:
+          type: string
+          description: Unique URL handle; derived from the name when absent.
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        center_freq:
+          type: integer
+          format: int64
+        samp_rate:
+          type: integer
+          format: int64
+        start_freq:
+          type: integer
+          format: int64
+          description: Defaults to the centre frequency.
+        start_mod:
+          type: string
+          description: Defaults to nfm.
+        tuning_step:
+          type: integer
+          format: int64
+          description: Defaults to 1000 Hz.
+        initial_squelch_level:
+          type: integer
+        initial_nr_level:
+          type: integer
+        waterfall_levels:
+          $ref: "#/components/schemas/WaterfallLevels"
+    PresetReplace:
+      type: object
+      additionalProperties: false
+      required: [version, name, center_freq, samp_rate]
+      properties:
+        version:
+          type: integer
+          description: Expected version (optimistic concurrency, 409 version_conflict on mismatch).
+        slug:
+          type: string
+          description: Unique URL handle; kept when absent.
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        center_freq:
+          type: integer
+          format: int64
+        samp_rate:
+          type: integer
+          format: int64
+        start_freq:
+          type: integer
+          format: int64
+        start_mod:
+          type: string
+        tuning_step:
+          type: integer
+          format: int64
+        initial_squelch_level:
+          type: integer
+        initial_nr_level:
+          type: integer
+        waterfall_levels:
+          $ref: "#/components/schemas/WaterfallLevels"
+    PresetUpdate:
+      type: object
+      required: [preset, disabled_schedules]
+      properties:
+        preset:
+          $ref: "#/components/schemas/Preset"
+        disabled_schedules:
+          type: array
+          description: Schedules disabled because the preset no longer fits their device.
+          items:
+            type: string
+            format: uuid
+    ScheduleList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Schedule"
+    Schedule:
+      type: object
+      required: [id, device_id, preset_id, kind, days_of_week, priority, enabled, created_at, updated_at, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+        preset_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [static, daylight]
+        start_minute:
+          type: integer
+          description: Minute of the UTC day, 0 to 1439 (static).
+        end_minute:
+          type: integer
+          description: Minute of the UTC day; before start_minute wraps over midnight (static).
+        days_of_week:
+          type: integer
+          description: Bitmask of the days a window starts on, Monday = 1 … Sunday = 64.
+        daylight_phase:
+          type: string
+          enum: [day, night, greyline]
+        priority:
+          type: integer
+          description: The highest priority wins on overlapping windows.
+        enabled:
+          type: boolean
+        disabled_reason:
+          type: string
+          enum: [device_stale, device_removed, preset_incompatible]
+          description: Set when the hub disabled the schedule; an admin re-enables it.
+        disabled_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+    ScheduleInput:
+      type: object
+      additionalProperties: false
+      required: [device_id, preset_id]
+      properties:
+        device_id:
+          type: string
+        preset_id:
+          type: string
+        kind:
+          type: string
+          enum: [static, daylight]
+          description: Defaults to static. Daylight is not supported yet (422 schedule_kind_unsupported).
+        start_minute:
+          type: integer
+        end_minute:
+          type: integer
+        days_of_week:
+          type: integer
+          description: Defaults to 127 (every day).
+        daylight_phase:
+          type: string
+          enum: [day, night, greyline]
+        priority:
+          type: integer
+          description: Defaults to 0.
+        enabled:
+          type: boolean
+          description: Defaults to true.
+    ScheduleReplace:
+      type: object
+      additionalProperties: false
+      required: [version, device_id, preset_id]
+      properties:
+        version:
+          type: integer
+          description: Expected version (optimistic concurrency, 409 version_conflict on mismatch).
+        device_id:
+          type: string
+        preset_id:
+          type: string
+        kind:
+          type: string
+          enum: [static, daylight]
+        start_minute:
+          type: integer
+        end_minute:
+          type: integer
+        days_of_week:
+          type: integer
+        daylight_phase:
+          type: string
+          enum: [day, night, greyline]
+        priority:
+          type: integer
+        enabled:
+          type: boolean
+    ReportingStatus:
+      type: object
+      required: [networks]
+      properties:
+        networks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportingNetwork"
+    ReportingNetwork:
+      type: object
+      required: [network, enabled, pending, in_flight, failed, sent, dead]
+      properties:
+        network:
+          type: string
+          enum: [pskreporter, wsprnet, aprs_is, sondehub, sondehub_listener, ais_udp, mqtt]
+        enabled:
+          type: boolean
+          description: A transport for the network is enabled.
+        pending:
+          type: integer
+          format: int64
+        in_flight:
+          type: integer
+          format: int64
+        failed:
+          type: integer
+          format: int64
+        sent:
+          type: integer
+          format: int64
+        dead:
+          type: integer
+          format: int64
+        last_sent_at:
+          type: string
+          format: date-time
+        oldest_due_at:
+          type: string
+          format: date-time
+          description: Enqueue time of the oldest entry waiting (pending or failed).
   responses:
     Problem:
       description: Error

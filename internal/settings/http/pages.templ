@@ -351,6 +351,18 @@ templ overviewPage(s overviewSummary) {
 						Retention jobs failing: { joinComma(s.FailedJobs) }. See <a href="/admin/retention">Data &amp; retention</a>.
 				}
 			</li>
+			if s.ShowSchedules {
+				<li>
+					switch {
+						case s.SchedulesUnavailable:
+							Schedules: status unavailable.
+						case s.DisabledSchedules == 0:
+							Schedules: none disabled by the hub.
+						default:
+							Schedules disabled by the hub (device gone or preset no longer fitting): { strconv.Itoa(s.DisabledSchedules) }. See the <a href="/admin/devices">device pages</a>.
+					}
+				</li>
+			}
 		</ul>
 	</section>
 	<section class="flex flex-col gap-2" aria-labelledby="title-sections">
