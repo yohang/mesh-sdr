@@ -264,9 +264,10 @@ func TestLoadErrors(t *testing.T) {
 			code:  CodeUnknownKey, origin: "hub.toml",
 		},
 		{
-			name: "tls internal without the hub CA", role: RoleHub,
+			// Removed by ADR 0021: browsers must never trust the hub CA.
+			name: "tls internal", role: RoleHub,
 			files: map[string]string{"hub.toml": minimalHub + "[gateway]\ntls_mode = \"internal\"\n"},
-			code:  CodeRequired, origin: "hub.toml", message: "tls.ca_cert",
+			code:  CodeInvalidValue, origin: "hub.toml",
 		},
 		{
 			name: "acme without storage", role: RoleHub,

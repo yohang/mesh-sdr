@@ -1,6 +1,6 @@
 // Package gateway is the hub gateway (ADR 0002, ADR 0012, ADR 0021): the
 // only public listener of the hub, built on net/http. It terminates TLS
-// (ACME, operator files, the hub CA or off), serves the hub router
+// (ACME, operator files or off), serves the hub router
 // in-process and proxies /nodes/{nodeId}/ws to the node over mTLS:
 //
 //  1. delete every client-supplied X-Rx-* header;
@@ -41,10 +41,9 @@ const (
 
 // TLS modes of the public listener.
 const (
-	TLSACME     = "acme"
-	TLSFiles    = "files"
-	TLSInternal = "internal"
-	TLSOff      = "off"
+	TLSACME  = "acme"
+	TLSFiles = "files"
+	TLSOff   = "off"
 )
 
 // Config is the gateway configuration.
@@ -57,8 +56,8 @@ type Config struct {
 	TLSMode    string
 	// CertFile and KeyFile are the operator certificate (TLSFiles).
 	CertFile, KeyFile string
-	// PublicURL is hub.url: its host is certified (TLSACME, TLSInternal)
-	// and redirects go to it.
+	// PublicURL is hub.url: its host is certified (TLSACME) and redirects
+	// go to it.
 	PublicURL string
 	ACMEEmail string
 	// ACMECA is the ACME directory URL; empty: Let's Encrypt production.
@@ -84,8 +83,5 @@ type Options struct {
 	// gateway certificate, the node server name and its pinned
 	// certificate.
 	NodeTLS func(ctx context.Context, nodeID string) (*tls.Config, error)
-	// InternalCert returns the public certificate for TLSInternal, issued
-	// by the hub CA for the host of PublicURL.
-	InternalCert func() (*tls.Certificate, error)
-	Logger       *slog.Logger
+	Logger  *slog.Logger
 }

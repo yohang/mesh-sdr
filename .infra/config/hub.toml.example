@@ -30,9 +30,9 @@ allow_insecure_url = false
 # WebSockets (/nodes/<id>/ws) to the nodes over mTLS (ADR 0012, ADR 0021).
 # Public TLS: acme (certificate for the host of hub.url from an ACME CA; the
 # host must be a public DNS name reaching this gateway), files (tls_cert and
-# tls_key below), internal (certificate for the host of hub.url from the hub
-# CA of [tls], for a LAN whose browsers trust tls/ca.pem) or off (plain
-# HTTP on http_listen, behind a TLS-terminating proxy or for development).
+# tls_key below) or off (plain HTTP on http_listen, behind a TLS-terminating
+# proxy or for development). On a LAN without a public name, use files with
+# your own certificate, or off behind a reverse proxy that terminates TLS.
 tls_mode = "acme"
 # HTTPS listen address (unused with tls_mode = off). Binding :443 as a
 # non-root user needs CAP_NET_BIND_SERVICE, or

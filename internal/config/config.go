@@ -112,10 +112,9 @@ type HubSection struct {
 
 // Gateway TLS modes (INT-001).
 const (
-	TLSModeACME     = "acme"
-	TLSModeFiles    = "files"
-	TLSModeInternal = "internal"
-	TLSModeOff      = "off"
+	TLSModeACME  = "acme"
+	TLSModeFiles = "files"
+	TLSModeOff   = "off"
 )
 
 // Gateway is the [gateway] table: the hub gateway, the only public
@@ -123,7 +122,7 @@ const (
 type Gateway struct {
 	HTTPSListen   string   `toml:"https_listen" env:"HTTPS_LISTEN" jsonschema:"description=HTTPS listen address (host:port) of the gateway\\, used unless gateway.tls_mode is off."`
 	HTTPListen    string   `toml:"http_listen" env:"HTTP_LISTEN" jsonschema:"description=Plain HTTP listen address (host:port). With TLS it redirects to https and answers ACME HTTP-01 challenges; with gateway.tls_mode = off it serves the hub. Empty: no plain listener."`
-	TLSMode       string   `toml:"tls_mode" env:"TLS_MODE" jsonschema:"enum=acme,enum=files,enum=internal,enum=off,description=Public TLS: acme (certificate from an ACME CA for the host of hub.url)\\, files (gateway.tls_cert and gateway.tls_key)\\, internal (certificate from the hub CA tls.ca_cert\\, LAN use) or off (plain HTTP on gateway.http_listen\\, behind a TLS-terminating proxy or for development)."`
+	TLSMode       string   `toml:"tls_mode" env:"TLS_MODE" jsonschema:"enum=acme,enum=files,enum=off,description=Public TLS: acme (certificate from an ACME CA for the host of hub.url)\\, files (gateway.tls_cert and gateway.tls_key)\\, or off (plain HTTP on gateway.http_listen\\, behind a TLS-terminating proxy or for development)."`
 	TLSCert       string   `toml:"tls_cert" env:"TLS_CERT" jsonschema:"description=PEM certificate chain of the public listener (tls_mode = files). Relative paths are resolved against the config dir."`
 	TLSKey        string   `toml:"tls_key" env:"TLS_KEY" jsonschema:"description=PEM private key of the public listener (tls_mode = files\\, mode 0600). Relative paths are resolved against the config dir."`
 	ACMEEmail     string   `toml:"acme_email" env:"ACME_EMAIL" jsonschema:"description=Contact e-mail of the ACME account (tls_mode = acme)."`

@@ -5,7 +5,7 @@
 - Deciders: project owner
 - Scope: epic part `epic/grid-3` of epics #446 (grid) and #453 (integrations): GRID-011 (#19), GRID-012 (#20), GRID-014 (#22), GRID-015 (#23), GRID-003 (#11), INT-001 (#85). It finishes the gateway part of GRID-007 (#15).
 - Amends: ADR 0002 (implementation notes: forward auth and node transport).
-- Amended by: ADR 0021 (gateway on net/http without Caddy, `nogateway` build and `prod-node` image removed, `gateway.mode` and `gateway.stream_close_delay` removed).
+- Amended by: ADR 0021 (gateway on net/http without Caddy, `nogateway` build and `prod-node` image removed, `gateway.mode`, `gateway.stream_close_delay` and `gateway.tls_mode = internal` removed).
 
 ## Context
 

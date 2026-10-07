@@ -356,48 +356,6 @@ func (ca *CA) MintClient(kind, id string, now time.Time) (tls.Certificate, error
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, nil
 }
 
-// MintServer issues an in-memory server certificate with a fresh key for
-// host, a DNS name or an IP address: the public certificate of the gateway
-// with gateway.tls_mode = internal.
-func (ca *CA) MintServer(host string, now time.Time) (tls.Certificate, error) {
-	key, err := GenerateKey()
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	serial, err := newSerial()
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	tmpl := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: host},
-		NotBefore:    now.Add(-clockSkew),
-		NotAfter:     now.Add(HubValidity),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-
-	if ip := net.ParseIP(host); ip != nil {
-		tmpl.IPAddresses = []net.IP{ip}
-	} else {
-		tmpl.DNSNames = []string{host}
-	}
-
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.cert, &key.PublicKey, ca.key)
-	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("issue server certificate: %w", err)
-	}
-
-	leaf, err := x509.ParseCertificate(der)
-	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("parse server certificate: %w", err)
-	}
-
-	return tls.Certificate{Certificate: [][]byte{der, ca.cert.Raw}, PrivateKey: key, Leaf: leaf}, nil
-}
-
 // CreateNodeCSR returns a DER CSR for key with urn:rx:node:<nodeID> and the
 // SANs of a specific listen host.
 func CreateNodeCSR(key *ecdsa.PrivateKey, nodeID, listen string) ([]byte, error) {

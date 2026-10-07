@@ -10,10 +10,8 @@ import (
 	"time"
 )
 
-// CertSource mints and caches an in-memory certificate: a client
-// certificate (hub or gateway) or the public server certificate of
-// gateway.tls_mode = internal. It mints a new one when 2/3 of its validity
-// has elapsed.
+// CertSource mints and caches an in-memory client certificate (hub or
+// gateway), minting a new one when 2/3 of its validity has elapsed.
 type CertSource struct {
 	mint func(now time.Time) (tls.Certificate, error)
 	now  func() time.Time
@@ -25,12 +23,6 @@ type CertSource struct {
 // NewClientSource returns a source of urn:rx:<kind>:<id> client certificates.
 func NewClientSource(ca *CA, kind, id string, now func() time.Time) *CertSource {
 	return &CertSource{mint: func(t time.Time) (tls.Certificate, error) { return ca.MintClient(kind, id, t) }, now: now}
-}
-
-// NewServerSource returns a source of server certificates for host (a DNS
-// name or an IP address).
-func NewServerSource(ca *CA, host string, now func() time.Time) *CertSource {
-	return &CertSource{mint: func(t time.Time) (tls.Certificate, error) { return ca.MintServer(host, t) }, now: now}
 }
 
 // Get returns the current certificate.

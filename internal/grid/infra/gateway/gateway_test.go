@@ -635,33 +635,6 @@ func TestGatewayOperatorCertificate(t *testing.T) {
 	}
 }
 
-// The internal mode certifies the host of hub.url with the hub CA.
-func TestGatewayInternalCA(t *testing.T) {
-	f := newFixture(t)
-	addr := freeAddr(t)
-
-	o := f.options(gateway.Config{TLSMode: gateway.TLSInternal, HTTPSListen: addr, PublicURL: "https://sdr.test"})
-	if _, err := gateway.New(o); err == nil {
-		t.Fatal("internal mode without the hub CA")
-	}
-
-	o.InternalCert = pki.NewServerSource(f.ca, "sdr.test", time.Now).Get
-	startGateway(t, o)
-
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: f.ca.Pool(), ServerName: "sdr.test", MinVersion: tls.VersionTLS12}}}
-
-	resp, err := client.Get("https://" + addr + "/") //nolint:noctx // test
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_ = resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK || resp.TLS.PeerCertificates[0].DNSNames[0] != "sdr.test" {
-		t.Fatalf("status %d", resp.StatusCode)
-	}
-}
-
 // ACME: the configuration is checked, the storage directory is created
 // 0700, the plain listener answers HTTP-01 challenges and redirects the
 // rest. No ACME CA is contacted.

@@ -3,10 +3,8 @@ package wire
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -54,18 +52,6 @@ func newGateway(cfg config.Hub, logger *slog.Logger, router http.Handler, g *hub
 		Hub:     router,
 		NodeTLS: g.gatewayDialConfig,
 		Logger:  component(logger, "grid.infra.gateway"),
-	}
-
-	// gateway.tls_mode = internal: the public certificate comes from the
-	// hub CA, for the host of hub.url.
-	if gw.TLSMode == config.TLSModeInternal && g.ca != nil {
-		u, err := url.Parse(cfg.Hub.URL)
-		if err != nil {
-			return nil, fmt.Errorf("hub.url: %w", err)
-		}
-
-		src := pki.NewServerSource(g.ca, u.Hostname(), time.Now)
-		o.InternalCert = src.Get
 	}
 
 	return gateway.New(o)

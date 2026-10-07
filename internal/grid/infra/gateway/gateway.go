@@ -76,17 +76,6 @@ func New(o Options) (*Gateway, error) {
 		}
 
 		g.tls = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
-	case TLSInternal:
-		if o.InternalCert == nil {
-			return nil, errors.New("gateway: tls_mode internal needs the hub CA (tls.ca_cert)")
-		}
-
-		g.tls = &tls.Config{
-			MinVersion: tls.VersionTLS12,
-			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return o.InternalCert()
-			},
-		}
 	case TLSACME:
 		if o.Config.StorageDir == "" {
 			return nil, errors.New("gateway: tls_mode acme needs storage_dir")

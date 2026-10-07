@@ -211,7 +211,7 @@ func (c *checker) smtp(s SMTP) {
 func (c *checker) gateway(h *Hub) {
 	g := h.Gateway
 
-	c.enum("gateway.tls_mode", g.TLSMode, TLSModeACME, TLSModeFiles, TLSModeInternal, TLSModeOff)
+	c.enum("gateway.tls_mode", g.TLSMode, TLSModeACME, TLSModeFiles, TLSModeOff)
 
 	if g.TLSMode == TLSModeOff {
 		if g.HTTPListen == "" {
@@ -261,10 +261,6 @@ func (c *checker) gateway(h *Hub) {
 
 	if g.TLSMode == TLSModeACME && g.StorageDir == "" {
 		c.fail("gateway.storage_dir", CodeRequired, "gateway.storage_dir is required with gateway.tls_mode = acme")
-	}
-
-	if g.TLSMode == TLSModeInternal && h.TLS.CACert == "" {
-		c.fail("gateway.tls_mode", CodeRequired, "gateway.tls_mode = internal needs the hub CA (tls.ca_cert)")
 	}
 
 	if g.StreamTimeout.Duration() <= 0 {
