@@ -82,32 +82,3 @@ func TestUsersPages(t *testing.T) {
 		t.Errorf("disable the last admin = %d %s", res.StatusCode, b)
 	}
 }
-
-func TestUsersAPI(t *testing.T) {
-	h := newHub(t)
-	h.addUser("root", domain.RoleAdmin)
-	h.addUser("alice", domain.RoleListener)
-
-	root := h.signedIn("root")
-
-	v := decode(t, root.api(http.MethodGet, "/api/v1/users?q=ali&enabled=true", ""))
-	if users, _ := v["users"].([]any); len(users) != 1 {
-		t.Errorf("list = %v", v)
-	}
-
-	id := h.userID("alice")
-
-	res := root.api(http.MethodPatch, "/api/v1/users/"+id, `{"enabled":false,"display_name":"Alice"}`)
-	if v := decode(t, res); res.StatusCode != http.StatusOK || v["enabled"] != false || v["display_name"] != "Alice" {
-		t.Errorf("patch = %d %v", res.StatusCode, v)
-	}
-
-	res = root.api(http.MethodPost, "/api/v1/users/"+id+"/password", "")
-	if v := decode(t, res); res.StatusCode != http.StatusOK || v["password"] == "" {
-		t.Errorf("generated = %d %v", res.StatusCode, v)
-	}
-
-	if res := root.api(http.MethodPatch, "/api/v1/users/"+h.userID("root"), `{"enabled":false}`); res.StatusCode != http.StatusConflict {
-		t.Errorf("disable the last admin = %d", res.StatusCode)
-	}
-}

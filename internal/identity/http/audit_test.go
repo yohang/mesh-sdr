@@ -60,12 +60,7 @@ func TestAuditPages(t *testing.T) {
 		t.Errorf("unknown format = %d", res.StatusCode)
 	}
 
-	v := decode(t, root.api(http.MethodGet, "/api/v1/audit?action=auth.login.&limit=1", ""))
-	if list, _ := v["entries"].([]any); len(list) != 1 || v["next_before"] == nil {
-		t.Errorf("api = %v", v)
-	}
-
-	if res := alice.api(http.MethodGet, "/api/v1/audit", ""); res.StatusCode != http.StatusForbidden {
-		t.Errorf("listener api = %d", res.StatusCode)
+	if res := alice.form("/admin/audit/export", url.Values{"format": {"csv"}}, false); res.StatusCode != http.StatusForbidden {
+		t.Errorf("listener export = %d", res.StatusCode)
 	}
 }

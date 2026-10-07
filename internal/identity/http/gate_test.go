@@ -35,7 +35,7 @@ func TestPasswordGateConfinesFlaggedUsers(t *testing.T) {
 	c := h.client()
 	c.session()
 
-	if res := c.login("alice", pw, false); res.StatusCode != http.StatusOK {
+	if res := c.login("alice", pw, false); res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("login = %d", res.StatusCode)
 	}
 
@@ -87,9 +87,9 @@ func TestPasswordGateConfinesFlaggedUsers(t *testing.T) {
 		t.Errorf("static = %d, want the file server's 404", res.StatusCode)
 	}
 
-	res = c.do(http.MethodPost, "/api/v1/auth/logout", "", "", map[string]string{identityhttp.CSRFHeader: c.token})
-	if res.StatusCode != http.StatusNoContent {
-		t.Errorf("logout = %d", res.StatusCode)
+	res = c.do(http.MethodPost, "/logout", "", "", map[string]string{identityhttp.CSRFHeader: c.token})
+	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/" {
+		t.Errorf("logout = %d %q", res.StatusCode, res.Header.Get("Location"))
 	}
 }
 

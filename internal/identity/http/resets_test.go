@@ -3,6 +3,7 @@ package http_test
 import (
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -85,41 +86,37 @@ func TestPasswordResetPages(t *testing.T) {
 	}
 }
 
-func TestPasswordResetAPI(t *testing.T) {
+// TestAdminPasswordResetLink: for a user without an e-mail address, the
+// admin gets the reset link to copy; only admins may issue one.
+func TestAdminPasswordResetLink(t *testing.T) {
 	h := newHub(t)
 	h.addUser("root", domain.RoleAdmin)
 	h.addUser("bob", domain.RoleListener)
 	h.addUser("carol", domain.RoleListener)
 
+	root := h.signedIn("root")
+
+	res := root.form("/admin/users/"+h.userID("bob")+"/password-reset", nil, false)
+	b := body(t, res)
+
+	link := regexp.MustCompile(`/password/reset/[A-Za-z0-9_-]+`).FindString(b)
+	if res.StatusCode != http.StatusOK || !strings.Contains(b, "Copy the reset link") || link == "" {
+		t.Fatalf("admin reset = %d %s", res.StatusCode, b)
+	}
+
 	anon := h.client()
 	anon.session()
 
-	if res := anon.api(http.MethodPost, "/api/v1/auth/password-reset", `{"login":"bob"}`); res.StatusCode != http.StatusAccepted {
-		t.Errorf("request = %d", res.StatusCode)
+	res = anon.form("/password/reset", url.Values{"token": {strings.TrimPrefix(link, "/password/reset/")}, "password": {newPassword}, "confirm_password": {newPassword}}, false)
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("confirm = %d %s", res.StatusCode, body(t, res))
 	}
 
-	root := h.signedIn("root")
-
-	res := root.api(http.MethodPost, "/api/v1/users/"+h.userID("bob")+"/password-reset", "")
-	v := decode(t, res)
-
-	link, _ := v["link"].(string)
-	if res.StatusCode != http.StatusOK || v["mailed"] != false || link == "" {
-		t.Fatalf("admin reset = %d %v", res.StatusCode, v)
-	}
-
-	token := strings.TrimPrefix(link, hubURL+"/password/reset/")
-
-	res = anon.api(http.MethodPost, "/api/v1/auth/password-reset/confirm", `{"token":"`+token+`","new_password":"`+newPassword+`"}`)
-	if res.StatusCode != http.StatusNoContent {
-		t.Fatalf("confirm = %d %v", res.StatusCode, decode(t, res))
-	}
-
-	if res := anon.login("bob", newPassword, false); res.StatusCode != http.StatusOK {
+	if res := anon.login("bob", newPassword, false); res.StatusCode != http.StatusSeeOther {
 		t.Errorf("login = %d", res.StatusCode)
 	}
 
-	if res := h.signedIn("carol").api(http.MethodPost, "/api/v1/users/"+h.userID("root")+"/password-reset", ""); res.StatusCode != http.StatusForbidden {
+	if res := h.signedIn("carol").form("/admin/users/"+h.userID("root")+"/password-reset", nil, false); res.StatusCode != http.StatusForbidden {
 		t.Errorf("listener issues a reset = %d", res.StatusCode)
 	}
 }

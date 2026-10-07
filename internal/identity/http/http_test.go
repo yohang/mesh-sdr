@@ -121,13 +121,9 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 	}
 
 	srv := api.Server{
-		HealthHandlers:     api.NewHealthHandlers(d.DB, logger),
-		AuthHandlers:       api.NewAuthHandlers(m.HTTP),
-		AccountHandlers:    api.NewAccountHandlers(m.HTTP, m.Accounts, m.Profile),
-		InvitationHandlers: api.NewInvitationHandlers(m.HTTP, m.HTTP, m.Invitations),
-		ResetHandlers:      api.NewResetHandlers(m.HTTP, m.Resets),
-		AuditHandlers:      api.NewAuditHandlers(m.Audit),
-		TokenHandlers:      api.NewTokenHandlers(m.HTTP, m.HTTP, m.Tokens),
+		HealthHandlers: api.NewHealthHandlers(d.DB, logger),
+		AuthHandlers:   api.NewAuthHandlers(m.HTTP),
+		TokenHandlers:  api.NewTokenHandlers(m.HTTP, m.HTTP, m.Tokens),
 	}
 
 	return &hub{
@@ -153,14 +149,6 @@ func (o *outbox) Enqueue(m mail.Message) error {
 	o.sent = append(o.sent, m)
 
 	return nil
-}
-
-// count returns the number of queued e-mails.
-func (o *outbox) count() int {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	return len(o.sent)
 }
 
 // last returns the last message sent to an address, and the path of the
@@ -274,12 +262,16 @@ func (c *client) session() map[string]any {
 	return v
 }
 
+// login posts the sign-in form: 303 to the next page on success.
 func (c *client) login(login, pw string, remember bool) *http.Response {
 	c.h.t.Helper()
 
-	b, _ := json.Marshal(map[string]any{"login": login, "password": pw, "remember_me": remember})
+	v := url.Values{"login": {login}, "password": {pw}}
+	if remember {
+		v.Set("remember_me", "on")
+	}
 
-	return c.do(http.MethodPost, "/api/v1/auth/login", "application/json", string(b), map[string]string{identityhttp.CSRFHeader: c.token})
+	return c.do(http.MethodPost, "/login", "application/x-www-form-urlencoded", v.Encode(), map[string]string{identityhttp.CSRFHeader: c.token})
 }
 
 func decode(t *testing.T, res *http.Response) map[string]any {
@@ -334,14 +326,11 @@ func TestLoginAndSessionCookie(t *testing.T) {
 	c := h.client()
 	c.session()
 
-	res := c.login("alice", password, false)
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("login = %d", res.StatusCode)
-	}
+	pre := c.token
 
-	v := decode(t, res)
-	if v["authenticated"] != true || v["csrf_token"] == c.token || res.Header.Get("Cache-Control") != "no-store" {
-		t.Errorf("login response = %v", v)
+	res := c.login("alice", password, false)
+	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/" || res.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("login = %d %v", res.StatusCode, res.Header)
 	}
 
 	sc := setCookie(res, "__Host-rx_session")
@@ -356,7 +345,7 @@ func TestLoginAndSessionCookie(t *testing.T) {
 	s := c.session()
 	user, _ := s["user"].(map[string]any)
 
-	if s["authenticated"] != true || user["username"] != "alice" || s["csrf_token"] != v["csrf_token"] {
+	if s["authenticated"] != true || user["username"] != "alice" || s["csrf_token"] == pre {
 		t.Errorf("session = %v", s)
 	}
 
@@ -405,23 +394,25 @@ func TestLoginErrors(t *testing.T) {
 	c := h.client()
 	c.session()
 
-	wrong := decode(t, c.login("alice", "wrong password!", false))
-	unknown := decode(t, c.login("nobody", password, false))
+	res := c.login("alice", "wrong password!", false)
+	wrong := body(t, res)
 
-	if wrong["code"] != "invalid_credentials" || wrong["status"] != float64(401) {
-		t.Errorf("wrong password = %v", wrong)
+	if res.StatusCode != http.StatusUnauthorized || !strings.Contains(wrong, "Incorrect username, e-mail or password.") {
+		t.Errorf("wrong password = %d %s", res.StatusCode, wrong)
 	}
 
-	if wrong["detail"] != unknown["detail"] || wrong["code"] != unknown["code"] {
-		t.Errorf("responses differ: %v / %v", wrong, unknown)
+	// An unknown account gets the same answer (no user enumeration).
+	if res := c.login("nobody", password, false); res.StatusCode != http.StatusUnauthorized ||
+		strings.ReplaceAll(body(t, res), "nobody", "alice") != wrong {
+		t.Errorf("unknown account = %d", res.StatusCode)
 	}
 
 	for range 3 {
 		c.login("nobody", "x", false)
 	}
 
-	res := c.login("nobody", password, false)
-	if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Retry-After") == "" || decode(t, res)["code"] != "rate_limited" {
+	res = c.login("nobody", password, false)
+	if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Retry-After") == "" || !strings.Contains(body(t, res), "Too many attempts") {
 		t.Errorf("throttled login = %d %q", res.StatusCode, res.Header.Get("Retry-After"))
 	}
 }
@@ -430,28 +421,24 @@ func TestCSRFMatrix(t *testing.T) {
 	h := newHub(t)
 	h.addUser("alice", domain.RoleListener)
 
-	body := `{"login":"alice","password":"` + password + `"}`
+	form := url.Values{"login": {"alice"}, "password": {password}}.Encode()
 
 	tests := []struct {
 		name   string
 		header func(c *client) map[string]string
-		ctype  string
 		status int
-		code   string
 	}{
-		{"no token", func(*client) map[string]string { return nil }, "application/json", 403, "csrf_failed"},
-		{"wrong token", func(*client) map[string]string { return map[string]string{identityhttp.CSRFHeader: "nope"} }, "application/json", 403, "csrf_failed"},
+		{"no token", func(*client) map[string]string { return nil }, 403},
+		{"wrong token", func(*client) map[string]string { return map[string]string{identityhttp.CSRFHeader: "nope"} }, 403},
 		{"cross-site fetch", func(c *client) map[string]string {
 			return map[string]string{identityhttp.CSRFHeader: c.token, "Sec-Fetch-Site": "cross-site"}
-		}, "application/json", 403, "csrf_failed"},
+		}, 403},
 		{"foreign origin", func(c *client) map[string]string {
 			return map[string]string{identityhttp.CSRFHeader: c.token, "Origin": "https://evil.example"}
-		}, "application/json", 403, "csrf_failed"},
-		{"text/plain body", func(c *client) map[string]string { return map[string]string{identityhttp.CSRFHeader: c.token} }, "text/plain", 415, "unsupported_media_type"},
-		{"form body", func(c *client) map[string]string { return map[string]string{identityhttp.CSRFHeader: c.token} }, "application/x-www-form-urlencoded", 415, "unsupported_media_type"},
+		}, 403},
 		{"trusted origin", func(c *client) map[string]string {
 			return map[string]string{identityhttp.CSRFHeader: c.token, "Origin": hubURL, "Sec-Fetch-Site": "same-origin"}
-		}, "application/json", 200, ""},
+		}, 303},
 	}
 
 	for _, tt := range tests {
@@ -459,15 +446,9 @@ func TestCSRFMatrix(t *testing.T) {
 			c := h.client()
 			c.session()
 
-			res := c.do(http.MethodPost, "/api/v1/auth/login", tt.ctype, body, tt.header(c))
+			res := c.do(http.MethodPost, "/login", "application/x-www-form-urlencoded", form, tt.header(c))
 			if res.StatusCode != tt.status {
 				t.Fatalf("status = %d, want %d", res.StatusCode, tt.status)
-			}
-
-			if tt.code != "" {
-				if v := decode(t, res); v["code"] != tt.code || res.Header.Get("Content-Type") != "application/problem+json" {
-					t.Errorf("problem = %v", v)
-				}
 			}
 		})
 	}
@@ -479,7 +460,7 @@ func TestCSRFMatrix(t *testing.T) {
 		c := h.client()
 		c.session()
 
-		if res := c.do(http.MethodPost, "/api/v1/auth/login", "application/json", body, map[string]string{identityhttp.CSRFHeader: other.token}); res.StatusCode != 403 {
+		if res := c.do(http.MethodPost, "/login", "application/x-www-form-urlencoded", form, map[string]string{identityhttp.CSRFHeader: other.token}); res.StatusCode != 403 {
 			t.Errorf("status = %d", res.StatusCode)
 		}
 	})
@@ -491,18 +472,29 @@ func TestCSRFMatrix(t *testing.T) {
 		pre := c.token
 		c.login("alice", password, false)
 
-		if res := c.do(http.MethodPost, "/api/v1/auth/logout", "", "", map[string]string{identityhttp.CSRFHeader: pre}); res.StatusCode != 403 {
+		if res := c.do(http.MethodPost, "/logout", "", "", map[string]string{identityhttp.CSRFHeader: pre}); res.StatusCode != 403 {
 			t.Errorf("logout with the pre-session token = %d", res.StatusCode)
 		}
 	})
 
-	t.Run("html actions", func(t *testing.T) {
+	// The API answers problem+json and takes JSON bodies only.
+	t.Run("api", func(t *testing.T) {
 		c := h.client()
 		c.session()
 
-		for _, path := range []string{"/login", "/logout"} {
-			if res := c.do(http.MethodPost, path, "application/x-www-form-urlencoded", "login=alice&password=x", nil); res.StatusCode != 403 {
-				t.Errorf("POST %s without token = %d", path, res.StatusCode)
+		for _, tt := range []struct {
+			name, ctype string
+			header      map[string]string
+			status      int
+			code        string
+		}{
+			{"no token", "application/json", nil, 403, "csrf_failed"},
+			{"text/plain body", "text/plain", map[string]string{identityhttp.CSRFHeader: c.token}, 415, "unsupported_media_type"},
+			{"form body", "application/x-www-form-urlencoded", map[string]string{identityhttp.CSRFHeader: c.token}, 415, "unsupported_media_type"},
+		} {
+			res := c.do(http.MethodPost, "/api/v1/auth/token", tt.ctype, `{"node_id":"roof","cid":"x"}`, tt.header)
+			if v := decode(t, res); res.StatusCode != tt.status || v["code"] != tt.code || res.Header.Get("Content-Type") != "application/problem+json" {
+				t.Errorf("%s = %d %v", tt.name, res.StatusCode, v)
 			}
 		}
 	})
@@ -514,17 +506,12 @@ func TestLogout(t *testing.T) {
 
 	c := h.client()
 	c.session()
-
-	if res := c.do(http.MethodPost, "/api/v1/auth/logout", "", "", map[string]string{identityhttp.CSRFHeader: c.token}); res.StatusCode != http.StatusUnauthorized {
-		t.Errorf("anonymous logout = %d", res.StatusCode)
-	}
-
 	c.login("alice", password, false)
 	c.session()
 	session := *c.cookies["__Host-rx_session"]
 
-	res := c.do(http.MethodPost, "/api/v1/auth/logout", "", "", map[string]string{identityhttp.CSRFHeader: c.token})
-	if res.StatusCode != http.StatusNoContent {
+	res := c.do(http.MethodPost, "/logout", "", "", map[string]string{identityhttp.CSRFHeader: c.token})
+	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("logout = %d", res.StatusCode)
 	}
 
@@ -610,7 +597,7 @@ func TestAuthBodiesAreBounded(t *testing.T) {
 		t.Errorf("large form = %d", res.StatusCode)
 	}
 
-	res := c.do(http.MethodPost, "/api/v1/auth/login", "application/json", `{"login":"alice","password":"`+big+`"}`, hdr)
+	res := c.do(http.MethodPost, "/api/v1/auth/token", "application/json", `{"node_id":"roof","cid":"`+big+`"}`, hdr)
 	if res.StatusCode != http.StatusRequestEntityTooLarge || !strings.Contains(decode(t, res)["detail"].(string), "too large") {
 		t.Errorf("large JSON body = %d", res.StatusCode)
 	}
@@ -756,7 +743,7 @@ func TestBackgroundRequests(t *testing.T) {
 	c := h.client()
 	c.session()
 
-	if res := c.login("alice", password, false); res.StatusCode != http.StatusOK {
+	if res := c.login("alice", password, false); res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("login = %d", res.StatusCode)
 	}
 

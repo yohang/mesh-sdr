@@ -2,32 +2,25 @@ package http_test
 
 import (
 	"net/http"
+	"regexp"
+	"slices"
 	"testing"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 )
 
-func sessionIDs(t *testing.T, res *http.Response) (current string, others []string) {
+// revokeForms returns the session revocation forms of a page under prefix.
+func revokeForms(t *testing.T, res *http.Response, prefix string) []string {
 	t.Helper()
 
-	v := decode(t, res)
+	re := regexp.MustCompile(regexp.QuoteMeta(prefix) + `/sessions/[A-Za-z0-9_-]+/revoke`)
 
-	list, _ := v["sessions"].([]any)
-	for _, raw := range list {
-		s, _ := raw.(map[string]any)
-		id, _ := s["id"].(string)
-
-		if s["current"] == true {
-			current = id
-		} else {
-			others = append(others, id)
-		}
-	}
-
-	return current, others
+	return re.FindAllString(body(t, res), -1)
 }
 
-func TestSessionsAPI(t *testing.T) {
+// TestSessionForms: own sessions on the account page, a user's sessions on
+// Admin › Users, and who may sign them out (SR-18).
+func TestSessionForms(t *testing.T) {
 	h := newHub(t)
 	h.addUser("root", domain.RoleAdmin)
 	h.addUser("alice", domain.RoleListener)
@@ -37,19 +30,33 @@ func TestSessionsAPI(t *testing.T) {
 	alice2 := h.signedIn("alice")
 	bob := h.signedIn("bob")
 
-	res := alice.api(http.MethodGet, "/api/v1/me/sessions", "")
-	current, others := sessionIDs(t, res)
+	page := body(t, alice.do(http.MethodGet, "/account", "", "", nil))
 
-	if res.StatusCode != http.StatusOK || current == "" || len(others) != 1 {
-		t.Fatalf("own sessions = %d %q %v", res.StatusCode, current, others)
+	current := regexp.MustCompile(`(?s)\(this session\).*?(/account/sessions/[A-Za-z0-9_-]+/revoke)`).FindStringSubmatch(page)
+	// Each form names its action twice (action and hx-post).
+	forms := slices.Compact(regexp.MustCompile(`/account/sessions/[A-Za-z0-9_-]+/revoke`).FindAllString(page, -1))
+
+	if current == nil || len(forms) != 2 {
+		t.Fatalf("own sessions = %v", forms)
 	}
 
-	// Bob cannot revoke Alice's session (SR-18).
-	if res := bob.api(http.MethodDelete, "/api/v1/me/sessions/"+others[0], ""); res.StatusCode != http.StatusNotFound {
-		t.Errorf("IDOR = %d", res.StatusCode)
+	other := forms[0]
+	if other == current[1] {
+		other = forms[1]
 	}
 
-	if res := alice.api(http.MethodDelete, "/api/v1/me/sessions/"+others[0], ""); res.StatusCode != http.StatusNoContent {
+	// Bob cannot revoke Alice's sessions.
+	for _, f := range forms {
+		if res := bob.form(f, nil, false); res.StatusCode != http.StatusNotFound {
+			t.Errorf("bob revokes %s = %d", f, res.StatusCode)
+		}
+	}
+
+	if s := alice2.session(); s["authenticated"] != true {
+		t.Fatal("bob signed out alice")
+	}
+
+	if res := alice.form(other, nil, false); res.StatusCode != http.StatusOK {
 		t.Errorf("revoke = %d", res.StatusCode)
 	}
 
@@ -57,37 +64,48 @@ func TestSessionsAPI(t *testing.T) {
 		t.Error("revoked session still valid")
 	}
 
-	// Admin side.
-	root := h.signedIn("root")
-	aliceID := h.userID("alice")
-
-	res = root.api(http.MethodGet, "/api/v1/users/"+aliceID+"/sessions", "")
-	if _, list := sessionIDs(t, res); res.StatusCode != http.StatusOK || len(list) != 1 {
-		t.Errorf("admin list = %d %v", res.StatusCode, list)
+	if s := alice.session(); s["authenticated"] != true {
+		t.Error("the current session was signed out")
 	}
 
-	if res := bob.api(http.MethodGet, "/api/v1/users/"+aliceID+"/sessions", ""); res.StatusCode != http.StatusForbidden {
+	// Admin side.
+	root := h.signedIn("root")
+	user := "/admin/users/" + h.userID("alice")
+
+	if list := revokeForms(t, root.do(http.MethodGet, user, "", "", nil), user); len(list) != 1 {
+		t.Errorf("admin list = %v", list)
+	}
+
+	if res := bob.do(http.MethodGet, user, "", "", nil); res.StatusCode != http.StatusForbidden {
 		t.Errorf("listener reads another user's sessions = %d", res.StatusCode)
 	}
 
-	res = root.api(http.MethodPost, "/api/v1/users/"+aliceID+"/sessions/revoke", "")
-	if v := decode(t, res); res.StatusCode != http.StatusOK || v["revoked"] != float64(1) {
-		t.Errorf("revoke all = %d %v", res.StatusCode, v)
+	if res := bob.form(user+"/sessions/revoke", nil, false); res.StatusCode != http.StatusForbidden {
+		t.Errorf("listener signs another user out = %d", res.StatusCode)
+	}
+
+	// A session of another user cannot be revoked through this user's page.
+	bobPage := "/admin/users/" + h.userID("bob")
+
+	bobForms := revokeForms(t, root.do(http.MethodGet, bobPage, "", "", nil), bobPage)
+	if len(bobForms) != 1 {
+		t.Fatalf("bob's sessions = %v", bobForms)
+	}
+
+	ref := regexp.MustCompile(`/sessions/([A-Za-z0-9_-]+)/revoke`).FindStringSubmatch(bobForms[0])[1]
+	if res := root.form(user+"/sessions/"+ref+"/revoke", nil, false); res.StatusCode == http.StatusOK {
+		t.Errorf("revoke bob's session through alice's page = %d", res.StatusCode)
+	}
+
+	if s := bob.session(); s["authenticated"] != true {
+		t.Error("bob signed out through alice's page")
+	}
+
+	if res := root.form(user+"/sessions/revoke", nil, false); res.StatusCode != http.StatusOK {
+		t.Errorf("revoke all = %d", res.StatusCode)
 	}
 
 	if s := alice.session(); s["authenticated"] != false {
 		t.Error("session survived sign-out everywhere")
-	}
-
-	// logout-all signs out every own session, this one included.
-	b2 := h.signedIn("bob")
-
-	res = bob.api(http.MethodPost, "/api/v1/auth/logout-all", "")
-	if res.StatusCode != http.StatusNoContent || setCookie(res, "__Host-rx_session") == nil {
-		t.Errorf("logout-all = %d", res.StatusCode)
-	}
-
-	if s := b2.session(); s["authenticated"] != false {
-		t.Error("other session survived logout-all")
 	}
 }

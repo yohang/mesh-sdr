@@ -3,6 +3,7 @@ package http_test
 import (
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -40,20 +41,8 @@ func TestInvitationPages(t *testing.T) {
 		t.Errorf("test mail = %+v", m)
 	}
 
-	// The API twin of "Send a test e-mail".
-	sent := h.mail.count()
-
-	res = root.api(http.MethodPost, "/api/v1/mail/test", "")
-	if v := decode(t, res); res.StatusCode != http.StatusOK || v["to"] != "root@example.org" {
-		t.Errorf("API test mail = %d %v", res.StatusCode, v)
-	}
-
-	if m, _ := h.mail.last("root@example.org"); h.mail.count() != sent+1 || !strings.Contains(m.Subject, "Test") {
-		t.Errorf("API test mail = %+v", m)
-	}
-
-	if res := h.signedIn("bob").api(http.MethodPost, "/api/v1/mail/test", ""); res.StatusCode != http.StatusForbidden {
-		t.Errorf("API test mail as listener = %d", res.StatusCode)
+	if res := h.signedIn("bob").form("/admin/invitations/test-mail", nil, false); res.StatusCode != http.StatusForbidden {
+		t.Errorf("test mail as listener = %d", res.StatusCode)
 	}
 
 	// The invitee: the page, then the account.
@@ -94,50 +83,48 @@ func TestInvitationPages(t *testing.T) {
 	}
 }
 
-func TestInvitationAPI(t *testing.T) {
+// TestInvitationLinkAndRevocation: an invitation shown as a link; the
+// role comes from the invitation, never from the acceptance form; a used
+// invitation cannot be revoked.
+func TestInvitationLinkAndRevocation(t *testing.T) {
 	h := newHub(t)
 	h.addUser("root", domain.RoleAdmin)
 
 	root := h.signedIn("root")
 
-	res := root.api(http.MethodPost, "/api/v1/invitations", `{"role":"listener","expires_in_hours":48}`)
-	v := decode(t, res)
+	res := root.form("/admin/invitations", url.Values{"role": {"listener"}, "days": {"2"}}, false)
+	b := body(t, res)
 
-	link, _ := v["link"].(string)
-	if res.StatusCode != http.StatusCreated || v["mailed"] != false || !strings.HasPrefix(link, hubURL+"/invite/") {
-		t.Fatalf("create = %d %v", res.StatusCode, v)
+	link := regexp.MustCompile(`/invite/[A-Za-z0-9_-]+`).FindString(b)
+	if res.StatusCode != http.StatusOK || link == "" {
+		t.Fatalf("create = %d %s", res.StatusCode, b)
 	}
 
-	token := strings.TrimPrefix(link, hubURL+"/invite/")
+	revoke := regexp.MustCompile(`/admin/invitations/[0-9a-f-]+/revoke`).FindString(body(t, root.do(http.MethodGet, "/admin/invitations", "", "", nil)))
+	if revoke == "" {
+		t.Fatal("no revoke form")
+	}
+
+	token := strings.TrimPrefix(link, "/invite/")
 	anon := h.client()
 	anon.session()
 
-	if v := decode(t, anon.api(http.MethodGet, "/api/v1/auth/invitations/"+token, "")); v["role"] != "listener" {
-		t.Errorf("check = %v", v)
+	res = anon.form("/invite", url.Values{
+		"token": {token}, "role": {"admin"}, "username": {"invitee"}, "password": {newPassword}, "confirm_password": {newPassword},
+	}, false)
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("accept = %d %s", res.StatusCode, body(t, res))
 	}
 
-	if res := anon.api(http.MethodPost, "/api/v1/auth/invitations/"+token+"/accept", `{"username":"api_user","password":"`+newPassword+`","role":"admin"}`); res.StatusCode != http.StatusBadRequest {
-		t.Errorf("role in the acceptance request = %d", res.StatusCode)
+	if s := anon.session(); s["authenticated"] != true || len(s["roles"].([]any)) != 1 || s["roles"].([]any)[0] != "listener" {
+		t.Errorf("session = %v", s)
 	}
 
-	res = anon.api(http.MethodPost, "/api/v1/auth/invitations/"+token+"/accept", `{"username":"api_user","password":"`+newPassword+`"}`)
-	if v := decode(t, res); res.StatusCode != http.StatusCreated || v["authenticated"] != true || setCookie(res, "__Host-rx_session") == nil {
-		t.Fatalf("accept = %d %v", res.StatusCode, v)
-	}
-
-	res = root.api(http.MethodGet, "/api/v1/invitations", "")
-	list, _ := decode(t, res)["invitations"].([]any)
-
-	if first, _ := list[0].(map[string]any); len(list) != 1 || first["state"] != "redeemed" {
-		t.Errorf("list = %v", list)
-	}
-
-	id := list[0].(map[string]any)["id"].(string)
-	if res := root.api(http.MethodDelete, "/api/v1/invitations/"+id, ""); res.StatusCode != http.StatusConflict {
+	if res := root.form(revoke, nil, false); res.StatusCode == http.StatusOK {
 		t.Errorf("revoke a used invitation = %d", res.StatusCode)
 	}
 
-	if res := anon.api(http.MethodGet, "/api/v1/auth/invitations/"+token, ""); res.StatusCode != http.StatusNotFound {
+	if res := h.client().do(http.MethodGet, link, "", "", nil); res.StatusCode != http.StatusNotFound {
 		t.Errorf("used = %d", res.StatusCode)
 	}
 

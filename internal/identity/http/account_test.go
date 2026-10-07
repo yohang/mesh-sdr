@@ -105,8 +105,8 @@ func TestEmailChangeWithConfirmation(t *testing.T) {
 		t.Fatalf("verify page = %d %s", res.StatusCode, b)
 	}
 
-	if v := decode(t, c.api(http.MethodGet, "/api/v1/me", "")); v["email"] != "alice@example.org" {
-		t.Errorf("address changed before confirmation: %v", v)
+	if b := body(t, c.do(http.MethodGet, "/account", "", "", nil)); !strings.Contains(b, "alice@example.org") || strings.Contains(b, "new@example.org") {
+		t.Errorf("address changed before confirmation: %s", b)
 	}
 
 	anon.session()
@@ -116,8 +116,8 @@ func TestEmailChangeWithConfirmation(t *testing.T) {
 		t.Fatalf("confirm = %d %s", res.StatusCode, b)
 	}
 
-	if v := decode(t, c.api(http.MethodGet, "/api/v1/me", "")); v["email"] != "new@example.org" || v["email_verified"] != true {
-		t.Errorf("me = %v", v)
+	if b := body(t, c.do(http.MethodGet, "/account", "", "", nil)); !strings.Contains(b, "new@example.org") {
+		t.Errorf("account after confirmation = %s", b)
 	}
 
 	if m, _ := h.mail.last("alice@example.org"); !strings.Contains(m.Body, "new@example.org") {
@@ -130,60 +130,13 @@ func TestEmailChangeWithConfirmation(t *testing.T) {
 
 	// The address of another account cannot be confirmed, and the answer
 	// is the one of any dead link (SR-06).
-	res = c.api(http.MethodPost, "/api/v1/me/email", `{"email":"BOB@example.org","current_password":"`+password+`"}`)
-	if v := decode(t, res); res.StatusCode != http.StatusOK || v["pending"] != true {
-		t.Fatalf("API change = %d %v", res.StatusCode, v)
+	res = c.form("/account/email", url.Values{"email": {"BOB@example.org"}, "current_password": {password}}, true)
+	if b := body(t, res); res.StatusCode != http.StatusOK || !strings.Contains(b, "We sent a confirmation link") {
+		t.Fatalf("change to a taken address = %d %s", res.StatusCode, b)
 	}
 
 	_, link = h.mail.last("BOB@example.org")
 	if res := anon.form("/account/email/verify", url.Values{"token": {strings.TrimPrefix(link, "/account/email/verify/")}}, false); res.StatusCode != http.StatusNotFound {
 		t.Errorf("taken address = %d", res.StatusCode)
-	}
-
-	// The API twin of the confirmation form.
-	res = c.api(http.MethodPost, "/api/v1/me/email", `{"email":"api@example.org","current_password":"`+password+`"}`)
-	if v := decode(t, res); res.StatusCode != http.StatusOK || v["pending"] != true {
-		t.Fatalf("API change = %d %v", res.StatusCode, v)
-	}
-
-	_, link = h.mail.last("api@example.org")
-	confirm := `{"token":"` + strings.TrimPrefix(link, "/account/email/verify/") + `"}`
-
-	if res := anon.api(http.MethodPost, "/api/v1/auth/email/confirm", confirm); res.StatusCode != http.StatusNoContent {
-		t.Fatalf("API confirm = %d %s", res.StatusCode, body(t, res))
-	}
-
-	if v := decode(t, c.api(http.MethodGet, "/api/v1/me", "")); v["email"] != "api@example.org" || v["email_verified"] != true {
-		t.Errorf("me after API confirm = %v", v)
-	}
-
-	res = anon.api(http.MethodPost, "/api/v1/auth/email/confirm", confirm)
-	if v := decode(t, res); res.StatusCode != http.StatusUnprocessableEntity || v["code"] != "invalid_token" {
-		t.Errorf("API second use = %d %v", res.StatusCode, v)
-	}
-}
-
-func TestMeAPI(t *testing.T) {
-	h := newHub(t)
-	h.addUser("alice", domain.RoleOperator)
-
-	c := h.signedIn("alice")
-
-	v := decode(t, c.api(http.MethodGet, "/api/v1/me", ""))
-	if v["username"] != "alice" || v["email_verified"] != false || len(v["roles"].([]any)) != 1 || v["roles"].([]any)[0] != "operator" {
-		t.Errorf("me = %v", v)
-	}
-
-	res := c.api(http.MethodPatch, "/api/v1/me", `{"display_name":"Alice"}`)
-	if v := decode(t, res); res.StatusCode != http.StatusOK || v["display_name"] != "Alice" {
-		t.Errorf("patch = %d %v", res.StatusCode, v)
-	}
-
-	if res := c.api(http.MethodPatch, "/api/v1/me", `{"display_name":"Alice","username":"root"}`); res.StatusCode != http.StatusBadRequest {
-		t.Errorf("patch with an unknown field = %d", res.StatusCode)
-	}
-
-	if res := h.client().api(http.MethodGet, "/api/v1/me", ""); res.StatusCode != http.StatusUnauthorized {
-		t.Errorf("anonymous = %d", res.StatusCode)
 	}
 }

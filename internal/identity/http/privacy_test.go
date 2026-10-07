@@ -55,24 +55,25 @@ func TestExportAndDeletion(t *testing.T) {
 		t.Error("session survived the deletion")
 	}
 
-	// API: export and delete as admin, delete own.
+	// Admin › Users: export and delete, admin only; the last admin stays.
 	root := h.signedIn("root")
-	bobID := h.userID("bob")
+	bob := "/admin/users/" + h.userID("bob")
 
-	if res := root.api(http.MethodPost, "/api/v1/users/"+bobID+"/export", ""); res.StatusCode != http.StatusOK {
+	if res := root.form(bob+"/export", nil, false); res.StatusCode != http.StatusOK ||
+		!strings.Contains(res.Header.Get("Content-Disposition"), "attachment") {
 		t.Errorf("admin export = %d", res.StatusCode)
 	}
 
-	bob := h.signedIn("bob")
-	if res := bob.api(http.MethodDelete, "/api/v1/users/"+bobID, ""); res.StatusCode != http.StatusForbidden {
+	if res := h.signedIn("bob").form(bob+"/delete", url.Values{"confirm": {"1"}}, false); res.StatusCode != http.StatusForbidden {
 		t.Errorf("listener deletes = %d", res.StatusCode)
 	}
 
-	if res := bob.api(http.MethodDelete, "/api/v1/me", `{"current_password":"`+password+`"}`); res.StatusCode != http.StatusNoContent {
-		t.Errorf("delete me = %d", res.StatusCode)
+	res = root.form("/admin/users/"+h.userID("root")+"/delete", url.Values{"confirm": {"1"}}, false)
+	if b := body(t, res); res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(b, "last enabled admin") {
+		t.Errorf("delete the last admin = %d %s", res.StatusCode, b)
 	}
 
-	if res := root.api(http.MethodDelete, "/api/v1/users/"+h.userID("root"), ""); res.StatusCode != http.StatusConflict {
-		t.Errorf("delete the last admin = %d", res.StatusCode)
+	if res := root.form(bob+"/delete", url.Values{"confirm": {"1"}}, false); res.StatusCode != http.StatusSeeOther {
+		t.Errorf("admin deletes = %d %s", res.StatusCode, body(t, res))
 	}
 }
