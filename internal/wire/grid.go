@@ -20,6 +20,7 @@ import (
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
 
@@ -206,9 +207,9 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 
 		statesLogger := component(logger, "grid.app.states")
 		g.control.OnLinkChange(func(ctx context.Context, id domain.NodeID) {
-			// After every ingested batch (device reports change the
-			// desired state) and every answer of the node.
-			if err := g.states.Publish(ctx, id); err != nil && ctx.Err() == nil {
+			// After an ingested batch that changed the node's devices
+			// (MarkChanged below): heartbeats cost nothing.
+			if err := g.states.PublishChanged(ctx, id); err != nil && ctx.Err() == nil {
 				statesLogger.ErrorContext(ctx, "push desired state", slog.String("node_id", id.String()), slog.Any("error", err))
 			}
 		})
@@ -217,6 +218,11 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter db.Adapter, now fun
 		g.caps = app.NewCapabilities(capRepo, nodeRepo, g.manager, component(logger, "grid.app.capabilities"))
 		g.control.Handle(rxv1.TypeNodeCapabilities, g.caps.Handler())
 		g.caps.OnReport(g.devices.Sync)
+		g.caps.OnReport(func(_ context.Context, n *domain.Node, _ ctl.Capabilities, _ time.Time) error {
+			g.states.MarkChanged(n.ID())
+
+			return nil
+		})
 		g.control.Handle(rxv1.TypeDeviceState, g.devices.StateHandler())
 		g.status.Listen(g.devices.NodeStatusChanged)
 

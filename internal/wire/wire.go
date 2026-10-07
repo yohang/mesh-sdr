@@ -346,17 +346,30 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	sch := newScheduling(adapter, g, settingsModule.Store, auditLog, now, logger)
 
 	if g.states != nil {
-		statesLogger := component(logger, "grid.app.states")
-
 		// The desired state carries listen_policy: a settings change is
-		// pushed to the nodes.
+		// pushed to the nodes by one worker that coalesces the changes and
+		// stops with the hub.
+		changed := make(chan struct{}, 1)
+
 		settingsModule.Store.Subscribe(func(*settingsapp.Snapshot) {
-			go func() {
-				ctx := context.WithoutCancel(ctx)
-				if n := g.states.PublishAll(ctx); n > 0 {
-					statesLogger.DebugContext(ctx, "desired state pushed after a settings change", slog.Int("nodes", n))
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		})
+
+		statesLogger := component(logger, "grid.app.states")
+		workers = append(workers, func(ctx context.Context) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-changed:
+					if n := g.states.PublishAll(ctx); n > 0 {
+						statesLogger.DebugContext(ctx, "desired state pushed after a settings change", slog.Int("nodes", n))
+					}
 				}
-			}()
+			}
 		})
 	}
 

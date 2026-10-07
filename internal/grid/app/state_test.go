@@ -104,11 +104,35 @@ func TestStates(t *testing.T) {
 		t.Errorf("status = %s %s", got, hint)
 	}
 
-	// A new welcome sends the state again (another revision).
+	// A new welcome sends the state again (the node did not record a
+	// refused revision); the node stays degraded until it accepts it.
 	welcome(t, c, attic.ID(), "1.0.0")
 
 	if err := s.Welcomed(ctx, attic.ID(), 7); err != nil || len(sender.sent) != 2 {
 		t.Errorf("welcomed with an old revision = %v, %v", sender.sent, err)
+	}
+
+	if link, _ := tracker.State(attic.ID()); len(link.StateErrors) != 1 {
+		t.Errorf("refusals lost on reconnect: %+v", link)
+	}
+
+	s.Applied(ctx, attic.ID(), ctl.StateApplied{Revision: sender.sent[1].Revision})
+
+	if link, _ := tracker.State(attic.ID()); len(link.StateErrors) != 0 {
+		t.Errorf("refusals kept after an accepted state: %+v", link)
+	}
+
+	// Link changes push only after MarkChanged.
+	desired.st = state("anonymous")
+
+	if err := s.PublishChanged(ctx, attic.ID()); err != nil || len(sender.sent) != 2 {
+		t.Errorf("unmarked link change pushed: %v, %v", sender.sent, err)
+	}
+
+	s.MarkChanged(attic.ID())
+
+	if err := s.PublishChanged(ctx, attic.ID()); err != nil || len(sender.sent) != 3 {
+		t.Errorf("marked link change = %v, %v", sender.sent, err)
 	}
 
 	// A state too large for a control message is refused.
@@ -118,6 +142,11 @@ func TestStates(t *testing.T) {
 
 	if err := s.Publish(ctx, attic.ID()); !errors.Is(err, app.ErrStateTooLarge) {
 		t.Errorf("too large: %v", err)
+	}
+
+	// Reported once per revision.
+	if err := s.Publish(ctx, attic.ID()); err != nil {
+		t.Errorf("too large again: %v", err)
 	}
 
 	sender.down = true
