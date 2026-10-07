@@ -53,7 +53,7 @@ jobs:
       # The cgo DSP, the device runtime and the media send queue run
       # concurrent goroutines over shared rings (ADR 0019).
       - name: Test (race)
-        run: docker run --rm -v "$PWD:/app" mesh-sdr-dev:ci go test -race ./internal/dsp/... ./internal/radio/... ./internal/protocol/rxv1/sendq/...
+        run: docker run --rm -v "$PWD:/app" mesh-sdr-dev:ci go test -race ./internal/dsp/... ./internal/radio/... ./internal/protocol/rxv1/sendq/... ./internal/protocol/rxv1/wsconn/... ./internal/grid/infra/media/...
 
       # The node-only build (ADR 0012) must not link Caddy.
       - name: Test (nogateway)

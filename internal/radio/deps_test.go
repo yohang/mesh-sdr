@@ -6,24 +6,50 @@ import (
 	"testing"
 )
 
-// The node holds no DB connection (GRID-002): the device module layers
-// never link the database packages (the module wiring reads config.Node
-// only), and only internal/dsp/csdr uses cgo.
-func TestNoDatabaseAndCgoBoundary(t *testing.T) {
-	out, err := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}} {{len .CgoFiles}}", "./domain/...", "./app/...", "./infra/...", "./http/...", "../dsp/...").CombinedOutput()
+// goList returns "<import path> <number of cgo files>" for the packages.
+func goList(t *testing.T, patterns ...string) [][2]string {
+	t.Helper()
+
+	args := append([]string{"list", "-deps", "-f", "{{.ImportPath}} {{len .CgoFiles}}"}, patterns...)
+
+	out, err := exec.Command("go", args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list: %v: %s", err, out)
 	}
 
+	var pkgs [][2]string
+
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		pkg, cgo, _ := strings.Cut(line, " ")
+		pkgs = append(pkgs, [2]string{pkg, cgo})
+	}
 
-		if strings.HasPrefix(pkg, "github.com/yohang/mesh-sdr/internal/db") || strings.Contains(pkg, "sqlite") {
-			t.Errorf("the device module links %s", pkg)
+	return pkgs
+}
+
+// The node holds no DB connection (GRID-002): the device module layers
+// never link the database packages (the module wiring reads config.Node
+// only).
+func TestNoDatabase(t *testing.T) {
+	for _, p := range goList(t, "./domain/...", "./app/...", "./infra/...", "./http/...", "../dsp/...") {
+		if strings.HasPrefix(p[0], "github.com/yohang/mesh-sdr/internal/db") || strings.Contains(p[0], "sqlite") {
+			t.Errorf("the device module links %s", p[0])
+		}
+	}
+}
+
+// Only internal/dsp/csdr uses cgo in the whole module (ADR 0014, ADR 0019).
+func TestCgoBoundary(t *testing.T) {
+	for _, tags := range []string{"", "nogateway"} {
+		patterns := []string{"github.com/yohang/mesh-sdr/..."}
+		if tags != "" {
+			patterns = append([]string{"-tags", tags}, patterns...)
 		}
 
-		if strings.HasPrefix(pkg, "github.com/yohang/mesh-sdr/") && cgo != "0" && pkg != "github.com/yohang/mesh-sdr/internal/dsp/csdr" {
-			t.Errorf("%s uses cgo outside internal/dsp/csdr", pkg)
+		for _, p := range goList(t, patterns...) {
+			if strings.HasPrefix(p[0], "github.com/yohang/mesh-sdr/") && p[1] != "0" && p[0] != "github.com/yohang/mesh-sdr/internal/dsp/csdr" {
+				t.Errorf("%s uses cgo outside internal/dsp/csdr (tags %q)", p[0], tags)
+			}
 		}
 	}
 }
