@@ -57,7 +57,9 @@ func (t *Tracker) Welcomed(id domain.NodeID, boot shared.UUID, compat domain.Com
 
 	s := t.get(id)
 	s.Connected, s.EverWelcomed, s.Boot, s.Compat, s.WelcomedAt, s.DialFailures = true, true, boot, compat, now, 0
-	s.StateRevision, s.AppliedRevision, s.StateErrors = 0, 0, nil
+	// Nothing is pushed on the new channel yet. The refusals of the last
+	// answer stay until the node accepts a state (the node degraded).
+	s.StateRevision = 0
 }
 
 // StatePushed records the desired-state revision sent on the channel.

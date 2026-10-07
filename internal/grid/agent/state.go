@@ -126,9 +126,47 @@ func (s *DesiredState) Apply(st ctl.StateApply) ctl.StateApplied {
 		}
 	}
 
-	s.revision, s.presets, s.devices, s.policy = st.Revision, presets, devices, st.Policy
+	switch st.Policy.ListenPolicy {
+	case "anonymous", "registered":
+		s.policy = st.Policy
+	default:
+		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: "invalid listen_policy"})
+	}
+
+	s.presets, s.devices = presets, devices
+
+	// The revision is recorded only when every part was accepted: after a
+	// reconnect, ctl.welcome then asks for the state again and the hub
+	// learns the refusals again (the node stays degraded).
+	if len(out.Errors) == 0 {
+		s.revision = st.Revision
+	}
 
 	return out
+}
+
+// Bounds of the values a node accepts from the hub (the hub validates them
+// too, presets/domain): they keep every comparison below free of overflow.
+const (
+	maxFrequency = 300_000_000_000
+	maxRate      = 2147483647
+)
+
+// checkPreset validates the data of a preset like the hub does.
+func checkPreset(p ctl.Preset) bool {
+	switch {
+	case p.CenterFreq <= 0 || p.CenterFreq > maxFrequency, p.SampRate <= 0 || p.SampRate > maxRate:
+		return false
+	case p.StartFreq <= 0 || p.StartFreq > maxFrequency, p.TuningStep <= 0 || p.TuningStep > maxRate:
+		return false
+	}
+
+	d := p.StartFreq - p.CenterFreq
+	if d < 0 {
+		d = -d
+	}
+
+	return 2*d <= p.SampRate
 }
 
 // check validates the desired state of one device against its config.
@@ -137,6 +175,10 @@ func check(cfg ctl.Device, want ctl.DesiredDevice, presets map[string]ctl.Preset
 		p, ok := presets[id]
 		if !ok {
 			return CodeInvalidState, "preset " + id + " is not described"
+		}
+
+		if !checkPreset(p) {
+			return CodeInvalidState, "preset " + id + " has invalid values"
 		}
 
 		half := p.SampRate / 2
@@ -154,6 +196,10 @@ func check(cfg ctl.Device, want ctl.DesiredDevice, presets map[string]ctl.Preset
 	}
 
 	t := want.Schedule
+	if len(t.Slots) > 0 && t.From >= t.Until {
+		return CodeInvalidState, "invalid schedule horizon"
+	}
+
 	last := t.From
 
 	for _, sl := range t.Slots {

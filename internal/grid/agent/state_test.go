@@ -18,8 +18,8 @@ func TestDesiredState(t *testing.T) {
 	}
 
 	presets := map[string]ctl.Preset{
-		"ft8": {Name: "FT8", CenterFreq: 14_074_000, SampRate: 2_048_000},
-		"2m":  {Name: "2 m", CenterFreq: 144_800_000, SampRate: 2_048_000},
+		"ft8": {Name: "FT8", CenterFreq: 14_074_000, SampRate: 2_048_000, StartFreq: 14_074_000, TuningStep: 1000},
+		"2m":  {Name: "2 m", CenterFreq: 144_800_000, SampRate: 2_048_000, StartFreq: 144_800_000, TuningStep: 1000},
 	}
 
 	first := s.Apply(ctl.StateApply{
@@ -33,7 +33,7 @@ func TestDesiredState(t *testing.T) {
 		},
 	})
 
-	if len(first.Errors) != 1 || first.Errors[0].DeviceID != "ghost" || first.Errors[0].Code != agent.CodeUnknownDevice || s.Revision() != 1 {
+	if len(first.Errors) != 1 || first.Errors[0].DeviceID != "ghost" || first.Errors[0].Code != agent.CodeUnknownDevice || s.Revision() != 0 {
 		t.Fatalf("first = %+v", first)
 	}
 
@@ -44,7 +44,7 @@ func TestDesiredState(t *testing.T) {
 	// The hub sends a preset the node config refuses for hf, and a broken
 	// timeline for vhf: both keep their previous state.
 	second := s.Apply(ctl.StateApply{
-		Revision: 2, Presets: map[string]ctl.Preset{"2m": presets["2m"]},
+		Revision: 2, Presets: map[string]ctl.Preset{"2m": presets["2m"]}, Policy: ctl.StatePolicy{ListenPolicy: "registered"},
 		Devices: map[string]ctl.DesiredDevice{
 			"hf":  {Presets: []string{"2m"}},
 			"vhf": {Presets: []string{"2m"}, Schedule: ctl.Timeline{From: 0, Until: 10, Slots: []ctl.TimelineSlot{{From: 5, Until: 20, PresetID: "2m"}}}},
@@ -63,7 +63,29 @@ func TestDesiredState(t *testing.T) {
 		t.Error("the preset of a kept state was dropped")
 	}
 
-	if s.Revision() != 2 || s.Policy().ListenPolicy != "" {
+	// A refused part leaves the revision unrecorded, so the next welcome
+	// asks for the state again.
+	if s.Revision() != 0 || s.Policy().ListenPolicy != "registered" {
 		t.Errorf("revision %d, policy %+v", s.Revision(), s.Policy())
+	}
+
+	// Values the hub never sends are refused: a start frequency outside the
+	// band, a zero step, an invalid policy.
+	bad := s.Apply(ctl.StateApply{
+		Revision: 3, Policy: ctl.StatePolicy{ListenPolicy: "everyone"},
+		Presets: map[string]ctl.Preset{"x": {Name: "x", CenterFreq: 14_074_000, SampRate: 2_048_000, StartFreq: 20_000_000, TuningStep: 1}},
+		Devices: map[string]ctl.DesiredDevice{"hf": {Presets: []string{"x"}}},
+	})
+	if len(bad.Errors) != 2 || bad.Errors[0].Code != agent.CodeInvalidState || s.Revision() != 0 {
+		t.Errorf("bad = %+v", bad)
+	}
+
+	ok := s.Apply(ctl.StateApply{
+		Revision: 4, Policy: ctl.StatePolicy{ListenPolicy: "anonymous"},
+		Presets: map[string]ctl.Preset{"ft8": presets["ft8"]},
+		Devices: map[string]ctl.DesiredDevice{"hf": {Presets: []string{"ft8"}}},
+	})
+	if len(ok.Errors) != 0 || s.Revision() != 4 {
+		t.Errorf("ok = %+v, revision %d", ok, s.Revision())
 	}
 }
