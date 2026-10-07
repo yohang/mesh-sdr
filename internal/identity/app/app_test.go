@@ -83,6 +83,8 @@ type env struct {
 	sessions *sqlite.Sessions
 	audit    *sqlite.AuditLog
 	unknown  *memory.Throttle
+	// logouts records the revocations Auth publishes.
+	logouts *recRevocations
 }
 
 func newEnv(t *testing.T, ipLimiter app.IPLimiter) *env {
@@ -96,7 +98,7 @@ func newEnv(t *testing.T, ipLimiter app.IPLimiter) *env {
 	e := &env{
 		db: a, clock: c, hasher: &spyHasher{Hasher: argon2.New(cheap, 4, 64)},
 		users: sqlite.NewUsers(a, ids), sessions: sqlite.NewSessions(a), audit: sqlite.NewAuditLog(a),
-		unknown: memory.NewThrottle(100),
+		unknown: memory.NewThrottle(100), logouts: &recRevocations{},
 	}
 
 	local, err := app.NewLocalProvider(ctx, e.users, a, e.hasher, c.Now, logger)
@@ -110,7 +112,8 @@ func newEnv(t *testing.T, ipLimiter app.IPLimiter) *env {
 
 	e.auth = app.NewAuth(app.AuthDeps{
 		Users: e.users, Sessions: e.sessions, Audit: e.audit, Tx: a, IDs: ids, Now: c.Now, Provider: local,
-		IPLimiter: ipLimiter, Unknown: e.unknown, Refusals: memory.NewRefusalGate(100), SessionPolicies: app.DefaultSessionPolicies(), Logger: logger,
+		IPLimiter: ipLimiter, Unknown: e.unknown, Refusals: memory.NewRefusalGate(100), SessionPolicies: app.DefaultSessionPolicies(),
+		Revocations: e.logouts, Logger: logger,
 	})
 	e.admin = app.NewUserAdmin(app.UserAdminDeps{
 		Pending: e.pending(),
@@ -593,6 +596,43 @@ func TestLogout(t *testing.T) {
 
 	if n != 1 {
 		t.Errorf("%d logout audit entries, want 1", n)
+	}
+
+	// The ended session is published once, so its sockets close at once.
+	if got := e.logouts.got; len(got) != 1 || len(got[0].Sessions) != 1 || got[0].Sessions[0] != s.Ref() || len(got[0].Users) != 0 {
+		t.Errorf("logout revocations = %+v, want the session %s", got, s.Ref())
+	}
+}
+
+// TestPeek: Peek resolves a session like Resolve but records no activity.
+func TestPeek(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, nil)
+	e.addUser(t, "alice", "", domain.RoleListener)
+
+	res, err := e.login("alice", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e.clock.Advance(2 * time.Hour)
+
+	got, err := e.auth.Peek(ctx, res.Token.Cookie())
+	if err != nil || got.Principal.UserID() != res.Principal.UserID() {
+		t.Fatalf("Peek = %v, %v", got.Principal.UserID(), err)
+	}
+
+	stored, _ := e.sessions.ByTokenHash(ctx, res.Token.Hash())
+	if !stored.LastSeenAt().Equal(t0) {
+		t.Errorf("Peek recorded activity: %v", stored.LastSeenAt())
+	}
+
+	if err := e.auth.Logout(ctx, res.Token.Cookie(), app.RequestMeta{IP: ip}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.auth.Peek(ctx, res.Token.Cookie()); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Errorf("Peek after logout: %v", err)
 	}
 }
 

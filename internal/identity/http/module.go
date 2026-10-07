@@ -45,6 +45,8 @@ const AuthBodyLimit = 64 << 10
 type Authenticator interface {
 	Login(ctx context.Context, in app.LoginInput) (app.LoginResult, error)
 	Resolve(ctx context.Context, cookie string) (app.Resolution, error)
+	// Peek is Resolve without recording activity.
+	Peek(ctx context.Context, cookie string) (app.Resolution, error)
 	Logout(ctx context.Context, cookie string, meta app.RequestMeta) error
 	SessionPolicy() domain.SessionPolicy
 }
@@ -367,12 +369,22 @@ func (s *State) Principal() domain.Principal { return s.principal }
 // HasSession reports whether the request carries a valid session.
 func (s *State) HasSession() bool { return s.session != nil }
 
+// BackgroundHeader marks a request the page made on its own (a live
+// fragment refreshed by a hub event, ADR 0016): it does not count as
+// activity of the session (ADR 0018).
+const BackgroundHeader = "X-Msdr-Background"
+
 func (m *Module) session(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		st := &State{userAgent: r.UserAgent()}
 
 		if c, err := r.Cookie(m.sessionCookieName()); err == nil && c.Value != "" {
-			res, err := m.auth.Resolve(r.Context(), c.Value)
+			resolve := m.auth.Resolve
+			if r.Header.Get(BackgroundHeader) == "1" {
+				resolve = m.auth.Peek
+			}
+
+			res, err := resolve(r.Context(), c.Value)
 
 			switch {
 			case err == nil:
@@ -661,6 +673,38 @@ func (m *Module) ChangePassword(ctx context.Context, current, newPassword string
 	}
 
 	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge), res.Forced, nil
+}
+
+// CheckSession re-reads the session of a long-lived request (the hub
+// events WebSocket) without recording activity. It returns when the
+// session ends at the latest if nothing else happens (its idle or absolute
+// expiry), domain.ErrUnauthenticated once it has ended, and a zero time for
+// a request without a session.
+func (m *Module) CheckSession(ctx context.Context, r *http.Request) (time.Time, error) {
+	if FromContext(ctx).session == nil {
+		return time.Time{}, nil
+	}
+
+	c, err := r.Cookie(m.sessionCookieName())
+	if err != nil || c.Value == "" {
+		return time.Time{}, domain.ErrUnauthenticated
+	}
+
+	res, err := m.auth.Peek(ctx, c.Value)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	if res.Session.ID() != FromContext(ctx).session.ID() {
+		return time.Time{}, domain.ErrUnauthenticated
+	}
+
+	until := res.Session.AbsoluteExpiresAt()
+	if idle := res.Session.IdleExpiresAt(); idle.Before(until) {
+		until = idle
+	}
+
+	return until, nil
 }
 
 // SessionRef returns the public handle of the request's session ("" when

@@ -24,6 +24,7 @@ type Auth struct {
 	unknown  LoginThrottle
 	refusals RefusalGate
 	policies SessionPolicies
+	revoked  RevocationPublisher
 	logger   *slog.Logger
 }
 
@@ -42,16 +43,25 @@ type AuthDeps struct {
 	// SessionPolicies gives the session and throttling policies, read on
 	// every use (DB settings, ADR 0010).
 	SessionPolicies SessionPolicies
-	Logger          *slog.Logger
+	// Revocations is told about the session ended by a logout, after
+	// commit, so its sockets close at once (hub events WS, node media
+	// connections); nil publishes nothing.
+	Revocations RevocationPublisher
+	Logger      *slog.Logger
 }
 
 // NewAuth returns the service.
 func NewAuth(d AuthDeps) *Auth {
-	return &Auth{
+	a := &Auth{
 		users: d.Users, sessions: d.Sessions, audit: d.Audit, tx: d.Tx, ids: d.IDs, now: d.Now,
 		provider: d.Provider, ipLimit: d.IPLimiter, unknown: d.Unknown, refusals: d.Refusals, policies: d.SessionPolicies,
-		logger: d.Logger,
+		revoked: d.Revocations, logger: d.Logger,
 	}
+	if a.revoked == nil {
+		a.revoked = NoRevocations{}
+	}
+
+	return a
 }
 
 // SessionPolicy returns the session lifetimes.
@@ -355,6 +365,17 @@ type Resolution struct {
 // for a malformed, unknown, revoked or expired session, or a disabled user.
 // Activity is recorded at most once per minute.
 func (a *Auth) Resolve(ctx context.Context, cookie string) (Resolution, error) {
+	return a.resolve(ctx, cookie, true)
+}
+
+// Peek is Resolve without recording activity: background requests (live
+// fragment refreshes) and the session checks of long-lived sockets do not
+// keep a session alive against its idle timeout (ADR 0016 decision 4).
+func (a *Auth) Peek(ctx context.Context, cookie string) (Resolution, error) {
+	return a.resolve(ctx, cookie, false)
+}
+
+func (a *Auth) resolve(ctx context.Context, cookie string, touch bool) (Resolution, error) {
 	tok, err := domain.ParseSessionToken(cookie)
 	if err != nil {
 		return Resolution{}, domain.ErrUnauthenticated
@@ -387,7 +408,7 @@ func (a *Auth) Resolve(ctx context.Context, cookie string) (Resolution, error) {
 		return Resolution{}, domain.ErrUnauthenticated
 	}
 
-	if s.Touch(now, a.policies.SessionPolicy()) {
+	if touch && s.Touch(now, a.policies.SessionPolicy()) {
 		if err := a.sessions.Touch(ctx, s); err != nil {
 			// Activity tracking is best effort; the session stays valid.
 			a.logger.WarnContext(ctx, "session activity not recorded", slog.String("session_id", s.ID().String()), slog.Any("error", err))
@@ -404,7 +425,9 @@ func (a *Auth) Logout(ctx context.Context, cookie string, meta RequestMeta) erro
 		return nil // nothing to log out
 	}
 
-	return a.tx.WithinTx(ctx, func(ctx context.Context) error {
+	ref := ""
+
+	err = a.tx.WithinTx(ctx, func(ctx context.Context) error {
 		s, err := a.sessions.ByTokenHash(ctx, tok.Hash())
 		if errors.Is(err, domain.ErrSessionNotFound) {
 			return nil
@@ -428,6 +451,13 @@ func (a *Auth) Logout(ctx context.Context, cookie string, meta RequestMeta) erro
 			return err
 		}
 
+		ref = s.Ref()
+
 		return a.audit.Append(ctx, e.WithTarget("session", s.ID().String()).WithRequestID(meta.RequestID))
 	})
+	if err == nil && ref != "" {
+		a.revoked.PublishRevocation(ctx, Revocation{Sessions: []string{ref}})
+	}
+
+	return err
 }
