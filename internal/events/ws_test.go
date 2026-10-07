@@ -1,4 +1,4 @@
-package http_test
+package events_test
 
 import (
 	"context"
@@ -16,9 +16,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/yohang/mesh-sdr/internal/events/app"
-	"github.com/yohang/mesh-sdr/internal/events/domain"
-	eventshttp "github.com/yohang/mesh-sdr/internal/events/http"
+	"github.com/yohang/mesh-sdr/internal/events"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -34,17 +32,17 @@ type session struct {
 	checks int
 }
 
-func (s *session) Identify(context.Context) eventshttp.Identity {
+func (s *session) Identify(context.Context) events.Identity {
 	s.mu.Lock()
 	anon := s.anon
 	s.mu.Unlock()
 
 	if anon {
-		return eventshttp.Identity{}
+		return events.Identity{}
 	}
 
-	return eventshttp.Identity{
-		Viewer: domain.Viewer{UserID: "u1", SessionRef: "ref1"}, Name: "alice", Roles: []string{"listener"}, RoleRank: 1,
+	return events.Identity{
+		Viewer: events.Viewer{UserID: "u1", SessionRef: "ref1"}, Name: "alice", Roles: []string{"listener"}, RoleRank: 1,
 		UserID: shared.MustParseUUID("01890000-0000-7000-8000-000000000001"), SessionID: shared.MustParseUUID("01890000-0000-7000-8000-000000000002"),
 	}
 }
@@ -56,7 +54,7 @@ func (s *session) Check(context.Context, *http.Request) (time.Time, error) {
 	s.checks++
 
 	if s.ended {
-		return time.Time{}, domain.ErrUnauthenticated
+		return time.Time{}, events.ErrUnauthenticated
 	}
 
 	return s.until, nil
@@ -68,12 +66,12 @@ func (s *session) end() {
 	s.mu.Unlock()
 }
 
-// authz denies admin topics and the topics of device "secret".
-type authz struct{}
+// wsAuthz denies admin topics and the topics of device "secret".
+type wsAuthz struct{}
 
-func (authz) AuthorizeTopic(_ context.Context, t domain.Topic) error {
+func (wsAuthz) AuthorizeTopic(_ context.Context, t events.Topic) error {
 	if t.IsAdmin() || t.Device() == "secret" {
-		return domain.ErrTopicForbidden
+		return events.ErrTopicForbidden
 	}
 
 	return nil
@@ -82,18 +80,18 @@ func (authz) AuthorizeTopic(_ context.Context, t domain.Topic) error {
 // presence records the registry calls.
 type presence struct {
 	mu       sync.Mutex
-	open     map[shared.UUID]app.Connection
-	closed   map[shared.UUID]app.CloseReason
+	open     map[shared.UUID]events.Connection
+	closed   map[shared.UUID]events.CloseReason
 	beats    int
 	attached map[shared.UUID]string
 	attaches int
 }
 
 func newPresence() *presence {
-	return &presence{open: map[shared.UUID]app.Connection{}, closed: map[shared.UUID]app.CloseReason{}, attached: map[shared.UUID]string{}}
+	return &presence{open: map[shared.UUID]events.Connection{}, closed: map[shared.UUID]events.CloseReason{}, attached: map[shared.UUID]string{}}
 }
 
-func (p *presence) Open(_ context.Context, c app.Connection) error {
+func (p *presence) Open(_ context.Context, c events.Connection) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -121,7 +119,7 @@ func (p *presence) Attach(_ context.Context, id shared.UUID, device string) erro
 	return nil
 }
 
-func (p *presence) Close(_ context.Context, id shared.UUID, reason app.CloseReason) error {
+func (p *presence) Close(_ context.Context, id shared.UUID, reason events.CloseReason) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -130,11 +128,11 @@ func (p *presence) Close(_ context.Context, id shared.UUID, reason app.CloseReas
 	return nil
 }
 
-func (p *presence) reasons() []app.CloseReason {
+func (p *presence) reasons() []events.CloseReason {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	out := []app.CloseReason{}
+	out := []events.CloseReason{}
 	for _, r := range p.closed {
 		out = append(out, r)
 	}
@@ -144,24 +142,24 @@ func (p *presence) reasons() []app.CloseReason {
 
 type fixture struct {
 	srv      *httptest.Server
-	broker   *app.Broker
+	broker   *events.Broker
 	session  *session
 	presence *presence
-	module   *eventshttp.Module
+	module   *events.Module
 	stop     context.CancelFunc
 }
 
-func newFixture(t *testing.T, timings eventshttp.Timings, limits ...app.Limits) *fixture {
+func newFixture(t *testing.T, timings events.Timings, limits ...events.Limits) *fixture {
 	t.Helper()
 
-	lim := app.DefaultLimits()
+	lim := events.DefaultLimits()
 	if len(limits) > 0 {
 		lim = limits[0]
 	}
 
-	f := &fixture{broker: app.NewBroker(), session: &session{}, presence: newPresence()}
-	f.module = eventshttp.New(eventshttp.Deps{
-		Broker: f.broker, Authz: authz{}, Session: f.session, Presence: f.presence, Admission: app.NewAdmission(lim),
+	f := &fixture{broker: events.NewBroker(), session: &session{}, presence: newPresence()}
+	f.module = events.New(events.Deps{
+		Broker: f.broker, Authz: wsAuthz{}, Session: f.session, Presence: f.presence, Admission: events.NewAdmission(lim),
 		ClientIP: func(r *http.Request) string { h, _, _ := net.SplitHostPort(r.RemoteAddr); return h },
 		Origin:   hubOrigin, Version: "test", Timings: timings, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -187,7 +185,7 @@ func newFixture(t *testing.T, timings eventshttp.Timings, limits ...app.Limits) 
 	return f
 }
 
-func (f *fixture) url() string { return "ws" + strings.TrimPrefix(f.srv.URL, "http") + eventshttp.Path }
+func (f *fixture) url() string { return "ws" + strings.TrimPrefix(f.srv.URL, "http") + events.Path }
 
 // try dials and returns the connection, or the refusal status.
 func (f *fixture) try(t *testing.T, origin string, protocols ...string) (*websocket.Conn, *http.Response) {
@@ -321,7 +319,7 @@ func eventually(t *testing.T, what string, cond func() bool) {
 }
 
 func TestUpgradeChecks(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{})
+	f := newFixture(t, events.Timings{})
 
 	// No subprotocol: 426 problem+json (§6.1, ADR 0013).
 	if _, resp := f.try(t, "", "other"); resp.StatusCode != http.StatusUpgradeRequired ||
@@ -345,7 +343,7 @@ func TestUpgradeChecks(t *testing.T) {
 }
 
 func TestSocketCaps(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{}, app.Limits{PerSession: 2, PerAddress: 10, Total: 10, UpgradesPerMinute: 3})
+	f := newFixture(t, events.Timings{}, events.Limits{PerSession: 2, PerAddress: 10, Total: 10, UpgradesPerMinute: 3})
 
 	a := f.dial(t, "")
 	_ = f.dial(t, "")
@@ -368,7 +366,7 @@ func TestSocketCaps(t *testing.T) {
 }
 
 func TestSubscribeAndReceive(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{})
+	f := newFixture(t, events.Timings{})
 	ws := open(t, f)
 
 	send(t, ws, "sub", "s1", map[string]any{"topics": []string{"nodes"}})
@@ -378,11 +376,11 @@ func TestSubscribeAndReceive(t *testing.T) {
 		t.Fatalf("ack = %+v", ack)
 	}
 
-	f.broker.Publish(context.Background(), app.Event{
-		Topic: domain.MustTopic("nodes"), Type: "node.status",
+	f.broker.Publish(context.Background(), events.Event{
+		Topic: events.MustTopic("nodes"), Type: "node.status",
 		Payload: map[string]string{"node_id": "n1", "status": "offline"},
 	})
-	f.broker.Publish(context.Background(), app.Event{Topic: domain.MustTopic("devices"), Type: "device.status"})
+	f.broker.Publish(context.Background(), events.Event{Topic: events.MustTopic("devices"), Type: "device.status"})
 
 	ev := recv(t, ws)
 	if ev.Type != "node.status" || ev.Payload["node_id"] != "n1" {
@@ -397,8 +395,8 @@ func TestSubscribeAndReceive(t *testing.T) {
 		t.Fatalf("error = %+v", e)
 	}
 
-	f.broker.Publish(context.Background(), app.Event{Topic: domain.MustTopic("devices"), Type: "device.status"})
-	f.broker.Publish(context.Background(), app.Event{Topic: domain.MustTopic("nodes"), Type: "node.status", Payload: map[string]string{}})
+	f.broker.Publish(context.Background(), events.Event{Topic: events.MustTopic("devices"), Type: "device.status"})
+	f.broker.Publish(context.Background(), events.Event{Topic: events.MustTopic("nodes"), Type: "node.status", Payload: map[string]string{}})
 
 	if ev := recv(t, ws); ev.Type != "node.status" {
 		t.Fatalf("a refused sub subscribed devices: %+v", ev)
@@ -426,12 +424,12 @@ func TestSubscribeAndReceive(t *testing.T) {
 }
 
 func TestPresenceRows(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{Heartbeat: 20 * time.Millisecond})
+	f := newFixture(t, events.Timings{Heartbeat: 20 * time.Millisecond})
 	ws := open(t, f)
 
 	f.presence.mu.Lock()
 	n := len(f.presence.open)
-	var c app.Connection
+	var c events.Connection
 	for _, c = range f.presence.open {
 	}
 	f.presence.mu.Unlock()
@@ -478,13 +476,13 @@ func TestPresenceRows(t *testing.T) {
 
 	eventually(t, "row closed", func() bool { return len(f.presence.reasons()) == 1 })
 
-	if r := f.presence.reasons()[0]; r != app.CloseClient {
+	if r := f.presence.reasons()[0]; r != events.CloseClient {
 		t.Errorf("close reason = %s", r)
 	}
 }
 
 func TestHelloRequiredFirst(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{})
+	f := newFixture(t, events.Timings{})
 	ws := f.dial(t, "")
 
 	send(t, ws, "sub", "s1", map[string]any{"topics": []string{"nodes"}})
@@ -495,7 +493,7 @@ func TestHelloRequiredFirst(t *testing.T) {
 }
 
 func TestHelloTimeoutCloses4408(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{Hello: 50 * time.Millisecond})
+	f := newFixture(t, events.Timings{Hello: 50 * time.Millisecond})
 	ws := f.dial(t, "")
 
 	expectClose(t, ws, rxv1.CloseHandshakeTimeout)
@@ -503,7 +501,7 @@ func TestHelloTimeoutCloses4408(t *testing.T) {
 
 // TestRevokedSession: a session ended by identity is pushed at once.
 func TestRevokedSession(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{})
+	f := newFixture(t, events.Timings{})
 	ws := open(t, f)
 
 	f.broker.EndSessions([]string{"ref1"}, nil)
@@ -515,7 +513,7 @@ func TestRevokedSession(t *testing.T) {
 	expectClose(t, ws, rxv1.CloseUnauthenticated)
 	eventually(t, "row closed", func() bool { return len(f.presence.reasons()) == 1 })
 
-	if r := f.presence.reasons()[0]; r != app.ClosePolicy {
+	if r := f.presence.reasons()[0]; r != events.ClosePolicy {
 		t.Errorf("close reason = %s, want policy", r)
 	}
 }
@@ -523,7 +521,7 @@ func TestRevokedSession(t *testing.T) {
 // TestExpiredSession: a session is re-read at its known expiry; an expired
 // one ends the socket.
 func TestExpiredSession(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{SessionCheck: time.Hour, MinSessionCheck: 200 * time.Millisecond})
+	f := newFixture(t, events.Timings{SessionCheck: time.Hour, MinSessionCheck: 200 * time.Millisecond})
 	f.session.until = time.Now().Add(-time.Second) // re-read at the floor
 
 	ws := open(t, f)
@@ -539,7 +537,7 @@ func TestExpiredSession(t *testing.T) {
 
 // TestDroppedTopics: a recheck drops the topics now denied.
 func TestDroppedTopics(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{})
+	f := newFixture(t, events.Timings{})
 	ws := open(t, f)
 
 	send(t, ws, "sub", "s1", map[string]any{"topics": []string{"nodes"}})
@@ -547,7 +545,7 @@ func TestDroppedTopics(t *testing.T) {
 
 	// authz never denies "nodes": a recheck drops nothing, sends nothing.
 	f.broker.RecheckAll()
-	f.broker.Publish(context.Background(), app.Event{Topic: domain.MustTopic("nodes"), Type: "node.status", Payload: map[string]string{}})
+	f.broker.Publish(context.Background(), events.Event{Topic: events.MustTopic("nodes"), Type: "node.status", Payload: map[string]string{}})
 
 	if ev := recv(t, ws); ev.Type != "node.status" {
 		t.Fatalf("after recheck = %+v", ev)
@@ -555,7 +553,7 @@ func TestDroppedTopics(t *testing.T) {
 }
 
 func TestShutdownCloses1001(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{})
+	f := newFixture(t, events.Timings{})
 	ws := open(t, f)
 
 	f.stop()
@@ -563,16 +561,16 @@ func TestShutdownCloses1001(t *testing.T) {
 	expectClose(t, ws, rxv1.CloseGoingAway)
 	eventually(t, "row closed", func() bool { return len(f.presence.reasons()) == 1 })
 
-	if r := f.presence.reasons()[0]; r != app.CloseHubRestart {
+	if r := f.presence.reasons()[0]; r != events.CloseHubRestart {
 		t.Errorf("close reason = %s, want hub_restart", r)
 	}
 }
 
 func TestRateLimit(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{})
+	f := newFixture(t, events.Timings{})
 	ws := open(t, f)
 
-	for range eventshttp.MessageRate + 5 {
+	for range events.MessageRate + 5 {
 		send(t, ws, "presence.heartbeat", "", map[string]any{"view": "map"})
 	}
 
@@ -584,7 +582,7 @@ func TestRateLimit(t *testing.T) {
 }
 
 func TestRepeatedForbiddenCloses4403(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{})
+	f := newFixture(t, events.Timings{})
 	ws := open(t, f)
 
 	// Spread under the message rate: ten refusals keep the connection.
@@ -613,7 +611,7 @@ func TestRepeatedForbiddenCloses4403(t *testing.T) {
 // TestSessionCheckFloor: a session whose known expiry is past is not
 // re-read in a loop: the checks keep the floor delay.
 func TestSessionCheckFloor(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{SessionCheck: time.Hour})
+	f := newFixture(t, events.Timings{SessionCheck: time.Hour})
 	f.session.until = time.Now().Add(-time.Minute)
 
 	_ = open(t, f)
@@ -632,7 +630,7 @@ func TestSessionCheckFloor(t *testing.T) {
 // TestAnonymousWithoutTopics: an anonymous socket that follows nothing is
 // closed after the grace period; one with topics stays open.
 func TestAnonymousWithoutTopics(t *testing.T) {
-	f := newFixture(t, eventshttp.Timings{EmptyGrace: 200 * time.Millisecond})
+	f := newFixture(t, events.Timings{EmptyGrace: 200 * time.Millisecond})
 	f.session.anon = true
 
 	idle := f.dial(t, "")

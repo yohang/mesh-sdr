@@ -1,11 +1,11 @@
-package domain_test
+package events_test
 
 import (
 	"errors"
 	"strings"
 	"testing"
 
-	"github.com/yohang/mesh-sdr/internal/events/domain"
+	"github.com/yohang/mesh-sdr/internal/events"
 )
 
 func TestParseTopic(t *testing.T) {
@@ -14,7 +14,7 @@ func TestParseTopic(t *testing.T) {
 		"decodes:device=dev-hf", "diagnostics:device=a_1",
 	}
 	for _, s := range valid {
-		tp, err := domain.ParseTopic(s)
+		tp, err := events.ParseTopic(s)
 		if err != nil {
 			t.Errorf("ParseTopic(%q) = %v", s, err)
 
@@ -31,16 +31,16 @@ func TestParseTopic(t *testing.T) {
 		"decodes:device=a b", "admin", "admin.users", "decodes:device=" + strings.Repeat("a", 65),
 	}
 	for _, s := range invalid {
-		if _, err := domain.ParseTopic(s); !errors.Is(err, domain.ErrInvalidTopic) {
+		if _, err := events.ParseTopic(s); !errors.Is(err, events.ErrInvalidTopic) {
 			t.Errorf("ParseTopic(%q) = %v, want invalid_topic", s, err)
 		}
 	}
 
-	if d := domain.MustTopic("decodes:device=dev-hf").Device(); d != "dev-hf" {
+	if d := events.MustTopic("decodes:device=dev-hf").Device(); d != "dev-hf" {
 		t.Errorf("Device() = %q", d)
 	}
 
-	if !domain.MustTopic("admin.connections").IsAdmin() || domain.MustTopic("nodes").IsAdmin() {
+	if !events.MustTopic("admin.connections").IsAdmin() || events.MustTopic("nodes").IsAdmin() {
 		t.Error("IsAdmin")
 	}
 }

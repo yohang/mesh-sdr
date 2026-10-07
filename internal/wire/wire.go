@@ -18,7 +18,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
-	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
+	"github.com/yohang/mesh-sdr/internal/events"
 	"github.com/yohang/mesh-sdr/internal/files"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
@@ -319,7 +319,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	// gateway authz issued to the caller.
 	// Revoked sessions and users also end their events sockets at once
 	// (ADR 0016 decision 4).
-	broker := eventsapp.NewBroker()
+	broker := events.NewBroker()
 	revocations := revocationFanout{brokerRevocations{b: broker}}
 
 	if g.manager != nil {

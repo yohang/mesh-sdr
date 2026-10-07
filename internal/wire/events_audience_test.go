@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
-	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
-	eventsdomain "github.com/yohang/mesh-sdr/internal/events/domain"
+	"github.com/yohang/mesh-sdr/internal/events"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
@@ -18,17 +17,17 @@ import (
 // recordedEvents records the published events.
 type recordedEvents struct {
 	mu  sync.Mutex
-	got []eventsapp.Event
+	got []events.Event
 }
 
-func (r *recordedEvents) Publish(_ context.Context, ev eventsapp.Event) {
+func (r *recordedEvents) Publish(_ context.Context, ev events.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.got = append(r.got, ev)
 }
 
-func (r *recordedEvents) take() []eventsapp.Event {
+func (r *recordedEvents) take() []events.Event {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -73,7 +72,7 @@ func TestEventAudiences(t *testing.T) {
 	}
 
 	global := &fixedGlobal{v: "registered"}
-	broker := eventsapp.NewBroker()
+	broker := events.NewBroker()
 	cache := &policyCache{policies: gridapp.NewListenPolicies(devices, global), broker: broker, logger: quiet}
 	rec := &recordedEvents{}
 	ge := &gridEvents{
@@ -81,9 +80,9 @@ func TestEventAudiences(t *testing.T) {
 		lastBeat: map[domain.NodeID]time.Time{}, presence: make(chan struct{}, 1),
 	}
 
-	anon, user, op := eventsdomain.Viewer{}, eventsdomain.Viewer{UserID: "u"}, eventsdomain.Viewer{UserID: "o", Staff: true}
+	anon, user, op := events.Viewer{}, events.Viewer{UserID: "u"}, events.Viewer{UserID: "o", Staff: true}
 
-	sees := func(ev eventsapp.Event, v eventsdomain.Viewer) bool { return ev.Audience == nil || ev.Audience(v) }
+	sees := func(ev events.Event, v events.Viewer) bool { return ev.Audience == nil || ev.Audience(v) }
 
 	for _, node := range []string{"open", "closed"} {
 		ge.nodeDevices(ctx, domain.MustNodeID(node))
@@ -117,7 +116,7 @@ func TestEventAudiences(t *testing.T) {
 	}
 
 	// The cache asks sockets to re-authorise only when policies changed.
-	s := broker.Attach(anon, topicAuthz{policies: cache}, func(eventsapp.Event) {})
+	s := broker.Attach(anon, topicAuthz{policies: cache}, func(events.Event) {})
 
 	cache.refresh(ctx)
 

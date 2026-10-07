@@ -1,11 +1,10 @@
-package app
+package events
 
 import (
 	"net/netip"
 	"sync"
 	"time"
 
-	"github.com/yohang/mesh-sdr/internal/events/domain"
 	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
 )
 
@@ -53,8 +52,8 @@ func NewAdmission(limits Limits) *Admission {
 
 // Admit admits a socket of session (its public handle, "" when anonymous)
 // from address at now (IPv6 addresses count per /64, AddressKey). It returns the release function to call when the
-// socket ends, or domain.ErrUpgradeRate with the wait before the next
-// allowed upgrade, domain.ErrTooManyConnections or domain.ErrHubFull.
+// socket ends, or ErrUpgradeRate with the wait before the next
+// allowed upgrade, ErrTooManyConnections or ErrHubFull.
 func (a *Admission) Admit(session, address string, now time.Time) (release func(), retryAfter time.Duration, err error) {
 	address = AddressKey(address)
 
@@ -62,16 +61,16 @@ func (a *Admission) Admit(session, address string, now time.Time) (release func(
 	defer a.mu.Unlock()
 
 	if wait := a.takeUpgrade(address, now); wait > 0 {
-		return nil, wait, domain.ErrUpgradeRate
+		return nil, wait, ErrUpgradeRate
 	}
 
 	switch {
 	case a.total >= a.limits.Total:
-		return nil, 0, domain.ErrHubFull
+		return nil, 0, ErrHubFull
 	case session != "" && a.sessions[session] >= a.limits.PerSession:
-		return nil, 0, domain.ErrTooManyConnections.WithDetail("too many open event connections for this session")
+		return nil, 0, ErrTooManyConnections.WithDetail("too many open event connections for this session")
 	case a.addresses[address] >= a.limits.PerAddress:
-		return nil, 0, domain.ErrTooManyConnections.WithDetail("too many open event connections from this address")
+		return nil, 0, ErrTooManyConnections.WithDetail("too many open event connections from this address")
 	}
 
 	a.total++

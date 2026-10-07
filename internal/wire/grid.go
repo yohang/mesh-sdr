@@ -12,7 +12,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
-	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
+	"github.com/yohang/mesh-sdr/internal/events"
 	"github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
@@ -312,7 +312,7 @@ func (g *hubGrid) applySettings(base app.Timings, s gridSettings) {
 // transitions (after the device registry listener), committed node event
 // batches, admin node changes, enrollments, forgotten devices and presence
 // changes.
-func (g *hubGrid) publishEvents(b *eventsapp.Broker, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
+func (g *hubGrid) publishEvents(b *events.Broker, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
 	ge := newGridEvents(b, g, policies, now, logger)
 
 	if g.status != nil {

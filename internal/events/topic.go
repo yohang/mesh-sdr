@@ -1,7 +1,4 @@
-// Package domain holds the hub events model (TECHNICAL_SPEC §6.6, ADR
-// 0016, ADR 0018): the topics a client subscribes to on /api/ws, who
-// receives an event, and the subscription errors.
-package domain
+package events
 
 import (
 	"regexp"

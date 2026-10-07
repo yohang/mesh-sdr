@@ -1,9 +1,4 @@
-// Package http serves the hub events WebSocket, GET /api/ws (TECHNICAL_SPEC
-// §6.1, §6.2, §6.6, ADR 0016, ADR 0018): rx.v1 envelopes, session cookie
-// (or anonymous), Origin check and socket caps at the upgrade, topic
-// subscriptions authorised per topic, a presence row per socket, and the
-// end of the socket when its session ends.
-package http
+package events
 
 import (
 	"context"
@@ -23,8 +18,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/time/rate"
 
-	"github.com/yohang/mesh-sdr/internal/events/app"
-	"github.com/yohang/mesh-sdr/internal/events/domain"
 	"github.com/yohang/mesh-sdr/internal/http/problem"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/wsconn"
@@ -58,7 +51,7 @@ const (
 // Identity is who opens a connection.
 type Identity struct {
 	// Viewer is the subscriber as audience predicates see it.
-	Viewer domain.Viewer
+	Viewer Viewer
 	// UserID and SessionID are zero for an anonymous visitor.
 	UserID    shared.UUID
 	SessionID shared.UUID
@@ -73,7 +66,7 @@ type Session interface {
 	Identify(ctx context.Context) Identity
 	// Check re-reads the session of the upgrade request without recording
 	// activity. It returns when the session ends at the latest (zero for
-	// an anonymous request), or domain.ErrUnauthenticated once it ended.
+	// an anonymous request), or ErrUnauthenticated once it ended.
 	Check(ctx context.Context, r *http.Request) (time.Time, error)
 }
 
@@ -128,11 +121,11 @@ func (t Timings) withDefaults() Timings {
 
 // Deps are the dependencies of the module.
 type Deps struct {
-	Broker    *app.Broker
-	Authz     app.Authorizer
+	Broker    *Broker
+	Authz     Authorizer
 	Session   Session
-	Presence  app.Presence
-	Admission *app.Admission
+	Presence  Presence
+	Admission *Admission
 	// ClientIP returns the canonical client address of a request.
 	ClientIP func(r *http.Request) string
 	// Origin is the browser origin of the hub (scheme://host of hub.url).
@@ -224,7 +217,7 @@ type conn struct {
 	m       *Module
 	c       *wsconn.Conn
 	r       *http.Request
-	sub     *app.Subscription
+	sub     *Subscription
 	id      shared.UUID
 	logger  *slog.Logger
 	welcome atomic.Bool
@@ -242,12 +235,12 @@ type conn struct {
 // connection (presence.heartbeat).
 const attachEvery = 10 * time.Second
 
-func (cn *conn) closeReason() app.CloseReason {
-	if r, ok := cn.reason.Load().(app.CloseReason); ok {
+func (cn *conn) closeReason() CloseReason {
+	if r, ok := cn.reason.Load().(CloseReason); ok {
 		return r
 	}
 
-	return app.CloseClient
+	return CloseClient
 }
 
 // allowedOrigin reports whether the Origin of r may open the socket.
@@ -344,7 +337,7 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// §7.3 rule 1: the row exists before the first application frame.
-	err = m.d.Presence.Open(ctx, app.Connection{
+	err = m.d.Presence.Open(ctx, Connection{
 		ID: id, UserID: who.UserID, SessionID: who.SessionID, RoleRank: who.RoleRank,
 		IP: m.d.ClientIP(r), UserAgent: r.UserAgent(),
 	})
@@ -388,7 +381,7 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		select {
 		case <-m.shutdown:
-			cn.reason.Store(app.CloseHubRestart)
+			cn.reason.Store(CloseHubRestart)
 			cn.c.Close(rxv1.CloseGoingAway, "hub shutting down")
 		case <-cn.c.Done():
 		}
@@ -401,7 +394,7 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request) {
 
 // deliver is the broker sink: it encodes the event and enqueues it. It
 // never blocks; a full queue closes the connection with 4413 (wsconn).
-func (cn *conn) deliver(ev app.Event) {
+func (cn *conn) deliver(ev Event) {
 	typ, err := rxv1.ParseMessageType(ev.Type)
 	if err == nil {
 		err = rxv1.HubHubToClient().Check(typ)
@@ -461,7 +454,7 @@ func (cn *conn) watch(ctx context.Context, signedIn bool) {
 
 	if signedIn {
 		until, err := cn.m.d.Session.Check(ctx, cn.r)
-		if errors.Is(err, domain.ErrUnauthenticated) {
+		if errors.Is(err, ErrUnauthenticated) {
 			cn.revoke("session_expired")
 
 			return
@@ -499,7 +492,7 @@ func (cn *conn) watch(ctx context.Context, signedIn bool) {
 			until, err := cn.m.d.Session.Check(ctx, cn.r)
 
 			switch {
-			case errors.Is(err, domain.ErrUnauthenticated):
+			case errors.Is(err, ErrUnauthenticated):
 				cn.revoke("session_expired")
 
 				return
@@ -518,7 +511,7 @@ func (cn *conn) recheck(ctx context.Context) bool {
 	dropped, err := cn.sub.Recheck(ctx)
 
 	switch {
-	case errors.Is(err, domain.ErrUnauthenticated):
+	case errors.Is(err, ErrUnauthenticated):
 		cn.revoke("session_expired")
 
 		return true
@@ -549,7 +542,7 @@ func (cn *conn) recheck(ctx context.Context) bool {
 
 // revoke tells the client its session ended, then closes with 4401.
 func (cn *conn) revoke(reason string) {
-	cn.reason.Store(app.ClosePolicy)
+	cn.reason.Store(ClosePolicy)
 	cn.send(rxv1.TypeSessionRevoked, map[string]string{"reason": reason})
 	cn.c.Close(rxv1.CloseUnauthenticated, "session ended")
 }
@@ -647,7 +640,7 @@ func (cn *conn) hello(ctx context.Context, env rxv1.Envelope, id rxv1.Correlatio
 		"cid":         cn.id.String(),
 		"server":      map[string]string{"product_version": cn.m.d.Version, "protocol": rxv1.Subprotocol},
 		"user":        user,
-		"limits":      map[string]int{"max_msg_bytes": MaxMessageBytes, "msg_rate": MessageRate, "max_topics": domain.MaxTopics},
+		"limits":      map[string]int{"max_msg_bytes": MaxMessageBytes, "msg_rate": MessageRate, "max_topics": MaxTopics},
 		"server_time": cn.m.d.Now().UnixMilli(),
 	})
 	cn.welcome.Store(true)
@@ -726,7 +719,7 @@ func (cn *conn) presence(ctx context.Context, env rxv1.Envelope, id rxv1.Correla
 
 	if p.DeviceID != "" {
 		// Watching a device needs listen permission on it, as its topics.
-		t, err := domain.ParseTopic(string(domain.KindDecodes) + ":device=" + p.DeviceID)
+		t, err := ParseTopic(string(KindDecodes) + ":device=" + p.DeviceID)
 		if err != nil {
 			cn.reject(id, &rxv1.Error{Code: rxv1.CodeInvalidPayload, Path: "device_id", Reason: "invalid device id"}, rxv1.CloseProtocolViolations)
 
@@ -770,12 +763,12 @@ func (cn *conn) rejectDomain(id rxv1.CorrelationID, topic string, err error) {
 	escalate := rxv1.CloseCode(0)
 
 	switch {
-	case errors.Is(err, domain.ErrTopicForbidden), errors.Is(err, domain.ErrUnauthenticated):
+	case errors.Is(err, ErrTopicForbidden), errors.Is(err, ErrUnauthenticated):
 		p.Code, escalate = rxv1.CodeForbidden, rxv1.CloseForbidden
-	case errors.Is(err, domain.ErrTooManyTopics):
+	case errors.Is(err, ErrTooManyTopics):
 		// capacity_exceeded is defined for demodulators; reused (ADR 0016
 		// spec issue 5).
-		p.Code, p.Details = rxv1.CodeCapacityExceeded, map[string]any{"max_topics": domain.MaxTopics}
+		p.Code, p.Details = rxv1.CodeCapacityExceeded, map[string]any{"max_topics": MaxTopics}
 	default:
 		p.Code, escalate = rxv1.CodeInvalidPayload, rxv1.CloseProtocolViolations
 		p.Details["path"] = "topics"

@@ -1,9 +1,12 @@
-// Package app is the in-process hub events bus (TECHNICAL_SPEC §6.6, ADR
-// 0016 decision 13): modules publish events after commit, the connections
-// of /api/ws subscribe to topics and receive the events of those topics
-// their viewer may see. It also admits connections (socket caps, ADR 0018)
-// and ends the connections of revoked sessions.
-package app
+// Package events is the hub events module (TECHNICAL_SPEC §6.1, §6.2, §6.6,
+// ADR 0016, ADR 0018): the topics a client subscribes to and who receives
+// an event; the in-process bus (modules publish events after commit, the
+// connections of /api/ws subscribe to topics and receive the events of
+// those topics their viewer may see); the admission of connections (socket
+// caps) and the end of the connections of revoked sessions; and the
+// WebSocket GET /api/ws itself (rx.v1 envelopes, session cookie or
+// anonymous, Origin check, a presence row per socket).
+package events
 
 import (
 	"context"
@@ -11,8 +14,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-
-	"github.com/yohang/mesh-sdr/internal/events/domain"
 )
 
 // Event is one hub event. Type is the rx.v1 message type ("node.status").
@@ -20,10 +21,10 @@ import (
 // a domain type or a secret (§6.1). Audience, when set, restricts the event
 // to the viewers it accepts.
 type Event struct {
-	Topic    domain.Topic
+	Topic    Topic
 	Type     string
 	Payload  any
-	Audience domain.Audience
+	Audience Audience
 }
 
 // Publisher publishes hub events; producers depend on it (or on their own
@@ -33,9 +34,9 @@ type Publisher interface {
 }
 
 // Authorizer decides whether the subscriber of ctx may receive a topic. It
-// returns domain.ErrTopicForbidden or domain.ErrUnauthenticated.
+// returns ErrTopicForbidden or ErrUnauthenticated.
 type Authorizer interface {
-	AuthorizeTopic(ctx context.Context, t domain.Topic) error
+	AuthorizeTopic(ctx context.Context, t Topic) error
 }
 
 // Sink receives the events of one subscriber. It MUST NOT block: it
@@ -85,9 +86,9 @@ func (b *Broker) Subscribers() int {
 }
 
 // Attach registers a subscriber with no topic yet.
-func (b *Broker) Attach(v domain.Viewer, authz Authorizer, sink Sink) *Subscription {
+func (b *Broker) Attach(v Viewer, authz Authorizer, sink Sink) *Subscription {
 	s := &Subscription{
-		b: b, viewer: v, authz: authz, sink: sink, topics: map[domain.Topic]struct{}{},
+		b: b, viewer: v, authz: authz, sink: sink, topics: map[Topic]struct{}{},
 		ended: make(chan struct{}), recheck: make(chan struct{}, 1),
 	}
 
@@ -128,19 +129,19 @@ func (b *Broker) RecheckAll() {
 // Subscription is the topic set of one subscriber (one /api/ws connection).
 type Subscription struct {
 	b      *Broker
-	viewer domain.Viewer
+	viewer Viewer
 	authz  Authorizer
 	sink   Sink
 
 	mu     sync.RWMutex
-	topics map[domain.Topic]struct{}
+	topics map[Topic]struct{}
 
 	endOnce sync.Once
 	ended   chan struct{}
 	recheck chan struct{}
 }
 
-func (s *Subscription) has(t domain.Topic) bool {
+func (s *Subscription) has(t Topic) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -158,18 +159,18 @@ func (s *Subscription) Ended() <-chan struct{} { return s.ended }
 func (s *Subscription) Rechecks() <-chan struct{} { return s.recheck }
 
 // Viewer returns the subscriber.
-func (s *Subscription) Viewer() domain.Viewer { return s.viewer }
+func (s *Subscription) Viewer() Viewer { return s.viewer }
 
 // Subscribe parses every topic, drops duplicates, refuses a request that
 // would exceed MaxTopics before any authorisation, then authorises each
 // topic and adds them all, or none when one fails (ADR 0016 decision 6):
 // the error comes with the offending topic.
-func (s *Subscription) Subscribe(ctx context.Context, raw []string) ([]domain.Topic, string, error) {
-	topics := make([]domain.Topic, 0, min(len(raw), domain.MaxTopics+1))
-	seen := map[domain.Topic]struct{}{}
+func (s *Subscription) Subscribe(ctx context.Context, raw []string) ([]Topic, string, error) {
+	topics := make([]Topic, 0, min(len(raw), MaxTopics+1))
+	seen := map[Topic]struct{}{}
 
 	for _, r := range raw {
-		t, err := domain.ParseTopic(r)
+		t, err := ParseTopic(r)
 		if err != nil {
 			return nil, r, err
 		}
@@ -181,13 +182,13 @@ func (s *Subscription) Subscribe(ctx context.Context, raw []string) ([]domain.To
 		seen[t] = struct{}{}
 		topics = append(topics, t)
 
-		if len(topics) > domain.MaxTopics {
-			return nil, "", domain.ErrTooManyTopics
+		if len(topics) > MaxTopics {
+			return nil, "", ErrTooManyTopics
 		}
 	}
 
-	if s.added(topics) > domain.MaxTopics {
-		return nil, "", domain.ErrTooManyTopics
+	if s.added(topics) > MaxTopics {
+		return nil, "", ErrTooManyTopics
 	}
 
 	for _, t := range topics {
@@ -199,8 +200,8 @@ func (s *Subscription) Subscribe(ctx context.Context, raw []string) ([]domain.To
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.addedLocked(topics) > domain.MaxTopics {
-		return nil, "", domain.ErrTooManyTopics
+	if s.addedLocked(topics) > MaxTopics {
+		return nil, "", ErrTooManyTopics
 	}
 
 	for _, t := range topics {
@@ -212,14 +213,14 @@ func (s *Subscription) Subscribe(ctx context.Context, raw []string) ([]domain.To
 
 // added returns the number of topics the subscription would hold with
 // topics.
-func (s *Subscription) added(topics []domain.Topic) int {
+func (s *Subscription) added(topics []Topic) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	return s.addedLocked(topics)
 }
 
-func (s *Subscription) addedLocked(topics []domain.Topic) int {
+func (s *Subscription) addedLocked(topics []Topic) int {
 	n := len(s.topics)
 
 	for _, t := range topics {
@@ -237,33 +238,33 @@ func (s *Subscription) Unsubscribe(raw []string) {
 	defer s.mu.Unlock()
 
 	for _, r := range raw {
-		if t, err := domain.ParseTopic(r); err == nil {
+		if t, err := ParseTopic(r); err == nil {
 			delete(s.topics, t)
 		}
 	}
 }
 
 // Topics returns the current topics, sorted.
-func (s *Subscription) Topics() []domain.Topic {
+func (s *Subscription) Topics() []Topic {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	out := make([]domain.Topic, 0, len(s.topics))
+	out := make([]Topic, 0, len(s.topics))
 	for t := range s.topics {
 		out = append(out, t)
 	}
 
-	slices.SortFunc(out, func(a, b domain.Topic) int { return strings.Compare(a.String(), b.String()) })
+	slices.SortFunc(out, func(a, b Topic) int { return strings.Compare(a.String(), b.String()) })
 
 	return out
 }
 
 // Recheck authorises every current topic again and drops the ones now
 // denied (ADR 0016 decision 5). It returns the dropped topics, or
-// domain.ErrUnauthenticated when the subscriber's session ended; another
+// ErrUnauthenticated when the subscriber's session ended; another
 // error leaves the topics untouched.
-func (s *Subscription) Recheck(ctx context.Context) ([]domain.Topic, error) {
-	var dropped []domain.Topic
+func (s *Subscription) Recheck(ctx context.Context) ([]Topic, error) {
+	var dropped []Topic
 
 	for _, t := range s.Topics() {
 		err := s.authz.AuthorizeTopic(ctx, t)
@@ -271,7 +272,7 @@ func (s *Subscription) Recheck(ctx context.Context) ([]domain.Topic, error) {
 			continue
 		}
 
-		if !errors.Is(err, domain.ErrTopicForbidden) {
+		if !errors.Is(err, ErrTopicForbidden) {
 			// The session ended, or the check failed: nothing is dropped.
 			return nil, err
 		}

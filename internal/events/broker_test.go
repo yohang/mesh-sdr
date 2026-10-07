@@ -1,4 +1,4 @@
-package app_test
+package events_test
 
 import (
 	"context"
@@ -8,8 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yohang/mesh-sdr/internal/events/app"
-	"github.com/yohang/mesh-sdr/internal/events/domain"
+	"github.com/yohang/mesh-sdr/internal/events"
 )
 
 // authz allows every topic but the ones in deny.
@@ -19,7 +18,7 @@ type authz struct {
 	err  error
 }
 
-func (a *authz) AuthorizeTopic(_ context.Context, t domain.Topic) error {
+func (a *authz) AuthorizeTopic(_ context.Context, t events.Topic) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -28,7 +27,7 @@ func (a *authz) AuthorizeTopic(_ context.Context, t domain.Topic) error {
 	}
 
 	if a.deny[t.String()] {
-		return domain.ErrTopicForbidden
+		return events.ErrTopicForbidden
 	}
 
 	return nil
@@ -36,10 +35,10 @@ func (a *authz) AuthorizeTopic(_ context.Context, t domain.Topic) error {
 
 type recorder struct {
 	mu  sync.Mutex
-	got []app.Event
+	got []events.Event
 }
 
-func (r *recorder) sink(ev app.Event) {
+func (r *recorder) sink(ev events.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -60,16 +59,16 @@ func (r *recorder) types() []string {
 
 func TestSubscribeAllOrNothing(t *testing.T) {
 	ctx := context.Background()
-	b := app.NewBroker()
+	b := events.NewBroker()
 	az := &authz{deny: map[string]bool{"admin.connections": true}}
 	rec := &recorder{}
-	s := b.Attach(domain.Viewer{}, az, rec.sink)
+	s := b.Attach(events.Viewer{}, az, rec.sink)
 
-	if _, bad, err := s.Subscribe(ctx, []string{"nodes", "admin.connections"}); !errors.Is(err, domain.ErrTopicForbidden) || bad != "admin.connections" {
+	if _, bad, err := s.Subscribe(ctx, []string{"nodes", "admin.connections"}); !errors.Is(err, events.ErrTopicForbidden) || bad != "admin.connections" {
 		t.Fatalf("forbidden sub = %q, %v", bad, err)
 	}
 
-	if _, bad, err := s.Subscribe(ctx, []string{"nodes", "bogus"}); !errors.Is(err, domain.ErrInvalidTopic) || bad != "bogus" {
+	if _, bad, err := s.Subscribe(ctx, []string{"nodes", "bogus"}); !errors.Is(err, events.ErrInvalidTopic) || bad != "bogus" {
 		t.Fatalf("invalid sub = %q, %v", bad, err)
 	}
 
@@ -81,8 +80,8 @@ func TestSubscribeAllOrNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b.Publish(ctx, app.Event{Topic: domain.MustTopic("nodes"), Type: "node.status"})
-	b.Publish(ctx, app.Event{Topic: domain.MustTopic("presence"), Type: "presence.count"})
+	b.Publish(ctx, events.Event{Topic: events.MustTopic("nodes"), Type: "node.status"})
+	b.Publish(ctx, events.Event{Topic: events.MustTopic("presence"), Type: "presence.count"})
 
 	if got := rec.types(); len(got) != 1 || got[0] != "node.status@nodes" {
 		t.Fatalf("delivered %v", got)
@@ -103,10 +102,10 @@ func TestSubscribeAllOrNothing(t *testing.T) {
 
 func TestMaxTopics(t *testing.T) {
 	ctx := context.Background()
-	s := app.NewBroker().Attach(domain.Viewer{}, &authz{}, func(app.Event) {})
+	s := events.NewBroker().Attach(events.Viewer{}, &authz{}, func(events.Event) {})
 
-	topics := make([]string, 0, domain.MaxTopics)
-	for i := range domain.MaxTopics {
+	topics := make([]string, 0, events.MaxTopics)
+	for i := range events.MaxTopics {
 		topics = append(topics, "decodes:device=d"+string(rune('a'+i%26))+string(rune('a'+i/26)))
 	}
 
@@ -119,26 +118,26 @@ func TestMaxTopics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := s.Subscribe(ctx, []string{"nodes"}); !errors.Is(err, domain.ErrTooManyTopics) {
+	if _, _, err := s.Subscribe(ctx, []string{"nodes"}); !errors.Is(err, events.ErrTooManyTopics) {
 		t.Fatalf("33rd topic = %v", err)
 	}
 }
 
 func TestAudience(t *testing.T) {
 	ctx := context.Background()
-	b := app.NewBroker()
+	b := events.NewBroker()
 	alice, bob := &recorder{}, &recorder{}
 
-	for v, r := range map[domain.Viewer]*recorder{{UserID: "alice"}: alice, {UserID: "bob"}: bob} {
+	for v, r := range map[events.Viewer]*recorder{{UserID: "alice"}: alice, {UserID: "bob"}: bob} {
 		s := b.Attach(v, &authz{}, r.sink)
 		if _, _, err := s.Subscribe(ctx, []string{"notifications"}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	b.Publish(ctx, app.Event{
-		Topic: domain.MustTopic("notifications"), Type: "files.new",
-		Audience: func(v domain.Viewer) bool { return v.UserID == "alice" },
+	b.Publish(ctx, events.Event{
+		Topic: events.MustTopic("notifications"), Type: "files.new",
+		Audience: func(v events.Viewer) bool { return v.UserID == "alice" },
 	})
 
 	if len(alice.types()) != 1 || len(bob.types()) != 0 {
@@ -148,10 +147,10 @@ func TestAudience(t *testing.T) {
 
 func TestRecheckAndEnd(t *testing.T) {
 	ctx := context.Background()
-	b := app.NewBroker()
+	b := events.NewBroker()
 	az := &authz{deny: map[string]bool{}}
-	s := b.Attach(domain.Viewer{UserID: "u1", SessionRef: "s1"}, az, func(app.Event) {})
-	anon := b.Attach(domain.Viewer{}, az, func(app.Event) {})
+	s := b.Attach(events.Viewer{UserID: "u1", SessionRef: "s1"}, az, func(events.Event) {})
+	anon := b.Attach(events.Viewer{}, az, func(events.Event) {})
 
 	if _, _, err := s.Subscribe(ctx, []string{"nodes", "decodes:device=hf"}); err != nil {
 		t.Fatal(err)
@@ -210,7 +209,7 @@ func TestRecheckAndEnd(t *testing.T) {
 
 func TestAdmission(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	a := app.NewAdmission(app.Limits{PerSession: 2, PerAddress: 3, Total: 4, UpgradesPerMinute: 5})
+	a := events.NewAdmission(events.Limits{PerSession: 2, PerAddress: 3, Total: 4, UpgradesPerMinute: 5})
 
 	var releases []func()
 
@@ -231,7 +230,7 @@ func TestAdmission(t *testing.T) {
 		}
 	}
 
-	if err := admit("s1", "192.0.2.1"); !errors.Is(err, domain.ErrTooManyConnections) {
+	if err := admit("s1", "192.0.2.1"); !errors.Is(err, events.ErrTooManyConnections) {
 		t.Fatalf("third socket of a session = %v", err)
 	}
 
@@ -239,7 +238,7 @@ func TestAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := admit("", "192.0.2.1"); !errors.Is(err, domain.ErrUpgradeRate) && !errors.Is(err, domain.ErrTooManyConnections) {
+	if err := admit("", "192.0.2.1"); !errors.Is(err, events.ErrUpgradeRate) && !errors.Is(err, events.ErrTooManyConnections) {
 		t.Fatalf("fourth socket of an address = %v", err)
 	}
 
@@ -247,7 +246,7 @@ func TestAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := admit("", "192.0.2.3"); !errors.Is(err, domain.ErrHubFull) {
+	if err := admit("", "192.0.2.3"); !errors.Is(err, events.ErrHubFull) {
 		t.Fatalf("socket beyond the hub cap = %v", err)
 	}
 
@@ -260,7 +259,7 @@ func TestAdmission(t *testing.T) {
 
 	// Upgrades per minute and address: the fifth attempt of 192.0.2.1 was
 	// the last token.
-	if _, wait, err := a.Admit("", "192.0.2.1", now); !errors.Is(err, domain.ErrUpgradeRate) || wait <= 0 {
+	if _, wait, err := a.Admit("", "192.0.2.1", now); !errors.Is(err, events.ErrUpgradeRate) || wait <= 0 {
 		t.Fatalf("upgrade beyond the rate = %v, wait %v", err, wait)
 	}
 
@@ -272,7 +271,7 @@ func TestAdmission(t *testing.T) {
 // countingAuthz counts the authorisations.
 type countingAuthz struct{ n int }
 
-func (a *countingAuthz) AuthorizeTopic(context.Context, domain.Topic) error {
+func (a *countingAuthz) AuthorizeTopic(context.Context, events.Topic) error {
 	a.n++
 
 	return nil
@@ -283,7 +282,7 @@ func (a *countingAuthz) AuthorizeTopic(context.Context, domain.Topic) error {
 func TestSubscribeDedupAndLimitFirst(t *testing.T) {
 	ctx := context.Background()
 	az := &countingAuthz{}
-	s := app.NewBroker().Attach(domain.Viewer{}, az, func(app.Event) {})
+	s := events.NewBroker().Attach(events.Viewer{}, az, func(events.Event) {})
 
 	topics, _, err := s.Subscribe(ctx, []string{"nodes", "nodes", "devices", "nodes"})
 	if err != nil || len(topics) != 2 || az.n != 2 {
@@ -297,7 +296,7 @@ func TestSubscribeDedupAndLimitFirst(t *testing.T) {
 
 	az.n = 0
 
-	if _, _, err := s.Subscribe(ctx, big); !errors.Is(err, domain.ErrTooManyTopics) || az.n != 0 {
+	if _, _, err := s.Subscribe(ctx, big); !errors.Is(err, events.ErrTooManyTopics) || az.n != 0 {
 		t.Fatalf("oversized sub = %v after %d authorisations", err, az.n)
 	}
 
@@ -312,7 +311,7 @@ func TestSubscribeDedupAndLimitFirst(t *testing.T) {
 		t.Fatalf("30 new topics with duplicates: %v", err)
 	}
 
-	if _, _, err := s.Subscribe(ctx, []string{"presence"}); !errors.Is(err, domain.ErrTooManyTopics) {
+	if _, _, err := s.Subscribe(ctx, []string{"presence"}); !errors.Is(err, events.ErrTooManyTopics) {
 		t.Fatalf("33rd topic = %v", err)
 	}
 }
@@ -325,20 +324,20 @@ func TestAddressKey(t *testing.T) {
 		"2001:db8:1:2:ffff::1": "2001:db8:1:2::/64",
 		"not an address":       "not an address",
 	} {
-		if got := app.AddressKey(in); got != want {
+		if got := events.AddressKey(in); got != want {
 			t.Errorf("AddressKey(%q) = %q, want %q", in, got, want)
 		}
 	}
 
 	// Two addresses of one /64 share the per-address cap.
-	a := app.NewAdmission(app.Limits{PerSession: 10, PerAddress: 1, Total: 10, UpgradesPerMinute: 100})
+	a := events.NewAdmission(events.Limits{PerSession: 10, PerAddress: 1, Total: 10, UpgradesPerMinute: 100})
 	now := time.Unix(1_800_000_000, 0)
 
 	if _, _, err := a.Admit("", "2001:db8:1:2::1", now); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, _, err := a.Admit("", "2001:db8:1:2::2", now); !errors.Is(err, domain.ErrTooManyConnections) {
+	if _, _, err := a.Admit("", "2001:db8:1:2::2", now); !errors.Is(err, events.ErrTooManyConnections) {
 		t.Errorf("second address of the /64 = %v", err)
 	}
 }

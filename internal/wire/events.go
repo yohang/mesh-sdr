@@ -11,9 +11,7 @@ import (
 	"sync"
 	"time"
 
-	eventsapp "github.com/yohang/mesh-sdr/internal/events/app"
-	eventsdomain "github.com/yohang/mesh-sdr/internal/events/domain"
-	eventshttp "github.com/yohang/mesh-sdr/internal/events/http"
+	"github.com/yohang/mesh-sdr/internal/events"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/http/clientip"
@@ -65,7 +63,7 @@ func (p policySnapshot) anyAnonymous() bool {
 // viewerCanListen reports whether a viewer may listen to a device: any
 // enabled device for a signed-in user, the anonymous-listenable ones for a
 // visitor.
-func (p policySnapshot) viewerCanListen(v eventsdomain.Viewer, device string) bool {
+func (p policySnapshot) viewerCanListen(v events.Viewer, device string) bool {
 	policy, ok := p.devices[device]
 
 	return ok && (!v.Anonymous() || policy == gridapp.ListenAnonymous)
@@ -90,7 +88,7 @@ func (p policySnapshot) canListen(pr identitydomain.Principal, device string) bo
 // the snapshot actually changed.
 type policyCache struct {
 	policies *gridapp.ListenPolicies
-	broker   *eventsapp.Broker
+	broker   *events.Broker
 	logger   *slog.Logger
 
 	mu   sync.Mutex
@@ -147,12 +145,12 @@ type topicAuthz struct {
 	policies *policyCache
 }
 
-func (a topicAuthz) AuthorizeTopic(ctx context.Context, t eventsdomain.Topic) error {
+func (a topicAuthz) AuthorizeTopic(ctx context.Context, t events.Topic) error {
 	p := a.id.Principal(ctx)
 
 	if t.IsAdmin() {
 		if a.id.Authorize(ctx, identitydomain.RoleAdmin) != nil {
-			return eventsdomain.ErrTopicForbidden
+			return events.ErrTopicForbidden
 		}
 
 		return nil
@@ -169,9 +167,9 @@ func (a topicAuthz) AuthorizeTopic(ctx context.Context, t eventsdomain.Topic) er
 
 	switch {
 	case t.Device() != "" && !snap.canListen(p, t.Device()):
-		return eventsdomain.ErrTopicForbidden
+		return events.ErrTopicForbidden
 	case t.Device() == "" && !snap.anyAnonymous():
-		return eventsdomain.ErrTopicForbidden
+		return events.ErrTopicForbidden
 	}
 
 	return nil
@@ -180,10 +178,10 @@ func (a topicAuthz) AuthorizeTopic(ctx context.Context, t eventsdomain.Topic) er
 // eventsSession adapts identity to the events WS session port.
 type eventsSession struct{ id eventsIdentity }
 
-func (s eventsSession) Identify(ctx context.Context) eventshttp.Identity {
+func (s eventsSession) Identify(ctx context.Context) events.Identity {
 	p := s.id.Principal(ctx)
 	if p.IsAnonymous() {
-		return eventshttp.Identity{Roles: []string{}}
+		return events.Identity{Roles: []string{}}
 	}
 
 	name := p.Username().String()
@@ -199,8 +197,8 @@ func (s eventsSession) Identify(ctx context.Context) eventshttp.Identity {
 	user, _ := shared.UUIDFromBytes(p.UserID().Bytes())
 	session, _ := shared.ParseUUID(p.SessionID().String())
 
-	return eventshttp.Identity{
-		Viewer: eventsdomain.Viewer{UserID: p.UserID().String(), SessionRef: s.id.SessionRef(ctx), Staff: p.Has(identitydomain.RoleOperator)},
+	return events.Identity{
+		Viewer: events.Viewer{UserID: p.UserID().String(), SessionRef: s.id.SessionRef(ctx), Staff: p.Has(identitydomain.RoleOperator)},
 		UserID: user, SessionID: session, Name: name, Roles: roles, RoleRank: int(p.Role().ID()),
 	}
 }
@@ -208,7 +206,7 @@ func (s eventsSession) Identify(ctx context.Context) eventshttp.Identity {
 func (s eventsSession) Check(ctx context.Context, r *http.Request) (time.Time, error) {
 	until, err := s.id.CheckSession(ctx, r)
 	if errors.Is(err, identitydomain.ErrUnauthenticated) {
-		return time.Time{}, eventsdomain.ErrUnauthenticated
+		return time.Time{}, events.ErrUnauthenticated
 	}
 
 	return until, err
@@ -217,7 +215,7 @@ func (s eventsSession) Check(ctx context.Context, r *http.Request) (time.Time, e
 // eventsPresence records the events sockets in the grid presence registry.
 type eventsPresence struct{ p *gridapp.Presence }
 
-func (e eventsPresence) Open(ctx context.Context, c eventsapp.Connection) error {
+func (e eventsPresence) Open(ctx context.Context, c events.Connection) error {
 	return e.p.Open(ctx, griddomain.ConnectionInfo{
 		ID: c.ID, Kind: griddomain.ConnectionEvents, UserID: c.UserID, SessionID: c.SessionID, RoleID: c.RoleRank,
 		IP: c.IP, UserAgent: c.UserAgent,
@@ -232,13 +230,13 @@ func (e eventsPresence) Attach(ctx context.Context, id shared.UUID, device strin
 	return e.p.Attach(ctx, id, device)
 }
 
-func (e eventsPresence) Close(ctx context.Context, id shared.UUID, reason eventsapp.CloseReason) error {
+func (e eventsPresence) Close(ctx context.Context, id shared.UUID, reason events.CloseReason) error {
 	return e.p.Close(ctx, id, griddomain.ParseCloseReason(string(reason)))
 }
 
 // brokerRevocations ends the events sockets of revoked sessions and users
 // (ADR 0016 decision 4).
-type brokerRevocations struct{ b *eventsapp.Broker }
+type brokerRevocations struct{ b *events.Broker }
 
 // PublishRevocation implements identityapp.RevocationPublisher.
 func (r brokerRevocations) PublishRevocation(_ context.Context, rv identityapp.Revocation) {
@@ -271,12 +269,12 @@ func hubOrigin(hubURL string) string {
 }
 
 // newEventsModule builds the /api/ws module.
-func newEventsModule(hubURL string, b *eventsapp.Broker, id eventsIdentity, policies *policyCache,
+func newEventsModule(hubURL string, b *events.Broker, id eventsIdentity, policies *policyCache,
 	presence *gridapp.Presence, now func() time.Time, logger *slog.Logger,
-) *eventshttp.Module {
-	return eventshttp.New(eventshttp.Deps{
+) *events.Module {
+	return events.New(events.Deps{
 		Broker: b, Authz: topicAuthz{id: id, policies: policies}, Session: eventsSession{id: id},
-		Presence: eventsPresence{p: presence}, Admission: eventsapp.NewAdmission(eventsapp.DefaultLimits()),
+		Presence: eventsPresence{p: presence}, Admission: events.NewAdmission(events.DefaultLimits()),
 		ClientIP: func(r *http.Request) string { return clientip.From(r.Context()).String() },
 		Origin:   hubOrigin(hubURL), Version: version.String(), Now: now,
 		Logger: component(logger, "events.http.ws"),
@@ -327,14 +325,14 @@ type presenceCountEvent struct {
 }
 
 var (
-	topicNodes    = eventsdomain.MustTopic("nodes")
-	topicDevices  = eventsdomain.MustTopic("devices")
-	topicPresence = eventsdomain.MustTopic("presence")
+	topicNodes    = events.MustTopic("nodes")
+	topicDevices  = events.MustTopic("devices")
+	topicPresence = events.MustTopic("presence")
 )
 
 // gridEvents turns grid changes into hub events.
 type gridEvents struct {
-	b       eventsapp.Publisher
+	b       events.Publisher
 	nodes   griddomain.NodeRepository
 	devices *gridapp.Devices
 	now     func() time.Time
@@ -349,7 +347,7 @@ type gridEvents struct {
 	}
 }
 
-func newGridEvents(b eventsapp.Publisher, g *hubGrid, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
+func newGridEvents(b events.Publisher, g *hubGrid, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
 	return &gridEvents{
 		b: b, nodes: g.nodeRepo, devices: g.devices, policies: policies, now: now, logger: component(logger, "events.wire.grid"),
 		lastBeat: map[griddomain.NodeID]time.Time{}, presence: make(chan struct{}, 1), listeners: g.presence,
@@ -401,7 +399,7 @@ func (e *gridEvents) publishNode(ctx context.Context, id griddomain.NodeID, stat
 				ids = append(ids, d.ID().String())
 			}
 
-			audience = func(v eventsdomain.Viewer) bool {
+			audience = func(v events.Viewer) bool {
 				if v.Staff {
 					return true
 				}
@@ -417,14 +415,14 @@ func (e *gridEvents) publishNode(ctx context.Context, id griddomain.NodeID, stat
 		}
 	}
 
-	e.b.Publish(ctx, eventsapp.Event{
+	e.b.Publish(ctx, events.Event{
 		Topic: topicNodes, Type: rxv1.TypeNodeStatus.String(), Audience: audience,
 		Payload: nodeStatusEvent{NodeID: id.String(), Status: status},
 	})
 }
 
 // staff accepts operators and admins only.
-func staff(v eventsdomain.Viewer) bool { return v.Staff }
+func staff(v events.Viewer) bool { return v.Staff }
 
 // statusChanged is a grid StatusListener, registered after the device
 // registry's: devices are already marked offline when the events go out.
@@ -488,9 +486,9 @@ func (e *gridEvents) nodeDevices(ctx context.Context, id griddomain.NodeID) {
 
 		// Operators and admins see every device, the others the devices
 		// they may listen to (ADR 0018).
-		e.b.Publish(ctx, eventsapp.Event{
+		e.b.Publish(ctx, events.Event{
 			Topic: topicDevices, Type: rxv1.TypeDeviceStatus.String(),
-			Audience: func(v eventsdomain.Viewer) bool { return v.Staff || snap.viewerCanListen(v, device) },
+			Audience: func(v events.Viewer) bool { return v.Staff || snap.viewerCanListen(v, device) },
 			Payload:  deviceStatusEvent{DeviceID: device, NodeID: id.String(), State: string(st)},
 		})
 	}
@@ -498,7 +496,7 @@ func (e *gridEvents) nodeDevices(ctx context.Context, id griddomain.NodeID) {
 
 // forgotten publishes a forgotten device.
 func (e *gridEvents) forgotten(ctx context.Context, d *griddomain.Device) {
-	e.b.Publish(ctx, eventsapp.Event{
+	e.b.Publish(ctx, events.Event{
 		Topic: topicDevices, Type: rxv1.TypeDeviceStatus.String(), Audience: staff,
 		Payload: deviceStatusEvent{DeviceID: d.ID().String(), NodeID: d.Node().String(), State: "forgotten"},
 	})
@@ -539,7 +537,7 @@ func (e *gridEvents) runPresence(ctx context.Context) {
 
 		if n != last {
 			last = n
-			e.b.Publish(ctx, eventsapp.Event{Topic: topicPresence, Type: rxv1.TypePresenceCount.String(), Payload: presenceCountEvent{Total: n}})
+			e.b.Publish(ctx, events.Event{Topic: topicPresence, Type: rxv1.TypePresenceCount.String(), Payload: presenceCountEvent{Total: n}})
 		}
 	}
 }
