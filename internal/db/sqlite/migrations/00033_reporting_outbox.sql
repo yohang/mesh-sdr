@@ -23,6 +23,7 @@ CREATE TABLE reporting_outbox (
 
 CREATE INDEX reporting_outbox_claim ON reporting_outbox (network, status, next_attempt_at);
 CREATE INDEX reporting_outbox_status_created ON reporting_outbox (status, created_at);
+CREATE INDEX reporting_outbox_network_status_id ON reporting_outbox (network, status, id);
 
 -- +goose Down
 DROP TABLE reporting_outbox;

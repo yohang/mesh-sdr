@@ -24,9 +24,16 @@ SET status = sqlc.arg(status), attempts = sqlc.arg(attempts), next_attempt_at = 
 WHERE id = sqlc.arg(id) AND status = 'in_flight' AND lease_owner = sqlc.arg(owner);
 
 -- name: KillWaitingOutbox :execrows
+-- An entry waits since it became due (next_attempt_at) or, in flight, since
+-- its lease expired (a crashed worker).
 UPDATE reporting_outbox
 SET status = 'dead', lease_owner = NULL, lease_until = NULL, last_error = sqlc.arg(reason)
-WHERE network = sqlc.arg(network) AND status IN ('pending', 'failed') AND created_at < sqlc.arg(cutoff);
+WHERE network = sqlc.arg(network)
+  AND ((status IN ('pending', 'failed') AND next_attempt_at < sqlc.arg(cutoff))
+    OR (status = 'in_flight' AND lease_until < sqlc.arg(cutoff)));
+
+-- name: CountPendingOutbox :one
+SELECT COUNT(*) FROM reporting_outbox WHERE network = ? AND status = 'pending';
 
 -- name: KillOverflowOutbox :execrows
 UPDATE reporting_outbox

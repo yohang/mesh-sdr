@@ -96,9 +96,22 @@ func (r *Outbox) KillWaiting(ctx context.Context, network domain.Network, before
 	return n, nil
 }
 
-// KillOverflow implements domain.Repository.
+// KillOverflow implements domain.Repository: the pending entries are
+// counted first (index network, status, id), so an enqueue under the cap
+// writes nothing more.
 func (r *Outbox) KillOverflow(ctx context.Context, network domain.Network, keep int) (int64, error) {
-	n, err := sqlc.New(r.db.Writer(ctx)).KillOverflowOutbox(ctx, sqlc.KillOverflowOutboxParams{
+	q := sqlc.New(r.db.Writer(ctx))
+
+	pending, err := q.CountPendingOutbox(ctx, string(network))
+	if err != nil {
+		return 0, fmt.Errorf("count %s entries: %w", network, err)
+	}
+
+	if pending <= int64(keep) {
+		return 0, nil
+	}
+
+	n, err := q.KillOverflowOutbox(ctx, sqlc.KillOverflowOutboxParams{
 		Reason: nullString(domain.ReasonOverflow), Network: string(network), Keep: int64(keep),
 	})
 	if err != nil {

@@ -17,7 +17,9 @@ const (
 	KeySentRetention = "retention.reporting_outbox.sent"
 	KeyDeadRetention = "retention.reporting_outbox.dead"
 	// PendingTTL is how long the entries of a disabled network wait before
-	// they become dead (§7.3 rule 4, reporting.<network>.pending_ttl).
+	// they become dead (§7.3 rule 4, reporting.<network>.pending_ttl). It
+	// counts from when an entry became due (or its lease expired), not
+	// from its enqueue time.
 	PendingTTL = time.Hour
 	// purgeBatch bounds each delete (§7.3: ≤ 10 000 rows per transaction).
 	purgeBatch = 10_000
@@ -28,8 +30,9 @@ type RetentionValues interface {
 	Duration(key string) time.Duration
 }
 
-// PurgeJob is the outbox.purge job: the waiting entries of networks
-// without an enabled transport die after PendingTTL, sent entries are
+// PurgeJob is the outbox.purge job: the waiting entries (in flight with an
+// expired lease included) of networks without an enabled transport die
+// after PendingTTL, sent entries are
 // deleted after retention.reporting_outbox.sent and dead ones after
 // retention.reporting_outbox.dead. Each statement runs in its own short
 // transaction.

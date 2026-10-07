@@ -274,8 +274,9 @@ type Repository interface {
 	// Save writes the delivery state of a claimed entry while owner still
 	// holds it, and reports whether it did.
 	Save(ctx context.Context, e *Entry, owner string) (bool, error)
-	// KillWaiting makes dead, with reason, the waiting entries of network
-	// enqueued before before.
+	// KillWaiting makes dead, with reason, the entries of network waiting
+	// since before: pending or failed entries due before it, and in-flight
+	// entries whose lease expired before it.
 	KillWaiting(ctx context.Context, network Network, before time.Time, reason string) (int64, error)
 	// KillOverflow makes dead the oldest pending entries of network beyond
 	// keep.

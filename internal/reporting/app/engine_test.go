@@ -188,6 +188,13 @@ func TestOverflowAndPurge(t *testing.T) {
 	// Entries of a network without an enabled transport die after the
 	// pending TTL.
 	enqueue(t, e, domain.NetworkAPRSIS, 9, c.t)
+	enqueue(t, e, domain.NetworkAPRSIS, 10, c.t)
+
+	// A worker of that network claimed one entry and crashed: its expired
+	// lease counts as waiting.
+	if got, err := repo.Claim(ctx, domain.NetworkAPRSIS, "crashed", c.t, c.t.Add(time.Minute), 1); err != nil || len(got) != 1 {
+		t.Fatalf("claim = %v, %v", got, err)
+	}
 
 	if _, err := e.Drain(ctx, tr); err != nil {
 		t.Fatal(err)
@@ -204,7 +211,7 @@ func TestOverflowAndPurge(t *testing.T) {
 
 	c.t = c.t.Add(2 * time.Hour)
 
-	if n, err := job.Run(ctx); err != nil || n != 1 {
+	if n, err := job.Run(ctx); err != nil || n != 2 {
 		t.Errorf("pending TTL = %d, %v", n, err)
 	}
 
@@ -216,7 +223,7 @@ func TestOverflowAndPurge(t *testing.T) {
 
 	c.t = c.t.Add(30 * 24 * time.Hour)
 
-	if n, err := job.Run(ctx); err != nil || n != 2 {
+	if n, err := job.Run(ctx); err != nil || n != 3 {
 		t.Errorf("dead purge = %d, %v", n, err)
 	}
 }
