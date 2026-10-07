@@ -61,9 +61,37 @@ const certWarnAfter = 2.0 / 3
 // nodeRow is one node of the list.
 type nodeRow struct {
 	Node      *domain.Node
-	Devices   int
+	Devices   []deviceRow
 	Listeners int
 	CertWarn  bool
+}
+
+// deviceRow is a device of a node with its status.
+type deviceRow struct {
+	Device *domain.Device
+	Status domain.DeviceStatus
+}
+
+// mediaListeners counts the open media connections per node and per
+// device.
+func mediaListeners(conns []*domain.Connection) (perNode, perDevice map[string]int) {
+	perNode, perDevice = map[string]int{}, map[string]int{}
+
+	for _, c := range conns {
+		if i := c.Info(); i.Kind == domain.ConnectionMedia && i.NodeID != "" {
+			perNode[i.NodeID]++
+
+			if i.DeviceID != "" {
+				perDevice[i.DeviceID]++
+			}
+		}
+	}
+
+	return perNode, perDevice
+}
+
+func newDeviceRow(d *domain.Device, n *domain.Node, perDevice map[string]int) deviceRow {
+	return deviceRow{Device: d, Status: d.Status(n.Up(), perDevice[d.ID().String()])}
 }
 
 // nodesView is the node list.
@@ -101,7 +129,7 @@ type capsView struct {
 type nodeView struct {
 	Node      *domain.Node
 	CanAdmin  bool
-	Devices   []*domain.Device
+	Devices   []deviceRow
 	Listeners int
 	Caps      *capsView
 	Load      loadView
@@ -166,25 +194,20 @@ func (m *AdminModule) nodesView(r *http.Request) (nodesView, error) {
 		return nodesView{}, err
 	}
 
-	perNode := map[string]int{}
-	for _, d := range devices {
-		perNode[d.Node().String()]++
-	}
-
-	listeners := map[string]int{}
-
-	for _, c := range conns {
-		if i := c.Info(); i.Kind == domain.ConnectionMedia && i.NodeID != "" {
-			listeners[i.NodeID]++
-		}
-	}
-
+	listeners, perDevice := mediaListeners(conns)
 	now := m.now()
 	v := nodesView{CanAdmin: m.d.IsAdmin(r)}
 
 	for _, n := range nodes {
-		id := n.ID().String()
-		v.Rows = append(v.Rows, nodeRow{Node: n, Devices: perNode[id], Listeners: listeners[id], CertWarn: certWarn(n, now)})
+		row := nodeRow{Node: n, Listeners: listeners[n.ID().String()], CertWarn: certWarn(n, now)}
+
+		for _, d := range devices {
+			if d.Node() == n.ID() {
+				row.Devices = append(row.Devices, newDeviceRow(d, n, perDevice))
+			}
+		}
+
+		v.Rows = append(v.Rows, row)
 	}
 
 	return v, nil
@@ -211,7 +234,8 @@ func (m *AdminModule) nodeView(r *http.Request) (nodeView, int) {
 		Form: nodeForm{ID: n.ID().String(), Name: n.Name().String(), URL: n.URL().String(), Version: n.Version()},
 	}
 
-	if v.Devices, err = m.d.Devices.ListByNode(ctx, n.ID()); err != nil {
+	devices, err := m.d.Devices.ListByNode(ctx, n.ID())
+	if err != nil {
 		m.d.Logger.ErrorContext(ctx, "list node devices", slog.Any("error", err))
 
 		return nodeView{}, http.StatusInternalServerError
@@ -224,10 +248,11 @@ func (m *AdminModule) nodeView(r *http.Request) (nodeView, int) {
 		return nodeView{}, http.StatusInternalServerError
 	}
 
-	for _, c := range conns {
-		if i := c.Info(); i.Kind == domain.ConnectionMedia && i.NodeID == n.ID().String() {
-			v.Listeners++
-		}
+	listeners, perDevice := mediaListeners(conns)
+	v.Listeners = listeners[n.ID().String()]
+
+	for _, d := range devices {
+		v.Devices = append(v.Devices, newDeviceRow(d, n, perDevice))
 	}
 
 	rep, err := m.d.Capabilities.Get(ctx, n.ID().String())

@@ -21,14 +21,14 @@ templ nodesPage(v nodesView) {
 }
 
 // nodesTable is the live part of the list, also its htmx fragment (same
-// URL): it refetches itself when a node changes, or after the hub events
-// socket (re)subscribed (ADR 0016).
+// URL): it refetches itself when a node or a device changes, or after the
+// hub events socket (re)subscribed (ADR 0016).
 templ nodesTable(v nodesView) {
 	<div
 		id="nodes-table"
-		data-msdr-topics="nodes"
+		data-msdr-topics="nodes devices"
 		hx-get="/admin/nodes"
-		hx-trigger="msdr:node.status from:body delay:1s, msdr:resync from:body"
+		hx-trigger="msdr:node.status from:body delay:1s, msdr:device.status from:body delay:1s, msdr:resync from:body"
 		hx-swap="outerMorph"
 	>
 		if len(v.Rows) == 0 {
@@ -63,7 +63,20 @@ templ nodesTable(v nodesView) {
 								<td class="py-1 pr-4">
 									@certExpiry(row.Node, row.CertWarn)
 								</td>
-								<td class="py-1 pr-4">{ strconv.Itoa(row.Devices) }</td>
+								<td class="py-1 pr-4">
+									if len(row.Devices) == 0 {
+										—
+									} else {
+										<ul>
+											for _, d := range row.Devices {
+												<li>
+													<a href={ templ.URL("/admin/devices/" + d.Device.ID().String()) }>{ d.Device.Name() }</a>:
+													@deviceStatus(d)
+												</li>
+											}
+										</ul>
+									}
+								</td>
 								<td class="py-1">{ strconv.Itoa(row.Listeners) }</td>
 							</tr>
 						}
@@ -85,6 +98,14 @@ templ health(n *domain.Node) {
 	if n.Disabled() {
 		<span class="text-fg-muted">, disabled</span>
 	}
+}
+
+// deviceStatus is the summary status of a device (ready, busy, failed,
+// absent); the word carries the meaning, the colour only stresses it.
+templ deviceStatus(d deviceRow) {
+	<span class={ templ.KV("font-semibold text-danger", d.Status == domain.DeviceFailed), templ.KV("text-fg-muted", d.Status == domain.DeviceAbsent) }>
+		{ string(d.Status) }
+	</span>
 }
 
 templ certExpiry(n *domain.Node, warn bool) {
@@ -200,6 +221,7 @@ templ nodeLive(v nodeView) {
 							<tr class="border-b border-border">
 								<th scope="col" class="py-1 pr-4">Device</th>
 								<th scope="col" class="py-1 pr-4">Type</th>
+								<th scope="col" class="py-1 pr-4">Status</th>
 								<th scope="col" class="py-1">State</th>
 							</tr>
 						</thead>
@@ -207,10 +229,13 @@ templ nodeLive(v nodeView) {
 							for _, d := range v.Devices {
 								<tr class="border-b border-border">
 									<th scope="row" class="py-1 pr-4 font-medium">
-										<a href={ templ.URL("/admin/devices/" + d.ID().String()) }>{ d.Name() }</a>
+										<a href={ templ.URL("/admin/devices/" + d.Device.ID().String()) }>{ d.Device.Name() }</a>
 									</th>
-									<td class="py-1 pr-4">{ d.Type() }</td>
-									<td class="py-1">{ state(d) }</td>
+									<td class="py-1 pr-4">{ d.Device.Type() }</td>
+									<td class="py-1 pr-4">
+										@deviceStatus(d)
+									</td>
+									<td class="py-1">{ state(d.Device) }</td>
 								</tr>
 							}
 						</tbody>

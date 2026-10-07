@@ -131,9 +131,17 @@ func TestAdminNodesPages(t *testing.T) {
 	})
 
 	_, page := op.page("/admin/nodes/attic")
-	for _, want := range []string{`data-msdr-topics="nodes devices"`, `href="/admin/devices/hf"`, "Capabilities", "Load figures", "Fingerprint"} {
+	for _, want := range []string{`data-msdr-topics="nodes devices"`, `href="/admin/devices/hf"`, ">ready</span>", "Capabilities", "Load figures", "Fingerprint"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("operator detail lacks %q", want)
+		}
+	}
+
+	// The list shows each node's devices and their status.
+	_, list := op.page("/admin/nodes")
+	for _, want := range []string{`data-msdr-topics="nodes devices"`, `href="/admin/devices/hf"`, ">ready</span>"} {
+		if !strings.Contains(list, want) {
+			t.Errorf("node list lacks %q", want)
 		}
 	}
 
