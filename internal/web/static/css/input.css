@@ -4,6 +4,7 @@
 @source "../../../*/http";
 @source "../../../shell";
 @source "../../../bookmarks/*.templ";
+@source "../../../files/*.templ";
 @source "../js";
 
 /*
