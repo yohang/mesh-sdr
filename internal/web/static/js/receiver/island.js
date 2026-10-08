@@ -83,6 +83,7 @@
 // 3 dB or the squelch opened or closed. Untrusted text (device and node
 // names) goes through textContent only.
 
+import { DecodersTab } from "./decoders.js";
 import { confirmDialog } from "../confirm.js";
 import { eventsState } from "../events.js";
 import { notices, notifications, notify } from "../notify.js";
@@ -142,9 +143,17 @@ const AUTO_PERCENTILE = 0.2;
 const AUTO_FLOOR_MARGIN_DB = 5;
 const AUTO_PEAK_MARGIN_DB = 5;
 const DEFAULT_LEVELS = { min: -100, max: -20 };
-// Analog modes of the mode picker, in display order (RX-007; ADR 0026: no
-// digital modes in M1a). Only those the device's node reports are shown.
-const ANALOG_MODES = ["am", "sam", "nfm", "wfm", "usb", "lsb", "cw"];
+// Analog modes of the mode picker, in display order (RX-007, DEM-013).
+// Only those the device's node reports are shown. The digital modes come
+// from device.config (DEC-002) and follow them.
+const ANALOG_MODES = ["am", "sam", "nfm", "wfm", "usb", "lsb", "cw", "usbd", "lsbd"];
+// Labels of the modes whose id is not their name.
+const MODE_LABELS = /** @type {Record<string, string>} */ ({ usbd: "DATA", lsbd: "DATA-L" });
+
+/** @param {string} m */
+function modeLabel(m) {
+  return MODE_LABELS[m] ?? m.toUpperCase();
+}
 // Squelch level offered when the squelch is first switched on (dBFS).
 const SQUELCH_DEFAULT_DB = -100;
 // Pass band buttons scale the width by this factor.
@@ -257,6 +266,8 @@ export function parseLink(loc) {
   if (q.has("f") && Number.isFinite(f) && f > 0) want.hz = Math.round(f);
   const mode = (q.get("m") ?? "").toLowerCase();
   if (ANALOG_MODES.includes(mode)) want.mode = mode;
+  const m2 = (q.get("m2") ?? "").toLowerCase();
+  if (/^[a-z0-9_-]{1,24}$/.test(m2)) want.decoder = m2;
   const sql = Number(q.get("sql"));
   if (q.has("sql") && Number.isFinite(sql) && sql >= SQUELCH_MIN_DB && sql <= SQUELCH_MAX_DB) want.squelchDb = Math.round(sql);
   return { node_id: m[1], device_id: m[2], m2: (q.get("m2") ?? "").slice(0, 32), want };
@@ -274,7 +285,8 @@ function linkURL(t, e, m2) {
   const hz = e.outOfBand ?? e.tunedHz;
   if (hz) q.set("f", String(Math.round(hz)));
   if (e.demod?.mode) q.set("m", e.demod.mode);
-  if (m2) q.set("m2", m2);
+  const decoder = e.demod?.decoder || m2;
+  if (decoder) q.set("m2", decoder);
   if (e.demod && e.demod.squelchDb !== null) q.set("sql", String(e.demod.squelchDb));
   const s = q.toString();
   return `/receiver/${encodeURIComponent(t.node_id)}/${encodeURIComponent(t.device_id)}${s ? `?${s}` : ""}`;
@@ -435,6 +447,7 @@ class MsdrReceiver extends HTMLElement {
     this.stopKeys?.();
     this.panel.detach();
     this.engine?.removeEventListener("change", this.onChange);
+    this.decodersTab?.detach();
     this.grid?.removeEventListener("change", this.onGrid);
     notices.removeEventListener("change", this.onNotices);
     window.removeEventListener("popstate", this.onPop);
@@ -564,6 +577,8 @@ class MsdrReceiver extends HTMLElement {
     this.panel = new SidePanel({ id: "rx-panel", onChange: () => this.layout() });
     this.panel.addTab({ id: "bookmarks", label: "Bookmarks", content: this.buildBookmarks() });
     this.panel.addTab({ id: "info", label: "Info", content: this.buildInfo() });
+    this.decodersTab = new DecodersTab(this.engine);
+    this.panel.addTab({ id: "decoders", label: "Decoders", content: this.decodersTab.el });
 
     const left = el("div", { class: "flex min-w-0 flex-col gap-3" });
     left.append(this.display, this.empty, this.bar, dl, this.status, this.meterLive);
@@ -625,7 +640,10 @@ class MsdrReceiver extends HTMLElement {
     // Mode picker: one button per analog mode (RX-007), keys 1…9, 0.
     this.modes = el("div", { class: "flex flex-wrap gap-1", role: "group", "aria-labelledby": "rx-mode-label" });
     const mode = el("div", { class: GROUP });
-    mode.append(el("span", { id: "rx-mode-label", class: "font-semibold" }, "Mode"), this.modes);
+    // Digital modes (DEC-002): a decoder on top of an allowed underlying
+    // mode; pressed again, it stops.
+    this.digital = el("div", { class: "flex flex-wrap gap-1", role: "group", "aria-label": "Digital modes" });
+    mode.append(el("span", { id: "rx-mode-label", class: "font-semibold" }, "Mode"), this.modes, this.digital);
 
     // S-meter and dB read-out (RX-022): the text carries the value, the bar
     // only illustrates it.
@@ -1496,17 +1514,43 @@ class MsdrReceiver extends HTMLElement {
     if (shown !== modes.join()) {
       this.modes.replaceChildren(
         ...modes.map((m) => {
-          const b = el("button", { type: "button", class: SMALL_BUTTON, "data-mode": m, "aria-pressed": "false" }, m.toUpperCase());
+          const b = el("button", { type: "button", class: SMALL_BUTTON, "data-mode": m, "aria-pressed": "false" }, modeLabel(m));
           b.addEventListener("click", () => this.engine.setMode(m));
           return b;
         }),
       );
     }
+    // A running decoder marks the other underlying modes it allows
+    // (DEC-003): dotted underline and a title, not colour alone.
+    const digital = /** @type {any[]} */ (e.device?.decoders ?? []).filter((x) => x.available);
+    const active = digital.find((x) => x.mode === d?.decoder);
     for (const b of this.modes.children) {
-      const m = /** @type {HTMLElement} */ (b).dataset.mode;
+      const m = /** @type {HTMLElement} */ (b).dataset.mode ?? "";
+      const allowed = !!active && m !== d?.mode && active.underlying.includes(m);
       b.setAttribute("aria-pressed", String(m === d?.mode));
       b.classList.toggle("bg-accent", m === d?.mode);
       b.classList.toggle("text-accent-fg", m === d?.mode);
+      b.classList.toggle("underline", allowed);
+      b.classList.toggle("decoration-dotted", allowed);
+      if (allowed) b.setAttribute("title", `Also runs ${active.label}`);
+      else b.removeAttribute("title");
+      b.toggleAttribute("disabled", !d);
+    }
+    const shownDigital = [...this.digital.children].map((b) => /** @type {HTMLElement} */ (b).dataset.decoder).join();
+    if (shownDigital !== digital.map((x) => x.mode).join()) {
+      this.digital.replaceChildren(
+        ...digital.map((x) => {
+          const b = el("button", { type: "button", class: SMALL_BUTTON, "data-decoder": x.mode, "aria-pressed": "false" }, x.label);
+          b.addEventListener("click", () => this.engine.setDecoder(this.engine.demod?.decoder === x.mode ? null : x.mode));
+          return b;
+        }),
+      );
+    }
+    for (const b of this.digital.children) {
+      const on = /** @type {HTMLElement} */ (b).dataset.decoder === d?.decoder;
+      b.setAttribute("aria-pressed", String(on));
+      b.classList.toggle("bg-accent", on);
+      b.classList.toggle("text-accent-fg", on);
       b.toggleAttribute("disabled", !d);
     }
 
@@ -1587,7 +1631,7 @@ class MsdrReceiver extends HTMLElement {
         ["Access", c.login_required ? "Signed-in listeners" : "Everyone"],
       );
       const modes = ANALOG_MODES.filter((m) => (c.modes ?? []).includes(m));
-      if (modes.length) rows.push(["Modes", modes.map((m) => m.toUpperCase()).join(", ")]);
+      if (modes.length) rows.push(["Modes", modes.map(modeLabel).join(", ")]);
     }
     if (e.device && e.target && c && e.target.device_id === c.id && e.target.node_id === c.node_id) {
       rows.push(["Preset", e.device.active_preset?.name ?? "None"]);

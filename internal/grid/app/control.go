@@ -59,6 +59,7 @@ type Control struct {
 	onBoot   []BootHandler
 	onLink   []func(ctx context.Context, id domain.NodeID)
 	applied  []func(ctx context.Context, id domain.NodeID, types []rxv1.MessageType)
+	failed   []func(id domain.NodeID)
 	links    *Tracker
 
 	mu     sync.Mutex
@@ -77,6 +78,11 @@ func NewControl(nodes domain.NodeRepository, revocations domain.RevocationReposi
 
 // Handle registers the handler of an event type (composition time only).
 func (c *Control) Handle(t rxv1.MessageType, h EventHandler) { c.handlers[t] = h }
+
+// OnFailed registers a function told when the ingestion transaction of a
+// batch was rolled back: what handlers kept for after the commit is void
+// (composition time only).
+func (c *Control) OnFailed(f func(id domain.NodeID)) { c.failed = append(c.failed, f) }
 
 // OnBoot registers a node-restart handler (composition time only).
 func (c *Control) OnBoot(h BootHandler) { c.onBoot = append(c.onBoot, h) }
@@ -236,6 +242,10 @@ func (c *Control) Apply(ctx context.Context, id domain.NodeID, boot shared.UUID,
 		return c.cursors.Advance(ctx, id, boot, applied, now)
 	})
 	if err != nil {
+		for _, f := range c.failed {
+			f(id)
+		}
+
 		return 0, fmt.Errorf("node %s events: %w", id, err)
 	}
 

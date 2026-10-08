@@ -1,0 +1,104 @@
+package decodes
+
+// listPage is the Decodes page (FEATURE_SPEC §10.11, ADR 0028): the
+// filters and one page of decoded messages, newest first. Decoded text is
+// untrusted RF text: templ escapes it.
+templ listPage(v listView) {
+	<div class="flex flex-col gap-4">
+		<h1 class="text-2xl font-semibold">Decodes</h1>
+		if len(v.Devices) == 0 {
+			if v.SignedIn {
+				<p>No receiver is available.</p>
+			} else {
+				<p>Sign in to see the decoded messages of this station.</p>
+			}
+		} else {
+			@filtersForm(v)
+			if v.Retention != "" {
+				<p class="text-sm text-fg-muted">{ v.Retention }</p>
+			}
+			@results(v)
+		}
+	</div>
+}
+
+templ filtersForm(v listView) {
+	<form class="flex flex-wrap items-end gap-4" method="get" action={ templ.SafeURL(Path) } aria-label="Filter the decoded messages">
+		<div class="flex flex-col gap-1">
+			<label for="filter-mode" class="font-medium">Mode</label>
+			<select id="filter-mode" name="mode" class="rounded border border-border px-2 py-1">
+				<option value="" selected?={ v.Filter.Mode == "" }>Any</option>
+				for _, m := range v.Modes {
+					<option value={ m } selected?={ v.Filter.Mode == m }>{ m }</option>
+				}
+			</select>
+		</div>
+		<div class="flex flex-col gap-1">
+			<label for="filter-device" class="font-medium">Device</label>
+			<select id="filter-device" name="device" class="max-w-full rounded border border-border px-2 py-1">
+				<option value="" selected?={ v.Filter.Device == "" }>Any</option>
+				for _, d := range v.Devices {
+					<option value={ d.ID } selected?={ v.Filter.Device == d.ID }>{ d.Name }</option>
+				}
+			</select>
+		</div>
+		@timeField("filter-from", "from", "From (UTC)", v.Filter.From, v.Filter.Errors["from"])
+		@timeField("filter-until", "until", "Until (UTC)", v.Filter.Until, v.Filter.Errors["until"])
+		<button class="rounded border px-3 py-1 font-semibold" type="submit">Filter</button>
+	</form>
+}
+
+templ timeField(id, name, label, value, err string) {
+	<div class="flex flex-col gap-1">
+		<label for={ id } class="font-medium">{ label }</label>
+		<input
+			id={ id }
+			name={ name }
+			type="datetime-local"
+			value={ value }
+			class="rounded border border-border px-2 py-1"
+			if err != "" {
+				aria-invalid="true"
+				aria-describedby={ id + "-error" }
+			}
+		/>
+		if err != "" {
+			<span id={ id + "-error" } class="text-sm text-danger">{ err }</span>
+		}
+	</div>
+}
+
+templ results(v listView) {
+	if len(v.Rows) == 0 {
+		<p>No decoded message matches.</p>
+	} else {
+		<div class="relative overflow-x-auto">
+			<table class="w-full text-left">
+				<caption class="sr-only">Decoded messages, newest first</caption>
+				<thead>
+					<tr class="border-b border-border">
+						<th scope="col" class="py-1 pr-4">Time (UTC)</th>
+						<th scope="col" class="py-1 pr-4">Device</th>
+						<th scope="col" class="py-1 pr-4">Frequency (MHz)</th>
+						<th scope="col" class="py-1 pr-4">Mode</th>
+						<th scope="col" class="py-1">Message</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, m := range v.Rows {
+						<tr class="border-b border-border align-top">
+							<td class="whitespace-nowrap py-1 pr-4 font-mono tabular-nums">{ m.DecodedAt.Format("2006-01-02 15:04:05") }</td>
+							<td class="py-1 pr-4">{ v.deviceName(m.DeviceID) }</td>
+							<td class="py-1 pr-4 font-mono tabular-nums">{ freqText(m.FreqHz) }</td>
+							<td class="py-1 pr-4">{ m.Mode }</td>
+							<td class="break-all py-1 font-mono whitespace-pre-wrap">{ m.Text }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+		if v.Next != "" {
+			<a class="self-start underline" href={ templ.SafeURL(Path + "?" + v.Next) }>Older messages</a>
+		}
+	}
+}

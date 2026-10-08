@@ -22,12 +22,12 @@ import (
 
 // Prober implements agent.Prober.
 type Prober struct {
-	version string
-	devices func() []ctl.Device
+	version  string
+	devices  func() []ctl.Device
 	drivers  func(context.Context) []ctl.SDRDriver
 	decoders func(context.Context) []ctl.Decoder
 	started  time.Time
-	root    string // filesystem root, "/" except in tests
+	root     string // filesystem root, "/" except in tests
 
 	mu       sync.Mutex
 	lastIdle uint64

@@ -15,8 +15,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/radio/infra/decoder"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/devlog"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
-	"github.com/yohang/mesh-sdr/internal/shared/process"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
 // newRadio builds the device module of the node (GRID-002): the device

@@ -94,7 +94,7 @@ const SQUELCH_AUTO_MARGIN_DB = 10;
 // Audio rates: speech band, and the HD path broadcast FM needs.
 const AUDIO_RATE = 12000;
 const HD_AUDIO_RATE = 48000;
-const HD_MODES = new Set(["wfm"]);
+const HD_MODES = new Set(["wfm", "usbd", "lsbd"]);
 // Audio frames last 20 ms (§6.7); a sequence gap of n frames is n × 20 ms.
 const FRAME_MS = 20;
 // Close codes after which reconnecting cannot help (§6.2 client behaviour).
@@ -110,6 +110,7 @@ const JITTER_GAIN = 1 / 8;
  * @property {number} [hz] frequency
  * @property {string} [mode]
  * @property {number | null} [squelchDb] null: open
+ * @property {string} [decoder] digital mode (m2)
  */
 
 /**
@@ -292,6 +293,7 @@ class Engine extends EventTarget {
     if (w.mode && w.mode !== this.demod.mode) this.setMode(w.mode);
     if (typeof w.hz === "number") this.outOfBand = this.tune(w.hz, false) ? null : w.hz;
     if (w.squelchDb !== undefined) this.setSquelch(w.squelchDb);
+    if (w.decoder && w.decoder !== this.demod.decoder) this.setDecoder(w.decoder);
     this.emit("tune");
   }
 
@@ -499,6 +501,17 @@ class Engine extends EventTarget {
           this.emit("meter");
         }
         break;
+      // The listener's decoder (DEC-002): its messages and its status.
+      case "decode":
+        if (this.demod?.id === p.demod_id) this.signal("decode", p);
+        break;
+      case "diag.state":
+        if (this.demod?.id === p.demod_id) {
+          if (p.state === "stopped" && this.demod.decoder === p.decoder) this.demod.decoder = null;
+          this.signal("decoderstatus", p);
+          this.emit("tune");
+        }
+        break;
     }
   }
 
@@ -593,6 +606,7 @@ class Engine extends EventTarget {
           this.outOfBand = this.inBand(w.hz) ? null : w.hz;
         }
         if (w.squelchDb !== undefined) k.squelch_db = w.squelchDb ?? SQUELCH_MIN_DB;
+        if (w.decoder) k.decoder = w.decoder;
       }
       if (typeof k.hz === "number" && typeof w?.hz !== "number") {
         if (this.inBand(k.hz)) k.offset_hz = k.hz - this.centerHz;
@@ -627,11 +641,14 @@ class Engine extends EventTarget {
         highHz: 0,
         squelchDb: null,
         nr: { enabled: false, threshold: 0 },
+        decoder: null,
       };
       delete k.hz;
       this.applied(d.applied ?? {});
       this.setState("listening");
       this.emit("tune");
+      // The decoder of the previous connection, or of the link (m2).
+      if (k.decoder) this.setDecoder(k.decoder);
     } catch (err) {
       if (gen !== this.gen) return;
       this.setState("error", err?.message ?? String(err));
@@ -955,6 +972,38 @@ class Engine extends EventTarget {
   }
 
   /**
+   * setDecoder starts the decoder of a digital mode on the demodulator, or
+   * stops it (null) (DEC-002). The node switches the demodulator to the
+   * mode's default underlying mode when the current one is not allowed
+   * (DEC-003).
+   * @param {string | null} mode
+   */
+  async setDecoder(mode) {
+    const d = this.demod;
+    if (!d) return;
+    const gen = this.gen;
+    try {
+      const res = await this.request("decoder.set", { demod_id: d.id, decoder: mode });
+      if (gen !== this.gen || this.demod !== d) return;
+      const a = res?.applied ?? {};
+      if (a.mode && a.mode !== this.kept.mode) {
+        this.kept.mode = a.mode;
+        delete this.kept.bandpass;
+      }
+      this.applied(a);
+      if (HD_MODES.has(d.mode) && (this.audioStream?.rate ?? AUDIO_RATE) < HD_AUDIO_RATE) {
+        await this.request("audio.configure", { codec: this.audioCodec(), sample_rate: HD_AUDIO_RATE });
+      }
+    } catch (err) {
+      if (gen !== this.gen) return;
+      delete this.kept.decoder;
+      this.detail = err?.message ?? "";
+      this.emit("state");
+      if (this.detail) this.signal("message", { text: this.detail });
+    }
+  }
+
+  /**
    * queue merges fields into the next demod.set, sent at most every
    * TUNE_INTERVAL_MS (msg_rate, §6.9); the last value of a field wins.
    * @param {Record<string, any>} fields
@@ -1008,6 +1057,11 @@ class Engine extends EventTarget {
       d.squelchDb = sq === null || sq <= SQUELCH_MIN_DB ? null : sq;
     }
     if (a.nr && !("nr" in q)) d.nr = { enabled: !!a.nr.enabled, threshold: a.nr.threshold ?? 0 };
+    if ("decoder" in a) {
+      d.decoder = a.decoder ?? null;
+      if (d.decoder) this.kept.decoder = d.decoder;
+      else delete this.kept.decoder;
+    }
     this.emit("tune");
     if (this.detail && this.state === "listening") this.setState("listening");
   }

@@ -1,0 +1,92 @@
+// Package decodes keeps the decoded messages of the nodes (DEC-047, ADR
+// 0028): the hub is the only writer of decoded_messages, from the node
+// decode.batch events, and drops duplicates by a content hash. It serves the
+// Decodes page (FEATURE_SPEC §10.11: a paginated table with mode, device
+// and time filters; rights follow the listen policy) and the retention job.
+package decodes
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/a-h/templ"
+
+	"github.com/yohang/mesh-sdr/internal/db"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+)
+
+// Message is one stored decoded message.
+type Message struct {
+	ID        int64
+	DecodedAt time.Time
+	NodeID    string
+	DeviceID  string
+	// Origin is listener, service or mqtt.
+	Origin string
+	Mode   string
+	Family string
+	// FreqHz is the absolute RF frequency (0: unknown).
+	FreqHz int64
+	// Text is the plain-text rendering: untrusted RF text, at most 4 KiB.
+	Text    string
+	Schema  string
+	Payload json.RawMessage
+}
+
+// Device is a device whose messages a visitor may see.
+type Device struct {
+	ID   string
+	Name string
+}
+
+// Renderer renders the pages (internal/web/render).
+type Renderer interface {
+	Page(w http.ResponseWriter, r *http.Request, status int, page layout.Page, content, fragment templ.Component)
+	Error(w http.ResponseWriter, r *http.Request, status int)
+}
+
+// Deps are the dependencies of the module.
+type Deps struct {
+	DB *db.DB
+	// Visible returns the enabled devices the visitor of ctx may listen
+	// to (listen policy), by registry order: the messages they see.
+	Visible func(ctx context.Context) ([]Device, error)
+	// SignedIn reports whether the visitor of ctx is signed in.
+	SignedIn func(ctx context.Context) bool
+	// Retention returns retention.decoded_messages.max_age.
+	Retention func() time.Duration
+	// MaxRows returns retention.decoded_messages.max_rows.
+	MaxRows func() int
+	// Published, when set, is told every stored message after its commit
+	// (decode.new).
+	Published func(ctx context.Context, m Message)
+	Render    Renderer
+	Now       func() time.Time
+	Logger    *slog.Logger
+}
+
+// Module is the decodes module (an internal/http.Module).
+type Module struct {
+	d    Deps
+	repo *Repository
+
+	mu      sync.Mutex
+	pending map[string][]Message
+}
+
+// New returns the module.
+func New(d Deps) *Module {
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+
+	if d.Logger == nil {
+		d.Logger = slog.New(slog.DiscardHandler)
+	}
+
+	return &Module{d: d, repo: NewRepository(d.DB), pending: map[string][]Message{}}
+}

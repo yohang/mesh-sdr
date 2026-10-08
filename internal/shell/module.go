@@ -115,7 +115,6 @@ func (m *Module) Routes(r chi.Router) {
 	get("/", m.receiver)
 	get(ReceiverLinkPattern, m.receiverLink)
 	get(SectionMap.Path(), m.placeholder(SectionMap, "The live map is not available yet."))
-	get(SectionDecodes.Path(), m.placeholder(SectionDecodes, "Decoded messages are not available yet."))
 	get("/robots.txt", robots)
 	get("/policy", m.policyPage)
 	get(AboutPath, m.aboutPage)

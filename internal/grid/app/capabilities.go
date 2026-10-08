@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
@@ -97,19 +98,28 @@ func Rows(c ctl.Capabilities) ([]domain.Capability, error) {
 	for _, dec := range c.Decoders {
 		allOK := true
 
+		var reasons []string
+
 		for _, t := range dec.Tools {
 			allOK = allOK && t.OK
-			if err := add("tool:"+t.Name, t.OK, status(t.OK), t.Version, map[string]any{}, ""); err != nil {
+			if !t.OK && t.Reason != "" {
+				reasons = append(reasons, t.Reason)
+			}
+
+			if err := add("tool:"+t.Name, t.OK, status(t.OK), t.Version, map[string]any{}, truncate(t.Reason, 512)); err != nil {
 				return nil, err
 			}
 		}
 
-		if err := add("feature:"+dec.Cap, allOK, status(allOK), "", map[string]any{"modes": dec.Modes}, ""); err != nil {
+		// DIAG-004: a missing capability says which tool is missing.
+		reason := truncate(strings.Join(reasons, "; "), 512)
+
+		if err := add("feature:"+dec.Cap, allOK, status(allOK), "", map[string]any{"modes": dec.Modes}, reason); err != nil {
 			return nil, err
 		}
 
 		for _, m := range dec.Modes {
-			if err := add("mode:"+m, allOK, status(allOK), "", map[string]any{"cap": dec.Cap}, ""); err != nil {
+			if err := add("mode:"+m, allOK, status(allOK), "", map[string]any{"cap": dec.Cap}, reason); err != nil {
 				return nil, err
 			}
 		}

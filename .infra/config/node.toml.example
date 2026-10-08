@@ -61,11 +61,45 @@ ca_cert = "tls/ca.pem"
 # External programs. A tool is its tools.<name> absolute path when set,
 # otherwise found by name in tools.dirs, which is also the PATH of every
 # tool (the node's own PATH is never used). The node image ships
-# rtl_connector and rtl_tcp_connector (owrx_connector) in /usr/local/bin.
+# rtl_connector, rtl_tcp_connector (owrx_connector) and csdr-cwskimmer in
+# /usr/local/bin, and the decoders jt9, wsprd (wsjtx), js8 (js8call),
+# direwolf, multimon-ng and rtl_433 in /usr/bin. The node probes the
+# decoders at start and when the hub asks (DEC-001): a missing one makes
+# its digital modes unavailable.
 [tools]
 dirs = ["/usr/local/bin", "/usr/bin"]
 # rtl_connector = "/usr/local/bin/rtl_connector"
 # rtl_tcp_connector = "/usr/local/bin/rtl_tcp_connector"
+# jt9 = "/usr/bin/jt9"
+# wsprd = "/usr/bin/wsprd"
+# js8 = "/usr/bin/js8"
+# direwolf = "/usr/bin/direwolf"
+# multimon_ng = "/usr/bin/multimon-ng"
+# rtl_433 = "/usr/bin/rtl_433"
+# csdr_cwskimmer = "/usr/local/bin/csdr-cwskimmer"
+
+# Decoder resources of this node. The decoding settings are hub settings
+# (Admin › Decoding), pushed to the node.
+[decoders]
+# Workers of the batch decoders (WSJT family and JS8), shared by every
+# session; 0: half the CPU cores (at least 1).
+batch_workers = 0
+# Batch decoder jobs waiting for a worker; on overflow the oldest is
+# dropped.
+queue_length = 10
+
+# Limits of every external decoder process (DEC-048), applied between fork
+# and exec. Each decoder runs in its own workdir under node.runtime_dir,
+# argv only, and is restarted with back-off when it fails.
+[decoders.process_limits]
+# CPU niceness (0..19): the DSP keeps the priority.
+nice = 10
+# Open-files limit (RLIMIT_NOFILE).
+open_files = 1024
+# Address-space limit (RLIMIT_AS); "0" (none) leaves the memory cap to the
+# deployment (docker run --memory). Tools built with Go or with many
+# threads need 1GiB or more.
+memory = "0"
 
 # USB devices in a container: pass the bus (compose
 # devices: ["/dev/bus/usb:/dev/bus/usb"]) and the group owning it to the

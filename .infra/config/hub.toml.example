@@ -218,9 +218,18 @@ trusted_proxies = []
 # retention_days = 0                     # maximum age in days (0: no age limit)
 # max_total_bytes = 0                    # total size cap in bytes (0: no cap)
 
+# Decoded messages (DEC-047): one age for every mode, plus a row cap.
+[settings.retention.decoded_messages]
+# max_age = "30d"                        # deleted after this long (at least 1d)
+# max_rows = 1000000                     # the oldest beyond this many are deleted
+
 [settings.grid]
 # heartbeat_interval_s = 10              # node heartbeat period (1..300 s)
 # offline_after_s = 60                   # offline without heartbeat (5..3600 s, > 2 heartbeats)
+
+# Decoding (Admin › Decoding), pushed to the nodes in the desired state.
+[settings.decoders]
+# max_restarts = 5                       # unexpected exits within 5 min before a decoder gives up (1..100)
 
 [settings.invitations]
 # ttl_hours = 168                        # invitation link validity (1..720 hours)
