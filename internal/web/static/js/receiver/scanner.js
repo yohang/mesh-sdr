@@ -144,6 +144,8 @@ export class Scanner extends EventTarget {
     if (!this.running) return;
     const e = this.engine;
     if (what === "meter" && e.meter) {
+      // Readings while settling may still be of the previous bookmark.
+      if (this.phase === "settle") return;
       this.level = this.level === null ? e.meter.levelDb : this.level + (e.meter.levelDb - this.level) * SMOOTHING;
       this.check();
     } else if (what === "tune") {
