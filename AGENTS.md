@@ -54,6 +54,7 @@ internal/wire/          composition root (hand-written IoC) and the adapters bet
 internal/shared/domain/ shared kernel: domain error type, UUID, DeviceID
 internal/shared/audit/  audit Record, actors and Appender port (implemented once in internal/wire over identity's audit_log)
 internal/shared/ratelimit/ token bucket per key bounded by an LRU, client keys (IPv4 address, IPv6 /64)
+internal/shared/process/ node supervisor of external tools (ADR 0017): connectors, decoders, capability probes
 internal/<module>/      one bounded context / module, see Architecture
 docs/adr/               architecture decision records
 .infra/                 infrastructure files
@@ -66,7 +67,7 @@ Modules (bounded contexts):
 
 - `grid` (layered): nodes, enrollment, internal CA / mTLS, control channel, heartbeat, capabilities, device registry, gateway (`infra/gateway`, net/http: TLS, hub router, node media proxy) and its forward auth, node media WebSocket and access-token verification
 - `identity` (layered): users, roles, sessions, passwords, invitations, access tokens, CSRF, audit log; wired by `internal/identity/wire.go`
-- `radio` (layered): node devices (ADR 0019): device lifecycle and manager, owrx connectors under the process supervisor (`infra/process`, ADR 0017), DSP engine (`infra/engine`), media stream handler (`http`)
+- `radio` (layered): node devices (ADR 0019): device lifecycle and manager, owrx connectors under the process supervisor (`internal/shared/process`, ADR 0017), DSP engine (`infra/engine`), media stream handler (`http`)
 - `settings`: DB settings store, config locking/precedence, effective configuration, admin settings pages
 - `shell`: app shell UI (layout data, navigation, theming, static and error pages)
 - `events`: hub events bus, socket admission, `/api/ws`
@@ -107,7 +108,7 @@ Modeling rules (all modules):
 
 Goal: know everything that goes wrong or not as well as expected, plus debug info, filterable by level and by affected component — without cluttering business code.
 
-- Only `log/slog`. Loggers are injected, scoped at wiring: `logger.With(slog.String("component", "<module>.<layer>.<name>"))` (e.g. `radio.infra.process`; flat modules keep stable names such as `settings.app.store`). Never `slog.Default()` in business code.
+- Only `log/slog`. Loggers are injected, scoped at wiring: `logger.With(slog.String("component", "<module>.<layer>.<name>"))` (e.g. `radio.infra.engine`, `shared.process`; flat modules keep stable names such as `settings.app.store`). Never `slog.Default()` in business code.
 - Levels:
   - `Debug`: flow details useful for diagnosis (inputs, decisions, external calls).
   - `Info`: lifecycle and significant business events.

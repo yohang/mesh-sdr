@@ -357,10 +357,34 @@ func (n *Node) validate(o Origins) []Problem {
 		}
 	}
 
-	for name, p := range n.Tools.Paths() {
-		if !filepath.IsAbs(p) {
-			c.fail("tools."+name, CodeInvalidValue, "want an absolute path")
+	for _, t := range n.Tools.all() {
+		if t.path != "" && !filepath.IsAbs(t.path) {
+			c.fail("tools."+t.key, CodeInvalidValue, "want an absolute path")
 		}
+	}
+
+	if v := n.Decoders.BatchWorkers; v < 0 || v > 256 {
+		c.fail("decoders.batch_workers", CodeInvalidValue, "want 0..256")
+	}
+
+	if v := n.Decoders.MaxSessions; v < 0 || v > 10000 {
+		c.fail("decoders.max_sessions", CodeInvalidValue, "want 0..10000")
+	}
+
+	if v := n.Decoders.QueueLength; v < 1 || v > 1000 {
+		c.fail("decoders.queue_length", CodeInvalidValue, "want 1..1000")
+	}
+
+	if v := n.Decoders.ProcessLimits.Nice; v < 0 || v > 19 {
+		c.fail("decoders.process_limits.nice", CodeInvalidValue, "want 0..19")
+	}
+
+	if v := n.Decoders.ProcessLimits.OpenFiles; v < 16 || v > 1<<20 {
+		c.fail("decoders.process_limits.open_files", CodeInvalidValue, "want 16..1048576")
+	}
+
+	if v := n.Decoders.ProcessLimits.Memory.Bytes(); v != 0 && v < 64<<20 {
+		c.fail("decoders.process_limits.memory", CodeInvalidValue, "want 0 (none) or at least 64MiB")
 	}
 
 	for _, id := range slices.Sorted(maps.Keys(n.Devices)) {

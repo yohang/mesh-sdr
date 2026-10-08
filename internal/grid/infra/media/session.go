@@ -273,7 +273,8 @@ func (ss *session) run(ctx context.Context) {
 			ss.scoped(ctx, env, token.PermRetune)
 		case rxv1.TypeDemodCreate:
 			ss.scoped(ctx, env, token.PermDemod)
-		case rxv1.TypeDeviceDetach, rxv1.TypeStreamConfigure, rxv1.TypeAudioConfigure, rxv1.TypeDemodSet, rxv1.TypeDemodRemove:
+		case rxv1.TypeDeviceDetach, rxv1.TypeStreamConfigure, rxv1.TypeAudioConfigure, rxv1.TypeDemodSet, rxv1.TypeDemodRemove,
+			rxv1.TypeDecoderSet:
 			ss.stream(ctx, env)
 		case rxv1.TypeAck, rxv1.TypeError:
 		default:

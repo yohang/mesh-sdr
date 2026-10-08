@@ -363,7 +363,8 @@ templ capsSection(v nodeView) {
 							<tr class="border-b border-border">
 								<th scope="col" class="py-1 pr-4">Capability</th>
 								<th scope="col" class="py-1 pr-4">Status</th>
-								<th scope="col" class="py-1">Version</th>
+								<th scope="col" class="py-1 pr-4">Version</th>
+								<th scope="col" class="py-1">Detail</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -371,7 +372,8 @@ templ capsSection(v nodeView) {
 								<tr class="border-b border-border">
 									<th scope="row" class="py-1 pr-4 font-mono font-normal">{ c.Key() }</th>
 									<td class={ "py-1 pr-4", templ.KV("text-warning", !c.Available()) }>{ string(c.Status()) }</td>
-									<td class="py-1">{ orDash(c.Version()) }</td>
+									<td class="py-1 pr-4">{ orDash(c.Version()) }</td>
+									<td class="py-1">{ orDash(c.Error()) }</td>
 								</tr>
 							}
 						</tbody>

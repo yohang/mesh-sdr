@@ -9,7 +9,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/devlog"
-	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
+	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
 var epoch = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)

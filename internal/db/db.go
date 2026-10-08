@@ -256,6 +256,18 @@ func (d *DB) WithinTx(ctx context.Context, fn func(ctx context.Context) error) (
 	return nil
 }
 
+// IsConstraint reports whether err is an SQLite constraint violation
+// (SQLITE_CONSTRAINT and its extended codes): the statement failed, the
+// transaction goes on.
+func IsConstraint(err error) bool {
+	var e interface{ Code() int }
+
+	return errors.As(err, &e) && e.Code()&0xff == sqliteConstraint
+}
+
+// sqliteConstraint is SQLITE_CONSTRAINT.
+const sqliteConstraint = 19
+
 // Migrator returns the schema migrator.
 func (d *DB) Migrator() *Migrator { return d.migrator }
 

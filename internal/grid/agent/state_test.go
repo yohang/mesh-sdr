@@ -158,3 +158,20 @@ func TestDesiredStateOlderHub(t *testing.T) {
 		t.Fatalf("mixed: %+v, policy %+v, revision %d", out, s.Policy(), s.Revision())
 	}
 }
+
+// The decoding settings (decoders.max_restarts) are range-checked.
+func TestDesiredStateDecoders(t *testing.T) {
+	s := agent.NewDesiredState(nil)
+
+	ok := ctl.StatePolicy{ListenPolicy: "registered", WFMDeemphasis: 50, Decoders: &ctl.StateDecoders{MaxRestarts: 7}}
+	if out := s.Apply(ctl.StateApply{Revision: 1, Policy: ok}); len(out.Errors) != 0 || s.Policy().Decoders.MaxRestarts != 7 {
+		t.Fatalf("valid: %+v %+v", out, s.Policy())
+	}
+
+	bad := ok
+	bad.Decoders = &ctl.StateDecoders{MaxRestarts: 0}
+
+	if out := s.Apply(ctl.StateApply{Revision: 2, Policy: bad}); len(out.Errors) != 1 || s.Policy().Decoders.MaxRestarts != 7 {
+		t.Fatalf("invalid: %+v %+v", out, s.Policy())
+	}
+}

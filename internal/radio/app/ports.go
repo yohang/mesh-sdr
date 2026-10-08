@@ -131,6 +131,9 @@ type Demod interface {
 	Set(p DemodParams) error
 	// Params returns the applied parameters.
 	Params() DemodParams
+	// Tap delivers every block of demodulated audio, before framing, to
+	// fn until cancel (a decoder session, §8.3). fn must not block.
+	Tap(fn func(AudioBlock)) (cancel func())
 	Close()
 }
 

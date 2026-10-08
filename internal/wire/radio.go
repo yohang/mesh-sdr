@@ -4,17 +4,20 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"runtime"
 	"slices"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	radioapp "github.com/yohang/mesh-sdr/internal/radio/app"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	radiohttp "github.com/yohang/mesh-sdr/internal/radio/http"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/connector"
+	"github.com/yohang/mesh-sdr/internal/radio/infra/decoder"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/devlog"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
-	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
 // newRadio builds the device module of the node (GRID-002): the device
@@ -25,31 +28,34 @@ import (
 // read the desired state pushed by the hub (WFM de-emphasis, presets,
 // waterfall defaults). The sources also probe the device types of the
 // capability report (SRC-001). The connectors write their stderr lines to
-// the device log (SRC-005).
+// the device log (SRC-005). The decoders (DEC-001, DEC-002, DEC-048) run
+// their tools under the same supervisor with decoders.process_limits; the
+// toolbox probes them for the capability report.
 func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, state radiohttp.DesiredState, deviceLog *devlog.Log,
-) (*radioapp.Manager, *radiohttp.Streams, *connector.Sources, error) {
+	dec radioDecoding,
+) (*radioapp.Manager, *radiohttp.Streams, *connector.Sources, *decoder.Toolbox, error) {
 	devices, err := radioDevices(cfg, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	runtimeDir := cfg.Node.RuntimeDir
 
 	// Without a runtime dir (configs built in code), the node runs no tool.
 	if runtimeDir == "" && slices.ContainsFunc(devices, (*radiodomain.Device).Usable) {
-		return nil, nil, nil, fmt.Errorf("node.runtime_dir is required to run devices")
+		return nil, nil, nil, nil, fmt.Errorf("node.runtime_dir is required to run devices")
 	}
 
 	var sup *process.Supervisor
 
 	if runtimeDir != "" {
-		if sup, err = process.New(process.Options{RuntimeDir: runtimeDir, Logger: component(logger, "radio.infra.process")}); err != nil {
-			return nil, nil, nil, fmt.Errorf("node.runtime_dir: %w", err)
+		if sup, err = process.New(process.Options{RuntimeDir: runtimeDir, Logger: component(logger, "shared.process")}); err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("node.runtime_dir: %w", err)
 		}
 
 		n, err := process.SweepSessions(runtimeDir)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("node.runtime_dir: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("node.runtime_dir: %w", err)
 		}
 
 		if n > 0 {
@@ -59,13 +65,13 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 
 	lo, hi, err := config.ParsePortRange(cfg.Node.IPCPortRange)
 	if err != nil && len(devices) > 0 {
-		return nil, nil, nil, fmt.Errorf("node.ipc_port_range: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("node.ipc_port_range: %w", err)
 	}
 
 	var ports *connector.Ports
 	if err == nil {
 		if ports, err = connector.NewPorts(lo, hi); err != nil {
-			return nil, nil, nil, fmt.Errorf("node.ipc_port_range: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("node.ipc_port_range: %w", err)
 		}
 	}
 
@@ -79,10 +85,32 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 		Reporter: reporter, Logger: component(logger, "radio.app.manager"), MaxDemods: cfg.Node.MaxDemods,
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
-	return m, radiohttp.NewStreams(m, state, component(logger, "radio.http.streams")), sources, nil
+	tools := process.Tools{Paths: cfg.Tools.Paths(), Dirs: cfg.Tools.Dirs}
+	toolbox := decoder.NewToolbox(decoder.ToolboxOptions{Supervisor: sup, Tools: tools, Logger: component(logger, "radio.infra.decoder")})
+	lim := cfg.Decoders.ProcessLimits
+	core := uint64(0)
+	runner := decoder.NewRunner(decoder.Options{
+		Supervisor: sup, Tools: tools, MaxRestarts: dec.maxRestarts, Reprobe: dec.reprobe, Logger: component(logger, "radio.infra.decoder"),
+		Limits: process.Limits{
+			Nice: lim.Nice, OpenFiles: uint64(lim.OpenFiles), AddressSpace: uint64(lim.Memory.Bytes()), Core: &core, NoNewPrivs: true,
+		},
+	})
+	sessions := cfg.Decoders.SessionCap(runtime.NumCPU())
+	decoding := radiohttp.Decoding{Decoders: radioapp.NewDecoders(toolbox, runner, sessions, time.Now), Publisher: dec.publisher}
+
+	return m, radiohttp.NewStreams(m, state, decoding, component(logger, "radio.http.streams")), sources, toolbox, nil
+}
+
+// radioDecoding are the node services the decoders use: the hub
+// (decode.batch), the decoding settings of the desired state and the
+// capability report.
+type radioDecoding struct {
+	publisher   radioapp.DecodePublisher
+	maxRestarts func() int
+	reprobe     func()
 }
 
 // radioDevices builds the devices of the node configuration, ordered by id.

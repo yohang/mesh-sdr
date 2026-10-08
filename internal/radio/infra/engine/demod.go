@@ -34,6 +34,9 @@ type Mode struct {
 	ChannelRate float64
 	// HD modes need an HD output rate (dsp.HDOutputRates).
 	HD bool
+	// Cap is the capability that advertises the mode (DEC-001):
+	// cap:analog unless the mode has its own.
+	Cap string
 }
 
 // AGC profile of each analog family (DEM-009: one constant per family,
@@ -44,8 +47,13 @@ const (
 	agcNFM = dsp.AGCSlow
 )
 
+// AnalogCap is the capability of the analog demodulators of the node.
+const AnalogCap = "cap:analog"
+
 // modes is the analog mode catalogue. CW is the SSB chain (DEM-005): its
-// default pass band sits around an 800 Hz tone, the BFO offset.
+// default pass band sits around an 800 Hz tone, the BFO offset. DATA and
+// DATA-L (usbd, lsbd: DEM-013) are the SSB chain at 48 kHz on the HD path,
+// for digital modes, each with its own capability.
 var modes = []Mode{
 	{Name: "am", Demod: dsp.DemodAM, Low: -4000, High: 4000, MinHz: -10000, MaxHz: 10000, Squelch: true, AGC: agcAM, ChannelRate: dsp.NarrowChannelRate},
 	{Name: "sam", Demod: dsp.DemodSAM, Low: -4000, High: 4000, MinHz: -10000, MaxHz: 10000, Squelch: true, AGC: agcAM, ChannelRate: dsp.NarrowChannelRate},
@@ -54,16 +62,47 @@ var modes = []Mode{
 	{Name: "lsb", Demod: dsp.DemodSSB, Low: -2700, High: -300, MinHz: -5000, MaxHz: 0, Squelch: true, AGC: agcSSB, ChannelRate: dsp.NarrowChannelRate},
 	{Name: "cw", Demod: dsp.DemodSSB, Low: 650, High: 950, MinHz: -2000, MaxHz: 2000, Squelch: true, AGC: agcSSB, ChannelRate: dsp.NarrowChannelRate},
 	{Name: "wfm", Demod: dsp.DemodWFM, Low: -75000, High: 75000, MinHz: -90000, MaxHz: 90000, Squelch: true, AGC: dsp.AGCOff, ChannelRate: dsp.WideChannelRate, HD: true},
+	{Name: "usbd", Demod: dsp.DemodSSB, Low: 0, High: 24000, MinHz: 0, MaxHz: 24000, Squelch: true, AGC: agcSSB, ChannelRate: dsp.DataChannelRate, HD: true, Cap: "cap:usbd"},
+	{Name: "lsbd", Demod: dsp.DemodSSB, Low: -24000, High: 0, MinHz: -24000, MaxHz: 0, Squelch: true, AGC: agcSSB, ChannelRate: dsp.DataChannelRate, HD: true, Cap: "cap:lsbd"},
 }
 
 // MinBandwidth is the narrowest pass band (RX-020).
 const MinBandwidth = 100.0
 
-// Modes returns the names of the analog modes, for the capability report.
+// Modes returns the names of the analog modes.
 func Modes() []string {
 	out := make([]string, len(modes))
 	for i, m := range modes {
 		out[i] = m.Name
+	}
+
+	return out
+}
+
+// Capability is a capability of the analog demodulators and its modes.
+type Capability struct {
+	Cap   string
+	Modes []string
+}
+
+// Capabilities returns the capabilities of the analog modes, for the
+// capability report: cap:analog, then the modes that have their own.
+func Capabilities() []Capability {
+	out := []Capability{{Cap: AnalogCap}}
+
+	for _, m := range modes {
+		c := m.Cap
+		if c == "" {
+			c = AnalogCap
+		}
+
+		i := slices.IndexFunc(out, func(x Capability) bool { return x.Cap == c })
+		if i < 0 {
+			out = append(out, Capability{Cap: c})
+			i = len(out) - 1
+		}
+
+		out[i].Modes = append(out[i].Modes, m.Name)
 	}
 
 	return out
@@ -165,6 +204,40 @@ type demod struct {
 	params app.DemodParams
 	gen    int
 	b      *binding
+
+	tapMu   sync.Mutex
+	taps    map[int]func(app.AudioBlock)
+	nextTap int
+}
+
+// Tap implements app.Demod.
+func (d *demod) Tap(fn func(app.AudioBlock)) func() {
+	d.tapMu.Lock()
+	defer d.tapMu.Unlock()
+
+	if d.taps == nil {
+		d.taps = map[int]func(app.AudioBlock){}
+	}
+
+	id := d.nextTap
+	d.nextTap++
+	d.taps[id] = fn
+
+	return func() {
+		d.tapMu.Lock()
+		delete(d.taps, id)
+		d.tapMu.Unlock()
+	}
+}
+
+// tap delivers a block of audio to the taps.
+func (d *demod) tap(b app.AudioBlock) {
+	d.tapMu.Lock()
+	defer d.tapMu.Unlock()
+
+	for _, fn := range d.taps {
+		fn(b)
+	}
 }
 
 func (d *demod) poke() {
@@ -445,6 +518,10 @@ func (d *demod) run() {
 			d.e.log.Error("demodulator failed", slog.Any("error", err))
 
 			continue
+		}
+
+		if len(res.Audio) > 0 {
+			d.tap(app.AudioBlock{Samples: res.Audio, Rate: framer.Rate(), Time: meta.Time, Discontinuity: g != nil})
 		}
 
 		framer.Push(res.Audio, meta.Time, !res.Open, func(f dsp.AudioFrame) {

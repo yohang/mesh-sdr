@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
-	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
+	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
 // DefaultSize is the number of records kept per device (SRC-005).

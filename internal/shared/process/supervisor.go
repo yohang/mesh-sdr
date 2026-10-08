@@ -1,13 +1,13 @@
-// Package process supervises the external tools of a node (SDR connectors
-// now, decoders and capability probes later): TECHNICAL_SPEC §8.2, §8.4,
+// Package process supervises the external tools of a node (SDR connectors,
+// decoders and capability probes): TECHNICAL_SPEC §8.2, §8.4,
 // ADR 0017. It spawns argv only with a scrubbed environment in a private
 // workdir under node.runtime_dir, puts each tool in its own process group
 // with Pdeathsig, applies limits through the exec helper, classifies
 // stderr and exits, applies timeouts and restart back-off, and reports
 // every transition to a non-blocking sink. Linux only.
 //
-// It lives in the radio module, the first that needs it (ADR 0017 E2), and
-// moves to a shared technical package when the decoder supervisor arrives.
+// It is a shared technical package (ADR 0017 E1): the device manager and the
+// decoder sessions of the radio module and the capability probes use it.
 package process
 
 import (

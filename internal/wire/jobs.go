@@ -11,6 +11,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 
 	"github.com/yohang/mesh-sdr/internal/db"
+	"github.com/yohang/mesh-sdr/internal/decodes"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/identity"
@@ -20,8 +21,8 @@ import (
 
 // newJobs builds the hub's jobs scheduler with the retention jobs, and the
 // retention view (ADM-011, ADR 0010).
-func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobs.RetentionValues, audit audit.Appender,
-	filesRetention *files.Retention, filesPolicy func() files.RetentionPolicy, logger *slog.Logger,
+func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, decoded *decodes.Module, values jobs.RetentionValues,
+	audit audit.Appender, filesRetention *files.Retention, filesPolicy func() files.RetentionPolicy, logger *slog.Logger,
 ) (*jobs.Scheduler, *jobs.Retention, error) {
 	sched := jobs.NewScheduler(jobs.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.app.scheduler"))
 	sched.Register(idm.Reaper, identityapp.SessionReapEvery)
@@ -40,6 +41,8 @@ func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobs.
 	// FIL-004: the files the nodes sent, and the files left incomplete.
 	sched.Register(filesRetention, files.RetentionEvery)
 
+	sched.Register(decoded.Purge(), decodes.PurgeEvery)
+
 	sessions, err := jobs.NewTableStats(adapter, "sessions")
 	if err != nil {
 		return nil, nil, err
@@ -55,6 +58,11 @@ func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobs.
 		return nil, nil, err
 	}
 
+	decodedMessages, err := jobs.NewTableStats(adapter, "decoded_messages")
+	if err != nil {
+		return nil, nil, err
+	}
+
 	stores := []jobs.Store{
 		{Name: "sessions", Label: "Ended sessions", SettingKey: "retention.sessions", Job: identityapp.JobSessionsReap, Stats: sessions},
 		{Name: "audit_log", Label: "Audit log", SettingKey: "retention.audit_log", Job: identityapp.JobAuditPurge, Stats: auditLog},
@@ -62,6 +70,10 @@ func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobs.
 		{
 			Name: "files", Label: "Files", Job: files.JobRetention, Stats: filesRetention,
 			Policy: func() string { return filesPolicy().String() },
+		},
+		{
+			Name: "decoded_messages", Label: "Decoded messages", SettingKey: "retention.decoded_messages.max_age", Job: decodes.JobPurge,
+			Stats: decodedMessages,
 		},
 	}
 

@@ -63,7 +63,7 @@ func TestNavigation(t *testing.T) {
 	}{
 		{"visitor home", false, "/", []string{"/ receiver*", "/map map", "/decodes decodes", "/files files"}},
 		{"visitor map", false, "/map", []string{"/ receiver", "/map map*", "/decodes decodes", "/files files"}},
-		{"admin decodes", true, "/decodes", []string{"/ receiver", "/map map", "/decodes decodes*", "/files files", "/admin admin"}},
+		{"admin map", true, "/map", []string{"/ receiver", "/map map*", "/decodes decodes", "/files files", "/admin admin"}},
 		{"admin policy", true, "/policy", []string{"/ receiver", "/map map", "/decodes decodes", "/files files", "/admin admin"}},
 	}
 
@@ -90,7 +90,6 @@ func TestSectionPages(t *testing.T) {
 	tests := []struct{ path, title, section, text string }{
 		{"/", "<title>MeshSDR</title>", "receiver", `<script id="msdr-receiver-config" type="application/json"`},
 		{"/map", "<title>Map · MeshSDR</title>", "map", "The live map is not available yet."},
-		{"/decodes", "<title>Decodes · MeshSDR</title>", "decodes", "Decoded messages are not available yet."},
 	}
 
 	for _, tt := range tests {

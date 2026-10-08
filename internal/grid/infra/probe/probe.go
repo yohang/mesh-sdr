@@ -22,33 +22,30 @@ import (
 
 // Prober implements agent.Prober.
 type Prober struct {
-	version string
-	devices func() []ctl.Device
-	drivers func(context.Context) []ctl.SDRDriver
-	modes   []string
-	started time.Time
-	root    string // filesystem root, "/" except in tests
+	version  string
+	devices  func() []ctl.Device
+	drivers  func(context.Context) []ctl.SDRDriver
+	decoders func(context.Context) []ctl.Decoder
+	started  time.Time
+	root     string // filesystem root, "/" except in tests
 
 	mu       sync.Mutex
 	lastIdle uint64
 	lastAll  uint64
 }
 
-// AnalogCap is the decoder capability of the node's own analog
-// demodulators.
-const AnalogCap = "cap:analog"
-
 // AudioCodecs are the audio codecs of the node media streams.
 var AudioCodecs = []string{media.CodecADPCM, media.CodecPCM}
 
 // New returns a prober. devices lists the devices of the node config,
-// drivers probes the device types the node runs (SRC-001), modes the
-// analog modes of the node DSP (reported as the AnalogCap decoder, so the
-// hub derives their mode:* capabilities). devices and drivers may be nil.
-func New(version string, devices func() []ctl.Device, drivers func(context.Context) []ctl.SDRDriver, modes []string,
-	started time.Time,
+// drivers probes the device types the node runs (SRC-001), decoders the
+// decoder capabilities (DEC-001: the analog demodulators, the decoder
+// tools and their modes, from which the hub derives the mode:*
+// capabilities). devices, drivers and decoders may be nil.
+func New(version string, devices func() []ctl.Device, drivers func(context.Context) []ctl.SDRDriver,
+	decoders func(context.Context) []ctl.Decoder, started time.Time,
 ) *Prober {
-	return &Prober{version: version, devices: devices, drivers: drivers, modes: modes, started: started, root: "/"}
+	return &Prober{version: version, devices: devices, drivers: drivers, decoders: decoders, started: started, root: "/"}
 }
 
 func (p *Prober) read(path string) []byte {
@@ -76,8 +73,8 @@ func (p *Prober) Capabilities(ctx context.Context) ctl.Capabilities {
 	}
 
 	decoders := []ctl.Decoder{}
-	if len(p.modes) > 0 {
-		decoders = append(decoders, ctl.Decoder{Cap: AnalogCap, Tools: []ctl.Tool{}, Modes: p.modes})
+	if p.decoders != nil {
+		decoders = p.decoders(ctx)
 	}
 
 	return ctl.Capabilities{

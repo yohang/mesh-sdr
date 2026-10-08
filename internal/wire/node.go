@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
@@ -27,9 +28,11 @@ import (
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	radioapp "github.com/yohang/mesh-sdr/internal/radio/app"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	radiohttp "github.com/yohang/mesh-sdr/internal/radio/http"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/connector"
+	"github.com/yohang/mesh-sdr/internal/radio/infra/decoder"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/devlog"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
 	"github.com/yohang/mesh-sdr/internal/version"
@@ -43,7 +46,26 @@ type nodeOptions struct {
 	devices        func() []ctl.Device
 	mediaHeartbeat time.Duration
 	// outbox is told the file outbox (tests send files through it).
-	outbox func(*agent.Outbox)
+	outbox        func(*agent.Outbox)
+	probeDecoders bool
+}
+
+// WithDecoderProbe adds the decoder capabilities of the node to the
+// reports of a prober set by WithProber (tests that run decoders).
+func WithDecoderProbe() NodeOption { return func(o *nodeOptions) { o.probeDecoders = true } }
+
+// decoderProber adds the decoder capabilities to a prober's reports.
+type decoderProber struct {
+	agent.Prober
+
+	decoders func(context.Context) []ctl.Decoder
+}
+
+func (p decoderProber) Capabilities(ctx context.Context) ctl.Capabilities {
+	c := p.Prober.Capabilities(ctx)
+	c.Decoders = append(c.Decoders, p.decoders(ctx)...)
+
+	return c
 }
 
 // WithProber replaces the host prober.
@@ -101,8 +123,12 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 		o.devices = func() []ctl.Device { return devices }
 	}
 
-	// The capability report probes the drivers of the radio built below.
-	var sources *connector.Sources
+	// The capability report probes the drivers and the decoder tools of the
+	// radio built below.
+	var (
+		sources *connector.Sources
+		toolbox *decoder.Toolbox
+	)
 
 	if o.prober == nil {
 		drivers := func(ctx context.Context) []ctl.SDRDriver {
@@ -113,7 +139,10 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 
 			return out
 		}
-		o.prober = probe.New(version.String(), o.devices, drivers, engine.Modes(), time.Now())
+		decoders := func(ctx context.Context) []ctl.Decoder { return decoderCapabilities(ctx, toolbox) }
+		o.prober = probe.New(version.String(), o.devices, drivers, decoders, time.Now())
+	} else if o.probeDecoders {
+		o.prober = decoderProber{Prober: o.prober, decoders: func(ctx context.Context) []ctl.Decoder { return decoderCapabilities(ctx, toolbox) }}
 	}
 
 	ag, err := agent.New(agent.Options{
@@ -144,7 +173,21 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	// pushed to the hub over the control channel.
 	deviceLog := devlog.New(slices.Collect(maps.Keys(cfg.Devices)), devlog.DefaultSize, time.Now)
 
-	manager, streams, sources, err := newRadio(cfg, logger, deviceReporter{ag: ag, log: deviceLog}, state, deviceLog)
+	// Decoders: decoded messages go to the hub, the crash-loop threshold
+	// comes with the desired state, and a missing tool re-probes the node.
+	dec := radioDecoding{
+		publisher: decodePublisher{ag: ag},
+		maxRestarts: func() int {
+			if d := state.Policy().Decoders; d != nil {
+				return d.MaxRestarts
+			}
+
+			return 0
+		},
+		reprobe: (&coalesced{run: func() { ag.EmitCapabilities(context.Background()) }}).trigger,
+	}
+
+	manager, streams, sources, toolbox, err := newRadio(cfg, logger, deviceReporter{ag: ag, log: deviceLog}, state, deviceLog, dec)
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +255,90 @@ func (r deviceReporter) DeviceState(s radiodomain.Snapshot) {
 			Seq: seq, DeviceID: s.ID, State: string(s.State), Reason: s.Reason, ActivePresetID: s.ActivePreset,
 			CenterFreq: center, SampleRate: rate, Listeners: s.Listeners,
 		}
+	})
+}
+
+// decoderCapabilities is the decoders part of the capability report
+// (DEC-001): the analog demodulators, then the probed decoder tools.
+func decoderCapabilities(ctx context.Context, toolbox *decoder.Toolbox) []ctl.Decoder {
+	out := []ctl.Decoder{}
+
+	for _, c := range engine.Capabilities() {
+		out = append(out, ctl.Decoder{Cap: c.Cap, Tools: []ctl.Tool{}, Modes: c.Modes})
+	}
+
+	if toolbox == nil {
+		return out
+	}
+
+	for _, c := range toolbox.Probe(ctx) {
+		d := ctl.Decoder{Cap: c.Cap, Tools: make([]ctl.Tool, 0, len(c.Tools)), Modes: c.Modes}
+		for _, t := range c.Tools {
+			d.Tools = append(d.Tools, ctl.Tool{Name: t.Name, Version: t.Version, OK: t.OK, Reason: t.Reason})
+		}
+
+		out = append(out, d)
+	}
+
+	return out
+}
+
+// coalesced runs run in the background, at most once at a time: the
+// triggers that come while it runs make one more run (several decoder
+// sessions losing their tool re-probe the node once).
+type coalesced struct {
+	run func()
+
+	mu      sync.Mutex
+	running bool
+	dirty   bool
+}
+
+func (c *coalesced) trigger() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.running {
+		c.dirty = true
+
+		return
+	}
+
+	c.running = true
+
+	go func() {
+		for {
+			c.run()
+
+			c.mu.Lock()
+			if !c.dirty {
+				c.running = false
+				c.mu.Unlock()
+
+				return
+			}
+
+			c.dirty = false
+			c.mu.Unlock()
+		}
+	}()
+}
+
+// decodePublisher sends decoded messages to the hub (decode.batch, one
+// message per event; ClassDecode in the event buffer).
+type decodePublisher struct{ ag *agent.Agent }
+
+func (p decodePublisher) Decoded(d radioapp.Decoded) {
+	source := ctl.SourceListener
+	if d.CID == "" {
+		source = ctl.SourceBackground
+	}
+
+	p.ag.Emit(rxv1.TypeDecodeBatch, "", agent.ClassDecode, func(seq int64) any {
+		return ctl.DecodeBatch{Seq: seq, Decodes: []ctl.Decode{{
+			DeviceID: d.DeviceID, SessionID: d.SessionID, PresetID: d.PresetID, Mode: d.Mode, Family: d.Family, Freq: d.FreqHz,
+			TS: d.Time.UnixMilli(), Source: source, CID: d.CID, Schema: d.Schema, Text: d.Text, Payload: d.Payload,
+		}}}
 	})
 }
 

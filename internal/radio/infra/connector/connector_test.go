@@ -19,8 +19,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/connector"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
-	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
 var toolDir string

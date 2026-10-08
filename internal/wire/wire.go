@@ -430,7 +430,16 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		Policy: filesPolicy, Logger: component(logger, "files.http.gallery"),
 	})
 
-	scheduler, retention, err := newJobs(adapter, idm, sch, settingsStore, auditLog, filesRetention, filesPolicy, logger)
+	// Decoded messages (DEC-047): stored from the control channels, shown
+	// on the Decodes page.
+	var features *gridapp.Features
+
+	decoded := newDecodes(decodesDeps{
+		adapter: adapter, grid: g, broker: broker, policies: policies, identity: idm.HTTP,
+		features: func() *gridapp.Features { return features }, store: settingsStore, render: shellModule.Renderer, now: now, logger: logger,
+	})
+
+	scheduler, retention, err := newJobs(adapter, idm, sch, decoded, settingsStore, auditLog, filesRetention, filesPolicy, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jobs: %w", err)
 	}
@@ -442,7 +451,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, err
 	}
 
-	features := gridapp.NewFeatures(gridapp.FeaturesDeps{
+	features = gridapp.NewFeatures(gridapp.FeaturesDeps{
 		Devices: gridsqlite.NewDeviceRepository(adapter), Caps: gridsqlite.NewCapabilityRepository(adapter),
 		Policy: storeListenPolicy{store: settingsStore}, Links: g.links(), Nodes: g.nodeRepo, Listeners: g.presence,
 		Telemetry: g.history, PresetName: sch.presetName,
@@ -526,6 +535,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 			r.Method(http.MethodGet, "/status.json", status.Alias())
 		}),
 		events,
+		decoded,
 		shellModule.HTTP,
 	)
 

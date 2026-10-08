@@ -36,7 +36,11 @@ func TestProberReadsProc(t *testing.T) {
 		return []ctl.SDRDriver{{Type: "rtl_sdr", Available: true}, {Type: "rtl_tcp", Reason: "tool missing"}}
 	}
 
-	p := New("1.2.3", nil, drivers, []string{"am", "nfm"}, time.Now().Add(-time.Minute))
+	decoders := func(context.Context) []ctl.Decoder {
+		return []ctl.Decoder{{Cap: "cap:analog", Tools: []ctl.Tool{}, Modes: []string{"am", "nfm"}}}
+	}
+
+	p := New("1.2.3", nil, drivers, decoders, time.Now().Add(-time.Minute))
 	p.root = root + "/"
 
 	caps := p.Capabilities(context.Background())
@@ -44,7 +48,7 @@ func TestProberReadsProc(t *testing.T) {
 		t.Errorf("capabilities = %+v", caps)
 	}
 
-	if len(caps.Decoders) != 1 || caps.Decoders[0].Cap != AnalogCap || len(caps.Decoders[0].Modes) != 2 {
+	if len(caps.Decoders) != 1 || caps.Decoders[0].Cap != "cap:analog" || len(caps.Decoders[0].Modes) != 2 {
 		t.Errorf("analog modes = %+v", caps.Decoders)
 	}
 

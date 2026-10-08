@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +48,24 @@ func TestCapabilityRows(t *testing.T) {
 
 	if got["driver:soapy:sdrplay"].Status() != domain.CapabilityMissing || got["driver:soapy:sdrplay"].Error() != "no module" {
 		t.Errorf("missing driver = %+v", got["driver:soapy:sdrplay"])
+	}
+
+	// DIAG-004: a missing decoder tool says why, on the tool, the
+	// capability and its modes.
+	missing := sampleCaps()
+	missing.Decoders = []ctl.Decoder{{Cap: "cap:multimon-ng", Tools: []ctl.Tool{{Name: "multimon-ng", Reason: "multimon-ng not found"}}, Modes: []string{"selcall"}}}
+
+	rows, err = app.Rows(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range rows {
+		if strings.HasPrefix(r.Key(), "tool:") || strings.HasPrefix(r.Key(), "feature:") || strings.HasPrefix(r.Key(), "mode:") {
+			if r.Available() || r.Error() != "multimon-ng not found" {
+				t.Errorf("%s = %+v", r.Key(), r)
+			}
+		}
 	}
 
 	// The hash ignores seq.

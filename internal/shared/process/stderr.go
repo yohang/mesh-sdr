@@ -73,6 +73,19 @@ func readLines(r io.Reader, rules []Rule, sink lineSink) {
 	}
 }
 
+// ScanLines reads the output of a tool line by line, like its stderr: lines
+// are capped at 4 KiB (the rest is dropped and the line marked truncated)
+// and sanitised (invalid UTF-8 replaced, control characters other than \t
+// removed). It returns at EOF or on a read error. Decoder adapters parse
+// stdout with it (§8.4 typed output rule 4: RF-derived strings are data).
+func ScanLines(r io.Reader, fn func(text string, truncated bool)) {
+	readLines(r, nil, lineFunc(func(l Line) { fn(l.Text, l.Truncated) }))
+}
+
+type lineFunc func(Line)
+
+func (f lineFunc) line(l Line) { f(l) }
+
 func classify(rules []Rule, raw string, truncated bool) Line {
 	text := sanitize(raw)
 	c := ClassUnknown

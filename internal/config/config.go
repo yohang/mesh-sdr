@@ -153,7 +153,8 @@ type Node struct {
 	TLS      NodeTLS                 `toml:"tls" envPrefix:"TLS__" jsonschema:"description=Node certificate for hub <-> node mTLS\\, written by meshsdr node enroll."`
 	HubTrust HubTrust                `toml:"hub_trust" envPrefix:"HUB_TRUST__" jsonschema:"description=Trust in the hub: CA\\, expected hub identity\\, enrollment token."`
 	Devices  map[string]DeviceConfig `toml:"devices" env:"-" jsonschema:"description=SDR devices of this node\\, keyed by device id (^[a-z0-9][a-z0-9_-]{0\\,62}$\\, unique across the hub). Mirrored read-only into the hub device registry. File-only (no env override)."`
-	Tools    Tools                   `toml:"tools" envPrefix:"TOOLS__" jsonschema:"description=External programs run by the node (SDR connectors)."`
+	Tools    Tools                   `toml:"tools" envPrefix:"TOOLS__" jsonschema:"description=External programs run by the node (SDR connectors and decoders)."`
+	Decoders NodeDecoders            `toml:"decoders" envPrefix:"DECODERS__" jsonschema:"description=Decoder resources of this node."`
 	Log      Log                     `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
 }
 
@@ -164,18 +165,43 @@ type Tools struct {
 	Dirs            []string `toml:"dirs" env:"DIRS" jsonschema:"description=Absolute directories searched for tools without a path; also the PATH of every tool. The node's own PATH is never used."`
 	RTLConnector    string   `toml:"rtl_connector" env:"RTL_CONNECTOR" jsonschema:"description=Absolute path of rtl_connector (owrx_connector\\, rtl_sdr devices)."`
 	RTLTCPConnector string   `toml:"rtl_tcp_connector" env:"RTL_TCP_CONNECTOR" jsonschema:"description=Absolute path of rtl_tcp_connector (owrx_connector\\, rtl_tcp devices)."`
+	JT9             string   `toml:"jt9" env:"JT9" jsonschema:"description=Absolute path of jt9 (WSJT-X decoders)."`
+	WSPRD           string   `toml:"wsprd" env:"WSPRD" jsonschema:"description=Absolute path of wsprd (WSJT-X WSPR decoder)."`
+	JS8             string   `toml:"js8" env:"JS8" jsonschema:"description=Absolute path of js8 (JS8Call decoder)."`
+	Direwolf        string   `toml:"direwolf" env:"DIREWOLF" jsonschema:"description=Absolute path of direwolf (packet and APRS)."`
+	MultimonNG      string   `toml:"multimon_ng" env:"MULTIMON_NG" jsonschema:"description=Absolute path of multimon-ng (paging\\, SelCall\\, ZVEI\\, EAS)."`
+	RTL433          string   `toml:"rtl_433" env:"RTL_433" jsonschema:"description=Absolute path of rtl_433 (ISM sensors)."`
+	CWSkimmer       string   `toml:"csdr_cwskimmer" env:"CSDR_CWSKIMMER" jsonschema:"description=Absolute path of csdr-cwskimmer (CW and RTTY skimmers)."`
 }
 
-// Paths returns the configured tool paths by tool name.
+// tool is one [tools] path key: its TOML key, the program name and its
+// path.
+type tool struct {
+	key, name, path string
+}
+
+func (t Tools) all() []tool {
+	return []tool{
+		{"rtl_connector", "rtl_connector", t.RTLConnector},
+		{"rtl_tcp_connector", "rtl_tcp_connector", t.RTLTCPConnector},
+		{"jt9", "jt9", t.JT9},
+		{"wsprd", "wsprd", t.WSPRD},
+		{"js8", "js8", t.JS8},
+		{"direwolf", "direwolf", t.Direwolf},
+		{"multimon_ng", "multimon-ng", t.MultimonNG},
+		{"rtl_433", "rtl_433", t.RTL433},
+		{"csdr_cwskimmer", "csdr-cwskimmer", t.CWSkimmer},
+	}
+}
+
+// Paths returns the configured tool paths by program name.
 func (t Tools) Paths() map[string]string {
 	out := map[string]string{}
 
-	if t.RTLConnector != "" {
-		out["rtl_connector"] = t.RTLConnector
-	}
-
-	if t.RTLTCPConnector != "" {
-		out["rtl_tcp_connector"] = t.RTLTCPConnector
+	for _, tl := range t.all() {
+		if tl.path != "" {
+			out[tl.name] = tl.path
+		}
 	}
 
 	return out
@@ -263,6 +289,44 @@ type NodeSection struct {
 	WSNotSentLowat Size   `toml:"ws_notsent_lowat" env:"WS_NOTSENT_LOWAT" jsonschema:"description=TCP_NOTSENT_LOWAT of the node API sockets: bounds the kernel send buffering of media WebSockets (ADR 0004)."`
 }
 
+// NodeDecoders is the [decoders] table of the node: its decoder resources
+// (TECHNICAL_SPEC §8.3 rule 6, DEC-025, DEC-048). The decoding settings
+// themselves are hub DB settings pushed in the desired state.
+type NodeDecoders struct {
+	BatchWorkers  int           `toml:"batch_workers" env:"BATCH_WORKERS" jsonschema:"minimum=0,maximum=256,description=Workers of the batch decoders (WSJT family and JS8)\\, shared by every session; 0: half the CPU cores (at least 1)."`
+	QueueLength   int           `toml:"queue_length" env:"QUEUE_LENGTH" jsonschema:"minimum=1,maximum=1000,description=Batch decoder jobs waiting for a worker; on overflow the oldest job is dropped."`
+	MaxSessions   int           `toml:"max_sessions" env:"MAX_SESSIONS" jsonschema:"minimum=0,maximum=10000,description=Decoder sessions the node runs at once\\, all listeners together; beyond it a decoder is unavailable (node busy). 0: twice the CPU cores."`
+	ProcessLimits ProcessLimits `toml:"process_limits" envPrefix:"PROCESS_LIMITS__" jsonschema:"description=Limits of every external decoder process (DEC-048)\\, applied between fork and exec."`
+}
+
+// BatchWorkerCount returns the batch workers: BatchWorkers, or half of
+// cores (at least 1) when it is 0.
+func (d NodeDecoders) BatchWorkerCount(cores int) int {
+	if d.BatchWorkers > 0 {
+		return d.BatchWorkers
+	}
+
+	return max(1, cores/2)
+}
+
+// SessionCap returns the decoder session cap: MaxSessions, or twice cores
+// when it is 0.
+func (d NodeDecoders) SessionCap(cores int) int {
+	if d.MaxSessions > 0 {
+		return d.MaxSessions
+	}
+
+	return max(1, 2*cores)
+}
+
+// ProcessLimits is the [decoders.process_limits] table (DEC-048, ADR 0017
+// decision 7).
+type ProcessLimits struct {
+	Nice      int  `toml:"nice" env:"NICE" jsonschema:"minimum=0,maximum=19,description=CPU niceness of the decoder processes (0 to 19): the DSP keeps the priority."`
+	OpenFiles int  `toml:"open_files" env:"OPEN_FILES" jsonschema:"minimum=16,maximum=1048576,description=Open-files limit (RLIMIT_NOFILE) of each decoder process."`
+	Memory    Size `toml:"memory" env:"MEMORY" jsonschema:"description=Address-space limit (RLIMIT_AS) of each decoder process; 0: none (the deployment caps the node as a whole). Tools built with Go or with many threads need 1GiB or more."`
+}
+
 // EventBuffer is the [node.event_buffer] table.
 type EventBuffer struct {
 	MaxEvents int  `toml:"max_events" env:"MAX_EVENTS" jsonschema:"minimum=100,maximum=10000000,description=Maximum number of buffered events."`
@@ -297,7 +361,11 @@ func DefaultNode() Node {
 			RuntimeDir: "/run/meshsdr-node", IPCPortRange: "40000-40999", WSNotSentLowat: MustSize("16KiB"), MaxDemods: 32,
 		},
 		Tools: Tools{Dirs: []string{"/usr/local/bin", "/usr/bin"}},
-		Log:   defaultLog(),
+		Decoders: NodeDecoders{
+			QueueLength:   10,
+			ProcessLimits: ProcessLimits{Nice: 10, OpenFiles: 1024},
+		},
+		Log: defaultLog(),
 	}
 }
 

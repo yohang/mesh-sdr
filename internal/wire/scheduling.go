@@ -288,6 +288,7 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 			Waterfall: &ctl.StateWaterfall{
 				MinDB: s.settings.Int("waterfall.min_db"), MaxDB: s.settings.Int("waterfall.max_db"), Palette: s.settings.String("waterfall.palette"),
 			},
+			Decoders: &ctl.StateDecoders{MaxRestarts: s.settings.Int("decoders.max_restarts")},
 		},
 	}
 
