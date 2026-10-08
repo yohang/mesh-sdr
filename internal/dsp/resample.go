@@ -25,12 +25,12 @@ func NewS16Converter(out int) *S16Converter { return &S16Converter{out: out} }
 // Convert returns audio at rate as s16le at the output rate. The result is
 // valid until the next call. A new input rate starts a new resampler.
 func (c *S16Converter) Convert(audio []float32, rate int) ([]byte, error) {
+	if rate <= 0 || c.out <= 0 {
+		return nil, fmt.Errorf("%w: decoder input %d → %d Hz", ErrChain, rate, c.out)
+	}
+
 	if rate != c.in {
 		c.Close()
-
-		if rate <= 0 || c.out <= 0 {
-			return nil, fmt.Errorf("%w: decoder input %d → %d Hz", ErrChain, rate, c.out)
-		}
 
 		if rate != c.out {
 			rs, err := csdr.NewResampler(float64(rate), c.out)
