@@ -17,6 +17,7 @@ var AdminSections = []AdminSection{
 	{ID: "invitations", Label: "Invitations", Href: "/admin/invitations"},
 	{ID: "look-and-feel", Label: "Look & feel", Href: "/admin/look-and-feel"},
 	{ID: "nodes", Label: "Nodes", Href: "/admin/nodes"},
+	{ID: "node-health", Label: "Node health", Href: "/admin/grid"},
 	{ID: "devices", Label: "Devices", Href: "/admin/devices"},
 	{ID: "presets", Label: "Presets", Href: "/admin/presets"},
 	{ID: "schedules", Label: "Schedules", Href: "/admin/schedules"},
