@@ -72,7 +72,7 @@ templ listPage(v listView) {
 	<p class="text-fg-muted">
 		Hub bookmarks show to every listener of the devices their scope names. Pack bookmarks are shipped with the hub (the general pack and the { regionLabel(v.Region) } region pack, from the band plan region) and are read-only.
 	</p>
-	if v.Notice != "" {
+	if v.Notice != "" && !v.rowNotice() {
 		<p class="font-semibold text-success" role="status">{ v.Notice }</p>
 	}
 	@filtersForm(v)
@@ -177,7 +177,7 @@ templ bookmarksTable(v listView) {
 					</thead>
 					<tbody>
 						for _, b := range v.Rows {
-							@viewRow(b, v.Names)
+							@viewRow(b, v.Names, v.noticeFor(b))
 						}
 					</tbody>
 				</table>
@@ -187,14 +187,19 @@ templ bookmarksTable(v listView) {
 }
 
 // viewRow is one bookmark of the table. Hub rows can be edited inline
-// (htmx) or on their own page; pack rows are read-only.
-templ viewRow(b *Bookmark, n names) {
-	<tr id={ rowID(b.ID().String()) } class="border-b border-border align-top">
+// (htmx) or on their own page; pack rows are read-only. notice, when set,
+// confirms the row was just added or saved (announced politely). Rows
+// scrolled to (#bookmark-…) clear the sticky top bar.
+templ viewRow(b *Bookmark, n names, notice string) {
+	<tr id={ rowID(b.ID().String()) } class="scroll-mt-20 border-b border-border align-top">
 		<td class="py-1 pr-4 whitespace-nowrap">{ FormatHz(b.Frequency()) }</td>
 		<th scope="row" class="py-1 pr-4 font-medium">
 			{ b.Name() }
 			if b.Description() != "" {
 				<span class="block text-sm font-normal text-fg-muted">{ b.Description() }</span>
+			}
+			if notice != "" {
+				<span class="block text-sm font-semibold text-success" role="status">{ notice }</span>
 			}
 		</th>
 		<td class="py-1 pr-4">{ modeLabel(b) }</td>
@@ -418,7 +423,7 @@ templ addForm(f bookmarkForm, n names) {
 
 // editRow is the inline edit of a hub bookmark in the table.
 templ editRow(f bookmarkForm, n names) {
-	<tr id={ rowID(f.ID) } class="border-b border-border">
+	<tr id={ rowID(f.ID) } class="scroll-mt-20 border-b border-border">
 		<td colspan="6" class="py-2">
 			<form
 				class="flex flex-col gap-3"

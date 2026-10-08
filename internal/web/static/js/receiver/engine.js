@@ -135,6 +135,9 @@ const JITTER_GAIN = 1 / 8;
  * @typedef {object} Kept demod.create fields kept across reconnections
  * @property {string} [mode]
  * @property {number} [offset_hz]
+ * @property {number} [hz] the absolute frequency when the connection was
+ *   lost: a reconnection keeps it when the (possibly new) centre still
+ *   has it in band, else starts at the device's start frequency
  * @property {{low_hz: number, high_hz: number}} [bandpass]
  * @property {number} [squelch_db]
  * @property {{enabled: boolean, threshold: number}} [nr]
@@ -356,6 +359,10 @@ class Engine extends EventTarget {
   /** @param {number} code @param {string} reason */
   onClose(code, reason) {
     const welcomed = this.cid !== "";
+    // Listeners keep their absolute frequency, not their offset: the
+    // centre may differ after the reconnection (the node restarted its
+    // device, an operator moved it meanwhile).
+    if (this.demod) this.kept.hz = this.tunedHz;
     this.ws = null;
     this.gen++;
     this.rejectPending("connection closed");
@@ -587,6 +594,10 @@ class Engine extends EventTarget {
         }
         if (w.squelchDb !== undefined) k.squelch_db = w.squelchDb ?? SQUELCH_MIN_DB;
       }
+      if (typeof k.hz === "number" && typeof w?.hz !== "number") {
+        if (this.inBand(k.hz)) k.offset_hz = k.hz - this.centerHz;
+        else delete k.offset_hz;
+      }
       const mode = k.mode || start.mode || "nfm";
       // Each connection starts with speech-band audio.
       if (HD_MODES.has(mode)) {
@@ -617,6 +628,7 @@ class Engine extends EventTarget {
         squelchDb: null,
         nr: { enabled: false, threshold: 0 },
       };
+      delete k.hz;
       this.applied(d.applied ?? {});
       this.setState("listening");
       this.emit("tune");

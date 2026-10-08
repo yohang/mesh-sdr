@@ -67,6 +67,10 @@ type AdminDeps struct {
 	// PresetBand describes a preset (name, centre, sample rate); nil shows
 	// no preset on Admin › Connections.
 	PresetBand func(ctx context.Context, id shared.UUID) (PresetBand, bool)
+	// BandAt names the band plan band (bandplan.region) holding a
+	// frequency, "" outside every band; nil shows no band plan band on
+	// Admin › Connections.
+	BandAt func(ctx context.Context, hz int64) string
 	// MaskIPs reports privacy.mask_ips; nil masks.
 	MaskIPs func(ctx context.Context) bool
 	// Audit records the reveal of a masked address.
