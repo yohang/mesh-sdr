@@ -3,15 +3,21 @@
 // reason), the variant of each digital mode that has some (SelCall: DTMF,
 // EEA, EIA or CCIR; ZVEI: ZVEI1/2/3, DZVEI or PZVEI), one card per digital
 // mode with its messages, newest first, and a Clear button, and the digital
-// modes this receiver cannot run (DIAG-004: admins see the missing tool). Decoded text is untrusted RF text: it goes
-// through textContent only, cut to 4 KiB.
+// modes this receiver cannot run (DIAG-004: admins see the missing tool).
+// Decoded text is untrusted RF text: it goes through textContent only, cut
+// to 4 KiB.
 //
 // The image decoders (SSTV DEC-037, FAX DEC-038) send image.v1 messages:
 // a start, then each row, drawn on the card's canvas as it arrives, and an
 // end. The canvas has a text equivalent (its label and caption) and can be
 // saved as PNG (FIL-006).
+//
+// Text decoders (PSK, RTTY, SITOR-B, CW) also show the decoder waterfall
+// (secondary.js) and, at the top of their card, the line being printed
+// (partial decodes).
 
 import { saveFile } from "./recorder.js";
+import { SecondaryWaterfall } from "./secondary.js";
 
 /** Messages kept per card. */
 const MAX_MESSAGES = 200;
@@ -76,6 +82,7 @@ function mhz(hz) {
  * @property {HTMLElement} el
  * @property {HTMLOListElement} list
  * @property {ImageView | null} image
+ * @property {HTMLElement} live the line being printed
  */
 
 /** Largest image side accepted from a node (the hub's limit). */
@@ -122,16 +129,20 @@ export class DecodersTab {
     this.cardsEl = el("div", { class: "flex flex-col gap-3" });
     this.unavailableHead = el("h3", { class: "text-sm font-semibold" }, "Not available on this receiver");
     this.unavailable = el("ul", { class: "list-disc pl-5 text-sm text-fg-muted" });
-    this.el.append(this.status, this.hint, this.variantsEl, this.cardsEl, this.unavailableHead, this.unavailable);
+    this.waterfall = new SecondaryWaterfall(/** @type {any} */ (engine));
+    this.el.append(this.status, this.hint, this.variantsEl, this.waterfall.el, this.cardsEl, this.unavailableHead, this.unavailable);
 
     /** @type {[string, (ev: Event) => void][]} */
     this.listeners = [
       ["decode", (ev) => this.onDecode(/** @type {CustomEvent} */ (ev).detail)],
       ["decoderstatus", (ev) => this.onStatus(/** @type {CustomEvent} */ (ev).detail)],
+      ["fft2", (ev) => this.waterfall.onFFT(/** @type {CustomEvent} */ (ev).detail)],
       [
         "change",
         (ev) => {
-          if (/** @type {CustomEvent} */ (ev).detail === "config") this.syncModes();
+          const what = /** @type {CustomEvent} */ (ev).detail;
+          if (what === "config") this.syncModes();
+          if (what === "config" || what === "secondary" || what === "tune") this.waterfall.sync();
         },
       ],
     ];
@@ -210,14 +221,18 @@ export class DecodersTab {
     const clear = el("button", { type: "button", class: "rounded border border-border px-2 py-1 text-sm" }, "Clear");
     head.append(title, clear);
     const list = /** @type {HTMLOListElement} */ (el("ol", { class: "flex max-h-80 flex-col gap-1 overflow-y-auto font-mono text-sm", "aria-label": `${this.label(mode)} messages, newest first`, tabindex: "0" }));
-    section.append(head, list);
+    const live = el("p", { class: "break-all whitespace-pre-wrap font-mono text-sm text-fg-muted" });
+    live.hidden = true;
+    section.append(head, live, list);
     this.cardsEl.prepend(section);
     /** @type {Card} */
-    const c = { el: section, list, image: null };
+    const c = { el: section, list, image: null, live };
     clear.addEventListener("click", () => {
       list.replaceChildren();
       c.image?.figure.remove();
       c.image = null;
+      live.textContent = "";
+      live.hidden = true;
     });
     this.cards.set(mode, c);
     this.hint.hidden = true;
@@ -230,7 +245,10 @@ export class DecodersTab {
     const c = this.card(p.mode);
     if (p.schema === "image.v1" && p.payload && typeof p.payload === "object") this.onImage(c, p);
     const text = String(p.text ?? "").slice(0, MAX_TEXT);
-    if (!text) return;
+    // A text decoder's line being printed replaces the previous one.
+    c.live.textContent = p.partial ? text : "";
+    c.live.hidden = !p.partial;
+    if (p.partial || !text) return;
     const li = el("li", { class: "break-all whitespace-pre-wrap" });
     const meta = el("span", { class: "text-fg-muted" }, `${utcTime(Number(p.ts) || Date.now())} ${mhz(Number(p.freq_hz))} `);
     const body = el("span");

@@ -207,6 +207,7 @@ type demod struct {
 
 	tapMu   sync.Mutex
 	taps    map[int]func(app.AudioBlock)
+	iqTaps  map[int]func(app.IQBlock)
 	nextTap int
 }
 
@@ -227,6 +228,36 @@ func (d *demod) Tap(fn func(app.AudioBlock)) func() {
 		d.tapMu.Lock()
 		delete(d.taps, id)
 		d.tapMu.Unlock()
+	}
+}
+
+// TapIQ implements app.Demod.
+func (d *demod) TapIQ(fn func(app.IQBlock)) func() {
+	d.tapMu.Lock()
+	defer d.tapMu.Unlock()
+
+	if d.iqTaps == nil {
+		d.iqTaps = map[int]func(app.IQBlock){}
+	}
+
+	id := d.nextTap
+	d.nextTap++
+	d.iqTaps[id] = fn
+
+	return func() {
+		d.tapMu.Lock()
+		delete(d.iqTaps, id)
+		d.tapMu.Unlock()
+	}
+}
+
+// tapIQ delivers a block of selector IQ to the IQ taps.
+func (d *demod) tapIQ(b app.IQBlock) {
+	d.tapMu.Lock()
+	defer d.tapMu.Unlock()
+
+	for _, fn := range d.iqTaps {
+		fn(b)
 	}
 }
 
@@ -518,6 +549,10 @@ func (d *demod) run() {
 			d.e.log.Error("demodulator failed", slog.Any("error", err))
 
 			continue
+		}
+
+		if len(res.Selector) > 0 {
+			d.tapIQ(app.IQBlock{Samples: res.Selector, Rate: b.ch.Rate(), Time: meta.Time, Discontinuity: g != nil})
 		}
 
 		if len(res.Audio) > 0 {

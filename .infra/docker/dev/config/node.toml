@@ -36,3 +36,14 @@ freq_range = { min = "430MHz", max = "432MHz" }
 sample_rates = [1_024_000]
 listen_policy = "anonymous"
 driver = { device = "zvei" }
+
+# A third synthetic device whose USB dial at centre + 128 kHz carries the
+# text modes of the native decoders: SITOR-B at +600 Hz, BPSK31 at
+# +1000 Hz, CW at +1500 Hz and RTTY-170 at +2200 Hz (DEC-006 to DEC-012).
+[devices.dev-text]
+name = "Synthetic text modes"
+type = "rtl_sdr"
+freq_range = { min = "14MHz", max = "15MHz" }
+sample_rates = [1_024_000]
+listen_policy = "anonymous"
+driver = { device = "text" }

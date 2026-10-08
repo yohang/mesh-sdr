@@ -448,6 +448,7 @@ class MsdrReceiver extends HTMLElement {
     this.panel.detach();
     this.engine?.removeEventListener("change", this.onChange);
     this.decodersTab?.detach();
+    this.engine?.showFFT2(false);
     this.grid?.removeEventListener("change", this.onGrid);
     notices.removeEventListener("change", this.onNotices);
     window.removeEventListener("popstate", this.onPop);
@@ -1151,6 +1152,8 @@ class MsdrReceiver extends HTMLElement {
     const docked = (this.engine.display.panel ?? this.desktopMedia.matches) && !none;
     const open = (sheet ? !none : docked) || !!p.view;
     p.el.hidden = !open;
+    // The decoder waterfall runs only while the Decoders tab shows (DEC-004).
+    this.engine.showFFT2(open && p.active === "decoders" && !p.view && !(sheet && p.snapPoint === "peek"));
     this.panelToggle.setAttribute("aria-expanded", String(open));
     this.moreBtn.setAttribute("aria-expanded", String(p.view?.id === "more"));
     this.body.classList.toggle("md:grid-cols-[minmax(0,1fr)_20rem]", open && !sheet);

@@ -29,16 +29,41 @@ func (t tools) Available(c string) (bool, string) {
 	return false, "multimon-ng not found"
 }
 
-// fakeRun records whether it was closed.
+// fakeRun records whether it was closed, its offsets and its secondary
+// FFT state.
 type fakeRun struct {
 	mu      sync.Mutex
 	ev      app.DecoderEvents
 	mode    string
 	variant string
 	closed  bool
+	offsets []float64
+	size    int
+	fps     int
 }
 
 func (r *fakeRun) Audio(app.AudioBlock) {}
+func (r *fakeRun) IQ(app.IQBlock)       {}
+func (r *fakeRun) SpectrumSize() int    { return r.size }
+
+func (r *fakeRun) Retune(hz float64) {
+	r.mu.Lock()
+	r.offsets = append(r.offsets, hz)
+	r.mu.Unlock()
+}
+
+func (r *fakeRun) Spectrum(fps int) {
+	r.mu.Lock()
+	r.fps = fps
+	r.mu.Unlock()
+}
+
+func (r *fakeRun) state() ([]float64, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return append([]float64(nil), r.offsets...), r.fps
+}
 
 func (r *fakeRun) Close() {
 	r.mu.Lock()
@@ -59,7 +84,10 @@ type runner struct {
 }
 
 func (r *runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderRun, error) {
-	run := &fakeRun{ev: ev, mode: spec.Mode.Name, variant: spec.Variant}
+	run := &fakeRun{ev: ev, mode: spec.Mode.Name, variant: spec.Variant, offsets: []float64{spec.OffsetHz}}
+	if spec.Mode.Cap == domain.CapNativeDSP {
+		run.size = 2048
+	}
 
 	r.mu.Lock()
 	r.runs = append(r.runs, run)
@@ -316,7 +344,7 @@ func TestDecoderNodeBusy(t *testing.T) {
 	e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": nil}, "")
 
 	// Another listener's session holds the only slot.
-	_, other, err := e.dec.Start(domain.DigitalModes()[0], "DTMF", func(shared.UUID) app.DecoderEvents { return app.DecoderEvents{} })
+	_, other, err := e.dec.Start(domain.DigitalModes()[0], "DTMF", 0, func(shared.UUID) app.DecoderEvents { return app.DecoderEvents{} })
 	if err != nil {
 		t.Fatal(err)
 	}

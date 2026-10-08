@@ -670,6 +670,11 @@ func (ss *session) configureStream(req rxv1.Envelope) {
 
 	if a == nil {
 		ss.mu.Unlock()
+
+		if ss.configureSecondary(req, p) {
+			return
+		}
+
 		ss.peer.Fail(req, rxv1.CodeNotFound, "no such FFT stream")
 
 		return
@@ -981,7 +986,7 @@ func (ss *session) setDemod(req rxv1.Envelope) {
 		params.NR = app.NR{Enabled: p.NR.Enabled, ThresholdDB: p.NR.Threshold}
 	}
 
-	before := d.demod.Params().Mode
+	before := d.demod.Params()
 
 	if err := d.demod.Set(params); err != nil {
 		ss.fail(req, err)
@@ -989,8 +994,11 @@ func (ss *session) setDemod(req rxv1.Envelope) {
 		return
 	}
 
-	if d.demod.Params().Mode != before {
+	switch after := d.demod.Params(); {
+	case after.Mode != before.Mode:
 		ss.underlyingChanged(d)
+	case after.OffsetHz != before.OffsetHz:
+		dialChanged(d)
 	}
 
 	ss.peer.Ack(req, media.AppliedResult{Applied: appliedFor(d)})
@@ -1320,8 +1328,11 @@ func (ss *session) moveDemod(d *demodState, oldCenter, startHz int64, snap domai
 		return
 	}
 
-	if d.demod.Params().Mode != cur.Mode {
+	switch after := d.demod.Params(); {
+	case after.Mode != cur.Mode:
 		ss.underlyingChanged(d)
+	case snap.CenterHz+after.OffsetHz != oldCenter+cur.OffsetHz:
+		dialChanged(d)
 	}
 
 	res := appliedFor(d)

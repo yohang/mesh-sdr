@@ -3,13 +3,16 @@ package http
 import (
 	"errors"
 	"log/slog"
+	"math"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/media"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/sendq"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
 	"github.com/yohang/mesh-sdr/internal/radio/app"
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
@@ -49,6 +52,14 @@ type decoderSession struct {
 	variant string
 	run     app.DecoderRun
 	untap   func()
+	// offset is the secondary offset of a text decoder (DEC-005).
+	offset int64
+	// fft is the secondary FFT stream (DEC-004), when hasFFT; it starts
+	// paused: the listener opens it while it shows the Decoders tab.
+	fft    uint16
+	hasFFT bool
+	fps    int
+	paused bool
 }
 
 // digitalModes lists the catalogue for device.config.
@@ -131,12 +142,50 @@ func variantOf(p media.DecoderSet) (string, bool) {
 	return s, ok
 }
 
+// offsetOf returns the secondary offset of a text decoder: the one asked
+// for, else the running decoder's, else the middle of the demodulator's
+// pass band (DEC-005). Other modes have none.
+func offsetOf(m domain.DigitalMode, asked *int64, d *demodState, params app.DemodParams) int64 {
+	switch {
+	case m.BandwidthHz <= 0:
+		return 0
+	case asked != nil:
+		return *asked
+	case d.dec != nil && d.dec.mode.BandwidthHz > 0:
+		return d.dec.offset
+	default:
+		return int64(math.Round((params.LowHz + params.HighHz) / 2))
+	}
+}
+
+// startedFor is the ack result of decoder.set for the decoder of d (d.mu
+// held).
+func startedFor(d *demodState) media.DecoderStarted {
+	res := media.DecoderStarted{Applied: appliedFor(d)}
+
+	if dec := d.dec; dec != nil {
+		res.DecoderSessionID, res.Variant = dec.id.String(), dec.variant
+
+		if dec.mode.BandwidthHz > 0 {
+			res.OffsetHz, res.BandwidthHz = new(dec.offset), dec.mode.BandwidthHz
+		}
+
+		if dec.hasFFT {
+			res.SecondaryFFTStreamID = new(dec.fft)
+		}
+	}
+
+	return res
+}
+
 // setDecoder handles decoder.set (§6.4, DEC-002): the owner of a
 // demodulator starts or stops its decoder. The mode is checked against the
 // catalogue, the node capabilities and the service-only flag; a
 // demodulator whose mode the digital mode does not allow switches to its
 // default underlying mode first (DEC-003). Beyond decoders.max_sessions the
-// decoder is unavailable (node busy).
+// decoder is unavailable (node busy). An offset_hz for the text decoder
+// already running moves its secondary selector (DEC-005); otherwise the
+// decoder (re)starts, at most DecoderSetBurst times per DecoderSetEvery.
 func (ss *session) setDecoder(req rxv1.Envelope) {
 	p, err := decode[media.DecoderSet](req)
 	if err != nil {
@@ -156,18 +205,22 @@ func (ss *session) setDecoder(req rxv1.Envelope) {
 		return
 	}
 
-	if ok, retry := ss.s.decoderSets.Allow(ss.peer.Claims().ConnectionID, ss.s.now()); !ok {
-		ss.peer.RateLimited(req, retry)
-
-		return
-	}
-
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if p.Decoder == nil || *p.Decoder == "" {
 		ss.stopDecoder(d, true)
-		ss.peer.Ack(req, media.DecoderStarted{Applied: appliedFor(d)})
+		ss.peer.Ack(req, startedFor(d))
+
+		return
+	}
+
+	if ss.retuneDecoder(req, d, p) {
+		return
+	}
+
+	if ok, retry := ss.s.decoderSets.Allow(ss.peer.Claims().ConnectionID, ss.s.now()); !ok {
+		ss.peer.RateLimited(req, retry)
 
 		return
 	}
@@ -208,13 +261,27 @@ func (ss *session) setDecoder(req rxv1.Envelope) {
 		}
 	}
 
+	// A new mode has its default pass band: the default offset follows.
+	offset := offsetOf(m, p.OffsetHz, d, d.demod.Params())
+	if err := m.CheckOffset(float64(offset)); err != nil {
+		if switched {
+			res := appliedFor(d)
+			ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: d.stream, Applied: &res})
+			ss.report()
+		}
+
+		ss.fail(req, err)
+
+		return
+	}
+
 	ss.stopDecoder(d, true)
 
-	err = ss.startDecoder(d, m, variant)
+	err = ss.startDecoder(d, m, variant, offset)
 
 	switch {
 	case errors.Is(err, app.ErrNodeBusy):
-		ss.peer.Ack(req, media.DecoderStarted{Applied: appliedFor(d)})
+		ss.peer.Ack(req, startedFor(d))
 		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, nodeBusy)
 	case err != nil:
 		// The listener learns the underlying mode it was switched to.
@@ -225,11 +292,46 @@ func (ss *session) setDecoder(req rxv1.Envelope) {
 
 		ss.decoderError(req, err)
 	default:
-		ss.peer.Ack(req, media.DecoderStarted{DecoderSessionID: d.dec.id.String(), Variant: variant, Applied: appliedFor(d)})
+		ss.peer.Ack(req, startedFor(d))
 	}
 
 	if switched {
 		ss.report()
+	}
+}
+
+// retuneDecoder moves the secondary selector of the running text decoder
+// when decoder.set names it again (same variant) with an offset_hz
+// (DEC-005): no new session. It reports whether it answered req (d.mu
+// held).
+func (ss *session) retuneDecoder(req rxv1.Envelope, d *demodState, p media.DecoderSet) bool {
+	dec := d.dec
+	if dec == nil || p.OffsetHz == nil || dec.mode.BandwidthHz <= 0 || dec.mode.Name != *p.Decoder {
+		return false
+	}
+
+	if v, ok := variantOf(p); !ok || v != "" && v != dec.variant {
+		return false
+	}
+
+	if err := dec.mode.CheckOffset(float64(*p.OffsetHz)); err != nil {
+		ss.fail(req, err)
+
+		return true
+	}
+
+	dec.offset = *p.OffsetHz
+	dec.run.Retune(float64(dec.offset))
+	ss.peer.Ack(req, startedFor(d))
+
+	return true
+}
+
+// dialChanged resets what the decoder of d learnt of the dial frequency
+// (the CW timing, DEC-012) after the demodulator moved (d.mu held).
+func dialChanged(d *demodState) {
+	if d.dec != nil {
+		d.dec.run.Retune(float64(d.dec.offset))
 	}
 }
 
@@ -241,14 +343,21 @@ func (ss *session) underlyingChanged(d *demodState) {
 		return
 	}
 
-	m, variant := d.dec.mode, d.dec.variant
+	m, variant, offset := d.dec.mode, d.dec.variant, d.dec.offset
 	ss.stopDecoder(d, true)
 
-	if !m.Allows(d.demod.Params().Mode) {
+	params := d.demod.Params()
+	if !m.Allows(params.Mode) {
 		return
 	}
 
-	err := ss.startDecoder(d, m, variant)
+	// An offset outside the new pass band (the sideband flipped) moves to
+	// its middle.
+	if m.BandwidthHz > 0 && (float64(offset) < params.LowHz || float64(offset) > params.HighHz) {
+		offset = offsetOf(m, nil, &demodState{}, params)
+	}
+
+	err := ss.startDecoder(d, m, variant, offset)
 
 	switch {
 	case errors.Is(err, app.ErrNodeBusy):
@@ -282,27 +391,169 @@ func (r *reception) get() (int64, string) {
 	return r.freq, r.preset
 }
 
-// startDecoder starts a session of m on d and taps its audio (d.mu held).
-func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant string) error {
+// startDecoder starts a session of m on d and taps its audio, or the
+// selector IQ of a text decoder; a mode with a secondary FFT gets its
+// stream, paused (d.mu held).
+func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant string, offset int64) error {
+	// fft is set before the session can send a line (Spectrum).
+	var fft uint16
+
 	rx := &reception{}
-	id, run, err := ss.s.dec.Decoders.Start(m, variant, func(id shared.UUID) app.DecoderEvents {
+
+	id, run, err := ss.s.dec.Decoders.Start(m, variant, float64(offset), func(id shared.UUID) app.DecoderEvents {
 		return app.DecoderEvents{
-			Decode: func(rec app.DecodeRecord) { ss.decoded(d, id, m, rec, rx) },
-			Status: func(st app.DecoderStatus) { ss.sessionStatus(d, id, m.Name, variant, st) },
-			File:   func(f app.ProducedFile) { ss.produced(d, id, m, rx, f) },
+			Decode:   func(rec app.DecodeRecord) { ss.decoded(d, id, m, rec, rx) },
+			Status:   func(st app.DecoderStatus) { ss.sessionStatus(d, id, m.Name, variant, st) },
+			File:     func(f app.ProducedFile) { ss.produced(d, id, m, rx, f) },
+			Spectrum: func(f app.SpectrumFrame) { ss.secondaryFrame(d, id, fft, f) },
 		}
 	})
 	if err != nil {
 		return err
 	}
 
-	d.dec = &decoderSession{id: id, mode: m, variant: variant, run: run, untap: d.demod.Tap(run.Audio)}
+	dec := &decoderSession{id: id, mode: m, variant: variant, run: run, offset: offset}
+
+	if m.Input == domain.InputNarrowIQ {
+		dec.untap = d.demod.TapIQ(run.IQ)
+	} else {
+		dec.untap = d.demod.Tap(run.Audio)
+	}
+
+	if size := run.SpectrumSize(); m.SecondaryFFT && size > 0 {
+		ss.mu.Lock()
+		fft = ss.streamID()
+		ss.mu.Unlock()
+
+		dec.fft, dec.hasFFT, dec.fps, dec.paused = fft, true, ss.secondaryFPS(d.device), true
+		ss.q.ConfigureFFT(fft, dec.fps, true)
+		ss.peer.Send(rxv1.TypeStreamOpen, media.StreamOpen{
+			StreamID: fft, Kind: media.KindFFT2, Codec: media.CodecFFTU8, FFT: secondaryFFT(m, size), DemodID: d.id, FPS: dec.fps, Paused: true,
+		})
+	}
+
+	d.dec = dec
 
 	return nil
 }
 
-// stopDecoder ends the decoder of d, if any; notify sends its stopped
-// status (d.mu held). Nothing of that session reaches the listener after.
+// secondaryFFT is the geometry of a secondary FFT stream: start_hz and
+// span_hz are relative to the decoder's dial frequency (the selector IQ at
+// the mode's input rate, DEC-004).
+func secondaryFFT(m domain.DigitalMode, size int) *media.StreamFFT {
+	scale := rxv1.DefaultFFTU8Scale()
+
+	return &media.StreamFFT{Size: size, StartHz: -int64(m.InputRate / 2), SpanHz: m.InputRate, DBMin: scale.DBMin, DBStep: scale.DBStep}
+}
+
+// secondaryFPS is the frame rate of a secondary FFT: the device's spectrum
+// rate (fft_fps), within the client's max_fft_fps.
+func (ss *session) secondaryFPS(device string) int {
+	fps := 1
+
+	if a := ss.attachedTo(device); a != nil {
+		fps = a.lease.Engine().Spectrum().FPS
+	}
+
+	if m := ss.peer.Hello().Capabilities.MaxFFTFPS; m > 0 {
+		fps = min(fps, m)
+	}
+
+	return max(fps, 1)
+}
+
+// secondaryFrame queues a secondary FFT line of the current session while
+// its stream is open: d.mu is held so that a stopped session never queues
+// a frame after its stream was removed.
+func (ss *session) secondaryFrame(d *demodState, id shared.UUID, stream uint16, f app.SpectrumFrame) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if dec := d.dec; dec == nil || dec.id != id || !dec.hasFFT || dec.fft != stream || dec.paused {
+		return
+	}
+
+	_ = ss.q.PushFFT(sendq.Frame{
+		Type: rxv1.FrameSecondaryFFT, Codec: rxv1.CodecFFTU8DB, StreamID: stream, TimestampUS: f.TimestampUS, Payload: f.Payload,
+	})
+}
+
+// secondaryOf returns the demodulator whose decoder has the secondary FFT
+// stream id, locked (nil: none).
+func (ss *session) secondaryOf(id uint16) *demodState {
+	ss.mu.Lock()
+	demods := make([]*demodState, 0, len(ss.demods))
+
+	for _, d := range ss.demods {
+		demods = append(demods, d)
+	}
+	ss.mu.Unlock()
+
+	for _, d := range demods {
+		d.mu.Lock()
+
+		if d.dec != nil && d.dec.hasFFT && d.dec.fft == id {
+			return d
+		}
+
+		d.mu.Unlock()
+	}
+
+	return nil
+}
+
+// configureSecondary applies stream.configure to the secondary FFT stream
+// of a decoder: the listener opens it while it shows the Decoders tab, and
+// the node computes it only then (DEC-004). It reports whether the stream
+// is one.
+func (ss *session) configureSecondary(req rxv1.Envelope, p media.StreamConfigure) bool {
+	d := ss.secondaryOf(p.StreamID)
+	if d == nil {
+		return false
+	}
+
+	defer d.mu.Unlock()
+
+	dec := d.dec
+	limit := ss.secondaryFPS(d.device)
+
+	switch {
+	case p.FPS != nil && (*p.FPS < 1 || *p.FPS > limit):
+		ss.peer.Fail(req, rxv1.CodeOutOfRange, "fps: want 1.."+strconv.Itoa(limit))
+
+		return true
+	case p.Codec != nil && *p.Codec != media.CodecFFTU8:
+		ss.peer.Fail(req, rxv1.CodeOutOfRange, "fft codec "+strconv.Quote(*p.Codec)+" is not provided by this node")
+
+		return true
+	}
+
+	if p.FPS != nil {
+		dec.fps = *p.FPS
+	}
+
+	if p.Paused != nil {
+		dec.paused = *p.Paused
+	}
+
+	ss.q.ConfigureFFT(dec.fft, dec.fps, dec.paused)
+
+	if dec.paused {
+		dec.run.Spectrum(0)
+	} else {
+		dec.run.Spectrum(dec.fps)
+	}
+	ss.peer.Ack(req, media.StreamResult{Stream: media.StreamOpen{
+		StreamID: dec.fft, Kind: media.KindFFT2, Codec: media.CodecFFTU8, FFT: secondaryFFT(dec.mode, dec.run.SpectrumSize()),
+		DemodID: d.id, FPS: dec.fps, Paused: dec.paused,
+	}})
+
+	return true
+}
+
+// stopDecoder ends the decoder of d, if any, and closes its secondary FFT
+// stream; notify sends its stopped status (d.mu held). Nothing of that
+// session reaches the listener after.
 func (ss *session) stopDecoder(d *demodState, notify bool) {
 	dec := d.dec
 	if dec == nil {
@@ -313,6 +564,14 @@ func (ss *session) stopDecoder(d *demodState, notify bool) {
 	dec.untap()
 	dec.run.Close()
 
+	if dec.hasFFT {
+		ss.q.RemoveStream(dec.fft)
+
+		if notify {
+			ss.peer.Send(rxv1.TypeStreamClose, media.StreamClose{StreamID: dec.fft, Reason: media.ReasonClosed})
+		}
+	}
+
 	if notify {
 		ss.decoderStatus(d, dec.id, dec.mode.Name, dec.variant, media.DecoderStopped, "")
 	}
@@ -320,10 +579,22 @@ func (ss *session) stopDecoder(d *demodState, notify bool) {
 
 // live reports whether id is the current decoder session of d.
 func live(d *demodState, id shared.UUID) bool {
+	_, ok := liveOffset(d, id)
+
+	return ok
+}
+
+// liveOffset returns the secondary offset of session id while it is the
+// current decoder session of d.
+func liveOffset(d *demodState, id shared.UUID) (int64, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	return d.dec != nil && d.dec.id == id
+	if d.dec == nil || d.dec.id != id {
+		return 0, false
+	}
+
+	return d.dec.offset, true
 }
 
 // sessionStatus forwards a status of session id while it is current.
@@ -343,10 +614,12 @@ func (ss *session) decoderStatus(d *demodState, id shared.UUID, mode, variant, s
 }
 
 // decoded sends a decoded message of the current session to the listener
-// (decode) and, unless live, to the hub (decode.batch). Its frequency is
-// the demodulator's dial frequency.
+// (decode) and, unless live or partial, to the hub (decode.batch). Its
+// frequency is the demodulator's dial frequency plus the secondary offset
+// of a text decoder (DEC-005).
 func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, rec app.DecodeRecord, rx *reception) {
-	if !live(d, id) {
+	offset, ok := liveOffset(d, id)
+	if !ok {
 		return
 	}
 
@@ -356,15 +629,17 @@ func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, 
 	}
 
 	snap := a.lease.Snapshot()
-	freq := snap.CenterHz + d.demod.Params().OffsetHz
+	freq := snap.CenterHz + d.demod.Params().OffsetHz + offset
 	text := capText(rec.Text, media.MaxDecodeText)
 
 	ss.peer.Send(rxv1.TypeDecode, media.Decode{
 		DemodID: d.id, DecoderSessionID: id.String(), Mode: m.Name, TS: rec.Time.UnixMilli(), FreqHz: freq,
-		Schema: rec.Schema, Text: text, Payload: rec.Payload,
+		Schema: rec.Schema, Text: text, Payload: rec.Payload, Partial: rec.Partial,
 	})
 
-	if rec.Live {
+	// The rows of an image and the line a text decoder is printing go to
+	// the listener only.
+	if rec.Live || rec.Partial {
 		return
 	}
 

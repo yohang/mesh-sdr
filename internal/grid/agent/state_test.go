@@ -190,4 +190,16 @@ func TestDesiredStateDecoders(t *testing.T) {
 			t.Fatalf("invalid fax %+v: %+v %+v", f, out, s.Policy())
 		}
 	}
+
+	bad.Decoders = &ctl.StateDecoders{MaxRestarts: 7, DigimodesFFTSize: 3000}
+
+	if out := s.Apply(ctl.StateApply{Revision: 5, Policy: bad}); len(out.Errors) != 1 {
+		t.Fatalf("fft size: %+v", out)
+	}
+
+	ok.Decoders = &ctl.StateDecoders{MaxRestarts: 7, DigimodesFFTSize: 4096, ShowCW: true}
+
+	if out := s.Apply(ctl.StateApply{Revision: 6, Policy: ok}); len(out.Errors) != 0 || s.Policy().Decoders.DigimodesFFTSize != 4096 || !s.Policy().Decoders.ShowCW {
+		t.Fatalf("text settings: %+v %+v", out, s.Policy())
+	}
 }

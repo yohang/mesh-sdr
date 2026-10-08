@@ -1,7 +1,9 @@
 package domain
 
 import (
+	"math"
 	"slices"
+	"strconv"
 	"time"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -70,6 +72,28 @@ type DigitalMode struct {
 	// key: two listeners a few hertz apart decode the same message (ADR
 	// 0028).
 	DedupStep int64
+	// BandwidthHz is the half width of the secondary selector of a text
+	// decoder (DEC-005): it keeps ±BandwidthHz around the secondary
+	// offset. 0 for modes without a secondary selector.
+	BandwidthHz float64
+}
+
+// TextRate is the input rate of the native text decoders and of their
+// secondary FFT (the selector rate of OpenWebRX+'s digital chains).
+const TextRate = 12000
+
+// CheckOffset checks the secondary offset of a text decoder: the
+// selector band (±BandwidthHz around it) stays within the input band.
+func (m DigitalMode) CheckOffset(hz float64) error {
+	if m.BandwidthHz <= 0 {
+		return nil
+	}
+
+	if math.IsNaN(hz) || math.Abs(hz)+m.BandwidthHz > float64(m.InputRate)/2 {
+		return ErrOutOfRange.WithDetail("offset_hz: the decoder band must stay within ±" + strconv.Itoa(m.InputRate/2) + " Hz")
+	}
+
+	return nil
 }
 
 // DedupWindow is the time bucket of the duplicate key of streaming modes;
@@ -124,7 +148,46 @@ var digitalModes = []DigitalMode{
 	{Name: "sstv", Label: "SSTV", Cap: CapNativeDSP, Family: "image", Underlying: []string{"usb", "lsb", "nfm"}, Input: InputAudio, InputRate: 24000, DedupStep: 1000},
 	// DEC-038: the libcsdr++ HF FAX decoder on the USB audio at 12 kHz.
 	{Name: "fax", Label: "FAX", Cap: CapNativeDSP, Family: "image", Underlying: []string{"usb"}, Input: InputAudio, InputRate: 12000, DedupStep: 1000},
+	// DEC-006, DEC-007: native BPSK with Varicode, ±baud selector.
+	{
+		Name: "bpsk31", Label: "BPSK31", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
+		SecondaryFFT: true, BandwidthHz: 31.25, DedupStep: textDedupStep,
+	},
+	{
+		Name: "bpsk63", Label: "BPSK63", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
+		SecondaryFFT: true, BandwidthHz: 62.5, DedupStep: textDedupStep,
+	},
+	// DEC-008 to DEC-010: native RTTY with Baudot, ±shift selector.
+	{
+		Name: "rtty170", Label: "RTTY-170 (45)", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
+		InputRate: TextRate, SecondaryFFT: true, BandwidthHz: 170, DedupStep: textDedupStep,
+	},
+	{
+		Name: "rtty450", Label: "RTTY-450 (50N)", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
+		InputRate: TextRate, SecondaryFFT: true, BandwidthHz: 450, DedupStep: textDedupStep,
+	},
+	{
+		Name: "rtty85", Label: "RTTY-85 (50N)", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
+		InputRate: TextRate, SecondaryFFT: true, BandwidthHz: 85, DedupStep: textDedupStep,
+	},
+	// DEC-011: native SITOR-B with CCIR 476, 100 Bd, 170 Hz shift.
+	{
+		Name: "sitorb", Label: "SITOR-B", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
+		SecondaryFFT: true, BandwidthHz: 210, DedupStep: textDedupStep,
+	},
+	// DEC-012: native CW decoder, 75 Hz selector.
+	{
+		Name: "cwdecoder", Label: "CW Decoder", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
+		InputRate: TextRate, SecondaryFFT: true, BandwidthHz: 75, DedupStep: textDedupStep,
+	},
 }
+
+// textmodes is the family of the native text decoders (§9.4).
+const textmodes = "textmodes"
+
+// textDedupStep rounds the frequency of text decoders in the duplicate
+// key: listeners click a few tens of hertz apart on the same signal.
+const textDedupStep = 100
 
 // DigitalModes returns the catalogue, in display order.
 func DigitalModes() []DigitalMode {

@@ -229,6 +229,8 @@ func checkDecoders(d *ctl.StateDecoders) string {
 		return ""
 	case d.MaxRestarts < 1 || d.MaxRestarts > 100:
 		return "invalid decoders.max_restarts"
+	case !slices.Contains([]int{0, 512, 1024, 2048, 4096}, d.DigimodesFFTSize):
+		return "invalid decoders.digimodes_fft_size"
 	case d.FAX == nil:
 		return ""
 	case d.FAX.LPM < 30 || d.FAX.LPM > 480 || d.FAX.MinLength < 50 || d.FAX.MinLength > 450 || d.FAX.MaxLength < 500 || d.FAX.MaxLength > 8000:

@@ -93,7 +93,7 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 	lim := cfg.Decoders.ProcessLimits
 	core := uint64(0)
 	runner := decoder.NewRunner(decoder.Options{
-		Supervisor: sup, Tools: tools, MaxRestarts: dec.maxRestarts, Reprobe: dec.reprobe, FAX: dec.fax, Logger: component(logger, "radio.infra.decoder"),
+		Supervisor: sup, Tools: tools, MaxRestarts: dec.maxRestarts, Reprobe: dec.reprobe, FAX: dec.fax, Text: dec.text, Logger: component(logger, "radio.infra.decoder"),
 		Limits: process.Limits{
 			Nice: lim.Nice, OpenFiles: uint64(lim.OpenFiles), AddressSpace: uint64(lim.Memory.Bytes()), Core: &core, NoNewPrivs: true,
 		},
@@ -113,6 +113,8 @@ type radioDecoding struct {
 	maxRestarts func() int
 	fax         func() decoder.FAXSettings
 	reprobe     func()
+	// text are the settings of the text decoders.
+	text func() decoder.TextSettings
 }
 
 // radioDevices builds the devices of the node configuration, ordered by id.

@@ -75,6 +75,11 @@ type StateDecoders struct {
 	// MaxRestarts is the crash-loop threshold of decoder processes: that
 	// many unexpected exits within 5 minutes (1 to 100).
 	MaxRestarts int `json:"max_restarts"`
+	// DigimodesFFTSize is the secondary FFT size of the text decoders
+	// (512, 1024, 2048 or 4096; 0 from an older hub: the default).
+	DigimodesFFTSize int `json:"digimodes_fft_size,omitempty"`
+	// ShowCW: the CW decoder also prints dots and dashes.
+	ShowCW bool `json:"cw_showcw,omitempty"`
 	// FAX are the HF FAX decoder settings (fax_*, DEC-038); nil: the node
 	// defaults.
 	FAX *StateFAX `json:"fax,omitempty"`

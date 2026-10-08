@@ -9,6 +9,7 @@
 #include <csdr/sstv.hpp>
 #include <csdr/writer.hpp>
 
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -32,7 +33,8 @@ class FloatCarry : public Csdr::Reader<float> {
   public:
     size_t available() override { return buf.size() - pos; }
     float* getReadPointer() override { return buf.data() + pos; }
-    void advance(size_t n) override { pos += n; }
+    // A module never moves past the data it was given.
+    void advance(size_t n) override { pos += std::min(n, buf.size() - pos); }
     void wait() override {}
     void unblock() override {}
 

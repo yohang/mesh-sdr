@@ -194,6 +194,9 @@ class Engine extends EventTarget {
       this.net.bitRate = this.ws ? this.net.bytes * 8 : 0;
       this.net.bytes = 0;
     }, 1000);
+    // Whether the listener shows the decoder waterfall (the Decoders tab
+    // is visible): its stream runs only then (DEC-004).
+    this.fft2Wanted = false;
     this.reset();
     document.addEventListener("visibilitychange", () => this.onVisibility());
   }
@@ -229,6 +232,10 @@ class Engine extends EventTarget {
     this.demod = null;
     /** @type {{id: number, rate: number, codec: string} | null} */
     this.audioStream = null;
+    /** @type {{streamId: number, size: number, startHz: number, spanHz: number, paused: boolean} | null} the decoder waterfall (fft2) */
+    this.fft2 = null;
+    /** @type {{offsetHz: number, bandwidthHz: number} | null} the secondary selector of the text decoder (DEC-005) */
+    this.secondary = null;
     /** @type {{levelDb: number, open: boolean} | null} */
     this.meter = null;
     /** @type {Map<number, number>} */
@@ -492,6 +499,10 @@ class Engine extends EventTarget {
         break;
       case "stream.close":
         if (this.fft?.streamId === p.stream_id) this.fft = null;
+        if (this.fft2?.streamId === p.stream_id) {
+          this.fft2 = null;
+          this.secondary = null;
+        }
         if (this.audioStream?.id === p.stream_id) this.audioStream = null;
         this.emit("config");
         break;
@@ -519,6 +530,9 @@ class Engine extends EventTarget {
   openStream(p) {
     if (p.kind === "fft" && p.fft) {
       this.setFFT(p.stream_id, p.fft);
+    } else if (p.kind === "fft2" && p.fft && p.demod_id === this.demod?.id) {
+      this.fft2 = { streamId: p.stream_id, size: p.fft.size, startHz: p.fft.start_hz, spanHz: p.fft.span_hz, paused: true };
+      this.syncFFT2();
     } else if (p.kind === "audio") {
       this.audioStream = { id: p.stream_id, rate: p.sample_rate, codec: p.codec };
       this.audio.flush();
@@ -723,6 +737,12 @@ class Engine extends EventTarget {
       this.history.push(bins);
       if (this.history.length > HISTORY) this.history.shift();
       for (const v of this.views) v.onFFT(bins);
+      return;
+    }
+    if (f.type === FrameType.FFT2) {
+      if (f.streamId !== this.fft2?.streamId || f.codec !== Codec.FFT_U8_DB) return;
+      const p = parseFFTU8(f.payload);
+      if (p) this.signal("fft2", { bins: p.bins, dbMin: p.dbMin, dbStep: p.dbStep });
       return;
     }
     if (f.type !== FrameType.AUDIO || !this.audioStream || f.streamId !== this.audioStream.id) return;
@@ -992,6 +1012,7 @@ class Engine extends EventTarget {
       const res = await this.request("decoder.set", req);
       if (gen !== this.gen || this.demod !== d) return;
       if (res?.variant) this.kept.variant = res.variant;
+      this.secondaryFrom(res);
       const a = res?.applied ?? {};
       if (a.mode && a.mode !== this.kept.mode) {
         this.kept.mode = a.mode;
@@ -1008,6 +1029,56 @@ class Engine extends EventTarget {
       this.emit("state");
       if (this.detail) this.signal("message", { text: this.detail });
     }
+  }
+
+  /**
+   * secondaryFrom keeps the secondary selector of a decoder.set result.
+   * @param {any} res
+   */
+  secondaryFrom(res) {
+    this.secondary = typeof res?.offset_hz === "number" ? { offsetHz: res.offset_hz, bandwidthHz: Number(res.bandwidth_hz) || 0 } : null;
+    this.emit("secondary");
+  }
+
+  /**
+   * setDecoderOffset moves the text decoder to offsetHz from the dial (a
+   * click in the decoder waterfall, DEC-005): the session keeps running.
+   * @param {number} offsetHz
+   */
+  async setDecoderOffset(offsetHz) {
+    const d = this.demod;
+    if (!d?.decoder || !this.secondary) return;
+    const gen = this.gen;
+    try {
+      const res = await this.request("decoder.set", { demod_id: d.id, decoder: d.decoder, offset_hz: Math.round(offsetHz) });
+      if (gen === this.gen && this.demod === d) this.secondaryFrom(res);
+    } catch (err) {
+      if (gen !== this.gen) return;
+      this.detail = err?.message ?? "";
+      this.emit("state");
+      if (this.detail) this.signal("message", { text: this.detail });
+    }
+  }
+
+  /**
+   * showFFT2 tells whether the decoder waterfall is shown: the node
+   * computes it only then (DEC-004).
+   * @param {boolean} on
+   */
+  showFFT2(on) {
+    this.fft2Wanted = on;
+    this.syncFFT2();
+  }
+
+  // syncFFT2 opens or pauses the decoder waterfall stream as wanted (and
+  // never while the page is hidden, §6.8).
+  syncFFT2() {
+    const s = this.fft2;
+    if (!s) return;
+    const paused = !this.fft2Wanted || document.hidden;
+    if (paused === s.paused) return;
+    s.paused = paused;
+    this.request("stream.configure", { stream_id: s.streamId, paused }).catch(() => {});
   }
 
   /**
@@ -1078,6 +1149,7 @@ class Engine extends EventTarget {
 
   onVisibility() {
     // §6.8: hidden tabs SHOULD pause FFT streams; audio keeps playing.
+    this.syncFFT2();
     if (!this.fft) return;
     this.request("stream.configure", { stream_id: this.fft.streamId, paused: document.hidden }).catch(() => {});
   }

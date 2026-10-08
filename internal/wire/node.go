@@ -198,6 +198,14 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 			}
 
 			return decoder.DefaultFAX
+
+		},
+		text: func() decoder.TextSettings {
+			if d := state.Policy().Decoders; d != nil {
+				return decoder.TextSettings{FFTSize: d.DigimodesFFTSize, ShowCW: d.ShowCW}
+			}
+
+			return decoder.TextSettings{}
 		},
 		reprobe: (&coalesced{run: func() { ag.EmitCapabilities(context.Background()) }}).trigger,
 	}
