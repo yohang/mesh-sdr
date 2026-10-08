@@ -64,15 +64,29 @@ export function dialOf(d) {
   };
 }
 
+// Default underlying analog mode of the digital modes, the first of their
+// underlying list in OpenWebRX+ (luarvique/openwebrx owrx/modes.py at
+// 519a366b, AGPL-3.0, like the packs and band plans of ADR 0027). Modes
+// whose underlying is "empty" there (ADS-B, LoRa, ISM…) have none.
+const DEFAULT_UNDERLYING = /** @type {Record<string, string>} */ ({
+  bpsk31: "usb", bpsk63: "usb", rtty170: "usb", rtty450: "usb", rtty85: "usb",
+  sitorb: "usb", navtex: "usb", dsc: "usb", msk144: "usb", fax: "usb", hfdl: "usb",
+  ft8: "usb", ft4: "usb", jt65: "usb", jt9: "usb", wspr: "usb", fst4: "usb", fst4w: "usb", q65: "usb", js8: "usb",
+  cwdecoder: "usb", sstv: "usb", speech: "am", audio: "am", acars: "am",
+  packet: "nfm", ais: "nfm", page: "nfm", selcall: "nfm", zvei: "nfm", eas: "nfm", vdl2: "nfm",
+  "sonde-rs41": "nfm", "sonde-dfm9": "nfm", "sonde-dfm17": "nfm", "sonde-mts01": "nfm", "sonde-m10": "nfm", "sonde-m20": "nfm",
+});
+
 /**
  * tuneMode is the analog mode a mark tunes on a device offering modes: its
- * modulation when analog, else its underlying mode when analog; "" when
- * neither (a digital mode without an analog underlying keeps the current
- * mode; digital modes and their offsets come with M2).
+ * modulation when analog, else its underlying mode, else the default
+ * underlying mode of its digital modulation (OpenWebRX+); "" when none is
+ * offered (the current mode stays). Digital modes and their offsets come
+ * with M2.
  * @param {string} modulation @param {string} underlying @param {string[]} modes
  */
 export function tuneMode(modulation, underlying, modes) {
-  for (const m of [modulation, underlying]) {
+  for (const m of [modulation, underlying || DEFAULT_UNDERLYING[modulation] || ""]) {
     if (ANALOG_MODES.includes(m) && (modes.length === 0 || modes.includes(m))) return m;
   }
   return "";
