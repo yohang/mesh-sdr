@@ -90,6 +90,19 @@ func TestTokenContrast(t *testing.T) {
 
 	pairs = append(pairs, pair{"accent-fg", "accent", 4.5})
 
+	// Bookmark origins (BMK-007): shapes and labels on the receiver's
+	// surfaces, held to the text ratio.
+	for _, bg := range backgrounds {
+		for _, fg := range []string{"bmk-hub", "bmk-pack", "bmk-dial"} {
+			pairs = append(pairs, pair{fg, bg, 4.5})
+		}
+	}
+
+	// Bandplan ribbon (RX-029): band names (fg) on the tag colors.
+	for _, tag := range []string{"hamradio", "broadcast", "public", "service", "other"} {
+		pairs = append(pairs, pair{"fg", "band-" + tag, 4.5})
+	}
+
 	for name, set := range map[string]map[string]string{"light": light, "dark": dark} {
 		for _, p := range pairs {
 			t.Run(fmt.Sprintf("%s/%s-on-%s", name, p.fg, p.bg), func(t *testing.T) {
