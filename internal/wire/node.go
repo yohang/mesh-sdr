@@ -46,6 +46,25 @@ type nodeOptions struct {
 	mediaHeartbeat time.Duration
 	// outbox is told the file outbox (tests send files through it).
 	outbox func(*agent.Outbox)
+	probeDecoders  bool
+}
+
+// WithDecoderProbe adds the decoder capabilities of the node to the
+// reports of a prober set by WithProber (tests that run decoders).
+func WithDecoderProbe() NodeOption { return func(o *nodeOptions) { o.probeDecoders = true } }
+
+// decoderProber adds the decoder capabilities to a prober's reports.
+type decoderProber struct {
+	agent.Prober
+
+	decoders func(context.Context) []ctl.Decoder
+}
+
+func (p decoderProber) Capabilities(ctx context.Context) ctl.Capabilities {
+	c := p.Prober.Capabilities(ctx)
+	c.Decoders = append(c.Decoders, p.decoders(ctx)...)
+
+	return c
 }
 
 // WithProber replaces the host prober.
@@ -121,6 +140,8 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 		}
 		decoders := func(ctx context.Context) []ctl.Decoder { return decoderCapabilities(ctx, toolbox) }
 		o.prober = probe.New(version.String(), o.devices, drivers, decoders, time.Now())
+	} else if o.probeDecoders {
+		o.prober = decoderProber{Prober: o.prober, decoders: func(ctx context.Context) []ctl.Decoder { return decoderCapabilities(ctx, toolbox) }}
 	}
 
 	ag, err := agent.New(agent.Options{

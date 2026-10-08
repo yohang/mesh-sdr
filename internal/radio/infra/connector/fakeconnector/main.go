@@ -7,7 +7,9 @@
 //
 // The device argument (-d) selects a misbehaviour: "crash" exits after
 // 300 ms, "stall" stops streaming after 500 ms, "noiq" never opens its IQ
-// port; anything else streams.
+// port; "zvei" modulates the NFM carrier with the ZVEI1 sequence 12345
+// every 2 s instead of the 1 kHz tone (decoder tests); anything else
+// streams.
 //
 // It is not part of the product images.
 package main
@@ -81,7 +83,7 @@ func main() {
 
 	fmt.Fprintln(os.Stderr, "fakeconnector streaming at", *rate)
 
-	s := &synth{rate: float64(*rate), carrier: float64(*freq) + float64(*rate)/8, tone: float64(*freq) - float64(*rate)/5}
+	s := &synth{rate: float64(*rate), carrier: float64(*freq) + float64(*rate)/8, tone: float64(*freq) - float64(*rate)/5, zvei: *device == "zvei"}
 	s.rng = rand.New(rand.NewPCG(1, 2))
 	stallAfter := time.Duration(0)
 
@@ -138,7 +140,26 @@ type synth struct {
 	n             float64
 	phaseA        float64
 	phaseB        float64
+	phaseM        float64
+	zvei          bool
 	rng           *rand.Rand
+}
+
+// zveiTones are the ZVEI1 tones of the digits 1 to 5, 70 ms each.
+var zveiTones = []float64{1060, 1160, 1270, 1400, 1530}
+
+// modulation returns the audio tone at t (0: silence).
+func (s *synth) modulation(t float64) float64 {
+	if !s.zvei {
+		return 1000
+	}
+
+	i := int(math.Mod(t, 2) / 0.07)
+	if i >= len(zveiTones) {
+		return 0
+	}
+
+	return zveiTones[i]
 }
 
 func (s *synth) stream(conn net.Conn, center *atomic.Int64, stallAfter time.Duration) {
@@ -162,8 +183,12 @@ func (s *synth) stream(conn net.Conn, center *atomic.Int64, stallAfter time.Dura
 			t := s.n / s.rate
 			s.n++
 
-			// NFM: 2.5 kHz deviation by a 1 kHz tone.
-			inst := s.carrier - c + 2500*math.Sin(2*math.Pi*1000*t)
+			// NFM: 2.5 kHz deviation by the tone.
+			if f := s.modulation(t); f > 0 {
+				s.phaseM += 2 * math.Pi * f / s.rate
+			}
+
+			inst := s.carrier - c + 2500*math.Sin(s.phaseM)
 			s.phaseA += 2 * math.Pi * inst / s.rate
 			s.phaseB += 2 * math.Pi * (s.tone - c) / s.rate
 
@@ -176,6 +201,7 @@ func (s *synth) stream(conn net.Conn, center *atomic.Int64, stallAfter time.Dura
 
 		s.phaseA = math.Mod(s.phaseA, 2*math.Pi)
 		s.phaseB = math.Mod(s.phaseB, 2*math.Pi)
+		s.phaseM = math.Mod(s.phaseM, 2*math.Pi)
 
 		if _, err := conn.Write(buf); err != nil {
 			return
