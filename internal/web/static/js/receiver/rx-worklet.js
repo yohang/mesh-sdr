@@ -1,11 +1,14 @@
 // AudioWorklet player for the receiver: an adaptive jitter buffer (60–150 ms,
 // TECHNICAL_SPEC §2.3) fed with decoded mono PCM through the port, a linear
 // resampler from the stream rate to the context rate, silence concealment for
-// gaps (§6.7), and stats posted back every 250 ms. Self-contained: a worklet
-// module cannot carry a CSP nonce, so it imports nothing.
+// gaps (§6.7), and stats posted back every 250 ms. While recording
+// (REC-001), the played output goes back to the page too, in blocks of
+// REC_BLOCK samples ({rec}). Self-contained: a worklet module cannot carry
+// a CSP nonce, so it imports nothing.
 
 const MIN_TARGET_MS = 60;
 const MAX_TARGET_MS = 150;
+const REC_BLOCK = 8192;
 
 class RxPlayer extends AudioWorkletProcessor {
   constructor() {
@@ -29,6 +32,9 @@ class RxPlayer extends AudioWorkletProcessor {
     this.inRate = sampleRate;
     this.pos = 0;
     this.prev = 0;
+    // Recording: the block being filled, null when not recording.
+    this.rec = null;
+    this.recN = 0;
     this.port.onmessage = (e) => this.onMessage(e.data);
   }
 
@@ -49,6 +55,10 @@ class RxPlayer extends AudioWorkletProcessor {
     } else if (m.type === "flush") {
       this.r = this.w = this.n = 0;
       this.priming = true;
+    } else if (m.type === "record") {
+      if (!m.on) this.sendRec();
+      this.rec = m.on ? new Float32Array(REC_BLOCK) : null;
+      this.recN = 0;
     }
   }
 
@@ -81,6 +91,22 @@ class RxPlayer extends AudioWorkletProcessor {
     }
     this.pos = pos;
     this.prev = prev;
+  }
+
+  // sendRec posts the recorded samples of the current block.
+  sendRec() {
+    if (!this.rec || this.recN === 0) return;
+    const block = this.rec.slice(0, this.recN);
+    this.port.postMessage({ rec: block }, [block.buffer]);
+    this.recN = 0;
+  }
+
+  // record keeps the samples just played.
+  record(out) {
+    for (let i = 0; i < out.length; i++) {
+      this.rec[this.recN++] = out[i];
+      if (this.recN === REC_BLOCK) this.sendRec();
+    }
   }
 
   bufferedMs() {
@@ -123,6 +149,7 @@ class RxPlayer extends AudioWorkletProcessor {
       this.n -= len;
     }
     for (let c = 1; c < outputs[0].length; c++) outputs[0][c].set(out);
+    if (this.rec) this.record(out);
 
     if (currentTime - this.lastStats >= 0.25) {
       this.lastStats = currentTime;
