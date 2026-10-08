@@ -32,7 +32,7 @@ templ imagesSection(slots []slotView, notice, failure string) {
 					<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">Upload<span class="sr-only"> { s.Label }</span></button>
 				</form>
 				if s.Set {
-					<form method="post" action="/admin/site/images/remove" hx-post="/admin/site/images/remove" hx-target="#receiver-images" hx-swap="outerHTML" hx-confirm={ "Remove the " + s.Slot.Name() + " and restore the default?" }>
+					<form method="post" action="/admin/site/images/remove" hx-post="/admin/site/images/remove" hx-target="#receiver-images" hx-swap="outerHTML" hx-confirm={ "Remove the " + s.Slot.Name() + " and restore the default?" } data-confirm-action="Restore default">
 						<input type="hidden" name="slot" value={ s.Slot.Name() }/>
 						<button type="submit" class="rounded border border-border px-3 py-1">Restore default<span class="sr-only"> { s.Label }</span></button>
 					</form>

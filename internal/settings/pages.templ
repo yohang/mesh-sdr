@@ -317,7 +317,7 @@ templ storesView(rows []RetentionRow, notice, failure string) {
 							</td>
 							<td class="py-1 pr-4">{ lastRun(r) }</td>
 							<td class="py-1">
-								<form method="post" action="/admin/retention/purge" hx-post="/admin/retention/purge" hx-target="#retention-stores" hx-swap="outerHTML" hx-confirm={ "Delete the " + r.Label + " rows older than " + formatDuration(r.Retention) + " now?" }>
+								<form method="post" action="/admin/retention/purge" hx-post="/admin/retention/purge" hx-target="#retention-stores" hx-swap="outerHTML" hx-confirm={ "Delete the " + r.Label + " rows older than " + formatDuration(r.Retention) + " now?" } data-confirm-action="Delete now">
 									<input type="hidden" name="store" value={ r.Store }/>
 									<button type="submit" class="rounded border border-border px-2 py-1">Purge now<span class="sr-only">: { r.Label }</span></button>
 								</form>

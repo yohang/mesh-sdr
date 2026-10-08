@@ -102,7 +102,7 @@ templ devicePage(v deviceView) {
 			<h2 id="title-missing" class="text-lg font-semibold">No longer reported</h2>
 			<p>The node has reported its devices without this one since { since }: it was removed from the node config.</p>
 			if v.CanAdmin {
-				<form method="post" action={ templ.SafeURL("/admin/devices/" + v.Device.ID().String() + "/forget") } hx-post={ "/admin/devices/" + v.Device.ID().String() + "/forget" } hx-confirm={ "Forget " + v.Device.Name() + "? Its registry entry is deleted; presets are not affected." }>
+				<form method="post" action={ templ.SafeURL("/admin/devices/" + v.Device.ID().String() + "/forget") } hx-post={ "/admin/devices/" + v.Device.ID().String() + "/forget" } hx-confirm={ "Forget " + v.Device.Name() + "? Its registry entry is deleted; presets are not affected." } data-confirm-action="Forget the device">
 					<button type="submit" class="rounded border border-border px-3 py-1">Forget this device</button>
 				</form>
 			}

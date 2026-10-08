@@ -35,9 +35,30 @@
 // tuning_step_hz, which every device.config (attach, preset switch)
 // restores.
 //
+// Device switch (RX-040): connect() to another device closes the node
+// WebSocket and opens /nodes/{nodeId}/ws again; the gateway's forward auth
+// mints the new connection's access token, scoped to the devices of that
+// node the visitor may listen to (the hub checks the listen policy, the
+// node checks the token again).
+//
+// Deep link (RX-028): connect() takes the wanted tuning of a link (Hz, mode,
+// squelch). It only sets this visitor's demodulator: a frequency outside
+// the capture band is kept in outOfBand (the island offers a retune to
+// callers with that right) and applied once a centre change brings it
+// into the band.
+//
+// Node offline (GRID-021): the connection is retried with backoff, keeping
+// the device and the demodulator settings; retryNow() reconnects at once
+// when the hub says the node is back.
+//
 // Changes are announced with a "change" event whose detail names what
-// changed: "state", "config", "tune", "meter" or "audio". FFT lines go to
-// the attached views directly (hot path).
+// changed: "state", "config", "tune", "meter" or "audio". Other events:
+// "shared" ({kind: "preset" | "centre", preset, centerHz}) when someone
+// else switched the device's preset or moved its centre (RX-042),
+// "message" ({text}) for an unsolicited node error (RX-038) and "session"
+// when the hub refused a token refresh (session ended). FFT lines go to the
+// attached views directly (hot path). Network figures (RX-035) are in
+// net: received bit rate, round-trip time and its jitter.
 
 import { apiFetch } from "../csrf.js";
 import { decodeADPCM } from "./adpcm.js";
@@ -75,6 +96,18 @@ const HD_MODES = new Set(["wfm"]);
 const FRAME_MS = 20;
 // Close codes after which reconnecting cannot help (§6.2 client behaviour).
 const NO_RETRY = new Set([1000, 1003, 1008, 1009, 4400, 4403, 4426]);
+// A shared change seen this soon after this client asked for one is its
+// own (no "shared" event).
+const OWN_SHARED_MS = 5000;
+// Jitter: smoothing of the round-trip time variation (RFC 3550 style).
+const JITTER_GAIN = 1 / 8;
+
+/**
+ * @typedef {object} Wanted the tuning of a deep link (RX-028)
+ * @property {number} [hz] frequency
+ * @property {string} [mode]
+ * @property {number | null} [squelchDb] null: open
+ */
 
 /**
  * @typedef {object} Target the device the engine listens to
@@ -141,8 +174,26 @@ class Engine extends EventTarget {
       /** @type {{min: number, max: number} | null} */ levels: null,
       panel: true,
     };
+    /** @type {Wanted | null} deep link tuning, applied at the next attach */
+    this.want = null;
+    /** @type {number | null} a linked frequency outside the capture band */
+    this.outOfBand = null;
+    // When this client last asked for a shared change (ms).
+    this.ownShared = 0;
+    // Network figures (RX-035): bits per second received over the last
+    // second, last round-trip time and its jitter (ms).
+    this.net = { bytes: 0, bitRate: 0, rttMs: /** @type {number | null} */ (null), jitterMs: /** @type {number | null} */ (null) };
+    setInterval(() => {
+      this.net.bitRate = this.ws ? this.net.bytes * 8 : 0;
+      this.net.bytes = 0;
+    }, 1000);
     this.reset();
     document.addEventListener("visibilitychange", () => this.onVisibility());
+  }
+
+  /** @param {string} type @param {any} [detail] */
+  signal(type, detail) {
+    this.dispatchEvent(new CustomEvent(type, { detail }));
   }
 
   // reset forgets the per-connection state.
@@ -191,12 +242,14 @@ class Engine extends EventTarget {
 
   /**
    * connect listens to target; a different device closes the current
-   * connection first.
-   * @param {Target} target
+   * connection first. want is the tuning of a deep link: for the device
+   * already listened to, it is applied at once.
+   * @param {Target} target @param {Wanted | null} [want]
    */
-  connect(target) {
+  connect(target, want = null) {
     const t = this.target;
     if (t && t.node_id === target.node_id && t.device_id === target.device_id && (this.ws || this.retryTimer)) {
+      if (want) this.applyLink(want);
       return;
     }
     this.disconnect();
@@ -204,7 +257,45 @@ class Engine extends EventTarget {
     this.history = [];
     // Demodulator settings kept across reconnections of this device.
     this.kept = {};
+    this.want = want;
+    this.outOfBand = null;
     this.open();
+  }
+
+  // retryNow reconnects at once when a retry is pending (the node is back,
+  // GRID-021).
+  retryNow() {
+    if (!this.target || this.ws || !this.retryTimer) return;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = 0;
+    this.retry = 0;
+    this.open();
+  }
+
+  /**
+   * applyLink tunes this visitor's demodulator to a deep link (RX-028): mode,
+   * frequency (outOfBand when outside the capture band), squelch. Before the
+   * demodulator exists, it waits for the next attach.
+   * @param {Wanted} w
+   */
+  applyLink(w) {
+    if (!this.demod || !this.device) {
+      this.want = w;
+      return;
+    }
+    if (w.mode && w.mode !== this.demod.mode) this.setMode(w.mode);
+    if (typeof w.hz === "number") this.outOfBand = this.tune(w.hz, false) ? null : w.hz;
+    if (w.squelchDb !== undefined) this.setSquelch(w.squelchDb);
+    this.emit("tune");
+  }
+
+  /**
+   * inBand reports whether hz is inside the capture band.
+   * @param {number} hz
+   */
+  inBand(hz) {
+    const [lo, hi] = this.band();
+    return this.device !== null && hz >= lo && hz <= hi;
   }
 
   // disconnect closes the connection and stops retrying.
@@ -245,8 +336,13 @@ class Engine extends EventTarget {
     };
     ws.onmessage = (e) => {
       if (gen !== this.gen) return;
-      if (typeof e.data === "string") this.onText(e.data);
-      else this.onBinary(e.data);
+      if (typeof e.data === "string") {
+        this.net.bytes += e.data.length;
+        this.onText(e.data);
+      } else {
+        this.net.bytes += e.data.byteLength;
+        this.onBinary(e.data);
+      }
     };
     ws.onclose = (e) => {
       if (gen !== this.gen) return;
@@ -326,6 +422,9 @@ class Engine extends EventTarget {
       case "time.sync.reply": {
         const t3 = Date.now();
         const rtt = t3 - p.t0 - (p.t2 - p.t1);
+        const n = this.net;
+        if (n.rttMs !== null) n.jitterMs = (n.jitterMs ?? 0) + (Math.abs(rtt - n.rttMs) - (n.jitterMs ?? 0)) * JITTER_GAIN;
+        n.rttMs = Math.max(0, rtt);
         if (rtt <= this.bestRtt) {
           this.bestRtt = rtt;
           this.offsetMs = (p.t1 - p.t0 + (p.t2 - t3)) / 2;
@@ -346,20 +445,26 @@ class Engine extends EventTarget {
         } else {
           this.detail = p.message ?? "";
           this.emit("state");
+          if (this.detail) this.signal("message", { text: this.detail });
         }
         break;
       }
-      case "device.config":
+      case "device.config": {
+        const prev = this.device;
         this.device = p;
         // A new config (attach, preset switch) restores the device's step.
         this.stepHz = 0;
+        this.sharedChanged(prev);
         this.emit("config");
         this.emit("tune");
         break;
+      }
       case "device.config.patch":
         if (this.device && p.device_id === this.device.device_id) {
+          const prev = { ...this.device };
           Object.assign(this.device, p.set ?? {});
           for (const k of p.unset ?? []) delete this.device[k];
+          this.sharedChanged(prev);
           this.emit("config");
         }
         break;
@@ -424,6 +529,29 @@ class Engine extends EventTarget {
     this.emit("config");
   }
 
+  /**
+   * sharedChanged follows a change of the device's shared state (RX-042):
+   * a linked frequency the new centre brings into the band is tuned, and a
+   * preset switch or a centre move by someone else is announced ("shared").
+   * @param {any} prev the device.config before the change
+   */
+  sharedChanged(prev) {
+    const d = this.device;
+    if (!prev || !d || prev.device_id !== d.device_id) return;
+    if (this.outOfBand !== null && this.demod && this.inBand(this.outOfBand)) {
+      const hz = this.outOfBand;
+      this.outOfBand = null;
+      // After the stream.update that moves the demodulator.
+      setTimeout(() => this.tune(hz, false), 0);
+    }
+    if (Date.now() - this.ownShared < OWN_SHARED_MS) return;
+    if ((prev.active_preset?.id ?? "") !== (d.active_preset?.id ?? "")) {
+      this.signal("shared", { kind: "preset", preset: d.active_preset?.name ?? "", centerHz: d.center_hz });
+    } else if (prev.center_hz !== d.center_hz) {
+      this.signal("shared", { kind: "centre", centerHz: d.center_hz });
+    }
+  }
+
   /** @param {number} id @param {any} f StreamFFT */
   setFFT(id, f) {
     if (this.fft && this.fft.size !== f.size) this.history = [];
@@ -442,6 +570,20 @@ class Engine extends EventTarget {
       for (const s of res?.streams ?? []) this.openStream(s);
       const start = this.device?.start ?? {};
       const k = this.kept;
+      // A deep link sets this visitor's demodulator only (RX-028).
+      const w = this.want;
+      this.want = null;
+      if (w) {
+        if (w.mode) {
+          k.mode = w.mode;
+          delete k.bandpass;
+        }
+        if (typeof w.hz === "number") {
+          if (this.inBand(w.hz)) k.offset_hz = Math.round(w.hz) - this.centerHz;
+          this.outOfBand = this.inBand(w.hz) ? null : w.hz;
+        }
+        if (w.squelchDb !== undefined) k.squelch_db = w.squelchDb ?? SQUELCH_MIN_DB;
+      }
       const mode = k.mode || start.mode || "nfm";
       // Each connection starts with speech-band audio.
       if (HD_MODES.has(mode)) {
@@ -509,6 +651,7 @@ class Engine extends EventTarget {
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ node_id: target.node_id, cid: this.cid }),
       });
+      if (res.status === 401) this.signal("session");
       if (res.status === 401 || res.status === 403) return;
       if (!res.ok) throw new Error(`token API answered ${res.status}`);
       const body = await res.json();
@@ -630,6 +773,8 @@ class Engine extends EventTarget {
     const wanted = Math.round(snap ? Math.round(hz / step) * step : hz) - this.centerHz;
     if (!snap && Math.abs(wanted) > half) return false;
     const offset = Math.min(half, Math.max(-half, wanted));
+    // The visitor tuned elsewhere: a linked frequency is no longer wanted.
+    this.outOfBand = null;
     if (offset === this.demod.offsetHz) return true;
     this.demod.offsetHz = offset;
     this.kept.offset_hz = offset;
@@ -733,8 +878,10 @@ class Engine extends EventTarget {
     const t = this.target;
     if (!t || !this.device) return false;
     const gen = this.gen;
+    this.ownShared = Date.now();
     try {
       await this.request(type, { device_id: t.device_id, ...payload });
+      this.ownShared = Date.now();
       if (gen === this.gen && this.detail && this.state === "listening") this.setState("listening");
       return true;
     } catch (err) {

@@ -17,12 +17,18 @@ import "./device-log.js";
 import { installNavigation } from "./navigation.js";
 import { installShortcuts } from "./shortcuts.js";
 import { installEvents } from "./events.js";
+import { installNotifications } from "./notify.js";
+import { installConfirm } from "./confirm.js";
 // Receiver island and shell audio dock (ADR 0015): they share the engine, a
 // module singleton outside #main, so audio survives boosted navigation.
 import "./receiver/dock.js";
 import "./receiver/island.js";
+import { installReceiverNotices } from "./receiver/grid.js";
 
 installNavigation();
 installShortcuts();
 installAdminForms();
+installNotifications();
+installConfirm();
+installReceiverNotices();
 installEvents();

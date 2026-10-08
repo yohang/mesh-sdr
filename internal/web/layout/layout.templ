@@ -99,6 +99,8 @@ templ Document(s Shell, p Page, content templ.Component) {
 				</ul>
 			</footer>
 			<div id="msdr-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+			@toasts()
+			@confirmDialog()
 		</body>
 	</html>
 }
@@ -134,18 +136,48 @@ templ mainNav(nav []Link, current string) {
 	}
 }
 
-// notifications is the notifications area (UI-006): a bell that opens the
-// list of recent notifications. UI-011 fills it; until then it is empty.
+// notifications is the notifications area (UI-006, UI-011): a bell that
+// opens the list of the session's notifications, newest first, filled by
+// static/js/notify.js (which also sets the unread count in the bell's
+// name and badge).
 templ notifications() {
-	<button type="button" popovertarget="msdr-notifications" class="icon-button" aria-label="Notifications">
+	<button id="msdr-bell" type="button" popovertarget="msdr-notifications" class="icon-button relative" aria-label="Notifications">
 		@icon() {
 			<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21a2 2 0 0 0 4 0"></path>
 		}
+		<span id="msdr-bell-count" class="bell-count" aria-hidden="true" hidden></span>
 	</button>
 	<div id="msdr-notifications" popover class="menu-popover">
-		<p class="font-semibold">Notifications</p>
-		<p class="mt-1 text-fg-muted">No notifications.</p>
+		<div class="flex items-center justify-between gap-2">
+			<p class="font-semibold">Notifications</p>
+			<button id="msdr-notifications-clear" type="button" class="rounded border border-border px-2 py-1 text-xs" hidden>Clear</button>
+		</div>
+		<p id="msdr-notifications-empty" class="mt-1 text-fg-muted">No notifications.</p>
+		<ol id="msdr-notifications-list" class="mt-2 flex max-h-80 flex-col gap-2 overflow-y-auto"></ol>
 	</div>
+}
+
+// toasts is the toast region (UI-011, static/js/notify.js): top right from
+// 768 px, at the bottom (over the tab bar) below. Errors are announced
+// assertively and stay until dismissed; the others politely.
+templ toasts() {
+	<div id="msdr-toasts" class="toast-region">
+		<div id="msdr-toasts-alert" class="flex flex-col gap-2" aria-live="assertive" aria-relevant="additions"></div>
+		<div id="msdr-toasts-polite" class="flex flex-col gap-2" aria-live="polite" aria-relevant="additions"></div>
+	</div>
+}
+
+// confirmDialog is the one modal of the app (UI-012, static/js/confirm.js):
+// consequential actions only. Its text is set with textContent.
+templ confirmDialog() {
+	<dialog id="msdr-confirm" class="confirm-dialog" aria-labelledby="msdr-confirm-title" aria-describedby="msdr-confirm-message">
+		<h2 id="msdr-confirm-title" class="text-lg font-semibold" data-confirm-title>Please confirm</h2>
+		<p id="msdr-confirm-message" class="mt-2" data-confirm-message></p>
+		<div class="mt-4 flex flex-wrap justify-end gap-2">
+			<button type="button" class="button" data-confirm-cancel>Cancel</button>
+			<button type="button" class="button button-primary" data-confirm-ok>Confirm</button>
+		</div>
+	</dialog>
 }
 
 // userMenu is the user menu (UI-010): a "Sign in" link for anonymous
