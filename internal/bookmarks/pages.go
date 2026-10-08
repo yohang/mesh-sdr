@@ -120,14 +120,41 @@ func (m *Module) names(ctx context.Context) (names, error) {
 
 // listView is the Bookmarks › Manage page.
 type listView struct {
-	Names     names
-	Filter    filterForm
-	Bands     []Band
-	Region    string
-	Rows      []*Bookmark
-	Add       bookmarkForm
-	Notice    string
+	Names  names
+	Filter filterForm
+	Bands  []Band
+	Region string
+	Rows   []*Bookmark
+	Add    bookmarkForm
+	Notice string
+	// NoticeID is the bookmark the notice is about (created, saved): its
+	// row shows the notice, next to the anchor the redirect scrolls to.
+	NoticeID  string
 	Truncated bool
+}
+
+// rowNotice reports whether a row of the table shows the notice.
+func (v listView) rowNotice() bool {
+	if v.Notice == "" || v.NoticeID == "" {
+		return false
+	}
+
+	for _, b := range v.Rows {
+		if b.ID().String() == v.NoticeID {
+			return true
+		}
+	}
+
+	return false
+}
+
+// noticeFor is the notice the row of b shows, if any.
+func (v listView) noticeFor(b *Bookmark) string {
+	if v.NoticeID != "" && b.ID().String() == v.NoticeID {
+		return v.Notice
+	}
+
+	return ""
 }
 
 // filterForm holds the filters of the table, as typed.
@@ -233,7 +260,7 @@ func (m *Module) listView(r *http.Request, add bookmarkForm) (listView, error) {
 
 	v := listView{
 		Names: n, Filter: ff, Bands: m.Bandplan().Bands(0, 1<<62), Region: m.Region(), Add: add,
-		Notice: notices[r.URL.Query().Get("done")],
+		Notice: notices[r.URL.Query().Get("done")], NoticeID: r.URL.Query().Get("id"),
 	}
 
 	if len(rows) > maxRows {
@@ -307,7 +334,7 @@ func (m *Module) renderEdit(w http.ResponseWriter, r *http.Request, status int, 
 	}
 
 	if b.ReadOnly() {
-		m.page(w, r, status, b.Name(), packPage(b), viewRow(b, n))
+		m.page(w, r, status, b.Name(), packPage(b), viewRow(b, n, ""))
 
 		return
 	}
@@ -337,7 +364,7 @@ func (m *Module) rowPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.page(w, r, http.StatusOK, b.Name(), nil, viewRow(b, n))
+	m.page(w, r, http.StatusOK, b.Name(), nil, viewRow(b, n, ""))
 }
 
 func (m *Module) deletePage(w http.ResponseWriter, r *http.Request) {
@@ -365,7 +392,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	if d, ok := f.draft(); ok {
 		b, err := m.Create(r.Context(), d)
 		if err == nil {
-			redirect(w, r, ManagePath+"?done=created#bookmark-"+b.ID().String())
+			redirect(w, r, noticePath("created", b))
 
 			return
 		}
@@ -406,12 +433,12 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 					m.d.Logger.ErrorContext(r.Context(), "bookmark names", slog.Any("error", nerr))
 				}
 
-				m.page(w, r, http.StatusOK, b.Name(), nil, viewRow(b, n))
+				m.page(w, r, http.StatusOK, b.Name(), nil, viewRow(b, n, notices["saved"]))
 
 				return
 			}
 
-			redirect(w, r, ManagePath+"?done=saved#bookmark-"+b.ID().String())
+			redirect(w, r, noticePath("saved", b))
 
 			return
 		}
@@ -634,6 +661,14 @@ func parseForm(w http.ResponseWriter, r *http.Request, rd Renderer) bool {
 }
 
 // redirect answers a successful form: 303, or HX-Redirect for htmx.
+// noticePath is the table after b was created or saved: its row, scrolled
+// to, shows the notice.
+func noticePath(done string, b *Bookmark) string {
+	id := b.ID().String()
+
+	return ManagePath + "?done=" + done + "&id=" + url.QueryEscape(id) + "#" + rowID(id)
+}
+
 func redirect(w http.ResponseWriter, r *http.Request, path string) {
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", path)

@@ -138,7 +138,18 @@ func TestBookmarkPages(t *testing.T) {
 		t.Fatalf("create = %d", res.StatusCode)
 	}
 
-	id := strings.TrimPrefix(res.Header.Get("Location"), "/bookmarks/manage?done=created#bookmark-")
+	loc := res.Header.Get("Location")
+	_, id, _ := strings.Cut(loc, "#bookmark-")
+	if loc != "/bookmarks/manage?done=created&id="+id+"#bookmark-"+id {
+		t.Fatalf("created: Location = %q", loc)
+	}
+
+	// The new row shows the notice, clear of the sticky top bar.
+	if _, body := op.do(http.MethodGet, loc, "", "", nil); !strings.Contains(string(body), `role="status">Bookmark added.</span>`) ||
+		!strings.Contains(string(body), `<tr id="bookmark-`+id+`" class="scroll-mt-20`) {
+		t.Errorf("created row lacks its notice or scroll margin")
+	}
+
 	row := "/bookmarks/manage/" + id
 	htmx := map[string]string{"HX-Request": "true"}
 
