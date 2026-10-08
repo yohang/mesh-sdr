@@ -27,16 +27,35 @@
 // touch devices, else the clipboard).
 //
 // Bookmarks (bookmarks.js): the bookmark bar above the scale, the bandplan
-// ribbon under it (toolbar toggle, key B), Scan in the control bar (key S),
-// Find bookmark in the toolbar (key Y) and the Bookmarks tab.
+// ribbon under it (Display menu toggle, key B), Scan in the control bar
+// (key S), Find bookmark in the toolbar (key Y) and the Bookmarks tab.
 //
-// The side panel (UI-019, ARIA tabs) has the Bookmarks and Info tabs; the
-// open state and the active tab are per-session runtime state. Info: the device and its node,
+// The side panel (UI-019, panel.js) hosts the tabs: Bookmarks and Info; the
+// open state and the active tab are per-session runtime state. Info: the
+// device and its node,
 // its active preset, the status metrics (RX-035: audio buffer and rate,
 // stream bit rate, network, node CPU and temperature, listeners),
 // the station described by the hub (RX-036), whose server-rendered markup
 // ([data-rx-station]) the island moves into it, the session's events
 // (RX-038, notify.js) and a link to the About page.
+//
+// Layouts (UI-007, UI-020), from the viewport width only: from 1200 px the
+// side panel is docked on the right, open by default; from 768 px it is
+// docked and closed by default (the "Side panel" toggle, key Enter); below
+// 768 px it is the bottom sheet, the control bar keeps its first-priority
+// groups (frequency, mode, signal level) and "More" opens the others in
+// the sheet. The layout follows resizes and orientation changes; a panel
+// the visitor opened or closed stays so.
+//
+// Keyboard shortcuts (UI-014, keys.js) and their help (UI-015,
+// shortcuts-help.js) shown as a panel view by "?" and the user menu. The
+// Display menu holds the pointer frequency label (RX-031, mouse and pen
+// only) and the wheel swap (RX-032): the wheel zooms the waterfall, or
+// tunes when swapped, and Shift + wheel does the other. Every range slider
+// steps with the wheel (RX-033). Record (REC-001, recorder.js) keeps the
+// played PCM and downloads it as WAV; shown per receiverConfig.recorder.
+// "[" and "]" seek the next signal (RX-025, seek.js); pass bands are saved
+// per mode (RX-021, bandpasses.js) and "|" forgets them.
 //
 // Device picker (RX-040, UI-021): a native <select> with one <optgroup> per
 // node; each option names the device, its state and listeners, with a lock
@@ -66,12 +85,21 @@
 
 import { confirmDialog } from "../confirm.js";
 import { eventsState } from "../events.js";
-import { notices, notifications } from "../notify.js";
+import { notices, notifications, notify } from "../notify.js";
+import { registerShortcuts } from "../shortcuts.js";
 import { onThemeChange } from "../tokens.js";
+import { wheelRanges } from "../wheel-range.js";
+import { clearBandpasses } from "./bandpasses.js";
 import { ReceiverBookmarks } from "./bookmarks.js";
 import { getEngine, MIN_BANDWIDTH_HZ, NR_MAX_DB, NR_MIN_DB, SQUELCH_MAX_DB, SQUELCH_MIN_DB } from "./engine.js";
 import { getGrid, unavailable } from "./grid.js";
+import { receiverShortcuts } from "./keys.js";
+import { SidePanel } from "./panel.js";
+import { recordingName, saveFile, wavBlob } from "./recorder.js";
 import { FreqScale } from "./scale.js";
+import { SEEK_MARGIN_DB, seekBin } from "./seek.js";
+import { getState, setState } from "./session.js";
+import { shortcutsHelp } from "./shortcuts-help.js";
 import { Spectrum } from "./spectrum.js";
 import { Waterfall2D } from "./waterfall-2d.js";
 
@@ -129,6 +157,14 @@ const LAST_DEVICE_KEY = "msdr.receiver.device";
 // Tuning steps offered (RX-012, Hz); the device's step is added when it is
 // not one of them.
 const STEPS = [100, 1000, 5000, 6250, 9000, 10000, 12500, 25000, 100000];
+// Layout breakpoints (UI-007, input.css): the sheet below 768 px, the
+// panel open by default from 1200 px.
+const SHEET_MEDIA = "(width < 48rem)";
+const DESKTOP_MEDIA = "(width >= 75rem)";
+// Waterfall level step of the keyboard (dB).
+const LEVEL_STEP_DB = 5;
+// Pointer label offset from the pointer (CSS px).
+const POINTER_LABEL_PX = 12;
 
 /**
  * el creates an element with attributes and optional text content.
@@ -267,8 +303,12 @@ function deviceLabel(d) {
  * @property {{label: string, run: () => void}} [action]
  */
 
-const BUTTON = "rounded border border-border px-3 py-1 text-sm";
-const SMALL_BUTTON = "rounded border border-border px-2 py-1 text-sm";
+// Controls are 44 px touch targets on touch screens and below 768 px
+// (UI-007).
+const TOUCH = "max-md:min-h-11 max-md:min-w-11 pointer-coarse:min-h-11 pointer-coarse:min-w-11";
+const BUTTON = `rounded border border-border px-3 py-1 text-sm ${TOUCH}`;
+const SMALL_BUTTON = `rounded border border-border px-2 py-1 text-sm ${TOUCH}`;
+const FIELD = `rounded border px-2 py-1 ${TOUCH}`;
 const GROUP = "flex flex-wrap items-center gap-2";
 
 class MsdrReceiver extends HTMLElement {
@@ -293,6 +333,14 @@ class MsdrReceiver extends HTMLElement {
     this.openChip = "";
     /** @type {{underruns: number, overruns: number, underrunAt: number, overrunAt: number}} */
     this.audioSeen = { underruns: 0, overruns: 0, underrunAt: -Infinity, overrunAt: -Infinity };
+    // Display menu toggles (RX-031, RX-032), remembered by the browser.
+    this.showPointer = getState("pointer_frequency", true);
+    this.wheelSwap = getState("wheel_swap", false);
+    // Recording (REC-001): the UTC start and the frequency of the name.
+    /** @type {{at: Date, hz: number} | null} */
+    this.recStart = null;
+    this.sheetMedia = matchMedia(SHEET_MEDIA);
+    this.desktopMedia = matchMedia(DESKTOP_MEDIA);
     this.build();
 
     this.wf = new Waterfall2D(this.wfCanvas);
@@ -330,6 +378,19 @@ class MsdrReceiver extends HTMLElement {
     });
     this.resize = new ResizeObserver(() => this.sizeCanvases());
     this.resize.observe(this.display);
+    // Layout (UI-007): breakpoints, orientation and the sheet's heights.
+    this.onMedia = () => this.layout();
+    this.sheetMedia.addEventListener("change", this.onMedia);
+    this.desktopMedia.addEventListener("change", this.onMedia);
+    this.onResize = () => this.panel.render();
+    window.addEventListener("resize", this.onResize);
+    this.stopWheel = wheelRanges(this);
+    this.stopKeys = registerShortcuts(receiverShortcuts(this));
+    this.onHelp = (/** @type {Event} */ ev) => {
+      ev.preventDefault();
+      this.showHelp();
+    };
+    document.addEventListener("msdr:shortcuts-help", this.onHelp);
 
     this.lastSpec = 0;
     this.lastText = 0;
@@ -345,6 +406,15 @@ class MsdrReceiver extends HTMLElement {
     this.sizeCanvases();
     this.syncControls();
     this.renderEvents();
+    // ?panel=shortcuts (user menu, "?" on another page) opens the help.
+    // After the swap that brought the island in: the help lists the keys
+    // registered then.
+    const view = new URLSearchParams(location.search).get("panel");
+    setTimeout(() => {
+      if (!this.isConnected) return;
+      if (view === "shortcuts") this.showHelp();
+      else if (view === "info") this.showInfo();
+    }, 0);
     this.start();
   }
 
@@ -355,6 +425,13 @@ class MsdrReceiver extends HTMLElement {
     this.resize?.disconnect();
     this.stopTheme?.();
     this.bookmarks?.destroy();
+    this.sheetMedia.removeEventListener("change", this.onMedia);
+    this.desktopMedia.removeEventListener("change", this.onMedia);
+    window.removeEventListener("resize", this.onResize);
+    document.removeEventListener("msdr:shortcuts-help", this.onHelp);
+    this.stopWheel?.();
+    this.stopKeys?.();
+    this.panel.detach();
     this.engine?.removeEventListener("change", this.onChange);
     this.grid?.removeEventListener("change", this.onGrid);
     notices.removeEventListener("change", this.onNotices);
@@ -373,14 +450,19 @@ class MsdrReceiver extends HTMLElement {
       squelch: () => this.engine.demod?.squelchDb ?? this.squelchLevel,
       m2: () => this.m2,
       manageURL: this.cfg.bookmarks_url ?? "",
-      showTab: () => this.showTab("bookmarks"),
+      showTab: () => this.showBookmarks(),
       layout: () => this.layout(),
     });
     const bmk = this.bookmarks;
+    // S, Y and B go through the shortcut registry (keys.js), so they work
+    // and are listed whether or not their control is on screen.
+    for (const b of [bmk.scanBtn, bmk.findBtn, bmk.ribbonBtn]) b.removeAttribute("data-shortcut");
 
-    // Toolbar: device picker, zoom, levels, spectrum toggle,
-    // side panel toggle.
-    this.select = /** @type {HTMLSelectElement} */ (el("select", { id: "rx-device", class: "max-w-full min-w-0 rounded border px-2 py-1" }));
+    // Toolbar: device picker, Find bookmark and, docked, the side panel
+    // toggle.
+    this.select = /** @type {HTMLSelectElement} */ (
+      el("select", { id: "rx-device", class: `max-w-full min-w-0 ${FIELD}`, "aria-keyshortcuts": "P" })
+    );
     this.select.addEventListener("change", () => {
       if (!this.select.value) return;
       savePref(LAST_DEVICE_KEY, this.select.value);
@@ -390,39 +472,19 @@ class MsdrReceiver extends HTMLElement {
     const picker = el("div", { class: "flex min-w-0 items-center gap-2" });
     picker.append(el("label", { for: "rx-device", class: "font-semibold" }, "Device"), this.select);
 
-    this.zoomOut = el("button", { type: "button", class: BUTTON, "aria-label": "Zoom out" }, "−");
-    this.zoomText = el("span", { class: "min-w-10 text-center font-mono tabular-nums" });
-    this.zoomIn = el("button", { type: "button", class: BUTTON, "aria-label": "Zoom in" }, "+");
-    this.zoomOut.addEventListener("click", () => this.zoom(-1));
-    this.zoomIn.addEventListener("click", () => this.zoom(1));
-    const zoom = el("div", { class: "flex items-center gap-1", role: "group", "aria-label": "Zoom" });
-    zoom.append(this.zoomOut, this.zoomText, this.zoomIn);
+    this.panelToggle = el(
+      "button",
+      { type: "button", class: `${BUTTON} max-md:hidden`, "aria-controls": "rx-panel", "aria-keyshortcuts": "Enter" },
+      "Side panel",
+    );
+    this.panelToggle.addEventListener("click", () => this.togglePanel());
 
-    const auto = el("button", { type: "button", class: BUTTON }, "Auto levels");
-    auto.addEventListener("click", () => this.autoLevels());
-    const reset = el("button", { type: "button", class: BUTTON }, "Default levels");
-    reset.addEventListener("click", () => this.setLevels(null));
-    const levels = el("div", { class: "flex flex-wrap items-center gap-1", role: "group", "aria-label": "Waterfall levels" });
-    levels.append(auto, reset);
-
-    this.spToggle = el("button", { type: "button", class: BUTTON, "aria-pressed": "true" }, "Spectrum");
-    this.spToggle.addEventListener("click", () => {
-      this.engine.display.spectrum = !this.engine.display.spectrum;
-      this.layout();
-    });
-
-
-    this.panelToggle = el("button", { type: "button", class: BUTTON, "aria-controls": "rx-panel" }, "Side panel");
-    this.panelToggle.addEventListener("click", () => {
-      this.engine.display.panel = !this.engine.display.panel;
-      this.layout();
-    });
-
-    const shown = el("div", { class: "flex flex-wrap items-center gap-1", role: "group", "aria-label": "Display" });
-    shown.append(this.spToggle, bmk.ribbonBtn);
-
-    this.toolbar = el("div", { class: "flex flex-wrap items-center gap-x-4 gap-y-2" });
-    this.toolbar.append(picker, zoom, levels, shown, this.panelToggle, bmk.findBtn);
+    // 44 px touch targets (UI-007) on the bookmark controls too.
+    for (const b of [bmk.scanBtn, bmk.findBtn, bmk.ribbonBtn]) b.classList.add(...TOUCH.split(" "));
+    const tools = el("div", { class: "flex flex-wrap items-center gap-2" });
+    tools.append(bmk.findBtn, this.panelToggle);
+    this.toolbar = el("div", { class: "flex flex-wrap items-center justify-between gap-x-4 gap-y-2" });
+    this.toolbar.append(picker, tools);
 
     // Display: spectrum, scale and waterfall; the empty state replaces them.
     const describe = { role: "img", "aria-describedby": "rx-text" };
@@ -433,19 +495,34 @@ class MsdrReceiver extends HTMLElement {
       el("canvas", { ...describe, class: "block h-6 w-full touch-pan-y", "aria-label": "Frequency scale and pass band" })
     );
     this.wfCanvas = /** @type {HTMLCanvasElement} */ (
-      el("canvas", { ...describe, class: "block h-[55vh] min-h-48 w-full touch-pan-y bg-black", "aria-label": "Waterfall" })
+      el("canvas", { ...describe, class: "block h-[35vh] min-h-40 w-full touch-pan-y bg-black md:h-[55vh] md:min-h-48", "aria-label": "Waterfall" })
     );
     this.startBtn = el(
       "button",
-      { type: "button", class: "absolute left-1/2 top-40 -translate-x-1/2 rounded bg-accent px-4 py-2 font-semibold text-accent-fg" },
+      { type: "button", class: "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded bg-accent px-4 py-2 font-semibold text-accent-fg" },
       "Start audio",
     );
     this.startBtn.hidden = true;
     this.startBtn.addEventListener("click", () => this.engine.startAudio());
+    // Frequency under the pointer (RX-031): mouse and pen only, decorative
+    // (the text list below says the tuned frequency).
+    this.pointerLabel = el("span", {
+      class: "pointer-events-none absolute left-0 top-0 z-10 rounded border border-border bg-surface px-1 font-mono text-xs tabular-nums text-fg",
+      "aria-hidden": "true",
+    });
+    this.pointerLabel.hidden = true;
     this.display = el("div", { class: "relative cursor-crosshair select-none overflow-hidden rounded border border-border" });
-    this.display.append(this.spCanvas, bmk.bar, this.scaleCanvas, bmk.ribbon.el, this.wfCanvas, this.startBtn, bmk.tip);
-    for (const c of [this.spCanvas, this.scaleCanvas, this.wfCanvas]) this.bindPointer(c);
-    this.wfCanvas.addEventListener("wheel", (e) => this.onWheel(e), { passive: false });
+    // The Start audio button sits in the middle of the waterfall, where it
+    // covers no bookmark, scale nor ribbon (RX-004).
+    const wfArea = el("div", { class: "relative" });
+    wfArea.append(this.wfCanvas, this.startBtn);
+    this.display.append(this.spCanvas, bmk.bar, this.scaleCanvas, bmk.ribbon.el, wfArea, bmk.tip, this.pointerLabel);
+    for (const c of [this.spCanvas, this.scaleCanvas, this.wfCanvas]) {
+      this.bindPointer(c);
+      c.addEventListener("wheel", (e) => this.onWheel(e), { passive: false });
+      c.addEventListener("pointermove", (e) => this.movePointerLabel(c, e));
+      c.addEventListener("pointerleave", () => (this.pointerLabel.hidden = true));
+    }
 
     this.empty = el("div", { class: "flex min-h-48 flex-col items-center justify-center gap-3 rounded border border-border bg-surface p-6 text-center" });
     this.empty.hidden = true;
@@ -484,20 +561,28 @@ class MsdrReceiver extends HTMLElement {
     this.status = el("p", { class: "text-sm text-fg-muted", role: "status" });
     this.meterLive = el("p", { class: "sr-only", "aria-live": "polite" });
 
-    this.panel = this.buildPanel();
+    this.panel = new SidePanel({ id: "rx-panel", onChange: () => this.layout() });
+    this.panel.addTab({ id: "bookmarks", label: "Bookmarks", content: this.buildBookmarks() });
+    this.panel.addTab({ id: "info", label: "Info", content: this.buildInfo() });
 
     const left = el("div", { class: "flex min-w-0 flex-col gap-3" });
     left.append(this.display, this.empty, this.bar, dl, this.status, this.meterLive);
     this.body = el("div", { class: "grid gap-3" });
-    this.body.append(left, this.panel);
+    this.body.append(left, this.panel.el);
 
     const root = el("div", { class: "mt-4 flex flex-col gap-3" });
     root.append(this.toolbar, this.body);
     this.replaceChildren(root);
     this.layout();
+    // The tab of this session (navigation keeps it), Info at first.
+    this.panel.select(this.engine.display.tab ?? "info");
   }
 
-  // buildBar returns the control bar docked under the waterfall (UI-018).
+  // buildBar returns the control bar docked under the waterfall (UI-018),
+  // in groups of the FEATURE_SPEC §10.4 priorities. The first-priority
+  // groups (frequency, mode, signal level) always show; the others are in
+  // this.secondary, which shows in the bar from 768 px and in the sheet's
+  // More view below (UI-007).
   buildBar() {
     const e = this.engine;
 
@@ -509,8 +594,9 @@ class MsdrReceiver extends HTMLElement {
         inputmode: "decimal",
         autocomplete: "off",
         spellcheck: "false",
-        class: "w-36 rounded border px-2 py-1 font-mono tabular-nums",
+        class: `w-36 font-mono tabular-nums ${FIELD}`,
         "aria-describedby": "rx-freq-hint",
+        "aria-keyshortcuts": "T",
       })
     );
     this.freqInput.addEventListener("change", () => this.enterFrequency());
@@ -524,30 +610,180 @@ class MsdrReceiver extends HTMLElement {
       }
     });
     this.freqHint = el("span", { id: "rx-freq-hint", class: "text-sm text-danger" });
-    this.stepDown = el(
-      "button",
-      { type: "button", class: SMALL_BUTTON, "aria-label": "Tune down one step", "aria-keyshortcuts": "ArrowLeft", "data-shortcut": "arrowleft" },
-      "‹",
-    );
-    this.stepUp = el(
-      "button",
-      { type: "button", class: SMALL_BUTTON, "aria-label": "Tune up one step", "aria-keyshortcuts": "ArrowRight", "data-shortcut": "arrowright" },
-      "›",
-    );
+    this.stepDown = el("button", { type: "button", class: SMALL_BUTTON, "aria-label": "Tune down one step", "aria-keyshortcuts": "ArrowLeft" }, "‹");
+    this.stepUp = el("button", { type: "button", class: SMALL_BUTTON, "aria-label": "Tune up one step", "aria-keyshortcuts": "ArrowRight" }, "›");
     this.stepDown.addEventListener("click", () => e.step(-1));
     this.stepUp.addEventListener("click", () => e.step(1));
     const freq = el("div", { class: GROUP });
     freq.append(el("label", { for: "rx-freq", class: "font-semibold" }, "Frequency (MHz)"), this.stepDown, this.freqInput, this.stepUp, this.freqHint);
 
     // Tuning step (RX-012): drives ‹ › and the arrow keys.
-    this.stepSelect = /** @type {HTMLSelectElement} */ (el("select", { id: "rx-step", class: "rounded border px-2 py-1" }));
+    this.stepSelect = /** @type {HTMLSelectElement} */ (el("select", { id: "rx-step", class: FIELD }));
     this.stepSelect.addEventListener("change", () => e.setStep(Number(this.stepSelect.value)));
     const step = el("div", { class: GROUP });
     step.append(el("label", { for: "rx-step", class: "font-semibold" }, "Step"), this.stepSelect);
 
-    // Shared preset (RX-006) and centre (RX-010), for callers with the
-    // right only; a switch moves the device for every listener.
-    this.presetSelect = /** @type {HTMLSelectElement} */ (el("select", { id: "rx-preset", class: "max-w-48 rounded border px-2 py-1" }));
+    // Mode picker: one button per analog mode (RX-007), keys 1…9, 0.
+    this.modes = el("div", { class: "flex flex-wrap gap-1", role: "group", "aria-labelledby": "rx-mode-label" });
+    const mode = el("div", { class: GROUP });
+    mode.append(el("span", { id: "rx-mode-label", class: "font-semibold" }, "Mode"), this.modes);
+
+    // S-meter and dB read-out (RX-022): the text carries the value, the bar
+    // only illustrates it.
+    this.meter = /** @type {HTMLMeterElement} */ (
+      el("meter", { id: "rx-meter", min: String(METER_MIN_DB), max: String(METER_MAX_DB), class: "h-4 w-24 sm:w-32", "aria-labelledby": "rx-meter-label" })
+    );
+    this.meterText = el("span", { class: "font-mono tabular-nums text-sm sm:min-w-32" }, "—");
+    const smeter = el("div", { class: GROUP });
+    smeter.append(el("span", { id: "rx-meter-label", class: "font-semibold" }, "Signal"), this.meter, this.meterText);
+
+    // More (below 768 px): the other groups, in the sheet.
+    this.moreBtn = el("button", { type: "button", class: `${BUTTON} md:hidden`, "aria-expanded": "false", "aria-controls": "rx-panel" }, "More");
+    this.moreBtn.addEventListener("click", () => this.toggleMore());
+
+    // Pass band (RX-020, RX-021): read-out, narrower and wider (the edges
+    // are also dragged on the scale), and forget the saved pass bands.
+    this.bandText = el("span", { class: "font-mono tabular-nums text-sm" }, "—");
+    this.narrower = el("button", { type: "button", class: SMALL_BUTTON, "aria-keyshortcuts": "Shift+ArrowDown" }, "Narrower");
+    this.wider = el("button", { type: "button", class: SMALL_BUTTON, "aria-keyshortcuts": "Shift+ArrowUp" }, "Wider");
+    this.narrower.addEventListener("click", () => this.scaleBand(1 / BANDPASS_FACTOR));
+    this.wider.addEventListener("click", () => this.scaleBand(BANDPASS_FACTOR));
+    const forget = el("button", { type: "button", class: SMALL_BUTTON, "aria-keyshortcuts": "|", "aria-describedby": "rx-forget-hint" }, "Forget saved filters");
+    forget.addEventListener("click", () => this.resetBandpasses());
+    const band = el("div", { class: GROUP, role: "group", "aria-labelledby": "rx-band-label" });
+    band.append(
+      el("span", { id: "rx-band-label", class: "font-semibold" }, "Filter"),
+      this.bandText,
+      this.narrower,
+      this.wider,
+      forget,
+      el("span", { id: "rx-forget-hint", class: "sr-only" }, "Each mode starts again with its default filter."),
+    );
+
+    // Squelch: on/off, level, a one-shot auto (RX-023, RX-024) and the
+    // signal seek (RX-025).
+    this.sqOn = /** @type {HTMLInputElement} */ (el("input", { id: "rx-sq-on", type: "checkbox", class: "accent-accent", "aria-keyshortcuts": "D" }));
+    this.sqLevel = /** @type {HTMLInputElement} */ (
+      el("input", {
+        id: "rx-sq-level",
+        type: "range",
+        min: String(SQUELCH_MIN_DB + 1),
+        max: String(SQUELCH_MAX_DB),
+        step: "1",
+        class: `w-28 accent-accent ${TOUCH}`,
+        "aria-label": "Squelch level (dBFS)",
+        "aria-keyshortcuts": "{ }",
+      })
+    );
+    this.sqText = el("span", { class: "min-w-16 font-mono tabular-nums text-sm" });
+    this.sqAuto = el("button", { type: "button", class: SMALL_BUTTON, "aria-label": "Auto squelch", "aria-keyshortcuts": "A" }, "Auto");
+    this.sqOn.addEventListener("change", () => e.setSquelch(this.sqOn.checked ? this.squelchLevel : null));
+    this.sqLevel.addEventListener("input", () => {
+      this.squelchLevel = Number(this.sqLevel.value);
+      e.setSquelch(this.squelchLevel);
+    });
+    this.sqAuto.addEventListener("click", () => this.autoSquelch());
+    this.seekDown = el("button", { type: "button", class: SMALL_BUTTON, "aria-label": "Seek the previous signal", "aria-keyshortcuts": "[" }, "◀ Seek");
+    this.seekUp = el("button", { type: "button", class: SMALL_BUTTON, "aria-label": "Seek the next signal", "aria-keyshortcuts": "]" }, "Seek ▶");
+    this.seekDown.addEventListener("click", () => this.seek(-1));
+    this.seekUp.addEventListener("click", () => this.seek(1));
+    const sqLabel = el("label", { class: `flex items-center gap-1 font-semibold ${TOUCH}` });
+    sqLabel.append(this.sqOn, document.createTextNode("Squelch"));
+    const squelch = el("div", { class: GROUP });
+    squelch.append(sqLabel, this.sqLevel, this.sqText, this.sqAuto, this.seekDown, this.seekUp);
+
+    // Noise reduction: on/off and threshold (RX-027).
+    this.nrOn = /** @type {HTMLInputElement} */ (el("input", { id: "rx-nr-on", type: "checkbox", class: "accent-accent", "aria-keyshortcuts": "N" }));
+    this.nrLevel = /** @type {HTMLInputElement} */ (
+      el("input", {
+        id: "rx-nr-level",
+        type: "range",
+        min: String(NR_MIN_DB),
+        max: String(NR_MAX_DB),
+        step: "1",
+        class: `w-28 accent-accent ${TOUCH}`,
+        "aria-label": "Noise reduction threshold (dB)",
+      })
+    );
+    this.nrText = el("span", { class: "min-w-12 font-mono tabular-nums text-sm" });
+    const nr = () => e.setNR(this.nrOn.checked, Number(this.nrLevel.value));
+    this.nrOn.addEventListener("change", nr);
+    this.nrLevel.addEventListener("input", nr);
+    const nrLabel = el("label", { class: `flex items-center gap-1 font-semibold ${TOUCH}` });
+    nrLabel.append(this.nrOn, document.createTextNode("Noise reduction"));
+    const noise = el("div", { class: GROUP });
+    noise.append(nrLabel, this.nrLevel, this.nrText);
+
+    // View: zoom, levels, spectrum and the Display menu (RX-014…RX-018,
+    // RX-031, RX-032).
+    this.zoomOut = el("button", { type: "button", class: BUTTON, "aria-label": "Zoom out", "aria-keyshortcuts": "ArrowDown" }, "−");
+    this.zoomText = el("span", { class: "min-w-10 text-center font-mono tabular-nums" });
+    this.zoomIn = el("button", { type: "button", class: BUTTON, "aria-label": "Zoom in", "aria-keyshortcuts": "ArrowUp" }, "+");
+    this.zoomOut.addEventListener("click", () => this.zoom(-1));
+    this.zoomIn.addEventListener("click", () => this.zoom(1));
+    const zoom = el("div", { class: "flex items-center gap-1", role: "group", "aria-label": "Zoom" });
+    zoom.append(this.zoomOut, this.zoomText, this.zoomIn);
+    const auto = el("button", { type: "button", class: BUTTON, "aria-keyshortcuts": "Z" }, "Auto levels");
+    auto.addEventListener("click", () => this.autoLevels());
+    const reset = el("button", { type: "button", class: BUTTON, "aria-keyshortcuts": "C" }, "Default levels");
+    reset.addEventListener("click", () => this.setLevels(null));
+    this.spToggle = el("button", { type: "button", class: BUTTON, "aria-pressed": "true", "aria-keyshortcuts": "V" }, "Spectrum");
+    this.spToggle.addEventListener("click", () => this.toggleSpectrum());
+    this.displayBtn = el("button", { type: "button", class: BUTTON, "aria-expanded": "false", "aria-controls": "rx-display" }, "Display");
+    this.displayBtn.addEventListener("click", () => this.toggleDisplayMenu());
+    this.pointerBox = /** @type {HTMLInputElement} */ (el("input", { id: "rx-pointer-freq", type: "checkbox", class: "accent-accent" }));
+    this.pointerBox.checked = this.showPointer;
+    this.pointerBox.addEventListener("change", () => {
+      this.showPointer = this.pointerBox.checked;
+      setState("pointer_frequency", this.showPointer);
+      if (!this.showPointer) this.pointerLabel.hidden = true;
+    });
+    this.wheelBox = /** @type {HTMLInputElement} */ (el("input", { id: "rx-wheel-swap", type: "checkbox", class: "accent-accent" }));
+    this.wheelBox.checked = this.wheelSwap;
+    this.wheelBox.addEventListener("change", () => {
+      this.wheelSwap = this.wheelBox.checked;
+      setState("wheel_swap", this.wheelSwap);
+    });
+    /** @param {HTMLInputElement} box @param {string} text */
+    const check = (box, text) => {
+      const l = el("label", { class: `flex items-center gap-2 ${TOUCH}` });
+      l.append(box, document.createTextNode(text));
+      return l;
+    };
+    this.displayMenu = el("div", { id: "rx-display", role: "group", "aria-label": "Display", class: "flex basis-full flex-col gap-1 rounded border border-border bg-surface-raised p-2 text-sm" });
+    const ribbon = this.bookmarks.ribbonBtn;
+    ribbon.classList.add("self-start");
+    this.displayMenu.append(
+      ribbon,
+      check(this.pointerBox, "Show the frequency under the mouse pointer"),
+      check(this.wheelBox, "Wheel tunes, Shift + wheel zooms (instead of the other way round)"),
+    );
+    this.displayMenu.hidden = true;
+    this.displayMenu.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      this.toggleDisplayMenu(false);
+      this.displayBtn.focus();
+    });
+    const view = el("div", { class: GROUP, role: "group", "aria-label": "View" });
+    view.append(zoom, auto, reset, this.spToggle, this.displayBtn, this.displayMenu);
+
+    // Capture: record (REC-001) and share (UI-023).
+    this.recordBtn = el("button", { type: "button", class: BUTTON, "aria-pressed": "false", "aria-keyshortcuts": "R", "aria-describedby": "rx-record-hint" }, "Record");
+    this.recordBtn.addEventListener("click", () => this.toggleRecord());
+    this.recordText = el("span", { id: "rx-record-hint", class: "text-sm tabular-nums" });
+    this.shareBtn = el("button", { type: "button", class: BUTTON }, "Share link");
+    this.shareBtn.addEventListener("click", () => this.share());
+    this.recordGroup = el("div", { class: GROUP });
+    this.recordGroup.append(this.recordBtn, this.recordText);
+    this.recordGroup.hidden = !this.cfg.recorder;
+    const capture = el("div", { class: GROUP, role: "group", "aria-label": "Capture" });
+    capture.append(this.recordGroup, this.shareBtn);
+
+    // Operator (RX-006, RX-010): the shared preset and "Recentre here", for
+    // callers with the right only, set apart: they move the device for
+    // every listener.
+    this.presetSelect = /** @type {HTMLSelectElement} */ (el("select", { id: "rx-preset", class: `max-w-48 ${FIELD}` }));
     this.presetSelect.addEventListener("change", async () => {
       const id = this.presetSelect.value;
       if (!id) return;
@@ -555,11 +791,7 @@ class MsdrReceiver extends HTMLElement {
     });
     this.presetGroup = el("div", { class: GROUP });
     this.presetGroup.append(el("label", { for: "rx-preset", class: "font-semibold" }, "Preset"), this.presetSelect);
-    this.recentre = el(
-      "button",
-      { type: "button", class: SMALL_BUTTON, "aria-describedby": "rx-recentre-hint" },
-      "Recentre here",
-    );
+    this.recentre = el("button", { type: "button", class: SMALL_BUTTON, "aria-describedby": "rx-recentre-hint" }, "Recentre here");
     this.recentre.addEventListener("click", async () => {
       if (await this.confirmShared("centre")) e.retune(e.tunedHz);
     });
@@ -568,163 +800,36 @@ class MsdrReceiver extends HTMLElement {
       this.recentre,
       el("span", { id: "rx-recentre-hint", class: "sr-only" }, "Moves the device centre to the tuned frequency for every listener."),
     );
+    this.operator = el("div", { class: `${GROUP} border-l-4 border-warning pl-2`, role: "group", "aria-labelledby": "rx-operator-label" });
+    this.operator.append(el("span", { id: "rx-operator-label", class: "text-sm text-fg-muted" }, "Affects all listeners:"), this.presetGroup, this.recentreGroup);
 
-    // Mode picker: one button per analog mode (RX-007).
-    this.modes = el("div", { class: "flex flex-wrap gap-1", role: "group", "aria-labelledby": "rx-mode-label" });
-    const mode = el("div", { class: GROUP });
-    mode.append(el("span", { id: "rx-mode-label", class: "font-semibold" }, "Mode"), this.modes);
-
-    // Pass band (RX-020): read-out, narrower and wider; the edges are also
-    // dragged on the scale.
-    this.bandText = el("span", { class: "font-mono tabular-nums text-sm" }, "—");
-    this.narrower = el("button", { type: "button", class: SMALL_BUTTON }, "Narrower");
-    this.wider = el("button", { type: "button", class: SMALL_BUTTON }, "Wider");
-    this.narrower.addEventListener("click", () => this.scaleBand(1 / BANDPASS_FACTOR));
-    this.wider.addEventListener("click", () => this.scaleBand(BANDPASS_FACTOR));
-    const band = el("div", { class: GROUP, role: "group", "aria-labelledby": "rx-band-label" });
-    band.append(el("span", { id: "rx-band-label", class: "font-semibold" }, "Filter"), this.bandText, this.narrower, this.wider);
-
-    // Squelch: on/off, level and a one-shot auto (RX-023, RX-024).
-    this.sqOn = /** @type {HTMLInputElement} */ (el("input", { id: "rx-sq-on", type: "checkbox", class: "accent-accent" }));
-    this.sqLevel = /** @type {HTMLInputElement} */ (
-      el("input", {
-        id: "rx-sq-level",
-        type: "range",
-        min: String(SQUELCH_MIN_DB + 1),
-        max: String(SQUELCH_MAX_DB),
-        step: "1",
-        class: "w-28 accent-accent",
-        "aria-label": "Squelch level (dBFS)",
-      })
-    );
-    this.sqText = el("span", { class: "min-w-16 font-mono tabular-nums text-sm" });
-    this.sqAuto = el("button", { type: "button", class: SMALL_BUTTON, "aria-label": "Auto squelch" }, "Auto");
-    this.sqOn.addEventListener("change", () => e.setSquelch(this.sqOn.checked ? this.squelchLevel : null));
-    this.sqLevel.addEventListener("input", () => {
-      this.squelchLevel = Number(this.sqLevel.value);
-      e.setSquelch(this.squelchLevel);
-    });
-    this.sqAuto.addEventListener("click", () => {
-      const level = e.autoSquelch();
-      if (level !== null) this.squelchLevel = level;
-    });
-    const sqLabel = el("label", { class: "flex items-center gap-1 font-semibold" });
-    sqLabel.append(this.sqOn, document.createTextNode("Squelch"));
-    const squelch = el("div", { class: GROUP });
-    squelch.append(sqLabel, this.sqLevel, this.sqText, this.sqAuto);
-
-    // Noise reduction: on/off and threshold (RX-027).
-    this.nrOn = /** @type {HTMLInputElement} */ (el("input", { id: "rx-nr-on", type: "checkbox", class: "accent-accent" }));
-    this.nrLevel = /** @type {HTMLInputElement} */ (
-      el("input", {
-        id: "rx-nr-level",
-        type: "range",
-        min: String(NR_MIN_DB),
-        max: String(NR_MAX_DB),
-        step: "1",
-        class: "w-28 accent-accent",
-        "aria-label": "Noise reduction threshold (dB)",
-      })
-    );
-    this.nrText = el("span", { class: "min-w-12 font-mono tabular-nums text-sm" });
-    const nr = () => e.setNR(this.nrOn.checked, Number(this.nrLevel.value));
-    this.nrOn.addEventListener("change", nr);
-    this.nrLevel.addEventListener("input", nr);
-    const nrLabel = el("label", { class: "flex items-center gap-1 font-semibold" });
-    nrLabel.append(this.nrOn, document.createTextNode("Noise reduction"));
-    const noise = el("div", { class: GROUP });
-    noise.append(nrLabel, this.nrLevel, this.nrText);
-
-    // S-meter and dB read-out (RX-022): the text carries the value, the bar
-    // only illustrates it.
-    this.meter = /** @type {HTMLMeterElement} */ (
-      el("meter", { id: "rx-meter", min: String(METER_MIN_DB), max: String(METER_MAX_DB), class: "h-4 w-32", "aria-labelledby": "rx-meter-label" })
-    );
-    this.meterText = el("span", { class: "min-w-32 font-mono tabular-nums text-sm" }, "—");
-    const smeter = el("div", { class: GROUP });
-    smeter.append(el("span", { id: "rx-meter-label", class: "font-semibold" }, "Signal"), this.meter, this.meterText);
-
-    // More (UI-018): Share (UI-023).
-    this.moreBtn = el("button", { type: "button", class: SMALL_BUTTON, "aria-expanded": "false", "aria-controls": "rx-more" }, "More");
-    this.shareBtn = el("button", { type: "button", class: SMALL_BUTTON }, "Share link");
-    this.shareBtn.addEventListener("click", () => this.share());
-    this.moreMenu = el("div", { id: "rx-more", class: GROUP });
-    this.moreMenu.append(this.shareBtn);
-    this.moreMenu.hidden = true;
-    this.moreBtn.addEventListener("click", () => {
-      this.moreMenu.hidden = !this.moreMenu.hidden;
-      this.moreBtn.setAttribute("aria-expanded", String(!this.moreMenu.hidden));
-    });
-    const more = el("div", { class: GROUP });
-    more.append(this.moreBtn, this.moreMenu);
+    this.secondary = el("div", { class: "flex flex-col gap-4 md:contents" });
+    this.secondary.append(step, band, squelch, this.bookmarks.scanGroup, noise, view, capture, this.operator);
 
     const bar = el("div", {
       class: "flex flex-wrap items-center gap-x-6 gap-y-3 rounded border border-border bg-surface p-3",
       role: "group",
       "aria-label": "Receiver controls",
     });
-    bar.append(freq, step, this.presetGroup, this.recentreGroup, mode, band, squelch, noise, smeter, this.bookmarks.scanGroup, more);
+    bar.append(freq, mode, smeter, this.moreBtn, this.secondary);
     return bar;
   }
 
-  // buildPanel returns the side panel (UI-019): ARIA tabs (arrows, Home and
-  // End move between them) for the Bookmarks tab (bookmarks.js) and the
-  // Info tab.
-  buildPanel() {
-    const section = el("section", { id: "rx-panel", class: "flex min-w-0 flex-col self-start gap-3 rounded border border-border bg-surface p-3", "aria-label": "Side panel" });
-    const list = el("div", { role: "tablist", "aria-label": "Side panel", class: "flex gap-1 border-b border-border" });
-    const bookmarks = el("div", { class: "flex min-w-0 flex-col gap-3" });
-    bookmarks.append(el("h2", { class: "text-lg font-semibold" }, "Bookmarks"), this.bookmarks.panel);
-    /** @type {Map<string, {tab: HTMLElement, panel: HTMLElement}>} */
-    this.tabs = new Map();
-    for (const [id, label, content] of /** @type {[string, string, HTMLElement][]} */ ([
-      ["bookmarks", "Bookmarks", bookmarks],
-      ["info", "Info", this.buildInfo()],
-    ])) {
-      const tab = el("button", { type: "button", role: "tab", id: `rx-tab-${id}`, "aria-controls": `rx-tabpanel-${id}`, class: "-mb-px border-b-2 px-3 py-1 font-semibold" }, label);
-      tab.addEventListener("click", () => this.showTab(id));
-      tab.addEventListener("keydown", (ev) => {
-        const ids = [...this.tabs.keys()];
-        const i = ids.indexOf(id);
-        const j = { ArrowRight: (i + 1) % ids.length, ArrowLeft: (i - 1 + ids.length) % ids.length, Home: 0, End: ids.length - 1 }[ev.key];
-        if (j === undefined) return;
-        ev.preventDefault();
-        this.showTab(ids[j]);
-        this.tabs.get(ids[j])?.tab.focus();
-      });
-      const panel = el("div", { role: "tabpanel", id: `rx-tabpanel-${id}`, "aria-labelledby": `rx-tab-${id}`, tabindex: "0", class: "min-w-0" });
-      panel.append(content);
-      list.append(tab);
-      this.tabs.set(id, { tab, panel });
-    }
-    section.append(list, ...[...this.tabs.values()].map((t) => t.panel));
-    this.showTab(this.engine.display.tab ?? "info", false);
-    return section;
+  // buildBookmarks returns the Bookmarks tab (bookmarks.js).
+  buildBookmarks() {
+    const content = el("div", { class: "flex min-w-0 flex-col gap-3" });
+    content.append(el("h2", { class: "sr-only" }, "Bookmarks"), this.bookmarks.panel);
+    return content;
   }
 
-  /**
-   * showTab selects a side panel tab, opening the panel when asked to.
-   * @param {string} id @param {boolean} [open]
-   */
-  showTab(id, open = true) {
-    if (!this.tabs?.has(id)) return;
-    this.engine.display.tab = id;
-    for (const [k, { tab, panel }] of this.tabs) {
-      const on = k === id;
-      tab.setAttribute("aria-selected", String(on));
-      tab.tabIndex = on ? 0 : -1;
-      tab.classList.toggle("border-accent", on);
-      tab.classList.toggle("border-transparent", !on);
-      panel.hidden = !on;
-    }
-    if (open && !this.engine.display.panel) {
-      this.engine.display.panel = true;
-      this.layout();
-    }
+  // showBookmarks opens the Bookmarks tab (Find bookmark, key Y).
+  showBookmarks() {
+    this.openPanel();
+    this.panel.select("bookmarks", { open: true });
   }
 
-  // buildInfo returns the Info tab: the device, its node, the status
-  // metrics, the station, the session's events and the About link.
+  // buildInfo returns the Info tab (UI-019): the device, its node, the
+  // status metrics, the station, the session's events and the About link.
   buildInfo() {
     const panel = el("div", { class: "flex min-w-0 flex-col gap-3" });
     const dl = "grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm";
@@ -735,7 +840,7 @@ class MsdrReceiver extends HTMLElement {
     const about = el("p", { class: "text-sm" });
     about.append(el("a", { href: "/about" }, "About this receiver: version, help and source code"));
     panel.append(
-      el("h2", { id: "rx-info-title", class: "text-lg font-semibold" }, "Info"),
+      el("h2", { class: "sr-only" }, "Info"),
       this.info,
       el("h3", { class: "font-semibold" }, "Status"),
       this.metrics,
@@ -990,10 +1095,7 @@ class MsdrReceiver extends HTMLElement {
     this.toolbar.hidden = none;
     this.spCanvas.hidden = !e.display.spectrum;
     this.spToggle.setAttribute("aria-pressed", String(e.display.spectrum));
-    const open = e.display.panel && !none;
-    this.panel.hidden = !open;
-    this.panelToggle.setAttribute("aria-expanded", String(open));
-    this.body.classList.toggle("lg:grid-cols-[minmax(0,1fr)_20rem]", open);
+    this.layoutPanel(none);
     const i = ZOOMS.indexOf(e.display.zoom);
     this.zoomText.textContent = `×${e.display.zoom}`;
     this.zoomOut.toggleAttribute("disabled", i <= 0);
@@ -1004,6 +1106,105 @@ class MsdrReceiver extends HTMLElement {
     this.renderMetrics();
     this.renderChips();
     this.sizeCanvases();
+  }
+
+  /**
+   * layoutPanel applies the layout of the viewport (UI-007): docked panel
+   * (open by default from 1200 px) and every control group in the bar, or
+   * the bottom sheet and the compact bar whose other groups open in the
+   * sheet (More). A view (help, More) shows even without devices.
+   * @param {boolean} none no device to list
+   */
+  layoutPanel(none) {
+    const p = this.panel;
+    const sheet = this.sheetMedia.matches;
+    const more = p.view?.id === "more";
+    this.engine.display.tab = p.active;
+    p.setSheet(sheet);
+    if (!sheet) {
+      if (this.secondary.parentElement !== this.controls) this.controls.append(this.secondary);
+      if (more) p.closeView({ restore: false });
+    } else if (!more) {
+      this.secondary.remove();
+    }
+    const docked = (this.engine.display.panel ?? this.desktopMedia.matches) && !none;
+    const open = (sheet ? !none : docked) || !!p.view;
+    p.el.hidden = !open;
+    this.panelToggle.setAttribute("aria-expanded", String(open));
+    this.moreBtn.setAttribute("aria-expanded", String(p.view?.id === "more"));
+    this.body.classList.toggle("md:grid-cols-[minmax(0,1fr)_20rem]", open && !sheet);
+    this.body.classList.toggle("xl:grid-cols-[minmax(0,1fr)_22.5rem]", open && !sheet);
+  }
+
+  // togglePanel opens or closes the docked side panel (key Enter); in the
+  // sheet, it opens it to half or shrinks it to peek.
+  togglePanel() {
+    const p = this.panel;
+    if (this.sheetMedia.matches) {
+      p.snap(p.snapPoint === "peek" ? "half" : "peek");
+      return;
+    }
+    const open = !p.el.hidden;
+    if (open && p.view) p.closeView({ restore: false });
+    this.engine.display.panel = !open;
+    this.layout();
+  }
+
+  // openPanel shows the panel: docked, or the sheet at half at least.
+  openPanel() {
+    const p = this.panel;
+    if (this.sheetMedia.matches) {
+      if (p.snapPoint === "peek") p.snap("half");
+    } else if (p.el.hidden) {
+      this.engine.display.panel = true;
+    }
+    this.layout();
+  }
+
+  // showInfo opens the Info tab (key I).
+  showInfo() {
+    this.openPanel();
+    this.panel.select("info", { open: true });
+  }
+
+  // showHelp opens the keyboard shortcuts help as a panel view (UI-015,
+  // key ?, user menu); Esc or Close goes back to the tab.
+  showHelp() {
+    this.panel.showView({ id: "shortcuts", title: "Keyboard shortcuts", content: shortcutsHelp() });
+  }
+
+  // toggleMore shows the control groups of the compact bar's More in the
+  // sheet (UI-020), or goes back to the tab.
+  toggleMore() {
+    const p = this.panel;
+    if (p.view?.id === "more") {
+      p.closeView();
+      return;
+    }
+    p.showView({ id: "more", title: "More controls", content: this.secondary, onClose: () => this.secondary.remove() });
+  }
+
+  /** @param {boolean} [open] the Display menu (RX-031, RX-032) */
+  toggleDisplayMenu(open = this.displayMenu.hidden) {
+    this.displayMenu.hidden = !open;
+    this.displayBtn.setAttribute("aria-expanded", String(open));
+  }
+
+  // toggleSpectrum shows or hides the spectrum (RX-016, key V).
+  toggleSpectrum() {
+    this.engine.display.spectrum = !this.engine.display.spectrum;
+    this.layout();
+  }
+
+  // escape closes what Esc closes outside the panel: the panel's view or
+  // the sheet, then the Display menu.
+  escape() {
+    if (this.panel.escape()) return true;
+    if (!this.displayMenu.hidden) {
+      this.toggleDisplayMenu(false);
+      return true;
+    }
+    return false;
   }
 
   // chips returns the status chips (UI-022): hub, node, device, audio, and
@@ -1274,7 +1475,7 @@ class MsdrReceiver extends HTMLElement {
   syncControls() {
     const e = this.engine;
     const d = e.demod;
-    for (const c of [this.stepDown, this.stepUp, this.freqInput, this.narrower, this.wider, this.sqOn, this.sqAuto, this.nrOn]) {
+    for (const c of [this.stepDown, this.stepUp, this.freqInput, this.narrower, this.wider, this.sqOn, this.sqAuto, this.nrOn, this.seekDown, this.seekUp]) {
       c.toggleAttribute("disabled", !d);
     }
     if (document.activeElement !== this.freqInput) {
@@ -1351,6 +1552,7 @@ class MsdrReceiver extends HTMLElement {
     this.presetSelect.toggleAttribute("disabled", !d);
 
     this.recentreGroup.hidden = !perms.retune;
+    this.operator.hidden = this.presetGroup.hidden && this.recentreGroup.hidden;
     this.recentre.toggleAttribute("disabled", !d);
   }
 
@@ -1631,11 +1833,208 @@ class MsdrReceiver extends HTMLElement {
     else e.setBandpass(d.lowHz, Math.max(rel, d.lowHz + MIN_BANDWIDTH_HZ));
   }
 
+  // onWheel zooms, or tunes by one step with the wheel swap (RX-032);
+  // Shift + wheel does the other (browsers may turn it into a horizontal
+  // wheel).
   /** @param {WheelEvent} ev */
   onWheel(ev) {
-    if (ev.deltaY === 0) return;
+    const delta = ev.deltaY || ev.deltaX;
+    if (delta === 0) return;
     ev.preventDefault();
-    this.zoom(ev.deltaY < 0 ? 1 : -1);
+    const dir = delta < 0 ? 1 : -1;
+    if (this.wheelSwap !== ev.shiftKey) this.engine.step(dir);
+    else this.zoom(dir);
+  }
+
+  /**
+   * movePointerLabel shows the frequency under a mouse or pen pointer next
+   * to it (RX-031); touch pointers get none.
+   * @param {HTMLCanvasElement} canvas @param {PointerEvent} ev
+   */
+  movePointerLabel(canvas, ev) {
+    const label = this.pointerLabel;
+    const hz = this.showPointer && ev.pointerType !== "touch" ? this.hzAt(canvas, ev.clientX) : null;
+    if (hz === null) {
+      label.hidden = true;
+      return;
+    }
+    label.textContent = formatMHz(hz);
+    label.hidden = false;
+    const box = this.display.getBoundingClientRect();
+    const x = ev.clientX - box.left;
+    const y = ev.clientY - box.top;
+    // Beside the pointer, flipped to its left near the right edge.
+    const w = label.offsetWidth;
+    const h = label.offsetHeight;
+    const left = x + POINTER_LABEL_PX + w > box.width ? x - POINTER_LABEL_PX - w : x + POINTER_LABEL_PX;
+    const top = Math.min(box.height - h, Math.max(0, y + POINTER_LABEL_PX));
+    label.style.transform = `translate(${Math.max(0, Math.round(left))}px, ${Math.round(top)}px)`;
+  }
+
+  // autoSquelch sets the squelch once from the signal (RX-024, key A).
+  autoSquelch() {
+    const level = this.engine.autoSquelch();
+    if (level !== null) this.squelchLevel = level;
+  }
+
+  /** @param {number} db move the squelch level (keys { }), switching it on */
+  squelchBy(db) {
+    if (!this.engine.demod) return;
+    this.squelchLevel = Math.min(SQUELCH_MAX_DB, Math.max(SQUELCH_MIN_DB + 1, this.squelchLevel + db));
+    this.engine.setSquelch(this.squelchLevel);
+  }
+
+  /**
+   * seek tunes to the next signal above the squelch level minus 13 dB in
+   * the peak-hold spectrum (RX-025, keys [ ]).
+   * @param {1 | -1} dir
+   */
+  seek(dir) {
+    const e = this.engine;
+    const fft = e.fft;
+    const peak = this.spectrum?.peak;
+    if (!e.demod || !fft || !peak || peak.length !== fft.size) return;
+    const threshold = (this.squelchLevel - SEEK_MARGIN_DB - fft.dbMin) / fft.dbStep;
+    // From the pass band's edge: the signal heard now is not a new one.
+    const edge = e.tunedHz + (dir > 0 ? e.demod.highHz : e.demod.lowHz);
+    const from = ((edge - fft.startHz) / fft.spanHz) * fft.size;
+    const bin = seekBin(peak, from, dir, threshold);
+    if (bin < 0) {
+      this.say(`No signal above ${formatDb(this.squelchLevel - SEEK_MARGIN_DB)} dBFS ${dir > 0 ? "above" : "below"} the tuned frequency.`);
+      return;
+    }
+    e.tune(fft.startHz + ((bin + 0.5) / fft.size) * fft.spanHz);
+  }
+
+  /** @param {number} hz shift the pass band (Shift + ← →, RX-020) */
+  shiftBand(hz) {
+    const d = this.engine.demod;
+    if (d) this.engine.setBandpass(d.lowHz + hz, d.highHz + hz);
+  }
+
+  /** @param {number} dir the previous or next tuning step (RX-012) */
+  changeStep(dir) {
+    const opts = [...this.stepSelect.options].map((o) => Number(o.value));
+    const i = opts.indexOf(this.engine.tuningStep()) + dir;
+    if (!this.engine.demod || i < 0 || i >= opts.length) return;
+    this.engine.setStep(opts[i]);
+    this.say(`Tuning step ${formatStep(opts[i])}.`);
+  }
+
+  /**
+   * nudgeLevels moves a waterfall level (keys , . < >).
+   * @param {"min" | "max"} which @param {number} dir
+   */
+  nudgeLevels(which, dir) {
+    const lv = { ...this.levels() };
+    lv[which] += dir * LEVEL_STEP_DB;
+    if (lv.min >= lv.max) return;
+    this.setLevels(lv);
+    this.say(`Waterfall levels ${formatDb(lv.min)} to ${formatDb(lv.max)} dB.`);
+  }
+
+  /** @param {number} i select the i-th mode button (keys 1…9, 0) */
+  selectMode(i) {
+    const b = this.modes.children[i];
+    if (!(b instanceof HTMLButtonElement) || b.disabled) return false;
+    b.click();
+    return true;
+  }
+
+  // focusFrequency puts the focus in the frequency entry (key T).
+  focusFrequency() {
+    if (this.freqInput.disabled || this.controls.hidden) return false;
+    this.freqInput.focus();
+    this.freqInput.select();
+    return true;
+  }
+
+  // openPicker opens the device picker (key P).
+  openPicker() {
+    if (this.toolbar.hidden || this.select.disabled) return false;
+    this.select.focus();
+    try {
+      this.select.showPicker();
+    } catch {
+      // Not supported or not allowed: the focus is on it.
+    }
+    return true;
+  }
+
+  /**
+   * centreJump moves the shared centre by a quarter of the bandwidth
+   * (PageUp, PageDown, RX-010): for callers with the retune right only,
+   * others are told; the node checks it again.
+   * @param {1 | -1} dir
+   */
+  async centreJump(dir) {
+    const e = this.engine;
+    if (!e.demod || !e.device) return;
+    if (!e.device.permissions?.retune) {
+      notify({ level: "info", text: "Operators only: moving the centre affects every listener." });
+      return;
+    }
+    const hz = e.centerHz + dir * Math.round((e.device.sample_rate || 0) / 4);
+    if (await this.confirmShared("centre")) e.retune(hz);
+  }
+
+  // resetBandpasses forgets the saved pass bands (RX-021, key |).
+  resetBandpasses() {
+    const n = clearBandpasses();
+    this.say(n ? "Saved filters forgotten: each mode starts with its default filter." : "No saved filters.");
+  }
+
+  // recorderOn tells whether the visitor gets the recorder (REC-001).
+  recorderOn() {
+    return !!this.cfg.recorder;
+  }
+
+  // toggleRecord starts or stops the recording (REC-001, key R); the stop
+  // downloads the WAV file.
+  async toggleRecord() {
+    const a = this.engine.audio;
+    if (!this.recorderOn()) return;
+    if (!a.recording) {
+      if (!a.running) {
+        this.say("Start the audio to record.");
+        return;
+      }
+      a.startRecording();
+      this.recStart = { at: new Date(), hz: this.engine.tunedHz };
+      this.say("Recording.");
+      this.syncRecord();
+      return;
+    }
+    const rec = await a.stopRecording();
+    const start = this.recStart;
+    this.recStart = null;
+    this.syncRecord();
+    if (!rec || rec.samples === 0) {
+      this.say("Nothing was recorded.");
+      return;
+    }
+    const name = recordingName(start?.at ?? new Date(), start?.hz || this.engine.tunedHz);
+    saveFile(wavBlob(rec.chunks, rec.rate), name);
+    this.say(`Recording saved as ${name}.`);
+  }
+
+  // syncRecord shows the recording state and duration.
+  syncRecord() {
+    const a = this.engine.audio;
+    const on = a.recording;
+    if (on && !this.recStart) this.recStart = { at: new Date(), hz: this.engine.tunedHz };
+    this.recordBtn.setAttribute("aria-pressed", String(on));
+    const label = on ? "Stop recording" : "Record";
+    if (this.recordBtn.textContent !== label) this.recordBtn.textContent = label;
+    this.recordBtn.classList.toggle("rec-on", on);
+    let text = "";
+    if (on) {
+      const s = Math.floor(a.recordedSeconds());
+      text = `● REC ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    } else if (!a.running) {
+      text = "Start the audio to record.";
+    }
+    if (this.recordText.textContent !== text) this.recordText.textContent = text;
   }
 
   /** @param {number} now */
@@ -1657,6 +2056,7 @@ class MsdrReceiver extends HTMLElement {
       this.renderChips();
       this.renderMetrics();
       this.renderInfo();
+      this.syncRecord();
     }
   }
 
@@ -1705,6 +2105,9 @@ class MsdrReceiver extends HTMLElement {
     const e = this.engine;
     this.freqText.textContent = e.tunedHz ? formatMHz(e.tunedHz) : "—";
     this.modeText.textContent = e.demod?.mode ? e.demod.mode.toUpperCase() : "—";
+    // The sheet's head (UI-020): frequency and mode stay in sight.
+    const summary = e.tunedHz ? `${formatMHz(e.tunedHz)} ${this.modeText.textContent}` : "";
+    if (this.panel.summary.textContent !== summary) this.panel.summary.textContent = summary;
     if (e.meter) {
       this.levelText.textContent = `${e.meter.levelDb.toFixed(1)} dBFS${e.meter.open ? "" : " (squelched)"}`;
     } else {

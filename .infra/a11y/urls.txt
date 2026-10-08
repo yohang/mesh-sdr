@@ -8,6 +8,7 @@
 /policy 200
 /about 200
 /receiver/local/no-such-device?f=145500000&m=nfm 200
+/?panel=shortcuts 200
 /receiver/local/bad%20id 404
 /no-such-page 404
 /login 200
