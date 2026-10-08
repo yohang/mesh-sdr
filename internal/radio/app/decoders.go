@@ -23,6 +23,19 @@ type AudioBlock struct {
 	Discontinuity bool
 }
 
+// IQBlock is a block of selector IQ of a demodulator (a demodulator tap
+// for the text decoders, §8.3 "Secondary decoder"). Samples are valid
+// during the call only.
+type IQBlock struct {
+	Samples []complex64
+	// Rate is the channel rate of the demodulator (not an integer).
+	Rate float64
+	// Time is the time of the first sample.
+	Time time.Time
+	// Discontinuity: input samples were lost before this block.
+	Discontinuity bool
+}
+
 // Decoder session states (DEC-002: running, unavailable or error, with a
 // reason).
 const (
@@ -48,6 +61,9 @@ type DecodeRecord struct {
 	// Live records (the rows of an image) go to the listener only: the hub
 	// does not keep them.
 	Live bool
+	// Partial is the line a text decoder is printing (DEC-006 to DEC-012):
+	// the listener sees it at once, the hub only gets the whole line.
+	Partial bool
 }
 
 // File kinds of the decoders (FIL-005).
@@ -87,6 +103,8 @@ type DecoderEvents struct {
 	// File receives the files of the session, even after Close: the image
 	// in progress is saved then.
 	File func(ProducedFile)
+	// Spectrum receives the secondary FFT lines while it is on (DEC-004).
+	Spectrum func(SpectrumFrame)
 }
 
 // DecoderSpec describes a decoder session to start.
@@ -96,12 +114,26 @@ type DecoderSpec struct {
 	Mode    domain.DigitalMode
 	// Variant is the decoder variant of the mode ("" for none).
 	Variant string
+	// OffsetHz is the secondary offset of a text decoder (DEC-005): the
+	// frequency of the signal relative to the dial.
+	OffsetHz float64
 }
 
 // DecoderRun is a running decoder session.
 type DecoderRun interface {
 	// Audio feeds the session (an InputAudio mode); it never blocks.
 	Audio(b AudioBlock)
+	// IQ feeds the session (an InputNarrowIQ mode); it never blocks.
+	IQ(b IQBlock)
+	// Retune moves the secondary selector to offsetHz (DEC-005) and resets
+	// what depends on the dial frequency (the CW timing, DEC-012).
+	Retune(offsetHz float64)
+	// SpectrumSize is the size of the secondary FFT lines; 0: the session
+	// has none (DEC-004).
+	SpectrumSize() int
+	// Spectrum switches the secondary FFT on or off: it is computed only
+	// while the listener shows it (DEC-004).
+	Spectrum(on bool)
 	// Close stops the session; it does not wait for the tool to exit.
 	Close()
 }
@@ -222,9 +254,10 @@ func (d *Decoders) Check(name string) (domain.DigitalMode, error) {
 var ErrNodeBusy = errors.New("node busy")
 
 // Start starts a new session of m with a variant of the mode (already
-// checked); events builds the receivers of its output for its session id.
-// Beyond the node's session cap it returns ErrNodeBusy.
-func (d *Decoders) Start(m domain.DigitalMode, variant string, events func(id shared.UUID) DecoderEvents) (shared.UUID, DecoderRun, error) {
+// checked) and the secondary offset of a text decoder; events builds the
+// receivers of its output for its session id. Beyond the node's session
+// cap it returns ErrNodeBusy.
+func (d *Decoders) Start(m domain.DigitalMode, variant string, offsetHz float64, events func(id shared.UUID) DecoderEvents) (shared.UUID, DecoderRun, error) {
 	d.mu.Lock()
 	busy := d.max > 0 && d.running >= d.max
 	if !busy {
@@ -243,7 +276,7 @@ func (d *Decoders) Start(m domain.DigitalMode, variant string, events func(id sh
 		return shared.UUID{}, nil, fmt.Errorf("decoder session id: %w", err)
 	}
 
-	run, err := d.runner.Start(DecoderSpec{Session: id, Mode: m, Variant: variant}, events(id))
+	run, err := d.runner.Start(DecoderSpec{Session: id, Mode: m, Variant: variant, OffsetHz: offsetHz}, events(id))
 	if err != nil {
 		d.release()
 

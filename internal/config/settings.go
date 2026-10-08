@@ -140,6 +140,11 @@ type SettingsDecoders struct {
 	// MaxRestarts is the crash-loop threshold of decoder processes (ADR 0017
 	// decision 4, DIAG-003).
 	MaxRestarts int `toml:"max_restarts" env:"MAX_RESTARTS" jsonschema:"minimum=1,maximum=100" jsonschema_extras:"x-label=Restarts before a decoder gives up" jsonschema_description:"A decoder process that exits unexpectedly this many times within 5 minutes stops restarting: the session shows an error and retries every 10 minutes, or when the listener selects the decoder again (1 to 100). Applies to sessions started from now on."`
+	// DigimodesFFTSize is the size of the secondary FFT of the text
+	// decoders (DEC-004).
+	DigimodesFFTSize int `toml:"digimodes_fft_size" env:"DIGIMODES_FFT_SIZE" jsonschema:"enum=512,enum=1024,enum=2048,enum=4096" jsonschema_extras:"x-label=Decoder waterfall FFT size" jsonschema_description:"Size of the FFT of the decoder waterfall of PSK, RTTY, SITOR-B and CW (Receiver › Decoders): 512, 1024, 2048 or 4096 bins over 12 kHz. Applies to decoders started from now on."`
+	// ShowCW: the CW decoder also prints dots and dashes (DEC-012).
+	ShowCW bool `toml:"cw_showcw" env:"CW_SHOWCW" jsonschema_extras:"x-label=Show CW symbols" jsonschema_description:"The CW decoder also prints the dots and dashes it receives. Applies to decoders started from now on."`
 }
 
 // SettingsFiles is the [settings.files] table: retention of the files the
@@ -200,7 +205,7 @@ func DefaultSettings() Settings {
 		},
 		Files:         SettingsFiles{RetentionCount: 20},
 		Grid:          SettingsGrid{HeartbeatIntervalS: 10, OfflineAfterS: 60},
-		Decoders:      SettingsDecoders{MaxRestarts: 5},
+		Decoders:      SettingsDecoders{MaxRestarts: 5, DigimodesFFTSize: 2048},
 		Invitations:   SettingsInvitations{TTLHours: 168},
 		PasswordReset: SettingsPasswordReset{TTLMinutes: 30},
 	}

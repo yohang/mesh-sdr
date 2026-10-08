@@ -55,6 +55,9 @@ type Options struct {
 	// FAX returns the FAX settings pushed by the hub (DefaultFAX when
 	// nil).
 	FAX    func() FAXSettings
+	// Text returns the settings of the text decoders (digimodes_fft_size,
+	// cw_showcw pushed by the hub); nil: the defaults.
+	Text func() TextSettings
 	Logger *slog.Logger
 	// Now is the decode time source (tests).
 	Now func() time.Time
@@ -88,6 +91,10 @@ func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderR
 	// The native image decoders run in the node (DEC-037, DEC-038).
 	if spec.Mode.Name == app.FileSSTV || spec.Mode.Name == app.FileFAX {
 		return r.startImage(spec, ev)
+	}
+
+	if spec.Mode.Cap == domain.CapNativeDSP {
+		return r.startText(spec, ev)
 	}
 
 	ad, ok := adapters[spec.Mode.Name]
@@ -230,6 +237,18 @@ func (s *session) Audio(b app.AudioBlock) {
 		_, _ = s.buf.Write(out)
 	}
 }
+
+// IQ implements app.DecoderRun: the tools read audio.
+func (s *session) IQ(app.IQBlock) {}
+
+// Retune implements app.DecoderRun: the tools have no secondary selector.
+func (s *session) Retune(float64) {}
+
+// SpectrumSize implements app.DecoderRun: no secondary FFT.
+func (s *session) SpectrumSize() int { return 0 }
+
+// Spectrum implements app.DecoderRun: no secondary FFT.
+func (s *session) Spectrum(bool) {}
 
 // Close implements app.DecoderRun: nothing is reported after it.
 func (s *session) Close() {

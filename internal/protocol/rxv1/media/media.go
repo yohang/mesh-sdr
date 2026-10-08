@@ -373,8 +373,11 @@ type Applied struct {
 // digital mode on a demodulator (decoder null: stop it). A demodulator
 // whose mode the digital mode does not allow switches to the mode's
 // default underlying mode (DEC-003). options.variant picks the decoder
-// variant (default: the mode's first); the offset belongs to later
-// decoders and is ignored.
+// variant (default: the mode's first). offset_hz is the secondary offset
+// of a text decoder (DEC-005): the frequency of the signal relative to the
+// demodulator's dial frequency (default: the middle of its pass band);
+// sent again for the text decoder running, it moves the decoder without a
+// new session. Other decoders ignore it.
 type DecoderSet struct {
 	DemodID  string         `json:"demod_id"`
 	Decoder  *string        `json:"decoder"`
@@ -385,9 +388,18 @@ type DecoderSet struct {
 // DecoderStarted is the ack result of decoder.set.
 type DecoderStarted struct {
 	// DecoderSessionID is empty when the decoder was stopped.
-	DecoderSessionID string  `json:"decoder_session_id,omitempty"`
-	Variant          string  `json:"variant,omitempty"`
-	Applied          Applied `json:"applied"`
+	DecoderSessionID string `json:"decoder_session_id,omitempty"`
+	// SecondaryFFTStreamID is the decoder's secondary FFT stream (kind
+	// fft2, DEC-004), opened paused: stream.configure {paused:false}
+	// while the listener shows it.
+	SecondaryFFTStreamID *uint16 `json:"secondary_fft_stream_id,omitempty"`
+	Variant              string  `json:"variant,omitempty"`
+	// OffsetHz and BandwidthHz are the secondary selector of a text
+	// decoder (DEC-005; additive fields): it keeps ±BandwidthHz around
+	// the offset.
+	OffsetHz    *int64  `json:"offset_hz,omitempty"`
+	BandwidthHz float64 `json:"bandwidth_hz,omitempty"`
+	Applied     Applied `json:"applied"`
 }
 
 // Decode is decode (node → client, §6.5): one message of the client's own
@@ -402,6 +414,10 @@ type Decode struct {
 	Schema           string          `json:"schema"`
 	Text             string          `json:"text"`
 	Payload          json.RawMessage `json:"payload"`
+	// Partial is the line a text decoder is printing (additive field):
+	// the next decode replaces it, until the whole line comes without it.
+	// Partial lines are not stored.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // MaxDecodeText bounds the text of a decoded message (§8.4 typed output

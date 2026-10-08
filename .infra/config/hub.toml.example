@@ -239,6 +239,8 @@ trusted_proxies = []
 # Decoding (Admin › Decoding), pushed to the nodes in the desired state.
 [settings.decoders]
 # max_restarts = 5                       # unexpected exits within 5 min before a decoder gives up (1..100)
+# digimodes_fft_size = 2048              # decoder waterfall FFT size of PSK, RTTY, SITOR-B, CW (512, 1024, 2048, 4096)
+# cw_showcw = false                      # the CW decoder also prints dots and dashes
 
 [settings.invitations]
 # ttl_hours = 168                        # invitation link validity (1..720 hours)

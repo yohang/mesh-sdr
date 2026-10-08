@@ -442,6 +442,10 @@ type Result struct {
 	// Open reports whether the squelch was open (always true without
 	// squelch). Squelched audio is silence.
 	Open bool
+	// Selector is the selector IQ at the channel rate (residual shift and
+	// SSB band-pass, before the squelch): the input of the text decoders
+	// (§8.3 "Secondary decoder").
+	Selector []complex64
 }
 
 // Process runs a block of channel IQ through the chain.
@@ -491,7 +495,7 @@ func (c *Chain) Process(iq []complex64) (Result, error) {
 		clear(audio)
 	}
 
-	return Result{Audio: audio, LevelDB: c.level, Open: c.open}, nil
+	return Result{Audio: audio, LevelDB: c.level, Open: c.open, Selector: sel}, nil
 }
 
 // Close releases the stages.

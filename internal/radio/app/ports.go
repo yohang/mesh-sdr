@@ -134,6 +134,9 @@ type Demod interface {
 	// Tap delivers every block of demodulated audio, before framing, to
 	// fn until cancel (a decoder session, §8.3). fn must not block.
 	Tap(fn func(AudioBlock)) (cancel func())
+	// TapIQ delivers every block of selector IQ, at the channel rate, to fn
+	// until cancel (a text decoder session, §8.3). fn must not block.
+	TapIQ(fn func(IQBlock)) (cancel func())
 	Close()
 }
 

@@ -153,6 +153,18 @@ func (s *imageSession) Audio(b app.AudioBlock) {
 	}
 }
 
+// IQ implements app.DecoderRun: the image decoders read audio.
+func (s *imageSession) IQ(app.IQBlock) {}
+
+// Retune implements app.DecoderRun: no secondary selector.
+func (s *imageSession) Retune(float64) {}
+
+// SpectrumSize implements app.DecoderRun: no secondary FFT.
+func (s *imageSession) SpectrumSize() int { return 0 }
+
+// Spectrum implements app.DecoderRun: no secondary FFT.
+func (s *imageSession) Spectrum(bool) {}
+
 // Close implements app.DecoderRun: the goroutine ends after the queued
 // audio and saves the image in progress, if long enough.
 func (s *imageSession) Close() {
