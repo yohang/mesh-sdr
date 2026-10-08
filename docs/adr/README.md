@@ -31,3 +31,4 @@ ADRs are written with Status `Proposed` (spikes) and switch to `Accepted` once t
 | [0025](0025-pragmatic-ddd.md) | Pragmatic DDD | Accepted |
 | [0026](0026-m1a-scope.md) | M1a scope (KISS) | Accepted |
 | [0027](0027-m1b-scope.md) | M1b scope (KISS) | Proposed |
+| [0028](0028-m2-scope.md) | M2 scope (KISS) | Proposed |
