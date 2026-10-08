@@ -26,7 +26,7 @@
 // link to Bookmarks › Manage pre-filled from the current tuning (BMK-003).
 //
 // Control bar: Scan (scanner.js, key S) with its state as text and
-// aria-pressed. Toolbar: Bandplan (bandplan.js, key B). Keys go through
+// aria-pressed; disabled, with a text hint, while the squelch is off. Toolbar: Bandplan (bandplan.js, key B). Keys go through
 // the data-shortcut mechanism (shortcuts.js) on these visible controls.
 
 import { BookmarkSearch } from "./bookmark-search.js";
@@ -85,14 +85,12 @@ export class ReceiverBookmarks {
    *   engine: ReturnType<typeof import("./engine.js").getEngine>,
    *   grid: ReturnType<typeof import("./grid.js").getGrid>,
    *   modes: () => string[],
-   *   squelch: () => number,
    *   m2: () => string,
    *   manageURL: string,
    *   showTab: () => void,
    *   layout: () => void,
    * }} deps
-   *   modes: the modes of the device chosen; squelch: the squelch level
-   *   (dBFS) the scanner compares with; m2: the secondary mode of the link;
+   *   modes: the modes of the device chosen; m2: the secondary mode of the link;
    *   manageURL: Bookmarks › Manage ("" when the visitor may not add);
    *   showTab: opens the side panel on the Bookmarks tab; layout: the
    *   island lays itself out again (the ribbon was toggled).
@@ -120,7 +118,7 @@ export class ReceiverBookmarks {
     this.buildBar();
     this.ribbon = new BandplanRibbon();
     this.search = new BookmarkSearch(deps.grid);
-    this.scanner = new Scanner(e, { marks: () => this.marks, tune: (m) => this.tune(m), squelch: deps.squelch });
+    this.scanner = new Scanner(e, { marks: () => this.marks, tune: (m) => this.tune(m) });
     this.buildControls();
     this.buildPanel();
 
@@ -128,6 +126,7 @@ export class ReceiverBookmarks {
       const what = /** @type {CustomEvent} */ (ev).detail;
       if (what === "config" || what === "state") this.refresh(false);
       if (what === "tune") this.tuned();
+      if (what !== "meter") this.syncScan();
     };
     e.addEventListener("change", this.onEngine);
     this.onScanner = () => this.syncScan();
@@ -233,8 +232,12 @@ export class ReceiverBookmarks {
     this.scanBtn.setAttribute("aria-pressed", String(s.running));
     this.scanBtn.classList.toggle("bg-accent", s.running);
     this.scanBtn.classList.toggle("text-accent-fg", s.running);
+    // The squelch level is the hit threshold: no squelch, no scan.
+    const ready = s.running || (!!this.engine.demod && s.squelched());
+    this.scanBtn.toggleAttribute("disabled", !ready);
     const what = s.current ? `${s.current.name} (${formatMHz(s.current.frequency)})` : "";
-    this.scanState.textContent = !s.running ? "Off" : s.phase === "dwell" ? `On: signal on ${what}` : `On: ${what}`;
+    const text = s.running ? (s.phase === "dwell" ? `On: signal on ${what}` : `On: ${what}`) : ready ? "Off" : "Off. Set the squelch to scan";
+    if (this.scanState.textContent !== text) this.scanState.textContent = text;
   }
 
   /** @param {string} text said politely in the control bar */

@@ -451,7 +451,6 @@ class MsdrReceiver extends HTMLElement {
       engine: this.engine,
       grid: this.grid,
       modes: () => this.chosen()?.modes ?? [],
-      squelch: () => this.engine.demod?.squelchDb ?? this.squelchLevel,
       m2: () => this.m2,
       manageURL: this.cfg.bookmarks_url ?? "",
       showTab: () => this.showBookmarks(),
