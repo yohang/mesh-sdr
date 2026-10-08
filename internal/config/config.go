@@ -171,7 +171,8 @@ type Tools struct {
 	Direwolf        string   `toml:"direwolf" env:"DIREWOLF" jsonschema:"description=Absolute path of direwolf (packet and APRS)."`
 	MultimonNG      string   `toml:"multimon_ng" env:"MULTIMON_NG" jsonschema:"description=Absolute path of multimon-ng (paging\\, SelCall\\, ZVEI\\, EAS)."`
 	RTL433          string   `toml:"rtl_433" env:"RTL_433" jsonschema:"description=Absolute path of rtl_433 (ISM sensors)."`
-	CWSkimmer       string   `toml:"csdr_cwskimmer" env:"CSDR_CWSKIMMER" jsonschema:"description=Absolute path of csdr-cwskimmer (CW and RTTY skimmers)."`
+	CWSkimmer       string   `toml:"csdr_cwskimmer" env:"CSDR_CWSKIMMER" jsonschema:"description=Absolute path of csdr-cwskimmer (CW skimmer)."`
+	RTTYSkimmer     string   `toml:"csdr_rttyskimmer" env:"CSDR_RTTYSKIMMER" jsonschema:"description=Absolute path of csdr-rttyskimmer (RTTY skimmer)."`
 }
 
 // tool is one [tools] path key: its TOML key, the program name and its
@@ -191,6 +192,7 @@ func (t Tools) all() []tool {
 		{"multimon_ng", "multimon-ng", t.MultimonNG},
 		{"rtl_433", "rtl_433", t.RTL433},
 		{"csdr_cwskimmer", "csdr-cwskimmer", t.CWSkimmer},
+		{"csdr_rttyskimmer", "csdr-rttyskimmer", t.RTTYSkimmer},
 	}
 }
 

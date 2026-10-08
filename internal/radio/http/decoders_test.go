@@ -22,7 +22,7 @@ import (
 type tools struct{ ok bool }
 
 func (t tools) Available(c string) (bool, string) {
-	if (c == domain.CapMultimonNG || c == domain.CapNativeDSP || c == domain.CapWSPRD) && t.ok {
+	if (c == domain.CapMultimonNG || c == domain.CapNativeDSP || c == domain.CapWSPRD || c == domain.CapRTL433) && t.ok {
 		return true, ""
 	}
 
@@ -42,9 +42,10 @@ type fakeRun struct {
 	fps     int
 }
 
-func (r *fakeRun) Audio(app.AudioBlock) {}
-func (r *fakeRun) IQ(app.IQBlock)       {}
-func (r *fakeRun) SpectrumSize() int    { return r.size }
+func (r *fakeRun) Audio(app.AudioBlock)   {}
+func (r *fakeRun) IQ(app.IQBlock)         {}
+func (r *fakeRun) WideIQ(app.WideIQBlock) {}
+func (r *fakeRun) SpectrumSize() int      { return r.size }
 
 func (r *fakeRun) Retune(hz float64) {
 	r.mu.Lock()
@@ -344,7 +345,7 @@ func TestDecoderNodeBusy(t *testing.T) {
 	e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": nil}, "")
 
 	// Another listener's session holds the only slot.
-	_, other, err := e.dec.Start(domain.DigitalModes()[0], "DTMF", 0, func(shared.UUID) app.DecoderEvents { return app.DecoderEvents{} })
+	_, other, err := e.dec.Start(app.DecoderSpec{Mode: domain.DigitalModes()[0], Variant: "DTMF"}, func(shared.UUID) app.DecoderEvents { return app.DecoderEvents{} })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,5 +468,43 @@ func TestDecoderImages(t *testing.T) {
 
 	if f := got[0]; f.DeviceID != "vhf" || f.Mode != "sstv" || f.FreqHz != 144_000_000+125_000+12_500 || f.SessionID != started.DecoderSessionID || !f.Start.Equal(start) {
 		t.Errorf("file %+v", f)
+	}
+}
+
+// Wide IQ decoders (DEC-039, DEC-040): ISM fits the 250 kHz device and
+// runs; WMBus needs 1.2 MS/s and is unavailable, with the reason. A live
+// record (a skimmer's text) carries its signal offset and stays with the
+// listener.
+func TestDecoderWideIQ(t *testing.T) {
+	e := newDecoderEnv(t, true, 0, time.Minute)
+
+	e.check(rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}, "")
+	id := e.check(rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "am", "offset_hz": 0}, "").result.(media.DemodCreated).DemodID
+
+	res := e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "wmbus"}, "").result.(media.DecoderStarted)
+	st := sentOf[media.DiagState](e.p, rxv1.TypeDiagState)
+
+	if res.DecoderSessionID != "" || len(st) != 1 || st[0].State != media.DecoderUnavailable ||
+		st[0].Reason != "the device sample rate (250000 Hz) is below the 1200000 Hz this decoder needs" {
+		t.Fatalf("wmbus: %+v %+v", res, st)
+	}
+
+	started := e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "ism"}, "").result.(media.DecoderStarted)
+	if started.DecoderSessionID == "" || started.Applied.Mode != "am" {
+		t.Fatalf("ism: %+v", started)
+	}
+
+	r := e.run.last()
+	r.ev.Decode(app.DecodeRecord{Time: time.Now(), Schema: "skimmer.v1", Text: "x", Payload: json.RawMessage(`{}`), AudioHz: 1000, Live: true})
+
+	d := sentOf[media.Decode](e.p, rxv1.TypeDecode)
+	if len(d) != 1 || d[0].FreqHz != 144_000_000+125_000+1000 || e.pub.count() != 0 {
+		t.Errorf("decodes %+v, published %d", d, e.pub.count())
+	}
+
+	e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": nil}, "")
+
+	if !r.isClosed() {
+		t.Error("decoder kept")
 	}
 }

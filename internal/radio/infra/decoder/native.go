@@ -171,6 +171,9 @@ func (s *textSession) IQ(b app.IQBlock) {
 	}
 }
 
+// WideIQ implements app.DecoderRun: the text decoders read selector IQ.
+func (s *textSession) WideIQ(app.WideIQBlock) {}
+
 // Retune implements app.DecoderRun.
 func (s *textSession) Retune(offsetHz float64) {
 	s.mu.Lock()

@@ -77,6 +77,19 @@ function el(tag, attrs = {}, text) {
   return e;
 }
 
+/** Characters kept per skimmer signal. */
+const SKIMMER_TEXT = 80;
+
+/**
+ * hue derives a stable hue from a paging address (per-address colour).
+ * @param {string} s
+ */
+function hue(s) {
+  let h = 0;
+  for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+
 /** @param {number} ms */
 function utcTime(ms) {
   return new Date(ms).toISOString().slice(11, 19);
@@ -267,6 +280,10 @@ export class DecodersTab {
     if (typeof p?.mode !== "string") return;
     const c = this.card(p.mode);
     if (p.schema === "image.v1" && p.payload && typeof p.payload === "object") this.onImage(c, p);
+    if (p.schema === "skimmer.v1" && p.payload?.kind === "text") {
+      this.skimmerText(c, p);
+      return;
+    }
     const text = String(p.text ?? "").slice(0, MAX_TEXT);
     // A text decoder's line being printed replaces the previous one.
     c.live.textContent = p.partial ? text : "";
@@ -274,6 +291,12 @@ export class DecodersTab {
     if (p.partial || !text) return;
     if (p.schema === "js8.v1" && this.thread(c, p, text)) return;
     const li = el("li", { class: "break-all whitespace-pre-wrap" });
+    // Paging: a colour per address, besides the address in the text.
+    const address = p.schema === "paging.v1" ? p.payload?.address : undefined;
+    if (typeof address === "string") {
+      li.classList.add("border-l-4", "pl-1");
+      li.style.borderLeftColor = `hsl(${hue(address)} 70% 45%)`;
+    }
     let head = `${utcTime(Number(p.ts) || Date.now())} ${mhz(Number(p.freq_hz))} `;
     const db = Number(p.payload?.db);
     if (p.schema === "wsjt.v1" && Number.isFinite(db)) head += `${db} dB `;
@@ -434,6 +457,32 @@ export class DecodersTab {
       c.threads = c.threads.filter((x) => x !== t);
     }
     return true;
+  }
+
+  /**
+   * skimmerText shows the text of a skimmer (DEC-013, DEC-014): one row per
+   * signal frequency with its latest characters, the newest row first; a
+   * change of the dial frequency clears the rows.
+   * @param {Card & {rows?: Map<number, HTMLLIElement>}} c @param {any} p decode
+   */
+  skimmerText(c, p) {
+    if (!c.rows || p.payload.changed) {
+      if (c.rows) for (const li of c.rows.values()) li.remove();
+      c.rows = new Map();
+    }
+    const freq = Number(p.freq_hz) || 0;
+    let li = c.rows.get(freq);
+    if (!li || !li.isConnected) {
+      li = /** @type {HTMLLIElement} */ (el("li", { class: "break-all whitespace-pre-wrap" }));
+      li.append(el("span", { class: "text-fg-muted" }), el("span"));
+      c.rows.set(freq, li);
+    }
+    const [meta, body] = /** @type {HTMLElement[]} */ ([...li.children]);
+    const db = Number(p.payload.db) || 0;
+    meta.textContent = `${utcTime(Number(p.ts) || Date.now())} ${mhz(freq)} ${db} dB `;
+    body.textContent = ((body.textContent ?? "") + String(p.text ?? "")).slice(-SKIMMER_TEXT);
+    c.list.prepend(li);
+    while (c.list.childElementCount > MAX_MESSAGES) c.list.lastElementChild?.remove();
   }
 
   /** @param {any} p diag.state */

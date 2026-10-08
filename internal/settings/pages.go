@@ -105,6 +105,8 @@ var formPages = []formPage{
 				ID: "js8", Title: "JS8Call decoder", Description: "A change applies from the next slot of the running decoders.",
 				Keys: []string{"decoders.js8_enabled_profiles", "decoders.js8_decoding_depth"},
 			},
+			{ID: "paging", Title: "Paging", Keys: []string{"decoders.paging_filter", "decoders.paging_charset"}},
+			{ID: "ism", Title: "ISM", Keys: []string{"decoders.ism_report_levels"}},
 		},
 	},
 }

@@ -82,9 +82,22 @@ type DecodeRecord struct {
 
 // File kinds of the decoders (FIL-005).
 const (
-	FileSSTV = "sstv"
-	FileFAX  = "fax"
+	FileSSTV    = "sstv"
+	FileFAX     = "fax"
+	FileTextLog = "text_log"
 )
+
+// WideIQBlock is a block of the wide IQ tap of a demodulator (a decoder
+// whose input is domain.InputWideIQ), at the mode's input rate. Samples
+// are valid during the call only.
+type WideIQBlock struct {
+	Samples []complex64
+	Rate    int
+	// Time is the time of the first sample.
+	Time time.Time
+	// Discontinuity: input samples were lost before this block.
+	Discontinuity bool
+}
 
 // ProducedFile is a file a decoder session produced for Files (FIL-005):
 // an SSTV or FAX image as PNG, with its reception metadata (FIL-008).
@@ -135,6 +148,9 @@ type DecoderSpec struct {
 	// OffsetHz is the secondary offset of a text decoder (DEC-005): the
 	// frequency of the signal relative to the dial.
 	OffsetHz float64
+	// DialHz returns the dial frequency of the demodulator (the skimmers
+	// clear their text when it changes); nil in tests. It never blocks.
+	DialHz func() int64
 }
 
 // DecoderRun is a running decoder session.
@@ -143,6 +159,8 @@ type DecoderRun interface {
 	Audio(b AudioBlock)
 	// IQ feeds the session (an InputNarrowIQ mode); it never blocks.
 	IQ(b IQBlock)
+	// WideIQ feeds the session (an InputWideIQ mode); it never blocks.
+	WideIQ(b WideIQBlock)
 	// Retune moves the secondary selector to offsetHz (DEC-005) and resets
 	// what depends on the dial frequency (the CW timing, DEC-012).
 	Retune(offsetHz float64)
@@ -271,11 +289,13 @@ func (d *Decoders) Check(name string) (domain.DigitalMode, error) {
 // ErrNodeBusy refuses a decoder session beyond decoders.max_sessions.
 var ErrNodeBusy = errors.New("node busy")
 
-// Start starts a new session of m with a variant of the mode (already
-// checked) and the secondary offset of a text decoder; events builds the
-// receivers of its output for its session id. Beyond the node's session
-// cap it returns ErrNodeBusy.
-func (d *Decoders) Start(m domain.DigitalMode, variant string, offsetHz float64, events func(id shared.UUID) DecoderEvents) (shared.UUID, DecoderRun, error) {
+// Start starts a new session of spec: its mode and variant (already
+// checked), the secondary offset of a text decoder; the session id is set
+// here. events builds the receivers of its output for its session id.
+// Beyond the node's session cap it returns ErrNodeBusy.
+func (d *Decoders) Start(spec DecoderSpec, events func(id shared.UUID) DecoderEvents) (shared.UUID, DecoderRun, error) {
+	m := spec.Mode
+
 	d.mu.Lock()
 	busy := d.max > 0 && d.running >= d.max
 	if !busy {
@@ -294,7 +314,9 @@ func (d *Decoders) Start(m domain.DigitalMode, variant string, offsetHz float64,
 		return shared.UUID{}, nil, fmt.Errorf("decoder session id: %w", err)
 	}
 
-	run, err := d.runner.Start(DecoderSpec{Session: id, Mode: m, Variant: variant, OffsetHz: offsetHz}, events(id))
+	spec.Session = id
+
+	run, err := d.runner.Start(spec, events(id))
 	if err != nil {
 		d.release()
 

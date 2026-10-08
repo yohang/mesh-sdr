@@ -247,6 +247,9 @@ trusted_proxies = []
 # q65_enabled_combinations = ["A30", "E120", "C60"] # Q65 submode + period, narrower than 2700 Hz
 # js8_enabled_profiles = ["normal", "slow"] # JS8Call speeds: normal, slow, fast, turbo
 # js8_decoding_depth = 3                 # JS8Call decoding depth (1..3)
+# paging_filter = false                  # paging: keep only readable pages
+# paging_charset = "US"                  # paging: POCSAG charset (US, FR, DE, DK, SE, SI)
+# ism_report_levels = false              # ISM/WMBus: keep the signal levels of rtl_433
 
 # Decoding depth per WSJT mode; 0: wsjt_decoding_depth.
 [settings.decoders.wsjt_decoding_depths]

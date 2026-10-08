@@ -13,7 +13,9 @@
 // dial at the same frequency (SITOR-B at +600 Hz, BPSK31 at +1000 Hz, CW
 // at +1500 Hz, RTTY-170 at +2200 Hz, each message repeated); "ft8"
 // replaces it by an FT8 signal "CQ K1ABC FN42" 1500 Hz above it (USB), in
-// every 15 s UTC slot; anything else streams.
+// every 15 s UTC slot; "ism" keys the carrier on and off with a Nexus-TH
+// temperature sensor message every 5 s (OOK, rtl_433); anything else
+// streams.
 //
 // It is not part of the product images.
 package main
@@ -91,7 +93,7 @@ func main() {
 
 	s := &synth{
 		rate: float64(*rate), carrier: float64(*freq) + float64(*rate)/8, tone: float64(*freq) - float64(*rate)/5,
-		zvei: *device == "zvei", ft8: *device == "ft8",
+		zvei: *device == "zvei", ft8: *device == "ft8", ism: *device == "ism",
 	}
 	if *device == "text" {
 		s.text = textSignals()
@@ -156,6 +158,7 @@ type synth struct {
 	phaseM        float64
 	zvei          bool
 	ft8           bool
+	ism           bool
 	// text are the text mode signals at textRate (device "text").
 	text [][]complex64
 	rng  *rand.Rand
@@ -206,12 +209,55 @@ func ft8Tone(sec float64) (float64, bool) {
 	return 1500 + 6.25*float64(ft8Symbols[i]-'0'), true
 }
 
+// nexusBits are a Nexus-TH temperature sensor message (id 177, channel 1,
+// 21.5 °C, 45 %).
+var nexusBits = func() []byte {
+	var out []byte
+	for _, b := range []byte{0xB1, 0x80, 0xD7, 0xF2} {
+		for i := 7; i >= 0; i-- {
+			out = append(out, b>>i&1)
+		}
+	}
+
+	return append(out, 1, 1, 0, 1)
+}()
+
+// nexusPattern is the OOK keying of ten repeats of the message (PPM:
+// 500 µs pulses, 1 ms gaps for 0, 2 ms for 1, 4 ms between repeats), in
+// 500 µs units.
+var nexusPattern = func() []bool {
+	var out []bool
+	for range 10 {
+		for _, b := range nexusBits {
+			out = append(out, true, false, false)
+			if b == 1 {
+				out = append(out, false, false)
+			}
+		}
+
+		out = append(out, true, false, false, false, false, false, false, false, false)
+	}
+
+	return out
+}()
+
+// nexus returns the carrier amplitude of the "ism" device at t: the
+// Nexus-TH bursts every 5 s.
+func nexus(t float64) float64 {
+	i := int(math.Mod(t, 5) / 0.0005)
+	if i < len(nexusPattern) && nexusPattern[i] {
+		return 1
+	}
+
+	return 0
+}
+
 // zveiTones are the ZVEI1 tones of the digits 1 to 5, 70 ms each.
 var zveiTones = []float64{1060, 1160, 1270, 1400, 1530}
 
 // modulation returns the audio tone at t (0: silence).
 func (s *synth) modulation(t float64) float64 {
-	if s.text != nil {
+	if s.text != nil || s.ism {
 		return 0
 	}
 
@@ -263,6 +309,10 @@ func (s *synth) stream(conn net.Conn, center *atomic.Int64, stallAfter time.Dura
 				if !on {
 					amp = 0
 				}
+			}
+
+			if s.ism {
+				amp = 0.3 * nexus(t)
 			}
 
 			s.phaseA += 2 * math.Pi * inst / s.rate

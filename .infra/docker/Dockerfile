@@ -37,13 +37,14 @@ ARG CSDR_VERSION=0.18.41
 ARG CSDR_SHA256=aa903a61db5af280bf65aef75f0d850c68552621a086989ef86778294dff511a
 ARG OWRX_CONNECTOR_VERSION=0.6.5
 ARG OWRX_CONNECTOR_SHA256=63a7bccf5beab0220136829850b46df56c79ddb4b6d77d9ea191d1fd527ed7ec
-# csdr-skimmer (formerly csdr-cwskimmer): only csdr-cwskimmer is installed.
+# csdr-skimmer (formerly csdr-cwskimmer): csdr-cwskimmer and csdr-rttyskimmer.
 ARG CSDR_SKIMMER_VERSION=1.12
 ARG CSDR_SKIMMER_SHA256=2156bd5e8b2aeae756482040c9aad8f48a1658e02499441047ec877b9992f562
 
 
 # csdr 0.18.x (luarvique fork), owrx_connector (rtl_connector,
-# rtl_tcp_connector; no Soapy) and csdr-cwskimmer (csdr-skimmer), installed
+# rtl_tcp_connector; no Soapy), csdr-cwskimmer and csdr-rttyskimmer
+# (csdr-skimmer), installed
 # under /usr/local and staged in /opt/natives with their licence texts.
 FROM ${DEBIAN_IMAGE} AS natives
 
@@ -95,10 +96,10 @@ RUN curl -fsSL -o csdr.tar.gz "https://github.com/luarvique/csdr/archive/refs/ta
 RUN curl -fsSL -o csdr-skimmer.tar.gz "https://github.com/luarvique/csdr-skimmer/archive/refs/tags/${CSDR_SKIMMER_VERSION}.tar.gz"; \
     echo "${CSDR_SKIMMER_SHA256}  csdr-skimmer.tar.gz" | sha256sum -c -; \
     tar xzf csdr-skimmer.tar.gz; \
-    make -C "csdr-skimmer-${CSDR_SKIMMER_VERSION}" -j"$(nproc)" csdr-cwskimmer; \
+    make -C "csdr-skimmer-${CSDR_SKIMMER_VERSION}" -j"$(nproc)" csdr-cwskimmer csdr-rttyskimmer; \
     out=/opt/natives; \
     mkdir -p "${out}/usr/share/doc/csdr-skimmer"; \
-    install -m 0755 "csdr-skimmer-${CSDR_SKIMMER_VERSION}/csdr-cwskimmer" "${out}/usr/local/bin/"; \
+    install -m 0755 "csdr-skimmer-${CSDR_SKIMMER_VERSION}/csdr-cwskimmer" "csdr-skimmer-${CSDR_SKIMMER_VERSION}/csdr-rttyskimmer" "${out}/usr/local/bin/"; \
     cp "csdr-skimmer-${CSDR_SKIMMER_VERSION}/LICENSE" "${out}/usr/share/doc/csdr-skimmer/"
 
 

@@ -41,7 +41,8 @@ owrx_connector 0.6.5 (https://github.com/luarvique/owrx_connector, tag 0.6.5)
   Copyright (c) 2019-2026 Jakob Ketterl, Marat Fayzullin and contributors.
 
 csdr-skimmer 1.12 (https://github.com/luarvique/csdr-skimmer, tag 1.12)
-  csdr-cwskimmer, a CW decoder run by the node as a separate process.
+  csdr-cwskimmer and csdr-rttyskimmer, CW and RTTY decoders run by the node
+  as separate processes.
   GPL-3.0-or-later. Text: /usr/share/doc/csdr-skimmer/.
   Copyright (c) Marat Fayzullin.
 
@@ -50,6 +51,32 @@ JS8 frame parser (internal/radio/infra/decoder/js8.go)
   GPL-3.0) and of the JS8Call 2.2.0 varicode, with the JS8Call JSC word
   list (jsc_map.cpp, embedded in meshsdr). GPL-3.0-or-later.
   Copyright (c) 2018 Jordan Sherer, KN4CRD; Copyright (c) Jakob Ketterl.
+
+Data tables compiled into meshsdr
+---------------------------------
+
+SAME tables (internal/radio/infra/decoder/same_tables.go)
+  Event codes, originators and US state and county (FIPS) names of the EAS
+  decoder, from dsame3 (owrx/dsame3/defs.py of OpenWebRX+,
+  https://github.com/luarvique/openwebrx). ISC licence:
+  Copyright (C) 2017 Joseph W. Metcalf; modified by James Kitchens 2023;
+  additional modifications by Matthew R. McDougal 2024.
+  Permission to use, copy, modify, and/or distribute this software for any
+  purpose with or without fee is hereby granted, provided that the above
+  copyright notice and this permission notice appear in all copies.
+  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+  SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+  OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+  CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+Callsign country table (internal/radio/infra/decoder/callsign_table.go)
+  Amateur callsign prefixes and their countries, from OpenWebRX+
+  (owrx/lookup.py, https://github.com/luarvique/openwebrx).
+  AGPL-3.0-or-later, like MeshSDR. Text: /usr/share/doc/meshsdr/LICENSE.
+  Copyright (c) 2019-2026 Jakob Ketterl, Marat Fayzullin and contributors.
 
 Debian packages (copyright files under /usr/share/doc/<package>/copyright)
 -------------------------------------------------------------------------

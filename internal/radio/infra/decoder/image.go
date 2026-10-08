@@ -156,6 +156,9 @@ func (s *imageSession) Audio(b app.AudioBlock) {
 // IQ implements app.DecoderRun: the image decoders read audio.
 func (s *imageSession) IQ(app.IQBlock) {}
 
+// WideIQ implements app.DecoderRun: the image decoders read audio.
+func (s *imageSession) WideIQ(app.WideIQBlock) {}
+
 // Retune implements app.DecoderRun: no secondary selector.
 func (s *imageSession) Retune(float64) {}
 
