@@ -21,6 +21,11 @@ type Deps struct {
 	// AdminGate tells whether the visitor may open the admin area (admin
 	// role, from an allowed network). Nil: the Admin section is never shown.
 	AdminGate Gate
+	// Bookmarks admits the visitors who manage the hub bookmarks (operators
+	// and admins) and names their page: the receiver's Bookmarks tab then
+	// links its add form, pre-filled from the tuning (BMK-001, BMK-003).
+	// Optional.
+	Bookmarks *BookmarksLink
 	Logger    *slog.Logger
 	// User returns the signed-in visitor of a request for the user menu
 	// (nil: anonymous). Optional.
@@ -67,8 +72,14 @@ func New(d Deps) Wired {
 
 	station := NewStation(settings, d.Images)
 
-	return Wired{
-		Renderer: rd,
-		HTTP:     NewModule(rd, source, policy, station, web.Static(), component("shell.http")),
-	}
+	mod := NewModule(rd, source, policy, station, web.Static(), component("shell.http"))
+	mod.bookmarks = d.Bookmarks
+
+	return Wired{Renderer: rd, HTTP: mod}
+}
+
+// BookmarksLink is the Bookmarks › Manage page and who may open it.
+type BookmarksLink struct {
+	Gate Gate
+	Path string
 }

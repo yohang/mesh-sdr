@@ -37,6 +37,14 @@
 @property --msdr-color-warning { syntax: "<color>"; inherits: true; initial-value: #7a4f00; }
 @property --msdr-color-success { syntax: "<color>"; inherits: true; initial-value: #17692e; }
 @property --msdr-color-info { syntax: "<color>"; inherits: true; initial-value: #1f5f9e; }
+@property --msdr-color-bmk-hub { syntax: "<color>"; inherits: true; initial-value: #6d28d9; }
+@property --msdr-color-bmk-pack { syntax: "<color>"; inherits: true; initial-value: #0f766e; }
+@property --msdr-color-bmk-dial { syntax: "<color>"; inherits: true; initial-value: #b0306a; }
+@property --msdr-color-band-hamradio { syntax: "<color>"; inherits: true; initial-value: #dbeafe; }
+@property --msdr-color-band-broadcast { syntax: "<color>"; inherits: true; initial-value: #fde68a; }
+@property --msdr-color-band-public { syntax: "<color>"; inherits: true; initial-value: #d1fae5; }
+@property --msdr-color-band-service { syntax: "<color>"; inherits: true; initial-value: #fce7f3; }
+@property --msdr-color-band-other { syntax: "<color>"; inherits: true; initial-value: #e5e7eb; }
 
 :root {
   color-scheme: light dark;
@@ -55,6 +63,25 @@
   --msdr-color-warning: light-dark(#7a4f00, #e3b341);
   --msdr-color-success: light-dark(#17692e, #3fb950);
   --msdr-color-info: light-dark(#1f5f9e, #79c0ff);
+
+  /*
+   * Receiver bookmark bar (BMK-007): one color per origin (hub, pack, and
+   * the bandplan dial frequencies), always with its own shape. They meet
+   * 4.5:1 on bg, surface and surface-raised.
+   */
+  --msdr-color-bmk-hub: light-dark(#6d28d9, #c4a1ff);
+  --msdr-color-bmk-pack: light-dark(#0f766e, #2dd4bf);
+  --msdr-color-bmk-dial: light-dark(#b0306a, #ff7eb6);
+
+  /*
+   * Bandplan ribbon (RX-029): the background of a band by its first tag,
+   * under fg text (4.5:1); the band name is the text cue.
+   */
+  --msdr-color-band-hamradio: light-dark(#dbeafe, #1e3a5f);
+  --msdr-color-band-broadcast: light-dark(#fde68a, #4a3a10);
+  --msdr-color-band-public: light-dark(#d1fae5, #134e3a);
+  --msdr-color-band-service: light-dark(#fce7f3, #4a1d3a);
+  --msdr-color-band-other: light-dark(#e5e7eb, #2a313c);
 
   /* Typography. */
   --msdr-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -401,6 +428,96 @@
     & > span:nth-child(3) { height: 75%; }
     & > span:nth-child(4) { height: 100%; }
   }
+
+  /*
+   * Bookmark bar of the receiver (BMK-001, BMK-007, RX-030): markers placed
+   * at their frequency (left set from JS through CSSOM), in lanes. Each
+   * origin has a color and a shape (● hub, ■ pack, ◆ dial frequency), so
+   * color is never the only cue; the shape is decorative, the accessible
+   * name says the origin.
+   */
+  .bmk-bar {
+    position: relative;
+    height: 2.75rem;
+    overflow: hidden;
+    border-bottom: 1px solid var(--msdr-color-border);
+    background: var(--msdr-color-surface);
+    cursor: default;
+  }
+
+  .bmk-marker {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.125rem;
+    max-width: 12rem;
+    height: 1.25rem;
+    padding: 0 0.25rem 0 0.125rem;
+    border-radius: var(--msdr-radius-sm);
+    color: var(--msdr-color-fg);
+    font-size: var(--msdr-text-xs);
+    line-height: 1.25rem;
+    white-space: nowrap;
+
+    &:hover { background: var(--msdr-color-surface-raised); }
+    &[aria-current="true"] { background: var(--msdr-color-surface-raised); font-weight: 700; }
+    & .bmk-label { overflow: hidden; text-overflow: ellipsis; }
+  }
+
+  .bmk-shape::before {
+    display: inline-block;
+    width: 0.875rem;
+    text-align: center;
+  }
+
+  .bmk-shape-hub::before { content: "●" / ""; color: var(--msdr-color-bmk-hub); }
+  .bmk-shape-pack::before { content: "■" / ""; color: var(--msdr-color-bmk-pack); }
+  .bmk-shape-dial::before { content: "◆" / ""; color: var(--msdr-color-bmk-dial); }
+
+  /* Description of the hovered or focused marker (text only). */
+  .bmk-tip {
+    position: absolute;
+    z-index: 10;
+    max-width: min(20rem, 90%);
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--msdr-color-border);
+    border-radius: var(--msdr-radius-sm);
+    background: var(--msdr-color-surface-raised);
+    color: var(--msdr-color-fg);
+    font-size: var(--msdr-text-sm);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+  }
+
+  /* Bandplan ribbon (RX-029): bands placed from JS (CSSOM left and width). */
+  .band-ribbon {
+    position: relative;
+    height: 1.25rem;
+    overflow: hidden;
+    border-top: 1px solid var(--msdr-color-border);
+    background: var(--msdr-color-surface);
+  }
+
+  .band-seg {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    padding: 0 0.25rem;
+    overflow: hidden;
+    border-inline: 1px solid var(--msdr-color-border);
+    background: var(--msdr-color-band-other);
+    color: var(--msdr-color-fg);
+    font-size: var(--msdr-text-xs);
+    line-height: 1.125rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .band-hamradio { background: var(--msdr-color-band-hamradio); }
+  .band-broadcast { background: var(--msdr-color-band-broadcast); }
+  .band-public { background: var(--msdr-color-band-public); }
+  .band-service { background: var(--msdr-color-band-service); }
 
   /* Long-form text (usage policy): readable measure and spacing. */
   .prose-text {

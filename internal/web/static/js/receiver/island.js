@@ -26,7 +26,12 @@
 // and hint inline. "More" holds Share (UI-023: the platform share sheet on
 // touch devices, else the clipboard).
 //
-// The side panel (UI-019) has the Info tab only: the device and its node,
+// Bookmarks (bookmarks.js): the bookmark bar above the scale, the bandplan
+// ribbon under it (toolbar toggle, key B), Scan in the control bar (key S),
+// Find bookmark in the toolbar (key Y) and the Bookmarks tab.
+//
+// The side panel (UI-019, ARIA tabs) has the Bookmarks and Info tabs; the
+// open state and the active tab are per-session runtime state. Info: the device and its node,
 // its active preset, the status metrics (RX-035: audio buffer and rate,
 // stream bit rate, network, node CPU and temperature, listeners),
 // the station described by the hub (RX-036), whose server-rendered markup
@@ -63,6 +68,7 @@ import { confirmDialog } from "../confirm.js";
 import { eventsState } from "../events.js";
 import { notices, notifications } from "../notify.js";
 import { onThemeChange } from "../tokens.js";
+import { ReceiverBookmarks } from "./bookmarks.js";
 import { getEngine, MIN_BANDWIDTH_HZ, NR_MAX_DB, NR_MIN_DB, SQUELCH_MAX_DB, SQUELCH_MIN_DB } from "./engine.js";
 import { getGrid, unavailable } from "./grid.js";
 import { FreqScale } from "./scale.js";
@@ -348,6 +354,7 @@ class MsdrReceiver extends HTMLElement {
     clearTimeout(this.urlTimer);
     this.resize?.disconnect();
     this.stopTheme?.();
+    this.bookmarks?.destroy();
     this.engine?.removeEventListener("change", this.onChange);
     this.grid?.removeEventListener("change", this.onGrid);
     notices.removeEventListener("change", this.onNotices);
@@ -359,6 +366,18 @@ class MsdrReceiver extends HTMLElement {
   }
 
   build() {
+    this.bookmarks = new ReceiverBookmarks({
+      engine: this.engine,
+      grid: this.grid,
+      modes: () => this.chosen()?.modes ?? [],
+      squelch: () => this.engine.demod?.squelchDb ?? this.squelchLevel,
+      m2: () => this.m2,
+      manageURL: this.cfg.bookmarks_url ?? "",
+      showTab: () => this.showTab("bookmarks"),
+      layout: () => this.layout(),
+    });
+    const bmk = this.bookmarks;
+
     // Toolbar: device picker, zoom, levels, spectrum toggle,
     // side panel toggle.
     this.select = /** @type {HTMLSelectElement} */ (el("select", { id: "rx-device", class: "max-w-full min-w-0 rounded border px-2 py-1" }));
@@ -393,14 +412,17 @@ class MsdrReceiver extends HTMLElement {
     });
 
 
-    this.panelToggle = el("button", { type: "button", class: BUTTON, "aria-controls": "rx-panel" }, "Info");
+    this.panelToggle = el("button", { type: "button", class: BUTTON, "aria-controls": "rx-panel" }, "Side panel");
     this.panelToggle.addEventListener("click", () => {
       this.engine.display.panel = !this.engine.display.panel;
       this.layout();
     });
 
+    const shown = el("div", { class: "flex flex-wrap items-center gap-1", role: "group", "aria-label": "Display" });
+    shown.append(this.spToggle, bmk.ribbonBtn);
+
     this.toolbar = el("div", { class: "flex flex-wrap items-center gap-x-4 gap-y-2" });
-    this.toolbar.append(picker, zoom, levels, this.spToggle, this.panelToggle);
+    this.toolbar.append(picker, zoom, levels, shown, this.panelToggle, bmk.findBtn);
 
     // Display: spectrum, scale and waterfall; the empty state replaces them.
     const describe = { role: "img", "aria-describedby": "rx-text" };
@@ -421,7 +443,7 @@ class MsdrReceiver extends HTMLElement {
     this.startBtn.hidden = true;
     this.startBtn.addEventListener("click", () => this.engine.startAudio());
     this.display = el("div", { class: "relative cursor-crosshair select-none overflow-hidden rounded border border-border" });
-    this.display.append(this.spCanvas, this.scaleCanvas, this.wfCanvas, this.startBtn);
+    this.display.append(this.spCanvas, bmk.bar, this.scaleCanvas, bmk.ribbon.el, this.wfCanvas, this.startBtn, bmk.tip);
     for (const c of [this.spCanvas, this.scaleCanvas, this.wfCanvas]) this.bindPointer(c);
     this.wfCanvas.addEventListener("wheel", (e) => this.onWheel(e), { passive: false });
 
@@ -641,15 +663,70 @@ class MsdrReceiver extends HTMLElement {
       role: "group",
       "aria-label": "Receiver controls",
     });
-    bar.append(freq, step, this.presetGroup, this.recentreGroup, mode, band, squelch, noise, smeter, more);
+    bar.append(freq, step, this.presetGroup, this.recentreGroup, mode, band, squelch, noise, smeter, this.bookmarks.scanGroup, more);
     return bar;
   }
 
-  // buildPanel returns the side panel (UI-019) with its Info tab: the
-  // device, its node, the status metrics, the station, the session's events
-  // and the About link.
+  // buildPanel returns the side panel (UI-019): ARIA tabs (arrows, Home and
+  // End move between them) for the Bookmarks tab (bookmarks.js) and the
+  // Info tab.
   buildPanel() {
-    const panel = el("section", { id: "rx-panel", class: "flex min-w-0 flex-col self-start gap-3 rounded border border-border bg-surface p-3", "aria-labelledby": "rx-info-title" });
+    const section = el("section", { id: "rx-panel", class: "flex min-w-0 flex-col self-start gap-3 rounded border border-border bg-surface p-3", "aria-label": "Side panel" });
+    const list = el("div", { role: "tablist", "aria-label": "Side panel", class: "flex gap-1 border-b border-border" });
+    const bookmarks = el("div", { class: "flex min-w-0 flex-col gap-3" });
+    bookmarks.append(el("h2", { class: "text-lg font-semibold" }, "Bookmarks"), this.bookmarks.panel);
+    /** @type {Map<string, {tab: HTMLElement, panel: HTMLElement}>} */
+    this.tabs = new Map();
+    for (const [id, label, content] of /** @type {[string, string, HTMLElement][]} */ ([
+      ["bookmarks", "Bookmarks", bookmarks],
+      ["info", "Info", this.buildInfo()],
+    ])) {
+      const tab = el("button", { type: "button", role: "tab", id: `rx-tab-${id}`, "aria-controls": `rx-tabpanel-${id}`, class: "-mb-px border-b-2 px-3 py-1 font-semibold" }, label);
+      tab.addEventListener("click", () => this.showTab(id));
+      tab.addEventListener("keydown", (ev) => {
+        const ids = [...this.tabs.keys()];
+        const i = ids.indexOf(id);
+        const j = { ArrowRight: (i + 1) % ids.length, ArrowLeft: (i - 1 + ids.length) % ids.length, Home: 0, End: ids.length - 1 }[ev.key];
+        if (j === undefined) return;
+        ev.preventDefault();
+        this.showTab(ids[j]);
+        this.tabs.get(ids[j])?.tab.focus();
+      });
+      const panel = el("div", { role: "tabpanel", id: `rx-tabpanel-${id}`, "aria-labelledby": `rx-tab-${id}`, tabindex: "0", class: "min-w-0" });
+      panel.append(content);
+      list.append(tab);
+      this.tabs.set(id, { tab, panel });
+    }
+    section.append(list, ...[...this.tabs.values()].map((t) => t.panel));
+    this.showTab(this.engine.display.tab ?? "info", false);
+    return section;
+  }
+
+  /**
+   * showTab selects a side panel tab, opening the panel when asked to.
+   * @param {string} id @param {boolean} [open]
+   */
+  showTab(id, open = true) {
+    if (!this.tabs?.has(id)) return;
+    this.engine.display.tab = id;
+    for (const [k, { tab, panel }] of this.tabs) {
+      const on = k === id;
+      tab.setAttribute("aria-selected", String(on));
+      tab.tabIndex = on ? 0 : -1;
+      tab.classList.toggle("border-accent", on);
+      tab.classList.toggle("border-transparent", !on);
+      panel.hidden = !on;
+    }
+    if (open && !this.engine.display.panel) {
+      this.engine.display.panel = true;
+      this.layout();
+    }
+  }
+
+  // buildInfo returns the Info tab: the device, its node, the status
+  // metrics, the station, the session's events and the About link.
+  buildInfo() {
+    const panel = el("div", { class: "flex min-w-0 flex-col gap-3" });
     const dl = "grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm";
     this.info = el("dl", { class: dl });
     this.metrics = el("dl", { class: dl });
@@ -1298,6 +1375,8 @@ class MsdrReceiver extends HTMLElement {
     if (e.device && e.target && c && e.target.device_id === c.id && e.target.node_id === c.node_id) {
       rows.push(["Preset", e.device.active_preset?.name ?? "None"]);
       if (e.centerHz) rows.push(["Centre", formatMHz(e.centerHz)]);
+      // The bandplan ribbon's text equivalent (RX-029).
+      if (e.demod) rows.push(["Band", this.bookmarks?.bandAt(e.tunedHz) || "None in the band plan"]);
       if (e.device.sample_rate) rows.push(["Bandwidth", `${(e.device.sample_rate / 1e6).toFixed(3)} MHz`]);
       if (e.device.tuning_step_hz) rows.push(["Tuning step", `${(e.device.tuning_step_hz / 1e3).toFixed(1)} kHz`]);
     }
@@ -1577,6 +1656,7 @@ class MsdrReceiver extends HTMLElement {
       this.watchAudio();
       this.renderChips();
       this.renderMetrics();
+      this.renderInfo();
     }
   }
 
@@ -1597,6 +1677,7 @@ class MsdrReceiver extends HTMLElement {
     }
     if (e.display.spectrum) this.spectrum?.draw(tune);
     this.scale?.draw(win.startHz, win.spanHz, envelope);
+    this.bookmarks?.draw(win);
   }
 
   // updateMeter shows the last demod.meter (RX-022) and announces the

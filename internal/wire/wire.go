@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/yohang/mesh-sdr/internal/bookmarks"
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/events"
@@ -302,7 +303,8 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	operatorGate := &roleGate{role: identitydomain.RoleOperator}
 	shellModule := shell.New(shell.Deps{
 		Settings: settingsStore, AdminGate: adminGate, User: operatorLinks(userOf, operatorGate.Allows), Logger: logger,
-		Images: stationImages{b: images, logger: component(logger, "shell.infra.station_images")},
+		Bookmarks: &shell.BookmarksLink{Gate: operatorGate, Path: bookmarks.ManagePath},
+		Images:    stationImages{b: images, logger: component(logger, "shell.infra.station_images")},
 	})
 
 	ideps := identityDeps(cfg, logger, adapter)
