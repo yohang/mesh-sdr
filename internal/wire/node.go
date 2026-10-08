@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -41,6 +42,8 @@ type nodeOptions struct {
 	prober         agent.Prober
 	devices        func() []ctl.Device
 	mediaHeartbeat time.Duration
+	// outbox is told the file outbox (tests send files through it).
+	outbox func(*agent.Outbox)
 }
 
 // WithProber replaces the host prober.
@@ -120,6 +123,13 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// The files the decoders produce go to the hub through the outbox
+	// (FIL-005), under the node's runtime directory.
+	outbox := agent.NewOutbox(filepath.Join(cfg.Node.RuntimeDir, "outbox"), ag, time.Now, component(logger, "grid.agent.outbox"))
+	if o.outbox != nil {
+		o.outbox(outbox)
 	}
 
 	holder := pki.NewCertHolder(cert)

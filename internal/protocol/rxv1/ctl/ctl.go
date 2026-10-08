@@ -6,7 +6,11 @@
 // Fields added by ADR 0008 beyond the spec tables are additive and optional.
 package ctl
 
-import "github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
+import (
+	"encoding/json"
+
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
+)
 
 // Hello opens a session (hub → node).
 type Hello struct {
@@ -255,3 +259,47 @@ const (
 
 // MaxLogText bounds the text of a log record (the stderr line cap).
 const MaxLogText = 4096
+
+// FileBegin is file.begin (node → hub, FIL-005): a file a decoder produced
+// on the node, with its reception metadata (FIL-008) stamped by the node
+// clock. Its content follows in file.chunk events, then file.end. Times are
+// RFC 3339 UTC strings with a Z suffix.
+type FileBegin struct {
+	Seq    int64  `json:"seq"`
+	FileID string `json:"file_id"`
+	Kind   string `json:"kind"`
+	MIME   string `json:"mime"`
+	Size   int64  `json:"size"`
+	// SHA256 is the hex digest of the content.
+	SHA256           string `json:"sha256"`
+	DeviceID         string `json:"device_id"`
+	PresetID         string `json:"preset_id,omitempty"`
+	DecoderSessionID string `json:"decoder_session_id,omitempty"`
+	Mode             string `json:"mode"`
+	FrequencyHz      int64  `json:"frequency_hz"`
+	ReceivedStartUTC string `json:"received_start_utc"`
+	ReceivedEndUTC   string `json:"received_end_utc,omitempty"`
+	// Metadata are the per-kind details (SSTV mode, FAX LPM…): a JSON
+	// object.
+	Metadata json.RawMessage `json:"metadata,omitempty"`
+}
+
+// FileChunk is file.chunk (node → hub): the content of a file from Offset,
+// in standard base64.
+type FileChunk struct {
+	Seq     int64  `json:"seq"`
+	FileID  string `json:"file_id"`
+	Offset  int64  `json:"offset"`
+	DataB64 string `json:"data_b64"`
+}
+
+// FileEnd is file.end (node → hub): the whole content was sent.
+type FileEnd struct {
+	Seq    int64  `json:"seq"`
+	FileID string `json:"file_id"`
+}
+
+// FileChunkBytes is the content of a full file.chunk: 45 KiB, 60 KiB in
+// base64, so that the message stays under the 64 KiB inbound limit of the
+// control channel (§6.9) and under the 256 KiB chunk bound of §4.4.
+const FileChunkBytes = 45 << 10

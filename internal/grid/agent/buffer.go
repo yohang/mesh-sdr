@@ -46,7 +46,13 @@ type Buffer struct {
 	acked   int64
 	dropped map[string]int64
 	notify  chan struct{}
+	// onAck is told every new acknowledged seq (the file outbox).
+	onAck func(seq int64)
 }
+
+// OnAck registers the function told each new acknowledged seq, after the
+// buffer dropped the acknowledged events (composition time only).
+func (b *Buffer) OnAck(f func(seq int64)) { b.onAck = f }
 
 // NewBuffer returns a buffer of at most maxEvents events and maxBytes bytes.
 func NewBuffer(maxEvents, maxBytes int) *Buffer {
@@ -101,11 +107,20 @@ func (b *Buffer) dropOne() {
 
 // Ack drops every event up to and including seq.
 func (b *Buffer) Ack(seq int64) {
+	if !b.ack(seq) || b.onAck == nil {
+		return
+	}
+
+	b.onAck(seq)
+}
+
+// ack drops the events up to seq and reports whether seq is new.
+func (b *Buffer) ack(seq int64) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if seq <= b.acked {
-		return
+		return false
 	}
 
 	b.acked = seq
@@ -122,6 +137,8 @@ func (b *Buffer) Ack(seq int64) {
 
 	clear(b.events[n:])
 	b.events = b.events[:n]
+
+	return true
 }
 
 // Acked returns the highest acknowledged seq.
