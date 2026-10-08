@@ -50,6 +50,7 @@ type peer struct {
 	payload []any
 	q       *sendq.Queue
 	claims  token.Claims
+	hello   media.Hello
 }
 
 func (p *peer) Claims() token.Claims {
@@ -79,7 +80,7 @@ func (p *peer) count(typ rxv1.MessageType) int {
 
 	return n
 }
-func (p *peer) Hello() media.Hello { return media.Hello{} }
+func (p *peer) Hello() media.Hello { return p.hello }
 func (p *peer) Send(typ rxv1.MessageType, payload any) {
 	p.mu.Lock()
 	p.sent = append(p.sent, typ)
@@ -599,5 +600,70 @@ func TestPresetSelectUnknownMode(t *testing.T) {
 	u, ok := p.lastSent(rxv1.TypeStreamUpdate).(media.StreamUpdate)
 	if !ok || u.Applied == nil || u.Applied.OffsetHz != 10_000 || u.Applied.Mode != "nfm" {
 		t.Errorf("demodulator after a switch to an unknown mode: %+v", u.Applied)
+	}
+}
+
+// TestPCMHello: a client listing pcm-s16le alone (audio_compression = pcm)
+// gets PCM audio (DEM-010).
+func TestPCMHello(t *testing.T) {
+	m := runManager(t)
+	ctx := context.Background()
+
+	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen, token.PermDemod)}
+	p.hello.Capabilities.AudioCodecs = []string{media.CodecPCM}
+	ss := radiohttp.NewStreams(m, nil, slog.New(slog.DiscardHandler)).Open(p)
+
+	defer ss.Close()
+
+	ss.Handle(ctx, env(t, rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}))
+	ss.Handle(ctx, env(t, rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm"}))
+
+	if open, ok := p.lastSent(rxv1.TypeStreamOpen).(media.StreamOpen); !ok || open.Kind != media.KindAudio || open.Codec != media.CodecPCM {
+		t.Fatalf("audio stream = %+v", p.lastSent(rxv1.TypeStreamOpen))
+	}
+}
+
+// TestWaterfallLive: new waterfall settings in the desired state reach the
+// attached listeners as a device.config.patch; an unchanged state sends
+// nothing.
+func TestWaterfallLive(t *testing.T) {
+	m := runManager(t)
+	ctx := context.Background()
+
+	state := &desired{policy: ctl.StatePolicy{Waterfall: &ctl.StateWaterfall{MinDB: -100, MaxDB: -30, Palette: "default"}}}
+	streams := radiohttp.NewStreams(m, state, slog.New(slog.DiscardHandler))
+
+	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen)}
+	ss := streams.Open(p)
+
+	defer ss.Close()
+
+	ss.Handle(ctx, env(t, rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}))
+
+	streams.StateApplied()
+
+	if n := p.count(rxv1.TypeDeviceConfigPatch); n != 0 {
+		t.Fatalf("unchanged state sent %d patches", n)
+	}
+
+	state.policy.Waterfall = &ctl.StateWaterfall{MinDB: -90, MaxDB: -10, Palette: "turbo"}
+	streams.StateApplied()
+
+	patch, ok := p.lastSent(rxv1.TypeDeviceConfigPatch).(media.DeviceConfigPatch)
+	if !ok || patch.DeviceID != "vhf" || patch.Revision != 1 ||
+		patch.Set["waterfall"] != (media.Waterfall{Levels: media.Levels{Min: -90, Max: -10}, AutoMinRange: 50, Scheme: "turbo"}) {
+		t.Fatalf("patch = %+v", p.lastSent(rxv1.TypeDeviceConfigPatch))
+	}
+
+	// The next device.config carries them too.
+	p2 := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen)}
+	ss2 := streams.Open(p2)
+
+	defer ss2.Close()
+
+	ss2.Handle(ctx, env(t, rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}))
+
+	if cfg, ok := p2.lastSent(rxv1.TypeDeviceConfig).(media.DeviceConfig); !ok || cfg.Waterfall.Scheme != "turbo" || cfg.Waterfall.Levels.Min != -90 {
+		t.Fatalf("device.config = %+v", p2.lastSent(rxv1.TypeDeviceConfig))
 	}
 }

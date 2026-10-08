@@ -228,6 +228,8 @@ func TestAdminNodesPages(t *testing.T) {
 
 	if st, page := root.page("/admin/grid"); st != http.StatusOK || !strings.Contains(page, "grid.heartbeat_interval_s") {
 		t.Errorf("heartbeat settings = %d", st)
+	} else if !strings.Contains(page, `aria-current="page">Node health</a>`) {
+		t.Error("Node health is not the current admin section")
 	}
 
 	if n := countRows(t, e, "SELECT count(*) FROM audit_log WHERE target_id = 'attic' AND action IN ('node.add', 'node.update', 'node.revoke', 'node.enrollment_token.issue', 'node.delete')"); n < 6 {

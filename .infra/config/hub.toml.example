@@ -145,6 +145,9 @@ trusted_proxies = []
 # Broadcast FM de-emphasis in µs: 50 (Europe, most of the world) or 75
 # (Americas, South Korea). Pushed to the nodes.
 # wfm_deemphasis = 50
+# Audio sent to the listeners: adpcm (a quarter of the bandwidth) or pcm
+# (uncompressed). Applies to receivers opened from now on.
+# audio_compression = "adpcm"
 
 [settings.receiver]
 # name = "MeshSDR"                       # station name (top bar, titles)

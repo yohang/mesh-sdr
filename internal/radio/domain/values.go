@@ -5,6 +5,7 @@ package domain
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -116,6 +117,24 @@ const (
 	TypeRTLTCP = "rtl_tcp"
 )
 
+// deviceTypes is the SDR type registry (SRC-001): every type this node
+// runs, with the owrx_connector tool that runs it (§8.2). Other types are
+// valid in the config but unavailable on this node.
+var deviceTypes = map[string]string{
+	TypeRTLSDR: "rtl_connector",
+	TypeRTLTCP: "rtl_tcp_connector",
+}
+
+// SupportedTypes returns the registered device types, sorted.
+func SupportedTypes() []DeviceType {
+	out := make([]DeviceType, 0, len(deviceTypes))
+	for _, t := range slices.Sorted(maps.Keys(deviceTypes)) {
+		out = append(out, DeviceType{value: t})
+	}
+
+	return out
+}
+
 var deviceTypePattern = regexp.MustCompile(`^[a-z0-9_]{1,24}(:[a-z0-9_]{1,23})?$`)
 
 // NewDeviceType validates the syntax of s. Supported tells whether this
@@ -131,9 +150,15 @@ func NewDeviceType(s string) (DeviceType, error) {
 // String returns the type.
 func (t DeviceType) String() string { return t.value }
 
-// Supported reports whether the node implements this type (rtl_sdr and
-// rtl_tcp through owrx_connector; the others come with later tickets).
-func (t DeviceType) Supported() bool { return t.value == TypeRTLSDR || t.value == TypeRTLTCP }
+// Supported reports whether the type is in the registry.
+func (t DeviceType) Supported() bool {
+	_, ok := deviceTypes[t.value]
+
+	return ok
+}
+
+// Tool returns the connector tool of a supported type ("" otherwise).
+func (t DeviceType) Tool() string { return deviceTypes[t.value] }
 
 // driverDevicePattern bounds the connector device string (§8.2 rule 2): a
 // serial, an index or host:port, no control characters.

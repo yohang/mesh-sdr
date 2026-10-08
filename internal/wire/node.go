@@ -28,6 +28,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	radiohttp "github.com/yohang/mesh-sdr/internal/radio/http"
+	"github.com/yohang/mesh-sdr/internal/radio/infra/connector"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
@@ -96,8 +97,19 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 		o.devices = func() []ctl.Device { return devices }
 	}
 
+	// The capability report probes the drivers of the radio built below.
+	var sources *connector.Sources
+
 	if o.prober == nil {
-		o.prober = probe.New(version.String(), o.devices, engine.Modes(), time.Now())
+		drivers := func(ctx context.Context) []ctl.SDRDriver {
+			out := []ctl.SDRDriver{}
+			for _, d := range sources.Drivers(ctx) {
+				out = append(out, ctl.SDRDriver{Type: d.Type, Available: d.Available, Reason: d.Reason})
+			}
+
+			return out
+		}
+		o.prober = probe.New(version.String(), o.devices, drivers, engine.Modes(), time.Now())
 	}
 
 	ag, err := agent.New(agent.Options{
@@ -117,7 +129,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	// policy the media server enforces.
 	state := agent.NewDesiredState(o.devices())
 
-	manager, streams, err := newRadio(cfg, logger, deviceReporter{ag}, state)
+	manager, streams, sources, err := newRadio(cfg, logger, deviceReporter{ag}, state)
 	if err != nil {
 		return nil, err
 	}

@@ -5,7 +5,10 @@ export UID := $(shell id -u)
 export GID := $(shell id -g)
 
 COMPOSE ?= docker compose
-RUN     := $(COMPOSE) run --rm --no-deps app
+# -T: no TTY, so targets also work from scripts and CI; RUN_IT keeps one
+# for interactive targets.
+RUN     := $(COMPOSE) run --rm -T --no-deps app
+RUN_IT  := $(COMPOSE) run --rm --no-deps app
 A11Y    := $(COMPOSE) -f .infra/a11y/compose.yaml
 A11Y_HUB := hub
 
@@ -50,7 +53,7 @@ logs: ## Follow logs (c=<service>, default app)
 
 .PHONY: sh
 sh: ## Open a shell in a dev container
-	$(RUN) bash
+	$(RUN_IT) bash
 
 .PHONY: generate
 generate: ## Generate code (templ, sqlc, oapi-codegen, openapi.json) and CSS (tailwind)
@@ -68,7 +71,7 @@ test: generate ## Run tests
 a11y: ## Run the accessibility checks (axe-core, CI-only container) against the production image
 	trap '$(A11Y) down -v' EXIT; \
 	$(A11Y) up -d --build --wait $(A11Y_HUB) && \
-	$(A11Y) run --rm --build --no-deps a11y
+	$(A11Y) run --rm -T --build --no-deps a11y
 
 .PHONY: migrate
 migrate: generate ## Run hub migrations (cmd=up|down|status, default up)

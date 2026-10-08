@@ -127,6 +127,9 @@ class Engine extends EventTarget {
     /** @type {Kept} */
     this.kept = {};
     this.offsetMs = 0; // node clock − client clock
+    // Audio codec asked for in session.hello (hub setting
+    // audio_compression, set by the island): adpcm-ima or pcm-s16le.
+    this.codec = "adpcm-ima";
     // Display settings, kept across navigation (per-session runtime state):
     // zoom factor and first visible bin, spectrum visibility (RX-016), manual
     // levels (null: the device defaults, RX-017/018), side panel open
@@ -232,7 +235,8 @@ class Engine extends EventTarget {
       this.send("session.hello", {
         client: { name: "meshsdr-web", version: "1" },
         capabilities: {
-          audio_codecs: ["adpcm-ima", "pcm-s16le"],
+          // Listing pcm-s16le alone makes the node send PCM.
+          audio_codecs: this.codec === "pcm-s16le" ? ["pcm-s16le"] : ["adpcm-ima", "pcm-s16le"],
           fft_codecs: ["u8-db"],
           audio_rates: [AUDIO_RATE, HD_AUDIO_RATE],
           max_fft_fps: 60,
@@ -743,7 +747,7 @@ class Engine extends EventTarget {
 
   /** @returns {string} the codec of the audio stream */
   audioCodec() {
-    return this.audioStream?.codec || "adpcm-ima";
+    return this.audioStream?.codec || this.codec;
   }
 
   /**

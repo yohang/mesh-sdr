@@ -83,27 +83,20 @@ dirs = ["/usr/local/bin", "/usr/bin"]
 # operators (operator_can_retune) and admins retune it from the receiver.
 # A device whose driver, center_freq or sample_rate keys are invalid does
 # not stop the node: it is logged and reported failed (invalid_config).
-# [devices.hf-sdrplay]
-# name = "SDRplay RSPdx (HF)"        # required
-# type = "soapy:sdrplay"             # required: driver type
+# [devices.vhf-rtl]
+# name = "RTL-SDR (2 m)"             # required
+# type = "rtl_sdr"                   # required: rtl_sdr (USB) | rtl_tcp (remote rtl_tcp server)
 # enabled = true                     # default true
-# freq_range = { min = 1_000, max = "30MHz" }  # required (Hz or units)
-# sample_rates = [500_000, 2_000_000]          # required (S/s)
-# listen_policy = "registered"       # anonymous | registered (overrides the global policy)
+# freq_range = { min = "24MHz", max = "1766MHz" }  # required (Hz or units)
+# sample_rates = [2_400_000, 1_024_000]            # required (S/s)
+# center_freq = "145MHz"             # start tuning, within freq_range
+# sample_rate = 2_400_000            # start rate, one of sample_rates
+# listen_policy = "anonymous"        # anonymous | registered (overrides the global policy)
 # operator_can_retune = true
 # always_on = true
 # scheduler_enabled = true
 # auto_recover = true                # restart a failed device every 15 min
 # max_demods = 16                    # demodulators of this device at once
-#
-# [devices.vhf-rtl]
-# name = "RTL-SDR (2 m)"
-# type = "rtl_sdr"                   # rtl_sdr (USB) | rtl_tcp (remote rtl_tcp server)
-# freq_range = { min = "24MHz", max = "1766MHz" }
-# sample_rates = [2_400_000, 1_024_000]
-# center_freq = "145MHz"             # start tuning, within freq_range
-# sample_rate = 2_400_000            # start rate, one of sample_rates
-# listen_policy = "anonymous"
 # [devices.vhf-rtl.driver]
 # device = "0"                       # rtl_sdr: device index or serial (default 0); rtl_tcp: host:port
 # ppm = 1                            # frequency correction (-1000..1000)
@@ -112,6 +105,15 @@ dirs = ["/usr/local/bin", "/usr/bin"]
 # bias_tee = false                   # power an active antenna or LNA
 # direct_sampling = "off"            # off | i | q (HF without upconverter)
 # lfo_offset = 0                     # converter LO in Hz, signed: the hardware tunes to centre + lfo_offset
+#
+# Soapy devices come with M1b (SRC-015): this node does not support them
+# yet and reports them unavailable (driver_unsupported).
+# [devices.hf-sdrplay]
+# name = "SDRplay RSPdx (HF)"
+# type = "soapy:sdrplay"
+# freq_range = { min = 1_000, max = "30MHz" }
+# sample_rates = [500_000, 2_000_000]
+# listen_policy = "registered"
 
 [log]
 # debug | info | warn | error. --debug overrides it.

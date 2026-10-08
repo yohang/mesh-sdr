@@ -295,4 +295,16 @@ func TestReceiverStation(t *testing.T) {
 	if strings.Contains(body, "/api/v1/branding/") || strings.Contains(body, "<figure") {
 		t.Error("empty station shows images or a description")
 	}
+
+	// The island asks the nodes for the codec of audio_compression (DEM-010).
+	if !strings.Contains(body, `"audio_codec":"adpcm-ima"`) {
+		t.Error("default audio codec is not adpcm-ima")
+	}
+
+	m = shell.New(shell.Deps{Settings: values{"audio_compression": "pcm"}, Logger: discard})
+	_, body = do(t, httpserver.NewRouter(discard, "", http.NotFoundHandler(), m.HTTP), http.MethodGet, "/", nil)
+
+	if !strings.Contains(body, `"audio_codec":"pcm-s16le"`) {
+		t.Error("audio_compression = pcm does not ask for pcm-s16le")
+	}
 }
