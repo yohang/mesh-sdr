@@ -1,14 +1,21 @@
 // <msdr-audio-dock>: the shell-level audio controls, a row of the top bar
 // outside #main (ADR 0015 decision 9). It stays in the DOM across boosted
 // navigation, so the listener can start or stop the audio (RX-004), mute it
-// (shortcut M) and set the volume (RX-026) from any page. It shows only while the engine
-// listens to a device. Not a live region: the receiver page announces the
-// connection states.
+// (shortcuts M and Space) and set the volume (RX-026; Alt or Ctrl + ↑ ↓,
+// and the wheel on the slider, RX-033) from any page. It shows only while
+// the engine listens to a device. Not a live region: the receiver page
+// announces the connection states.
 
 import { syncTopics } from "../events.js";
+import { registerShortcuts } from "../shortcuts.js";
+import { wheelRanges } from "../wheel-range.js";
 import { getEngine } from "./engine.js";
 
-const BUTTON = "rounded border border-border px-3 py-1 text-sm";
+// Volume step of the keyboard (0..1).
+const VOLUME_STEP = 0.05;
+
+// 44 px touch targets on touch screens and below 768 px (UI-007).
+const BUTTON = "rounded border border-border px-3 py-1 text-sm max-md:min-h-11 pointer-coarse:min-h-11";
 
 class MsdrAudioDock extends HTMLElement {
   connectedCallback() {
@@ -25,9 +32,7 @@ class MsdrAudioDock extends HTMLElement {
     this.mute.type = "button";
     this.mute.className = BUTTON;
     this.mute.textContent = "Mute";
-    // Shortcut M (shortcuts.js), on every page while listening.
-    this.mute.dataset.shortcut = "m";
-    this.mute.setAttribute("aria-keyshortcuts", "M");
+    this.mute.setAttribute("aria-keyshortcuts", "M Space");
     this.mute.addEventListener("click", () => e.setMuted(!e.audio.muted));
 
     const label = document.createElement("label");
@@ -38,7 +43,7 @@ class MsdrAudioDock extends HTMLElement {
     this.volume.type = "range";
     this.volume.min = "0";
     this.volume.max = "100";
-    this.volume.className = "w-24 accent-accent";
+    this.volume.className = "w-24 accent-accent max-md:min-h-11 pointer-coarse:min-h-11";
     this.volume.addEventListener("input", () => e.setVolume(Number(this.volume?.value) / 100));
     label.append(text, this.volume);
 
@@ -46,6 +51,17 @@ class MsdrAudioDock extends HTMLElement {
     row.className = "mx-auto flex max-w-screen-2xl flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1 text-sm";
     row.append(this.play, this.mute, label, this.name);
     this.replaceChildren(row);
+    this.stopWheel = wheelRanges(row);
+
+    // Shortcuts on every page while listening (UI-014).
+    const listening = () => !!e.target;
+    /** @param {number} dir */
+    const volume = (dir) => e.setVolume(Math.round((e.audio.volume + dir * VOLUME_STEP) * 100) / 100);
+    this.stopKeys = registerShortcuts([
+      { keys: ["m", "Space"], label: "Mute or unmute", group: "Audio", enabled: listening, run: () => e.setMuted(!e.audio.muted) },
+      { keys: ["Alt+ArrowUp", "Ctrl+ArrowUp"], label: "Volume up", group: "Audio", repeat: true, enabled: listening, run: () => volume(1) },
+      { keys: ["Alt+ArrowDown", "Ctrl+ArrowDown"], label: "Volume down", group: "Audio", repeat: true, enabled: listening, run: () => volume(-1) },
+    ]);
 
     this.onChange = () => this.render();
     e.addEventListener("change", this.onChange);
@@ -54,6 +70,8 @@ class MsdrAudioDock extends HTMLElement {
 
   disconnectedCallback() {
     if (this.onChange) getEngine().removeEventListener("change", this.onChange);
+    this.stopWheel?.();
+    this.stopKeys?.();
   }
 
   render() {
@@ -72,6 +90,7 @@ class MsdrAudioDock extends HTMLElement {
     this.play.textContent = a.running ? "Stop audio" : "Start audio";
     this.mute.setAttribute("aria-pressed", String(a.muted));
     this.volume.value = String(Math.round(a.volume * 100));
+    this.volume.setAttribute("aria-valuetext", `${this.volume.value} %`);
     this.name.textContent = e.target ? e.target.name : "";
   }
 }
