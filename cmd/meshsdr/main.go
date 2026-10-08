@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/yohang/mesh-sdr/internal/cli"
-	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
+	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
 func main() {

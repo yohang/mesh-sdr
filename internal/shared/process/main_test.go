@@ -148,7 +148,7 @@ func (r *recorder) count(st State) int {
 func logger() *slog.Logger {
 	if os.Getenv("PROCESS_TEST_LOG") == "1" {
 		return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).
-			With(slog.String("component", "radio.infra.process"))
+			With(slog.String("component", "shared.process"))
 	}
 	return slog.New(slog.DiscardHandler)
 }

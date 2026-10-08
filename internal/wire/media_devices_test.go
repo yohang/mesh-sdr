@@ -19,7 +19,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/token"
-	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
+	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
 func TestMain(m *testing.M) {

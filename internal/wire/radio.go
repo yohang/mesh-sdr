@@ -13,7 +13,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/radio/infra/connector"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/devlog"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
-	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
+	"github.com/yohang/mesh-sdr/internal/shared/process"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -43,7 +43,7 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 	var sup *process.Supervisor
 
 	if runtimeDir != "" {
-		if sup, err = process.New(process.Options{RuntimeDir: runtimeDir, Logger: component(logger, "radio.infra.process")}); err != nil {
+		if sup, err = process.New(process.Options{RuntimeDir: runtimeDir, Logger: component(logger, "shared.process")}); err != nil {
 			return nil, nil, nil, fmt.Errorf("node.runtime_dir: %w", err)
 		}
 

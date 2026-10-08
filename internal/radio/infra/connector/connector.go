@@ -26,7 +26,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/radio/app"
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
-	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
+	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
 // Timeouts of §8.2 "Lifecycle".
