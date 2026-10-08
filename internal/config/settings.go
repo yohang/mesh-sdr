@@ -26,6 +26,7 @@ type Settings struct {
 	Receiver  SettingsReceiver  `toml:"receiver" envPrefix:"RECEIVER__" jsonschema:"description=Receiver identity and policies."`
 	Privacy   SettingsPrivacy   `toml:"privacy" envPrefix:"PRIVACY__" jsonschema:"description=Privacy of client data."`
 	UI        SettingsUI        `toml:"ui" envPrefix:"UI__" jsonschema:"description=Look and feel."`
+	Bandplan  SettingsBandplan  `toml:"bandplan" envPrefix:"BANDPLAN__" jsonschema:"description=Band plan and region bookmark pack."`
 	Waterfall SettingsWaterfall `toml:"waterfall" envPrefix:"WATERFALL__" jsonschema:"description=Waterfall defaults of the receiver (ADR 0026)."`
 	Session   SettingsSession   `toml:"session" envPrefix:"SESSION__" jsonschema:"description=Session lifetimes."`
 	Auth      SettingsAuth      `toml:"auth" envPrefix:"AUTH__" jsonschema:"description=Sign-in throttling."`
@@ -64,6 +65,11 @@ type SettingsPrivacy struct {
 type SettingsUI struct {
 	ThemeMode   string `toml:"theme_mode" env:"THEME_MODE" jsonschema:"enum=light,enum=dark,enum=auto" jsonschema_extras:"x-public=true,x-label=Theme" jsonschema_description:"Theme mode (UI-001): light or dark, or auto to follow the visitor's prefers-color-scheme. A change applies on the next full page load."`
 	ShortcutSet string `toml:"shortcut_set" env:"SHORTCUT_SET" jsonschema:"enum=default,enum=off" jsonschema_extras:"x-public=true,x-label=Keyboard shortcuts" jsonschema_description:"Keyboard shortcut set: default, or off to disable single-key shortcuts."`
+}
+
+// SettingsBandplan is the [settings.bandplan] table (RX-029, BMK-002).
+type SettingsBandplan struct {
+	Region string `toml:"region" env:"REGION" jsonschema:"enum=r1,enum=r2,enum=r3" jsonschema_extras:"x-public=true,x-label=Band plan region,x-enum-labels=R1,x-enum-labels=R2,x-enum-labels=R3" jsonschema_description:"IARU region of the band plan and of the region bookmark pack: r1 (Europe, Africa, Middle East), r2 (Americas) or r3 (Asia, Pacific)."`
 }
 
 // SettingsWaterfall is the [settings.waterfall] table: the one source of
@@ -137,6 +143,7 @@ func DefaultSettings() Settings {
 		UI: SettingsUI{
 			ThemeMode: "auto", ShortcutSet: "default",
 		},
+		Bandplan:  SettingsBandplan{Region: "r1"},
 		Waterfall: SettingsWaterfall{MinDB: -88, MaxDB: -20, Palette: "turbo"},
 		Session: SettingsSession{
 			IdleTimeout: MustDuration("24h"), AbsoluteTimeout: MustDuration("24h"), RememberMeTimeout: MustDuration("30d"),

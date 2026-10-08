@@ -37,3 +37,4 @@
 /admin/presets 200 signed-in
 /admin/presets/new 200 signed-in
 /admin/schedules 200 signed-in
+/bookmarks/manage 200 signed-in

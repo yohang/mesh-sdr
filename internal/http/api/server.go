@@ -34,6 +34,14 @@ type Server struct {
 	TokenHandlers
 	FeatureHandlers
 	StatusHandlers
+	BookmarkHandlers
+}
+
+// BookmarkHandlers serve GET /bookmarks and GET /bandplan; the bookmarks
+// module implements them (internal/bookmarks).
+type BookmarkHandlers interface {
+	GetBookmarks(ctx context.Context, req GetBookmarksRequestObject) (GetBookmarksResponseObject, error)
+	GetBandplan(ctx context.Context, req GetBandplanRequestObject) (GetBandplanResponseObject, error)
 }
 
 var _ StrictServerInterface = Server{}

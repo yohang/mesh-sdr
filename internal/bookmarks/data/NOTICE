@@ -1,0 +1,29 @@
+Bookmark packs and band plans of MeshSDR
+=========================================
+
+The files of this directory, except this NOTICE, are copied unmodified from
+OpenWebRX+ (https://github.com/luarvique/openwebrx), at commit
+f2a8feca17afd9e983af10f1794a3283a146c5bd:
+
+  bookmarks/aviation.json     bookmarks.d/aviation.json
+  bookmarks/cb.json           bookmarks.d/cb.json
+  bookmarks/marine.json       bookmarks.d/marine.json
+  bookmarks/misc.json         bookmarks.d/misc.json
+  bookmarks/vhf-marine.json   bookmarks.d/vhf-marine.json
+  bookmarks/wfax.json         bookmarks.d/wfax.json
+  bookmarks/r1/lpd.json       bookmarks.d/r1/lpd.json
+  bookmarks/r1/pmr.json       bookmarks.d/r1/pmr.json
+  bookmarks/r2/aar.json       bookmarks.d/r2/aar.json
+  bookmarks/r2/gmrs.json      bookmarks.d/r2/gmrs.json
+  bookmarks/r2/murs.json      bookmarks.d/r2/murs.json
+  bookmarks/r3/pmr.json       bookmarks.d/r3/pmr.json
+  bands/bands-r1.json         bands-r1.json
+  bands/bands-r2.json         bands-r2.json
+  bands/bands-r3.json         bands-r3.json
+
+The country packs of OpenWebRX+ (bookmarks.d/br, cn, de, no, se, us) are not
+included.
+
+OpenWebRX+ is licensed under the GNU Affero General Public License, version
+3 (AGPL-3.0). Its licence text is in LICENSE.txt, next to this file. These
+files are distributed under the same licence.

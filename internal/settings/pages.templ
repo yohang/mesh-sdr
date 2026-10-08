@@ -173,8 +173,8 @@ templ fieldView(f field) {
 			case f.Kind == InputEnum:
 				<label for={ f.ID } class="font-medium">{ f.Label }</label>
 				<select id={ f.ID } name={ f.Key } class="rounded border border-border px-2 py-1" aria-describedby={ describedBy(f) } { invalid(f)... }>
-					for _, o := range f.Options {
-						<option value={ o } selected?={ o == f.Value }>{ o }</option>
+					for i, o := range f.Options {
+						<option value={ o } selected?={ o == f.Value }>{ optionLabel(f, i) }</option>
 					}
 				</select>
 			case f.Kind == InputMarkdown || f.Kind == InputTextarea || f.Kind == InputList:
