@@ -26,8 +26,10 @@
 // link to Bookmarks › Manage pre-filled from the current tuning (BMK-003).
 //
 // Control bar: Scan (scanner.js, key S) with its state as text and
-// aria-pressed; disabled, with a text hint, while the squelch is off. Toolbar: Bandplan (bandplan.js, key B). Keys go through
-// the data-shortcut mechanism (shortcuts.js) on these visible controls.
+// aria-pressed; disabled, with a text hint, while the squelch is off.
+// Toolbar: Bandplan (bandplan.js, key B). The island binds S, Y and B in
+// its shortcut registry (keys.js), which clicks these controls, so the
+// keys work and are listed whether or not a control is on screen.
 
 import { BookmarkSearch } from "./bookmark-search.js";
 import { BandplanRibbon, rememberedVisible, rememberVisible } from "./bandplan.js";
@@ -165,7 +167,7 @@ export class ReceiverBookmarks {
 
   buildControls() {
     // Scan (BMK-006): a toggle with its state in text.
-    this.scanBtn = el("button", { type: "button", class: SMALL_BUTTON, "aria-pressed": "false", "aria-keyshortcuts": "S", "data-shortcut": "s" }, "Scan");
+    this.scanBtn = el("button", { type: "button", class: SMALL_BUTTON, "aria-pressed": "false", "aria-keyshortcuts": "S" }, "Scan");
     this.scanBtn.addEventListener("click", () => this.scanner.toggle());
     this.scanState = el("span", { class: "text-sm" });
     // RX-039: the name of the bookmark tuned to, for 3 s.
@@ -174,7 +176,7 @@ export class ReceiverBookmarks {
     this.scanGroup.append(this.scanBtn, this.scanState, this.tuneLabel);
 
     // Bandplan ribbon toggle (RX-029).
-    this.ribbonBtn = el("button", { type: "button", class: BUTTON, "aria-pressed": "false", "aria-keyshortcuts": "B", "data-shortcut": "b" }, "Bandplan");
+    this.ribbonBtn = el("button", { type: "button", class: BUTTON, "aria-pressed": "false", "aria-keyshortcuts": "B" }, "Bandplan");
     this.ribbonBtn.addEventListener("click", () => {
       const on = !this.engine.display.bandplan;
       this.engine.display.bandplan = on;
@@ -184,7 +186,7 @@ export class ReceiverBookmarks {
     });
 
     // Find a bookmark (BMK-004): opens the Bookmarks tab on the search.
-    this.findBtn = el("button", { type: "button", class: BUTTON, "aria-keyshortcuts": "Y", "data-shortcut": "y" }, "Find bookmark");
+    this.findBtn = el("button", { type: "button", class: BUTTON, "aria-keyshortcuts": "Y" }, "Find bookmark");
     this.findBtn.addEventListener("click", () => {
       this.d.showTab();
       this.search.focus();

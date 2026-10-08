@@ -457,9 +457,6 @@ class MsdrReceiver extends HTMLElement {
       layout: () => this.layout(),
     });
     const bmk = this.bookmarks;
-    // S, Y and B go through the shortcut registry (keys.js), so they work
-    // and are listed whether or not their control is on screen.
-    for (const b of [bmk.scanBtn, bmk.findBtn, bmk.ribbonBtn]) b.removeAttribute("data-shortcut");
 
     // Toolbar: device picker, Find bookmark and, docked, the side panel
     // toggle.
