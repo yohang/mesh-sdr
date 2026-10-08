@@ -98,8 +98,8 @@ func (b bookmarkDevices) Devices(ctx context.Context) ([]bookmarks.Device, error
 		active[d.ID()] = d.ActivePreset()
 	}
 
-	out := make([]bookmarks.Device, 0, len(summary))
-	for _, d := range summary {
+	out := make([]bookmarks.Device, 0, len(summary.Devices))
+	for _, d := range summary.Devices {
 		out = append(out, bookmarks.Device{
 			ID: d.ID, Name: d.Name, ListenPolicy: d.ListenPolicy, ActivePreset: active[d.ID], Modes: d.Modes,
 		})
