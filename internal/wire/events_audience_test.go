@@ -193,7 +193,7 @@ func jsonKeys(t *testing.T, v any) []string {
 
 // TestEventPublicPayloads: what listeners learn from node.status and
 // device.status is the public subset (§6.6): node availability, listeners
-// and the CPU, temperature and battery of an up node (RX-035, GRID-021);
+// and the CPU and temperature of an up node (RX-035, GRID-021), nothing else;
 // device state, listeners, active preset and centre (UI-021). Listener
 // count changes publish device.status for the changed devices only, to
 // their audience.
@@ -262,7 +262,7 @@ func TestEventPublicPayloads(t *testing.T) {
 
 	node, ok := got[0].Payload.(nodeStatusEvent)
 	if !ok || !sees(got[0], anon) || node.Status != "online" || node.Listeners == nil || *node.Listeners != 2 ||
-		node.CPU == nil || *node.CPU != 0.3 || node.TempC == nil || *node.TempC != temp || node.Battery != nil {
+		node.CPU == nil || *node.CPU != 0.3 || node.TempC == nil || *node.TempC != temp {
 		t.Errorf("node.status = %+v", got[0].Payload)
 	}
 

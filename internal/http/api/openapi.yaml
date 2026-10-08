@@ -109,7 +109,7 @@ paths:
         `listen_policy`), each with the modes its node reports available,
         its state, its active preset and its listener count (UI-021), and
         the nodes of those devices with their last public telemetry while
-        online (RX-035: CPU, temperature, battery). It never carries node
+        online (RX-035: CPU and temperature, the §6.6 public subset). It never carries node
         addresses, versions or missing requirements: the detailed report is
         on the Admin › Nodes pages (operators).
       tags: [grid]
@@ -612,10 +612,6 @@ components:
           type: number
           format: double
           description: Temperature (°C) of the last heartbeat, when the node reports one.
-        battery:
-          type: number
-          format: double
-          description: Battery level of the last heartbeat, as the node reports it, when it does.
     SessionInfo:
       type: object
       required: [authenticated, roles, csrf_token, providers]

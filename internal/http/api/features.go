@@ -63,7 +63,7 @@ func (h FeatureHandlers) GetFeatures(ctx context.Context, _ GetFeaturesRequestOb
 		nf := NodeFeatures{Id: n.ID.String(), Name: n.Name, Online: n.Online}
 		if t := n.Telemetry; t != nil {
 			cpu := t.CPU
-			nf.Cpu, nf.TempC, nf.Battery = &cpu, t.TempC, t.Battery
+			nf.Cpu, nf.TempC = &cpu, t.TempC
 		}
 
 		out.Nodes = append(out.Nodes, nf)

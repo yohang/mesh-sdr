@@ -28,7 +28,7 @@
 //
 // The side panel (UI-019) has the Info tab only: the device and its node,
 // its active preset, the status metrics (RX-035: audio buffer and rate,
-// stream bit rate, network, node CPU, temperature and battery, listeners),
+// stream bit rate, network, node CPU and temperature, listeners),
 // the station described by the hub (RX-036), whose server-rendered markup
 // ([data-rx-station]) the island moves into it, the session's events
 // (RX-038, notify.js) and a link to the About page.
@@ -1162,7 +1162,6 @@ class MsdrReceiver extends HTMLElement {
       ["Node CPU", typeof n?.cpu === "number" ? `${Math.round(n.cpu * 100)} %` : "—"],
       ["Temperature", typeof n?.temp_c === "number" ? `${n.temp_c.toFixed(1)} °C` : "—"],
     ];
-    if (typeof n?.battery === "number") rows.push(["Battery", `${Math.round(n.battery)} %`]);
     rows.push(["Listeners on this device", c ? String(c.listeners ?? 0) : "—"]);
     const key = JSON.stringify(rows.map(([k, v]) => [k, typeof v === "string" ? v : v.textContent]));
     if (key === this.metricsKey) return;

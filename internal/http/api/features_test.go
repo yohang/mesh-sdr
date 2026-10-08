@@ -135,7 +135,7 @@ func TestFeatures(t *testing.T) {
 
 				for k := range got.Nodes[i] {
 					switch k {
-					case "id", "name", "online", "cpu", "temp_c", "battery":
+					case "id", "name", "online", "cpu", "temp_c":
 					default:
 						t.Errorf("node %d carries %q", i, k)
 					}
@@ -146,9 +146,6 @@ func TestFeatures(t *testing.T) {
 				t.Errorf("attic = %v", a)
 			}
 
-			if _, ok := got.Nodes[0]["battery"]; ok {
-				t.Error("attic reports no battery")
-			}
 		})
 	}
 }

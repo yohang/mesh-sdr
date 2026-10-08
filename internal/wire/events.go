@@ -309,8 +309,8 @@ func listenPolicyWatch(c *policyCache, initial string) func(*settings.Snapshot) 
 
 // nodeStatusEvent is the node.status payload: thin (ADR 0016 decision 2),
 // the client refetches the fragment that renders what the viewer may see.
-// Listeners and the telemetry are the public subset of §6.6 (plus the
-// battery, RX-035), set for an up node only: a listener's receiver shows
+// Listeners and the telemetry are the public subset of §6.6 (listeners,
+// cpu, temp_c), set for an up node only: a listener's receiver shows
 // them in its Info tab, and learns from status whether its node is up
 // (GRID-021).
 type nodeStatusEvent struct {
@@ -319,7 +319,6 @@ type nodeStatusEvent struct {
 	Listeners *int     `json:"listeners,omitempty"`
 	CPU       *float64 `json:"cpu,omitempty"`
 	TempC     *float64 `json:"temp_c,omitempty"`
-	Battery   *float64 `json:"battery,omitempty"`
 }
 
 // deviceStatusEvent is the device.status payload (§6.6): the device state,
@@ -462,7 +461,7 @@ func (e *gridEvents) telemetry(ctx context.Context, id griddomain.NodeID, p *nod
 	if e.history != nil {
 		if s, ok := e.history.Latest(id); ok {
 			cpu := s.CPU
-			p.CPU, p.TempC, p.Battery = &cpu, s.TempC, s.Battery
+			p.CPU, p.TempC = &cpu, s.TempC
 		}
 	}
 }

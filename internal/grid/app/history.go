@@ -13,7 +13,6 @@ type LoadSample struct {
 	CPU               float64
 	Load1             float64
 	TempC             *float64
-	Battery           *float64
 	MemAvailableBytes uint64
 	MemTotalBytes     uint64
 }

@@ -93,6 +93,27 @@ func TestPresenceFromNodeEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if by, _ := p.ListenersByDevice(ctx); len(by) != 1 || by["hf"] != 1 {
+		t.Errorf("listeners by device = %v, want hf: 1", by)
+	}
+
+	// Nor through a heartbeat naming another node's device: the device is
+	// dropped, so its listener count cannot be inflated (UI-021).
+	hijack := event(6, rxv1.TypeConnectionHeart, cid1, "")
+	hijack.Payload, _ = json.Marshal(ctl.Connection{Seq: 6, CID: cid1.String(), DeviceID: "vhf", Demod: "nfm"})
+
+	if _, err := c.Apply(ctx, n.ID(), boot, false, []app.Event{hijack}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := repo.Get(ctx, cid1); got == nil || got.Info().DeviceID == "vhf" {
+		t.Errorf("heartbeat attached another node's device: %+v", got)
+	}
+
+	if by, _ := p.ListenersByDevice(ctx); by["vhf"] != 0 {
+		t.Errorf("listeners by device = %v, vhf inflated", by)
+	}
+
 	e.clock.advance(40 * time.Second)
 	p.Reap(ctx)
 

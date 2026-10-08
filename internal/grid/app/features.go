@@ -54,8 +54,8 @@ type DeviceFeatures struct {
 }
 
 // NodeFeatures describes the node of listed devices: its name, whether it
-// is online and its last telemetry while online (RX-035: CPU, temperature,
-// battery; nothing else of the heartbeat).
+// is online and its last telemetry while online (RX-035: CPU and temperature,
+// the §6.6 public subset; nothing else of the heartbeat).
 type NodeFeatures struct {
 	ID        domain.NodeID
 	Name      string
@@ -64,12 +64,11 @@ type NodeFeatures struct {
 }
 
 // Telemetry is the public part of a node heartbeat (TECHNICAL_SPEC §6.6
-// node.status public subset, plus the battery for RX-035).
+// node.status public subset).
 type Telemetry struct {
 	// CPU is the busy ratio, 0 to 1.
-	CPU     float64
-	TempC   *float64
-	Battery *float64
+	CPU   float64
+	TempC *float64
 }
 
 // Summary is the feature summary: the enabled devices in registry order
@@ -242,7 +241,7 @@ func (f *Features) node(id domain.NodeID, names map[domain.NodeID]string, online
 
 	if online && f.d.Telemetry != nil {
 		if s, ok := f.d.Telemetry.Latest(id); ok {
-			n.Telemetry = &Telemetry{CPU: s.CPU, TempC: s.TempC, Battery: s.Battery}
+			n.Telemetry = &Telemetry{CPU: s.CPU, TempC: s.TempC}
 		}
 	}
 

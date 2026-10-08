@@ -181,14 +181,14 @@ func TestFeaturesPickerFields(t *testing.T) {
 	hf, vhf := dev("attic", "hf"), dev("garden", "vhf")
 	hf.ApplyState(domain.StateRunning, "", nil, preset, now)
 
-	temp, battery := 41.5, 87.0
+	temp := 41.5
 	got, err := app.NewFeatures(app.FeaturesDeps{
 		Devices: deviceList{hf, vhf}, Caps: reports{}, Policy: fixedPolicy{v: "anonymous"},
 		Links:     links{domain.MustNodeID("attic")},
 		Nodes:     nodeList{domain.NewNode(domain.MustNodeID("attic"), domain.MustNodeName("Attic"), domain.MustNodeURL("https://attic:8074"), now)},
 		Listeners: listenerCounts{"hf": 3},
 		Telemetry: latest{
-			domain.MustNodeID("attic"):  {CPU: 0.25, TempC: &temp, Battery: &battery},
+			domain.MustNodeID("attic"):  {CPU: 0.25, TempC: &temp},
 			domain.MustNodeID("garden"): {CPU: 0.5},
 		},
 		PresetName: func(_ context.Context, id shared.UUID) string {
@@ -218,7 +218,7 @@ func TestFeaturesPickerFields(t *testing.T) {
 
 	attic, garden := got.Nodes[0], got.Nodes[1]
 	if attic.Name != "Attic" || !attic.Online || attic.Telemetry == nil || attic.Telemetry.CPU != 0.25 ||
-		*attic.Telemetry.TempC != temp || *attic.Telemetry.Battery != battery {
+		*attic.Telemetry.TempC != temp {
 		t.Errorf("attic = %+v", attic)
 	}
 

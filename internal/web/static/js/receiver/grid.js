@@ -42,7 +42,6 @@ const DOWN_STATES = new Set(["failed", "disabled", "unavailable"]);
  * @property {boolean} online
  * @property {number} [cpu] busy ratio 0..1
  * @property {number} [temp_c]
- * @property {number} [battery]
  */
 
 /** @param {string} status a node.status status */
@@ -143,7 +142,7 @@ class Grid extends EventTarget {
       return;
     }
     n.online = isUp(p.status);
-    for (const k of /** @type {const} */ (["cpu", "temp_c", "battery"])) {
+    for (const k of /** @type {const} */ (["cpu", "temp_c"])) {
       if (n.online && typeof p[k] === "number") n[k] = p[k];
       else delete n[k];
     }
