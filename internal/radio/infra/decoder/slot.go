@@ -21,9 +21,9 @@ import (
 const (
 	// wavHeader is the size of the canonical WAV header.
 	wavHeader = 44
-	// SlotGuard: a slot with less audio than this is not decoded (the
+	// slotGuard: a slot with less audio than this is not decoded (the
 	// first slot of a session usually starts late).
-	SlotGuard = time.Second
+	slotGuard = time.Second
 )
 
 // samplesIn returns the number of slot samples in d (rounded).

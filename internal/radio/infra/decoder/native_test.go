@@ -122,7 +122,7 @@ func TestTextModesCatalogue(t *testing.T) {
 func TestTextSession(t *testing.T) {
 	const rate = 24094.117647
 
-	r := NewRunner(Options{Text: func() TextSettings { return TextSettings{FFTSize: 1024} }})
+	r := NewRunner(Options{Settings: func() Settings { return Settings{FFTSize: 1024} }})
 	ev := &textEvents{}
 
 	run, err := r.Start(app.DecoderSpec{Session: shared.MustParseUUID("01890a5d-ac96-7a3b-8000-000000000001"), Mode: textMode(t, "rtty170"), OffsetHz: 1500}, ev.events())
@@ -145,12 +145,7 @@ func TestTextSession(t *testing.T) {
 		run.IQ(app.IQBlock{Samples: iq[i:min(i+2400, len(iq))], Rate: rate, Time: at.Add(time.Duration(float64(i) / rate * float64(time.Second)))})
 		// The queue holds two seconds: wait for the session to take it.
 		s := run.(*textSession)
-		ev.wait(t, "the input taken", func() bool {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-
-			return s.queued == 0
-		})
+		ev.wait(t, "the input taken", func() bool { return s.in.len() == 0 })
 	}
 
 	ev.wait(t, "two lines", func() bool { return len(ev.lines) >= 2 })
@@ -183,23 +178,23 @@ func TestTextSession(t *testing.T) {
 // TestTextSessionQueue: a session that falls behind drops the oldest
 // input; a closed session reports nothing.
 func TestTextSessionQueue(t *testing.T) {
-	q := &textSession{wake: make(chan struct{}, 1), done: make(chan struct{})}
+	q := &textSession{in: newDropQueue(int(inputBuffer.Microseconds()), iqWeight)}
 	block := make([]complex64, 24000)
 
 	for range 5 {
 		q.IQ(app.IQBlock{Samples: block, Rate: 24000})
 	}
 
-	if q.queued != 2*24000 || len(q.queue) != 2 || !q.queue[0].gap {
-		t.Fatalf("queued %d samples in %d blocks", q.queued, len(q.queue))
+	if items, _ := q.in.take(); len(items) != 2 || !items[0].gap || items[1].gap || q.in.drops() != 3 {
+		t.Fatalf("%d blocks queued (%+v), %d dropped", len(items), items, q.in.drops())
 	}
 
 	// A failed session drops its input.
-	q.fail()
+	q.in.discard()
 	q.IQ(app.IQBlock{Samples: block, Rate: 24000})
 
-	if q.queued != 0 {
-		t.Fatalf("failed session queued %d samples", q.queued)
+	if q.in.len() != 0 {
+		t.Fatalf("failed session queued %d blocks", q.in.len())
 	}
 
 	r := NewRunner(Options{})
@@ -214,7 +209,7 @@ func TestTextSessionQueue(t *testing.T) {
 
 	run.Close()
 	run.IQ(app.IQBlock{Samples: block, Rate: 24000})
-	s.emit(app.DecodeRecord{Text: "late"})
+	s.decode(app.DecodeRecord{Text: "late"})
 	s.status(app.DecoderStatus{State: app.DecoderError})
 
 	ev.mu.Lock()
@@ -249,7 +244,7 @@ func TestLineAssembler(t *testing.T) {
 		t.Fatalf("partial not throttled: %+v", got)
 	}
 
-	clock = clock.Add(LineIdle)
+	clock = clock.Add(lineIdle)
 	l.idle()
 
 	if len(got) != 3 || got[2].Text != "DE F4TEST" || got[2].Partial {
@@ -285,12 +280,7 @@ func TestTextSessionGap(t *testing.T) {
 
 	feed := func(b []complex64, gap bool) {
 		run.IQ(app.IQBlock{Samples: b, Rate: rate, Discontinuity: gap})
-		ev.wait(t, "the input taken", func() bool {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-
-			return s.queued == 0
-		})
+		ev.wait(t, "the input taken", func() bool { return s.in.len() == 0 })
 	}
 
 	for i := 0; i < len(iq); i += 2400 {

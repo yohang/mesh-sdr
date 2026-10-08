@@ -39,9 +39,6 @@ const (
 // cannot run (DIAG-004: admins see the missing tool).
 const unavailableText = "not available on this receiver"
 
-// nodeBusy is the reason of a decoder refused beyond decoders.max_sessions.
-const nodeBusy = "node busy"
-
 // adminRole is the admin role name in access tokens.
 const adminRole = "admin"
 
@@ -154,9 +151,12 @@ func offsetOf(m domain.DigitalMode, asked *int64, d *demodState, params app.Demo
 	case d.dec != nil && d.dec.mode.BandwidthHz > 0:
 		return d.dec.offset
 	default:
-		return int64(math.Round((params.LowHz + params.HighHz) / 2))
+		return passbandMiddle(params)
 	}
 }
+
+// passbandMiddle is the middle of the pass band of a demodulator.
+func passbandMiddle(p app.DemodParams) int64 { return int64(math.Round((p.LowHz + p.HighHz) / 2)) }
 
 // startedFor is the ack result of decoder.set for the decoder of d (d.mu
 // held).
@@ -286,16 +286,7 @@ func (ss *session) setDecoder(req rxv1.Envelope) {
 
 	ss.stopDecoder(d, true)
 
-	err = ss.startDecoder(d, m, variant, offset)
-
-	switch {
-	case errors.Is(err, app.ErrNodeBusy):
-		ss.peer.Ack(req, startedFor(d))
-		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, nodeBusy)
-	case errors.As(err, new(errWideTap)):
-		ss.peer.Ack(req, startedFor(d))
-		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, wideReason(err))
-	case err != nil:
+	if unavailable, err := ss.startDecoderOrReport(d, m, variant, offset); err != nil {
 		// The listener learns the underlying mode it was switched to.
 		if switched {
 			res := appliedFor(d)
@@ -303,8 +294,9 @@ func (ss *session) setDecoder(req rxv1.Envelope) {
 		}
 
 		ss.decoderError(req, err)
-	default:
+	} else {
 		ss.peer.Ack(req, startedFor(d))
+		unavailable()
 	}
 
 	if switched {
@@ -366,21 +358,42 @@ func (ss *session) underlyingChanged(d *demodState) {
 	// An offset outside the new pass band (the sideband flipped) moves to
 	// its middle.
 	if m.BandwidthHz > 0 && (float64(offset) < params.LowHz || float64(offset) > params.HighHz) {
-		offset = offsetOf(m, nil, &demodState{}, params)
+		offset = passbandMiddle(params)
 	}
 
-	err := ss.startDecoder(d, m, variant, offset)
-
-	switch {
-	case errors.Is(err, app.ErrNodeBusy):
-		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, nodeBusy)
-	case errors.As(err, new(errWideTap)):
-		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, wideReason(err))
-	case err != nil:
+	unavailable, err := ss.startDecoderOrReport(d, m, variant, offset)
+	if err != nil {
 		ss.s.log.Warn("decoder not re-created after an underlying mode change", slog.String("demod_id", d.id),
 			slog.String("decoder", m.Name), slog.Any("error", err))
-		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderError, "start_failed")
+		ss.decoderStatus(d, m.Name, variant, media.DecoderError, "start_failed")
+
+		return
 	}
+
+	unavailable()
+}
+
+// startDecoderOrReport starts a decoder of m on d (d.mu held). A decoder
+// the node cannot serve (node busy, a wide channel the device cannot
+// carry) is no error: report sends its unavailable status, once the
+// caller has answered.
+func (ss *session) startDecoderOrReport(d *demodState, m domain.DigitalMode, variant string, offset int64) (report func(), err error) {
+	err = ss.startDecoder(d, m, variant, offset)
+
+	var reason string
+
+	switch {
+	case err == nil:
+		return func() {}, nil
+	case errors.Is(err, domain.ErrNodeBusy):
+		reason = domain.ErrNodeBusy.Message()
+	case errors.As(err, new(errWideTap)):
+		reason = wideReason(err)
+	default:
+		return nil, err
+	}
+
+	return func() { ss.decoderStatus(d, m.Name, variant, media.DecoderUnavailable, reason) }, nil
 }
 
 // reception is where the last kept message of a decoder session was
@@ -437,7 +450,7 @@ func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant str
 	}
 
 	rx := &reception{}
-	spec := app.DecoderSpec{Mode: m, Variant: variant, OffsetHz: float64(offset), DialHz: func() int64 { return ss.tuning(d).dial }}
+	spec := app.DecoderSpec{Mode: m, Variant: variant, OffsetHz: float64(offset), Dial: func() int64 { return ss.tuning(d).dial }}
 
 	id, run, err := ss.s.dec.Decoders.Start(spec, func(id shared.UUID) app.DecoderEvents {
 		return app.DecoderEvents{
@@ -445,7 +458,6 @@ func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant str
 			Status:   func(st app.DecoderStatus) { ss.sessionStatus(d, id, m.Name, variant, st) },
 			File:     func(f app.ProducedFile) { ss.produced(d, id, m, rx, f) },
 			Spectrum: func(f app.SpectrumFrame) { ss.secondaryFrame(d, id, fft, f) },
-			Dial:     func() int64 { return ss.dial(d) },
 		}
 	})
 	if err != nil {
@@ -571,9 +583,7 @@ func (ss *session) configureSecondary(req rxv1.Envelope, p media.StreamConfigure
 		ss.peer.Fail(req, rxv1.CodeOutOfRange, "fps: want 1.."+strconv.Itoa(limit))
 
 		return true
-	case p.Codec != nil && *p.Codec != media.CodecFFTU8:
-		ss.peer.Fail(req, rxv1.CodeOutOfRange, "fft codec "+strconv.Quote(*p.Codec)+" is not provided by this node")
-
+	case p.Codec != nil && ss.badFFTCodec(req, *p.Codec):
 		return true
 	}
 
@@ -622,7 +632,7 @@ func (ss *session) stopDecoder(d *demodState, notify bool) {
 	}
 
 	if notify {
-		ss.decoderStatus(d, dec.id, dec.mode.Name, dec.variant, media.DecoderStopped, "")
+		ss.sendStatus(d, dec.id, dec.mode.Name, dec.variant, media.DiagState{State: media.DecoderStopped})
 	}
 }
 
@@ -646,36 +656,31 @@ func liveOffset(d *demodState, id shared.UUID) (int64, bool) {
 	return d.dec.offset, true
 }
 
+// diagStates are the diag.state names of the session states.
+var diagStates = map[string]string{
+	app.DecoderRunning: media.DecoderRunning, app.DecoderUnavailable: media.DecoderUnavailable, app.DecoderError: media.DecoderError,
+}
+
 // sessionStatus forwards a status of session id while it is current.
 func (ss *session) sessionStatus(d *demodState, id shared.UUID, mode, variant string, st app.DecoderStatus) {
 	if live(d, id) {
-		ss.sendStatus(d, id, mode, variant, st)
+		ss.sendStatus(d, id, mode, variant, media.DiagState{State: diagStates[st.State], Reason: st.Reason, Warning: st.Warning})
 	}
 }
 
-func (ss *session) decoderStatus(d *demodState, id shared.UUID, mode, variant, state, reason string) {
-	ss.sendStatus(d, id, mode, variant, app.DecoderStatus{State: state, Reason: reason})
+// decoderStatus sends the status of a decoder that has no session.
+func (ss *session) decoderStatus(d *demodState, mode, variant, state, reason string) {
+	ss.sendStatus(d, shared.UUID{}, mode, variant, media.DiagState{State: state, Reason: reason})
 }
 
-func (ss *session) sendStatus(d *demodState, id shared.UUID, mode, variant string, st app.DecoderStatus) {
-	p := media.DiagState{
-		DemodID: d.id, Decoder: mode, Variant: variant, State: st.State, Reason: st.Reason, Warning: st.Warning, Since: ss.s.now().UnixMilli(),
-	}
+// sendStatus sends the diag.state p of a decoder of d.
+func (ss *session) sendStatus(d *demodState, id shared.UUID, mode, variant string, p media.DiagState) {
+	p.DemodID, p.Decoder, p.Variant, p.Since = d.id, mode, variant, ss.s.now().UnixMilli()
 	if !id.IsZero() {
 		p.DecoderSessionID = id.String()
 	}
 
 	ss.peer.Send(rxv1.TypeDiagState, p)
-}
-
-// dial returns the dial frequency of d (0 when its device is detached).
-func (ss *session) dial(d *demodState) int64 {
-	a := ss.attachedTo(d.device)
-	if a == nil {
-		return 0
-	}
-
-	return a.lease.Snapshot().CenterHz + d.demod.Params().OffsetHz
 }
 
 // decoded sends a decoded message of the current session to the listener
@@ -690,23 +695,20 @@ func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, 
 		return
 	}
 
-	a := ss.attachedTo(d.device)
-	if a == nil {
+	t := ss.tuning(d)
+	if t.device == "" {
 		return
 	}
 
-	snap := a.lease.Snapshot()
-
 	dial := rec.DialHz
 	if dial == 0 {
-		dial = snap.CenterHz + d.demod.Params().OffsetHz
+		dial = t.dial
 	}
 
 	// A text decoder adds its secondary offset, a slot decoder the audio
-	// frequency of the signal,
-	// a skimmer the offset of its signal.
-	freq := dial + offset + rec.AudioHz
-	text := shared.Truncate(rec.Text, media.MaxDecodeText)
+	// frequency of the signal, a skimmer the offset of its signal. The
+	// decoders capped the text (media.MaxDecodeText).
+	freq, text := dial+offset+rec.AudioHz, rec.Text
 
 	ss.peer.Send(rxv1.TypeDecode, media.Decode{
 		DemodID: d.id, DecoderSessionID: id.String(), Mode: m.Name, TS: rec.Time.UnixMilli(), FreqHz: freq,
@@ -719,11 +721,11 @@ func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, 
 		return
 	}
 
-	rx.set(freq, snap.ActivePreset)
+	rx.set(freq, t.preset)
 
 	if pub := ss.s.dec.Publisher; pub != nil {
 		pub.Decoded(app.Decoded{
-			DeviceID: d.device, SessionID: id.String(), PresetID: snap.ActivePreset, Mode: m.Name, Family: m.Family,
+			DeviceID: d.device, SessionID: id.String(), PresetID: t.preset, Mode: m.Name, Family: m.Family,
 			FreqHz: freq, Time: rec.Time, CID: ss.peer.Claims().ConnectionID, Schema: rec.Schema, Text: text, Payload: rec.Payload,
 		})
 	}

@@ -12,48 +12,10 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
-// Settings are the decoding settings of the slot decoders (DEC-024,
-// DEC-021…023, DEC-029) and of the streaming tool decoders (paging, ISM),
-// pushed by the hub in the desired state (Admin › Decoding). A zero field
-// takes the default of the hub settings.
-type Settings struct {
-	// WSJTDepth is wsjt_decoding_depth (1 to 3, default 3).
-	WSJTDepth int
-	// WSJTDepths are the per-mode depths wsjt_decoding_depths[mode]; a
-	// missing or zero entry takes WSJTDepth (JT65 defaults to 1).
-	WSJTDepths map[string]int
-	// FST4Intervals and FST4WIntervals are the enabled T/R periods in
-	// seconds (fst4_enabled_intervals, fst4w_enabled_intervals).
-	FST4Intervals, FST4WIntervals []int
-	// Q65Combinations are the enabled submode and period combinations
-	// ("A30", q65_enabled_combinations).
-	Q65Combinations []string
-	// JS8Profiles are the enabled JS8 speeds (normal, slow, fast, turbo).
-	JS8Profiles []string
-	// JS8Depth is js8_decoding_depth (1 to 3, default 3).
-	JS8Depth int
-	// PagingFilter keeps only the readable pages (DEC-033).
-	PagingFilter bool
-	// PagingCharset is the POCSAG charset of multimon-ng (US, FR, DE, DK,
-	// SE or SI); "" is US.
-	PagingCharset string
-	// ISMReportLevels keeps the signal levels of rtl_433 in the ISM
-	// decodes (DEC-039).
-	ISMReportLevels bool
-}
-
-// Default decoding settings (the hub defaults, ADR 0028).
-var (
-	DefaultFST4Intervals   = []int{15, 30}
-	DefaultFST4WIntervals  = []int{120, 300}
-	DefaultQ65Combinations = []string{"A30", "E120", "C60"}
-	DefaultJS8Profiles     = []string{"normal", "slow"}
-)
-
 // Valid slot periods (WSJT-X 2.7).
 var (
-	FST4Periods  = []int{15, 30, 60, 120, 300, 900, 1800}
-	FST4WPeriods = []int{120, 300, 900, 1800}
+	fst4Periods  = []int{15, 30, 60, 120, 300, 900, 1800}
+	fst4wPeriods = []int{120, 300, 900, 1800}
 )
 
 // q65Periods are the Q65 T/R periods with the occupied bandwidth (Hz) of
@@ -62,10 +24,10 @@ var q65Periods = []struct {
 	seconds, bandwidth int
 }{{15, 433}, {30, 217}, {60, 108}, {120, 49}, {300, 19}}
 
-// Q65Combinations returns the valid Q65 combinations, submode then period
+// q65Combinations returns the valid Q65 combinations, submode then period
 // ("A15" … "E300"): those whose occupied bandwidth is below 2700 Hz
 // (DEC-023).
-func Q65Combinations() []string {
+func q65Combinations() []string {
 	var out []string
 
 	for _, p := range q65Periods {
@@ -90,8 +52,8 @@ var js8Speeds = map[string]struct {
 	"slow":   {30 * time.Second, "E"},
 }
 
-// JS8Speeds are the JS8 speeds, in display order.
-var JS8Speeds = []string{"normal", "slow", "fast", "turbo"}
+// js8SpeedOrder are the JS8 speeds, in display order.
+var js8SpeedOrder = []string{"normal", "slow", "fast", "turbo"}
 
 // depth returns the decoding depth of a WSJT mode.
 func (s Settings) depth(mode string) int {
@@ -160,9 +122,9 @@ func profiles(mode string, s Settings) []profile {
 			},
 		}}
 	case "fst4", "fst4w":
-		enabled, valid := orDefault(s.FST4Intervals, DefaultFST4Intervals), FST4Periods
+		enabled, valid := s.FST4Intervals, fst4Periods
 		if mode == "fst4w" {
-			enabled, valid = orDefault(s.FST4WIntervals, DefaultFST4WIntervals), FST4WPeriods
+			enabled, valid = s.FST4WIntervals, fst4wPeriods
 		}
 
 		var out []profile
@@ -176,12 +138,10 @@ func profiles(mode string, s Settings) []profile {
 
 		return out
 	case "q65":
-		enabled := orDefault(s.Q65Combinations, DefaultQ65Combinations)
-
 		var out []profile
 
-		for _, c := range Q65Combinations() {
-			if slices.Contains(enabled, c) {
+		for _, c := range q65Combinations() {
+			if slices.Contains(s.Q65Combinations, c) {
 				sec, _ := strconv.Atoi(c[1:])
 				period := time.Duration(sec) * time.Second
 				p := jt9("--q65", period, period*8/10, "-p", c[1:], "-b", c[:1])
@@ -196,14 +156,6 @@ func profiles(mode string, s Settings) []profile {
 	}
 
 	return nil
-}
-
-func orDefault[T any](v, def []T) []T {
-	if len(v) == 0 {
-		return def
-	}
-
-	return v
 }
 
 // wsjtRules classify the stderr of jt9, wsprd and js8.

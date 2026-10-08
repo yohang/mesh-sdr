@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	radioapp "github.com/yohang/mesh-sdr/internal/radio/app"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	radiohttp "github.com/yohang/mesh-sdr/internal/radio/http"
@@ -89,12 +90,12 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 		return nil, nil, nil, nil, err
 	}
 
-	toolbox := decoder.NewToolbox(decoder.ToolboxOptions{Supervisor: sup, Tools: tools, Logger: component(logger, "radio.infra.decoder")})
+	toolbox := decoder.NewToolbox(decoder.ToolboxOptions{Supervisor: sup, Tools: tools, Logger: component(logger, "radio.infra.decoder.probe")})
 	lim := cfg.Decoders.ProcessLimits
 	core := uint64(0)
 	runner := decoder.NewRunner(decoder.Options{
-		Supervisor: sup, Tools: tools, MaxRestarts: dec.maxRestarts, Reprobe: dec.reprobe, FAX: dec.fax, Text: dec.text, Logger: component(logger, "radio.infra.decoder"),
-		Queue: dec.queue, Settings: dec.settings, ClockSynced: dec.clockSynced,
+		Supervisor: sup, Tools: tools, Settings: dec.settings, Reprobe: dec.reprobe, Logger: component(logger, "radio.infra.decoder.runner"),
+		Queue: dec.queue, ClockSynced: dec.clockSynced,
 		Limits: process.Limits{
 			Nice: lim.Nice, OpenFiles: uint64(lim.OpenFiles), AddressSpace: uint64(lim.Memory.Bytes()), Core: &core, NoNewPrivs: true,
 		},
@@ -102,25 +103,24 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 	sessions := cfg.Decoders.SessionCap(runtime.NumCPU())
 	decoding := radiohttp.Decoding{Decoders: radioapp.NewDecoders(toolbox, runner, sessions, time.Now), Publisher: dec.publisher, Files: dec.files}
 
-	return m, radiohttp.NewStreams(m, state, decoding, component(logger, "radio.http.streams")), sources, toolbox, nil
+	// The waterfall defaults until the desired state carries the hub's.
+	w := config.DefaultSettings().Waterfall
+	waterfall := ctl.StateWaterfall{MinDB: w.MinDB, MaxDB: w.MaxDB, Palette: w.Palette}
+
+	return m, radiohttp.NewStreams(m, state, decoding, waterfall, component(logger, "radio.http.streams")), sources, toolbox, nil
 }
 
 // radioDecoding are the node services the decoders use: the hub
 // (decode.batch, the file outbox), the decoding settings of the desired
 // state and the capability report.
 type radioDecoding struct {
-	publisher   radioapp.DecodePublisher
-	files       radioapp.FilePublisher
-	maxRestarts func() int
-	fax         func() decoder.FAXSettings
-	reprobe     func()
-	// text are the settings of the text decoders.
-	text func() decoder.TextSettings
-	// queue runs the slot decoder jobs (DEC-025), settings are their
-	// settings from the desired state and clockSynced the node clock state
-	// (DEC-026).
+	publisher radioapp.DecodePublisher
+	files     radioapp.FilePublisher
+	settings  func() decoder.Settings
+	reprobe   func()
+	// queue runs the slot decoder jobs (DEC-025) and clockSynced is the
+	// node clock state (DEC-026).
 	queue       *decoder.Queue
-	settings    func() decoder.Settings
 	clockSynced func() bool
 }
 

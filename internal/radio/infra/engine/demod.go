@@ -166,14 +166,6 @@ func normalize(p app.DemodParams) (app.DemodParams, Mode, error) {
 	return p, m, nil
 }
 
-func appCodec(c rxv1.Codec) app.AudioCodec {
-	if c == rxv1.CodecADPCMIMA {
-		return app.CodecADPCM
-	}
-
-	return app.CodecPCM
-}
-
 func codecOf(c app.AudioCodec) rxv1.Codec {
 	if c == app.CodecADPCM {
 		return rxv1.CodecADPCMIMA
@@ -499,6 +491,8 @@ func (d *demod) run() {
 		builtFor  *binding
 		lastMeter time.Time
 		gap       bool
+		// failing: the chain failed on the last block (logged once).
+		failing bool
 	)
 
 	defer func() {
@@ -559,10 +553,16 @@ func (d *demod) run() {
 
 		res, err := chain.Process(iq)
 		if err != nil {
-			d.e.log.Error("demodulator failed", slog.Any("error", err))
+			if !failing {
+				d.e.log.Error("demodulator failed", slog.Any("error", err))
+			}
+
+			failing = true
 
 			continue
 		}
+
+		failing = false
 
 		if len(res.Selector) > 0 {
 			d.tapIQ(app.IQBlock{Samples: res.Selector, Rate: b.ch.Rate(), Time: meta.Time, Discontinuity: g != nil})
@@ -574,7 +574,7 @@ func (d *demod) run() {
 
 		framer.Push(res.Audio, meta.Time, !res.Open, func(f dsp.AudioFrame) {
 			d.audio(app.AudioOut{
-				Codec:   appCodec(f.Codec),
+				Codec:   key.codec,
 				Payload: f.Payload, Samples: f.Samples, Duration: f.Duration(framer.Rate()),
 				TimestampUS: uint64(max(f.Time.UnixMicro(), 0)), Squelched: f.Squelched, Reset: f.Reset, Discontinuity: gap,
 			})

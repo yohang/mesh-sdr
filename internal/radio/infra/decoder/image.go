@@ -8,11 +8,9 @@ import (
 	"image/png"
 	"log/slog"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/dsp"
-	"github.com/yohang/mesh-sdr/internal/dsp/csdr"
 	"github.com/yohang/mesh-sdr/internal/radio/app"
 )
 
@@ -54,8 +52,8 @@ type FAXSettings struct {
 	PostProcess, Color, AM    bool
 }
 
-// DefaultFAX are the FAX settings of a node the hub has not configured.
-var DefaultFAX = FAXSettings{LPM: 120, MinLength: 200, MaxLength: 1500, PostProcess: true}
+// defaultFAX are the FAX settings of a node the hub has not configured.
+var defaultFAX = FAXSettings{LPM: 120, MinLength: 200, MaxLength: 1500, PostProcess: true}
 
 // sstvModes name the SSTV modes of libcsdr++ by VIS code.
 var sstvModes = map[int]string{
@@ -75,24 +73,24 @@ func sstvMode(vis int) string {
 }
 
 // imageQueue is the depth of the audio queue of an image session, in
-// blocks (about 2 s of 20 ms blocks): beyond it, blocks are dropped.
+// blocks (about 2 s of 20 ms blocks): beyond it, the oldest blocks are
+// dropped.
 const imageQueue = 100
 
 // imageSession is a running SSTV or FAX decoder: the demodulator's tap
 // queues audio for its goroutine, which decodes it.
 type imageSession struct {
+	sessionBase
+
 	kind string
 	rx   *dsp.ImageReceiver
-	ev   app.DecoderEvents
 	// minLines returns the shortest image saved, in lines.
 	minLines func(m *dsp.Image) int
 	lpm      int
 	now      func() time.Time
-	log      *slog.Logger
-
-	mu     sync.Mutex
-	in     chan app.AudioBlock
-	closed bool
+	in       *dropQueue[app.AudioBlock]
+	// done is closed once the goroutine has ended.
+	done chan struct{}
 
 	// start is the reception start of the current image (goroutine only).
 	start time.Time
@@ -101,8 +99,8 @@ type imageSession struct {
 // startImage starts an SSTV or FAX session.
 func (r *Runner) startImage(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderRun, error) {
 	s := &imageSession{
-		kind: spec.Mode.Name, ev: ev, in: make(chan app.AudioBlock, imageQueue), now: r.o.Now,
-		log: r.o.Logger.With(slog.String("session_id", spec.Session.String()), slog.String("mode", spec.Mode.Name)),
+		sessionBase: sessionBase{ev: ev, log: r.sessionLog(spec)},
+		kind:        spec.Mode.Name, in: newDropQueue(imageQueue, one[app.AudioBlock]), now: r.o.Now, done: make(chan struct{}),
 	}
 
 	var err error
@@ -113,16 +111,12 @@ func (r *Runner) startImage(spec app.DecoderSpec, ev app.DecoderEvents) (app.Dec
 		// Images under half height are discarded (DEC-037).
 		s.minLines = func(m *dsp.Image) int { return (m.Height + 1) / 2 }
 	case app.FileFAX:
-		f := DefaultFAX
-		if r.o.FAX != nil {
-			f = r.o.FAX()
-		}
-
+		f := r.o.Settings().FAX
 		s.lpm = f.LPM
-		s.rx, err = dsp.NewFAXReceiver(csdr.FAXOptions{LPM: f.LPM, MaxLines: f.MaxLength, AM: f.AM, PostProcess: f.PostProcess, Color: f.Color})
+		s.rx, err = dsp.NewFAXReceiver(dsp.FAXOptions{LPM: f.LPM, MaxLines: f.MaxLength, AM: f.AM, PostProcess: f.PostProcess, Color: f.Color})
 		s.minLines = func(*dsp.Image) int { return f.MinLength }
 	default:
-		return nil, fmt.Errorf("%w for %s", ErrNoAdapter, spec.Mode.Name)
+		return nil, fmt.Errorf("%w for %s", errNoDecoder, spec.Mode.Name)
 	}
 
 	if err != nil {
@@ -134,87 +128,74 @@ func (r *Runner) startImage(spec app.DecoderSpec, ev app.DecoderEvents) (app.Dec
 	return s, nil
 }
 
-// Audio implements app.DecoderRun: the block is copied and queued; a full
-// queue drops it.
+// Audio implements app.DecoderRun: the block is copied and queued.
 func (s *imageSession) Audio(b app.AudioBlock) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.closed {
-		return
-	}
-
 	b.Samples = append([]float32(nil), b.Samples...)
-
-	select {
-	case s.in <- b:
-	default:
-		s.log.Debug("image decoder late: audio block dropped")
-	}
+	s.in.push(b, false)
 }
 
-// IQ implements app.DecoderRun: the image decoders read audio.
-func (s *imageSession) IQ(app.IQBlock) {}
-
-// WideIQ implements app.DecoderRun: the image decoders read audio.
-func (s *imageSession) WideIQ(app.WideIQBlock) {}
-
-// Retune implements app.DecoderRun: no secondary selector.
-func (s *imageSession) Retune(float64) {}
-
-// SpectrumSize implements app.DecoderRun: no secondary FFT.
-func (s *imageSession) SpectrumSize() int { return 0 }
-
-// Spectrum implements app.DecoderRun: no secondary FFT.
-func (s *imageSession) Spectrum(int) {}
-
-// Close implements app.DecoderRun: the goroutine ends after the queued
-// audio and saves the image in progress, if long enough.
+// Close implements app.DecoderRun: nothing is reported after it; the
+// goroutine ends after the queued audio and saves the image in progress,
+// if long enough.
 func (s *imageSession) Close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.closed = true
+	s.mu.Unlock()
 
-	if !s.closed {
-		s.closed = true
-		close(s.in)
-	}
+	s.in.close()
 }
 
 func (s *imageSession) run() {
-	running, failed := false, false
+	defer close(s.done)
 
-	for b := range s.in {
-		if failed {
-			continue
+	failed := false
+
+	for {
+		items, closed := s.in.take()
+
+		for _, it := range items {
+			if !failed {
+				failed = s.feed(it)
+			}
 		}
 
-		if !running {
-			running = true
-
-			s.ev.Status(app.DecoderStatus{State: app.DecoderRunning})
+		if closed {
+			break
 		}
 
-		evs, err := s.rx.Feed(b.Samples, b.Rate)
-		if err != nil {
-			s.log.Error("image decoder failed", slog.Any("error", err))
-			s.ev.Status(app.DecoderStatus{State: app.DecoderError, Reason: "decoder_failed"})
-
-			failed = true
-
-			continue
-		}
-
-		// The decoder works behind the last sample of the block.
-		at := b.Time.Add(time.Duration(len(b.Samples))*time.Second/time.Duration(max(b.Rate, 1)) - s.rx.Lag())
-
-		for _, e := range evs {
-			s.event(e, at)
-		}
+		<-s.in.wake
 	}
 
 	if m := s.rx.Close(); m != nil && !failed {
 		s.finish(m, time.Time{})
 	}
+}
+
+// feed decodes one block; true when the decoder failed.
+func (s *imageSession) feed(it queued[app.AudioBlock]) bool {
+	b := it.v
+	if it.gap {
+		s.log.Debug("image decoder late: audio blocks dropped")
+	}
+
+	s.status(app.DecoderStatus{State: app.DecoderRunning})
+
+	evs, err := s.rx.Feed(b.Samples, b.Rate)
+	if err != nil {
+		s.log.Error("image decoder failed", slog.Any("error", err))
+		s.status(app.DecoderStatus{State: app.DecoderError, Reason: "decoder_failed"})
+
+		return true
+	}
+
+	// The decoder works behind the last sample of the block.
+	at := b.Time.Add(time.Duration(len(b.Samples))*time.Second/time.Duration(max(b.Rate, 1)) - s.rx.Lag())
+
+	for _, e := range evs {
+		s.event(e, at)
+	}
+
+	return false
 }
 
 // event reports an event of the receiver at time at.
@@ -237,10 +218,10 @@ func (s *imageSession) event(e dsp.ImageEvent, at time.Time) {
 			text = fmt.Sprintf("FAX IOC %d, %d LPM, %d×%d", m.IOC, s.lpm, m.Width, m.Height)
 		}
 
-		s.decode(at, text, rec, false)
+		s.record(at, text, rec, false)
 	case dsp.ImageRow:
 		row := e.Row
-		s.decode(at, "", ImageRecord{
+		s.record(at, "", ImageRecord{
 			Event: "row", Kind: s.kind, Width: m.Width, Height: m.Height, Channels: m.Channels, Row: &row, Pixels: m.Row(row),
 		}, true)
 	case dsp.ImageEnd:
@@ -267,7 +248,7 @@ func (s *imageSession) finish(m *dsp.Image, end time.Time) {
 		at = s.now()
 	}
 
-	s.decode(at, text, ImageRecord{
+	s.record(at, text, ImageRecord{
 		Event: "end", Kind: s.kind, Width: m.Width, Height: m.Height, Channels: m.Channels, Lines: m.Lines, Complete: m.Complete, Saved: saved,
 	}, true)
 }
@@ -323,12 +304,12 @@ func encodePNG(m *dsp.Image) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// decode reports a record of the session.
-func (s *imageSession) decode(at time.Time, text string, rec ImageRecord, live bool) {
+// record reports a record of the session.
+func (s *imageSession) record(at time.Time, text string, rec ImageRecord, live bool) {
 	payload, err := json.Marshal(rec)
 	if err != nil {
 		return
 	}
 
-	s.ev.Decode(app.DecodeRecord{Time: at, Schema: ImageSchema, Text: text, Payload: payload, Live: live})
+	s.decode(app.DecodeRecord{Time: at, Schema: ImageSchema, Text: text, Payload: payload, Live: live})
 }

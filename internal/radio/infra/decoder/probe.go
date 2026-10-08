@@ -23,9 +23,9 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
-// ProbeParallel bounds the concurrent probes (§8.4 "Capability probing"
+// probeParallel bounds the concurrent probes (§8.4 "Capability probing"
 // rule 2).
-const ProbeParallel = 4
+const probeParallel = 4
 
 // toolProbe is how a tool is probed: an argv that exits quickly with stdin
 // closed (any exit code) and prints a line matching match, on stdout or
@@ -129,7 +129,7 @@ func (t *Toolbox) Available(c string) (bool, string) {
 }
 
 // Probe runs every decoder tool (argv only, stdin closed, process.ProbeTimeout,
-// at most ProbeParallel at once, §8.4) and returns the decoder
+// at most probeParallel at once, §8.4) and returns the decoder
 // capabilities with their tools and digital modes. It is called for every
 // capability report: at start, on the hub's request, and after a decoder
 // tool went missing (exit 127 or ENOENT).
@@ -209,7 +209,7 @@ func (t *Toolbox) probeTools(ctx context.Context) map[string]app.ToolStatus {
 		mu  sync.Mutex
 		wg  sync.WaitGroup
 		out = make(map[string]app.ToolStatus, len(names))
-		sem = make(chan struct{}, ProbeParallel)
+		sem = make(chan struct{}, probeParallel)
 	)
 
 	for _, n := range names {

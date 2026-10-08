@@ -35,8 +35,8 @@ type Options struct {
 	MaxDemods int
 }
 
-// DefaultMaxDemods is the interim node-wide demodulator cap (ADR 0019).
-const DefaultMaxDemods = 32
+// DefaultNodeMaxDemods is the interim node-wide demodulator cap (ADR 0019).
+const DefaultNodeMaxDemods = 32
 
 // Manager runs the devices of the node, one goroutine each.
 type Manager struct {
@@ -59,7 +59,7 @@ func NewManager(o Options) (*Manager, error) {
 	}
 
 	if o.MaxDemods <= 0 {
-		o.MaxDemods = DefaultMaxDemods
+		o.MaxDemods = DefaultNodeMaxDemods
 	}
 
 	m := &Manager{o: o, runners: map[string]*runner{}}

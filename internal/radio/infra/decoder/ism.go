@@ -55,14 +55,7 @@ func newISMParser(mode string) func(sessionConfig) lineParser {
 	return func(c sessionConfig) lineParser {
 		levels := c.settings.ISMReportLevels
 
-		return func(line string, at time.Time) []app.DecodeRecord {
-			rec, ok := parseISM(line, mode, levels, at)
-			if !ok {
-				return nil
-			}
-
-			return []app.DecodeRecord{rec}
-		}
+		return func(line string, at time.Time) []app.DecodeRecord { return single(parseISM(line, mode, levels, at)) }
 	}
 }
 

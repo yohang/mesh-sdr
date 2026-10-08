@@ -146,49 +146,49 @@ func (m DigitalMode) DefaultUnderlying() string { return m.Underlying[0] }
 var digitalModes = []DigitalMode{
 	// DEC-034: multimon-ng with one of DTMF, EEA, EIA and CCIR at 22 050 Hz.
 	{
-		Name: "selcall", Label: "SelCall", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050,
+		Name: "selcall", Label: "SelCall", Cap: CapMultimonNG, Family: FamilyPaging, Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050,
 		Variants: []string{"DTMF", "EEA", "EIA", "CCIR"}, DedupStep: 1000,
 	},
 	// DEC-035: multimon-ng with one of ZVEI1/2/3, DZVEI and PZVEI.
 	{
-		Name: "zvei", Label: "ZVEI", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050,
+		Name: "zvei", Label: "ZVEI", Cap: CapMultimonNG, Family: FamilyPaging, Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050,
 		Variants: []string{"ZVEI1", "ZVEI2", "ZVEI3", "DZVEI", "PZVEI"}, DedupStep: 1000,
 	},
 	// DEC-037: the libcsdr++ SSTV decoder on the audio at 24 kHz
 	// (OpenWebRX+ chain).
-	{Name: "sstv", Label: "SSTV", Cap: CapNativeDSP, Family: "image", Underlying: []string{"usb", "lsb", "nfm"}, Input: InputAudio, InputRate: 24000, DedupStep: 1000},
+	{Name: "sstv", Label: "SSTV", Cap: CapNativeDSP, Family: FamilyImage, Underlying: []string{"usb", "lsb", "nfm"}, Input: InputAudio, InputRate: 24000, DedupStep: 1000},
 	// DEC-038: the libcsdr++ HF FAX decoder on the USB audio at 12 kHz.
-	{Name: "fax", Label: "FAX", Cap: CapNativeDSP, Family: "image", Underlying: []string{"usb"}, Input: InputAudio, InputRate: 12000, DedupStep: 1000},
+	{Name: "fax", Label: "FAX", Cap: CapNativeDSP, Family: FamilyImage, Underlying: []string{"usb"}, Input: InputAudio, InputRate: 12000, DedupStep: 1000},
 	// DEC-006, DEC-007: native BPSK with Varicode, ±baud selector.
 	{
-		Name: "bpsk31", Label: "BPSK31", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
+		Name: "bpsk31", Label: "BPSK31", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
 		SecondaryFFT: true, BandwidthHz: 31.25, DedupStep: textDedupStep,
 	},
 	{
-		Name: "bpsk63", Label: "BPSK63", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
+		Name: "bpsk63", Label: "BPSK63", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
 		SecondaryFFT: true, BandwidthHz: 62.5, DedupStep: textDedupStep,
 	},
 	// DEC-008 to DEC-010: native RTTY with Baudot, ±shift selector.
 	{
-		Name: "rtty170", Label: "RTTY-170 (45)", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
+		Name: "rtty170", Label: "RTTY-170 (45)", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
 		InputRate: TextRate, SecondaryFFT: true, BandwidthHz: 170, DedupStep: textDedupStep,
 	},
 	{
-		Name: "rtty450", Label: "RTTY-450 (50N)", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
+		Name: "rtty450", Label: "RTTY-450 (50N)", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
 		InputRate: TextRate, SecondaryFFT: true, BandwidthHz: 450, DedupStep: textDedupStep,
 	},
 	{
-		Name: "rtty85", Label: "RTTY-85 (50N)", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
+		Name: "rtty85", Label: "RTTY-85 (50N)", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
 		InputRate: TextRate, SecondaryFFT: true, BandwidthHz: 85, DedupStep: textDedupStep,
 	},
 	// DEC-011: native SITOR-B with CCIR 476, 100 Bd, 170 Hz shift.
 	{
-		Name: "sitorb", Label: "SITOR-B", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
+		Name: "sitorb", Label: "SITOR-B", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
 		SecondaryFFT: true, BandwidthHz: 210, DedupStep: textDedupStep,
 	},
 	// DEC-012: native CW decoder, 75 Hz selector.
 	{
-		Name: "cwdecoder", Label: "CW Decoder", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
+		Name: "cwdecoder", Label: "CW Decoder", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
 		InputRate: TextRate, SecondaryFFT: true, BandwidthHz: 75, DedupStep: textDedupStep,
 	},
 	// DEC-016…023: the WSJT-X family, 12 kHz WAV slots decoded by jt9 or
@@ -203,37 +203,37 @@ var digitalModes = []DigitalMode{
 	wsjtMode("q65", "Q65", CapWSJT24, 15*time.Second, 0, 3000),
 	// DEC-029: JS8Call, slots of 6 to 30 s decoded by js8.
 	{
-		Name: "js8", Label: "JS8Call", Cap: CapJS8, Family: "js8", Underlying: []string{"usb", "usbd"}, Input: InputAudio, InputRate: SlotRate,
+		Name: "js8", Label: "JS8Call", Cap: CapJS8, Family: FamilyJS8, Underlying: []string{"usb", "usbd"}, Input: InputAudio, InputRate: SlotRate,
 		Slot: 6 * time.Second, HighHz: 3000,
 	},
 	// DEC-031, DEC-032: direwolf (AX.25 1200 Bd) on FM audio at 48 kHz,
 	// APRS parsed on the node.
-	{Name: "packet", Label: "Packet", Cap: CapDirewolf, Family: "packet", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 48000, DedupStep: 1000},
+	{Name: "packet", Label: "Packet", Cap: CapDirewolf, Family: FamilyPacket, Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 48000, DedupStep: 1000},
 	// DEC-033: multimon-ng with FLEX and POCSAG 512/1200/2400 at 22 050 Hz.
-	{Name: "page", Label: "Page", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050, DedupStep: 1000},
+	{Name: "page", Label: "Page", Cap: CapMultimonNG, Family: FamilyPaging, Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050, DedupStep: 1000},
 	// DEC-036: multimon-ng EAS (SAME headers) at 22 050 Hz.
-	{Name: "eas", Label: "EAS", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050, DedupStep: 1000},
+	{Name: "eas", Label: "EAS", Cap: CapMultimonNG, Family: FamilyPaging, Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050, DedupStep: 1000},
 	// DEC-013, DEC-014: the skimmers decode every signal of the 48 kHz of
 	// band above the dial: the real part of a 96 kHz wide IQ tap
 	// (OpenWebRX+ chain). A signal's frequency is the dial plus its offset,
 	// rounded to the skimmer's bins.
 	{
-		Name: "cwskimmer", Label: "CW Skimmer", Cap: CapSkimmer, Family: "skimmer", Underlying: []string{"usb", "cw", "lsb"}, Input: InputWideIQ,
+		Name: "cwskimmer", Label: "CW Skimmer", Cap: CapSkimmer, Family: FamilySkimmer, Underlying: []string{"usb", "cw", "lsb"}, Input: InputWideIQ,
 		InputRate: 96000, BandHigh: 48000, DedupStep: 100,
 	},
 	{
-		Name: "rttyskimmer", Label: "RTTY Skimmer", Cap: CapRTTYSkimmer, Family: "skimmer", Underlying: []string{"usb", "lsb"}, Input: InputWideIQ,
+		Name: "rttyskimmer", Label: "RTTY Skimmer", Cap: CapRTTYSkimmer, Family: FamilySkimmer, Underlying: []string{"usb", "lsb"}, Input: InputWideIQ,
 		InputRate: 96000, BandHigh: 48000, DedupStep: 100,
 	},
 	// DEC-039: rtl_433 on 250 kHz of IQ around the dial.
 	{
-		Name: "ism", Label: "ISM", Cap: CapRTL433, Family: "ism", Underlying: []string{"am", "nfm"}, Input: InputWideIQ, InputRate: 250_000,
+		Name: "ism", Label: "ISM", Cap: CapRTL433, Family: FamilyISM, Underlying: []string{"am", "nfm"}, Input: InputWideIQ, InputRate: 250_000,
 		BandLow: -125_000, BandHigh: 125_000, DedupStep: 1000,
 	},
 	// DEC-040: rtl_433 with its Wireless M-Bus decoders on 1.2 MS/s of IQ
 	// (their rate), 250 kHz of band around the dial.
 	{
-		Name: "wmbus", Label: "WMBus", Cap: CapRTL433, Family: "ism", Underlying: []string{"nfm", "am"}, Input: InputWideIQ, InputRate: 1_200_000,
+		Name: "wmbus", Label: "WMBus", Cap: CapRTL433, Family: FamilyISM, Underlying: []string{"nfm", "am"}, Input: InputWideIQ, InputRate: 1_200_000,
 		BandLow: -125_000, BandHigh: 125_000, DedupStep: 1000,
 	},
 }
@@ -244,13 +244,22 @@ const SlotRate = 12000
 
 func wsjtMode(name, label, capability string, slot time.Duration, low, high float64) DigitalMode {
 	return DigitalMode{
-		Name: name, Label: label, Cap: capability, Family: "wsjt", Underlying: []string{"usb", "usbd"}, Input: InputAudio, InputRate: SlotRate,
+		Name: name, Label: label, Cap: capability, Family: FamilyWSJT, Underlying: []string{"usb", "usbd"}, Input: InputAudio, InputRate: SlotRate,
 		Slot: slot, LowHz: low, HighHz: high,
 	}
 }
 
-// textmodes is the family of the native text decoders (§9.4).
-const textmodes = "textmodes"
+// Decoder families (§9.4); the node runs each family its own way.
+const (
+	FamilyPaging    = "paging"
+	FamilyImage     = "image"
+	FamilyTextModes = "textmodes"
+	FamilyWSJT      = "wsjt"
+	FamilyJS8       = "js8"
+	FamilyPacket    = "packet"
+	FamilySkimmer   = "skimmer"
+	FamilyISM       = "ism"
+)
 
 // textDedupStep rounds the frequency of text decoders in the duplicate
 // key: listeners click a few tens of hertz apart on the same signal.
@@ -269,6 +278,8 @@ func DigitalModes() []DigitalMode {
 
 // Digital mode errors.
 var (
+	// ErrNodeBusy refuses a decoder session beyond decoders.max_sessions.
+	ErrNodeBusy           = shared.NewError(shared.KindUnavailable, "node_busy", "node busy")
 	ErrUnknownDecoder     = shared.NewError(shared.KindNotFound, "unknown_decoder", "no such digital mode")
 	ErrDecoderServiceOnly = shared.NewError(shared.KindForbidden, "decoder_service_only", "this digital mode runs only as a background service")
 	ErrDecoderUnavailable = shared.NewError(shared.KindUnavailable, "decoder_unavailable", "this digital mode is not available on this receiver")

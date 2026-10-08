@@ -107,7 +107,7 @@ func startImage(t *testing.T, r *Runner, mode string, ev *imageEvents, audio []f
 		run.Audio(app.AudioBlock{Samples: b, Rate: rate, Time: at.Add(time.Duration(off) * time.Second / time.Duration(rate))})
 		// Faster than real time: wait for the queue to drain, a full one
 		// drops blocks.
-		for len(run.(*imageSession).in) > imageQueue/2 {
+		for run.(*imageSession).in.len() > imageQueue/2 {
 			time.Sleep(time.Millisecond)
 		}
 	}
@@ -163,18 +163,28 @@ func TestImageSSTV(t *testing.T) {
 }
 
 // An SSTV picture cut short under half its height is discarded when the
-// session ends.
+// session ends; nothing is reported to the listener after Close.
 func TestImageSSTVShort(t *testing.T) {
 	r := NewRunner(Options{})
 	ev := newImageEvents()
 
 	audio := dsptest.SSTV(dsptest.Robot36, 12000, 60, func(int, int) (uint8, uint8, uint8) { return 200, 200, 200 })
-	startImage(t, r, "sstv", ev, audio, 12000).Close()
-	ev.waitEnd(t)
+	run := startImage(t, r, "sstv", ev, audio, 12000)
 
-	p := ev.payloads(t)
-	if end := p["end"]; len(end) != 1 || end[0].Complete || end[0].Saved || end[0].Lines < 55 || end[0].Lines >= 120 {
-		t.Errorf("end %+v", end)
+	deadline := time.Now().Add(30 * time.Second)
+	for len(ev.payloads(t)["row"]) < 40 {
+		if time.Now().After(deadline) {
+			t.Fatal("rows not decoded")
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	run.Close()
+	<-run.(*imageSession).done
+
+	if end := ev.payloads(t)["end"]; len(end) != 0 {
+		t.Errorf("end after close: %+v", end)
 	}
 
 	ev.mu.Lock()
@@ -189,7 +199,7 @@ func TestImageSSTVShort(t *testing.T) {
 // it is discarded; otherwise it is saved in grey (DEC-038).
 func TestImageFAX(t *testing.T) {
 	for _, minLength := range []int{30, 50} {
-		r := NewRunner(Options{FAX: func() FAXSettings { return FAXSettings{LPM: 120, MinLength: minLength, MaxLength: 500} }})
+		r := NewRunner(Options{Settings: func() Settings { return Settings{FAX: FAXSettings{LPM: 120, MinLength: minLength, MaxLength: 500}} }})
 		ev := newImageEvents()
 
 		audio := dsptest.FAX(12000, 120, 40, func(x, _ int) uint8 { return uint8(x % 256) })

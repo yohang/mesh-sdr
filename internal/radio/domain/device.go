@@ -57,12 +57,12 @@ type DeviceParams struct {
 	// and the first sample rate).
 	Center Frequency
 	Rate   SampleRate
-	// MaxDemods caps the demodulators of the device (0: DefaultMaxDemods).
+	// MaxDemods caps the demodulators of the device (0: DefaultDeviceMaxDemods).
 	MaxDemods int
 }
 
-// DefaultMaxDemods is the interim per-device demodulator cap (ADR 0019).
-const DefaultMaxDemods = 16
+// DefaultDeviceMaxDemods is the interim per-device demodulator cap (ADR 0019).
+const DefaultDeviceMaxDemods = 16
 
 // Device is one SDR device of the node: its configuration (immutable for
 // the life of the process) and its runtime state.
@@ -111,7 +111,7 @@ func NewDevice(p DeviceParams) (*Device, error) {
 	}
 
 	if p.MaxDemods <= 0 {
-		p.MaxDemods = DefaultMaxDemods
+		p.MaxDemods = DefaultDeviceMaxDemods
 	}
 
 	d := &Device{p: p, state: StateStopped}
@@ -137,7 +137,7 @@ const ReasonInvalidConfig = "invalid_config"
 // instead of the device silently missing (SRC-002).
 func NewInvalidDevice(id shared.DeviceID, name string) *Device {
 	return &Device{
-		p:       DeviceParams{ID: id, Name: name, MaxDemods: DefaultMaxDemods},
+		p:       DeviceParams{ID: id, Name: name, MaxDemods: DefaultDeviceMaxDemods},
 		invalid: true, state: StateFailed, reason: ReasonInvalidConfig,
 	}
 }

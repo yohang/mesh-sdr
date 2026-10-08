@@ -14,14 +14,14 @@ import (
 
 // The text log of a skimmer session (FIL-005): the characters of each
 // signal frequency are joined into lines, like the lines of the text
-// decoders (a line ends at a line break, at MaxLine characters or after
-// LineIdle without a new character), written "<UTC time> <frequency Hz>
+// decoders (a line ends at a line break, at maxLine characters or after
+// lineIdle without a new character), written "<UTC time> <frequency Hz>
 // <text>". The log is saved into Files as a text_log file when the session
-// ends, when it reaches TextLogBytes or when it covers TextLogPeriod,
+// ends, when it reaches textLogBytes or when it covers textLogPeriod,
 // whichever comes first. An empty log is not saved.
 const (
-	TextLogBytes  = 1 << 20
-	TextLogPeriod = time.Hour
+	textLogBytes  = 1 << 20
+	textLogPeriod = time.Hour
 )
 
 // logLine is the line being assembled for one frequency.
@@ -84,7 +84,7 @@ func (l *textLog) add(rec app.DecodeRecord, dial int64, now time.Time) *app.Prod
 
 		ln.text = append(ln.text, string(r)...)
 
-		if len(ln.text) >= MaxLine {
+		if len(ln.text) >= maxLine {
 			l.endLine(freq, ln)
 		}
 	}
@@ -94,19 +94,19 @@ func (l *textLog) add(rec app.DecodeRecord, dial int64, now time.Time) *app.Prod
 	return l.full()
 }
 
-// tick ends the lines idle for LineIdle at now; it returns the log to
-// save when it covers TextLogPeriod.
+// tick ends the lines idle for lineIdle at now; it returns the log to
+// save when it covers textLogPeriod.
 func (l *textLog) tick(now time.Time) *app.ProducedFile {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	for _, freq := range slices.Sorted(maps.Keys(l.lines)) {
-		if ln := l.lines[freq]; len(ln.text) > 0 && now.Sub(ln.last) >= LineIdle {
+		if ln := l.lines[freq]; len(ln.text) > 0 && now.Sub(ln.last) >= lineIdle {
 			l.endLine(freq, ln)
 		}
 	}
 
-	if l.buf.Len() > 0 && now.Sub(l.start) >= TextLogPeriod {
+	if l.buf.Len() > 0 && now.Sub(l.start) >= textLogPeriod {
 		return l.take()
 	}
 
@@ -147,10 +147,10 @@ func (l *textLog) endLine(freq int64, ln *logLine) {
 	l.end = ln.start
 }
 
-// full returns the log when it reached TextLogBytes or covers
-// TextLogPeriod (l.mu held).
+// full returns the log when it reached textLogBytes or covers
+// textLogPeriod (l.mu held).
 func (l *textLog) full() *app.ProducedFile {
-	if l.buf.Len() >= TextLogBytes || (l.buf.Len() > 0 && l.end.Sub(l.start) >= TextLogPeriod) {
+	if l.buf.Len() >= textLogBytes || (l.buf.Len() > 0 && l.end.Sub(l.start) >= textLogPeriod) {
 		return l.take()
 	}
 

@@ -107,8 +107,11 @@ func NewSSTVReceiver() (*ImageReceiver, error) {
 	return &ImageReceiver{dec: d, rate: csdr.SSTVRate, out: make([]byte, imageOut)}, nil
 }
 
+// FAXOptions are the parameters of the FAX decoder (the fax_* settings).
+type FAXOptions = csdr.FAXOptions
+
 // NewFAXReceiver returns a receiver of FAX pages.
-func NewFAXReceiver(o csdr.FAXOptions) (*ImageReceiver, error) {
+func NewFAXReceiver(o FAXOptions) (*ImageReceiver, error) {
 	d, err := csdr.NewFAXDecoder(csdr.FAXRate, o)
 	if err != nil {
 		return nil, err

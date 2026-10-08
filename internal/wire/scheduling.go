@@ -68,22 +68,24 @@ func stateDecoders(s settingsReader) *ctl.StateDecoders {
 		}
 	}
 
-	seconds := func(list []string) []int {
-		var out []int
-
-		for _, v := range list {
-			if n, err := strconv.Atoi(v); err == nil {
-				out = append(out, n)
-			}
-		}
-
-		return out
-	}
-
 	d.FST4Intervals = seconds(s.Strings("decoders.fst4_enabled_intervals"))
 	d.FST4WIntervals = seconds(s.Strings("decoders.fst4w_enabled_intervals"))
 
 	return d
+}
+
+// seconds parses the periods of a decoders setting ("15"), skipping the
+// invalid ones.
+func seconds(list []string) []int {
+	var out []int
+
+	for _, v := range list {
+		if n, err := strconv.Atoi(v); err == nil {
+			out = append(out, n)
+		}
+	}
+
+	return out
 }
 
 // newScheduling builds the modules. g.states may be nil (grid disabled):

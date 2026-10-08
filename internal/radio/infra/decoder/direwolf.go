@@ -74,7 +74,7 @@ func writeDirewolfConfig(workdir string) error {
 
 // kissRun prepares each run of direwolf: its config and a fresh signal
 // for its KISS pseudo-terminal.
-func (s *session) kissRun(args []string) func() (process.Run, error) {
+func (s *toolSession) kissRun(args []string) func() (process.Run, error) {
 	return func() (process.Run, error) {
 		s.mu.Lock()
 		s.kiss = &kissRun{up: make(chan struct{}), failed: make(chan struct{})}
@@ -92,7 +92,7 @@ type kissRun struct {
 }
 
 // currentKISS returns the KISS link of the current run.
-func (s *session) currentKISS() *kissRun {
+func (s *toolSession) currentKISS() *kissRun {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -101,7 +101,7 @@ func (s *session) currentKISS() *kissRun {
 
 // waitKISS waits until the KISS link of the run is read; an error ends
 // the run's input.
-func (s *session) waitKISS(ctx context.Context, k *kissRun) error {
+func (s *toolSession) waitKISS(ctx context.Context, k *kissRun) error {
 	select {
 	case <-k.up:
 		return nil
@@ -114,7 +114,7 @@ func (s *session) waitKISS(ctx context.Context, k *kissRun) error {
 
 // direwolfStdout reads the stdout of a run: once direwolf names its
 // pseudo-terminal, the KISS frames are read from it until the run ends.
-func (s *session) direwolfStdout(ctx context.Context, rd io.Reader, parse frameParser) error {
+func (s *toolSession) direwolfStdout(ctx context.Context, rd io.Reader, parse frameParser) error {
 	k := s.currentKISS()
 	opened := false
 
@@ -144,7 +144,7 @@ func (s *session) direwolfStdout(ctx context.Context, rd io.Reader, parse frameP
 
 // readKISS opens the pseudo-terminal in raw mode and parses every data
 // frame until the run ends.
-func (s *session) readKISS(ctx context.Context, path string, up chan struct{}, parse frameParser) error {
+func (s *toolSession) readKISS(ctx context.Context, path string, up chan struct{}, parse frameParser) error {
 	// Non-blocking: the file is then read through the poller, and closing
 	// it ends a pending read.
 	fd, err := unix.Open(path, unix.O_RDWR|unix.O_NOCTTY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)

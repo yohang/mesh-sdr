@@ -143,6 +143,21 @@ var (
 	twoTimes = regexp.MustCompile(`^(.* +([0-9A-Z]{4,}) +([0-9A-Z]{4,})) .*$`)
 )
 
+// qsoPatterns are the QSO patterns in the order they are tried: the
+// submatch of the callsign, of the station it calls (0: none) and whether
+// both are the same callsign repeated ("<call> <call>").
+var qsoPatterns = []struct {
+	re           *regexp.Regexp
+	call, callee int
+	repeated     bool
+}{
+	{re: twoDe, call: 3, callee: 2},
+	{re: tuCall, call: 3, callee: 2},
+	{re: twoTimes, call: 2, repeated: true},
+	{re: cqCall, call: 3},
+	{re: deCall, call: 2},
+}
+
 // spot appends text to the rolling text of a frequency and looks for a
 // callsign: "<callee> DE <call>", "TU <callee> <call>", "<call> <call>",
 // "CQ <…> <call>", "DE|TEST|DX|… <call>", in that order. A callsign is
@@ -150,66 +165,47 @@ var (
 // cleared, otherwise its last characters are kept.
 func (p *skimmerParser) spot(offset int64, db int, text string) (SkimmerRecord, bool) {
 	all := p.text[offset] + text
-	r := SkimmerRecord{Kind: "spot", Mode: p.mode, OffsetHz: offset, DB: db}
 
-	var (
-		found   bool
-		country [2]string
-	)
+	for _, q := range qsoPatterns {
+		m := q.re.FindStringSubmatch(all)
 
-	if m := twoDe.FindStringSubmatch(all); m != nil && m[2] != m[3] {
-		if _, ok := callsignCountry(m[2]); ok {
-			if country, found = callsignCountry(m[3]); found {
-				r.Callsign, r.Callee, r.Message = m[3], m[2], m[1]
+		switch {
+		case m == nil:
+			continue
+		case q.repeated && (m[2] != m[3] || strings.Contains(m[2], "NN")):
+			continue
+		case q.callee > 0 && m[q.callee] == m[q.call]:
+			continue
+		}
+
+		if q.callee > 0 {
+			if _, ok := callsignCountry(m[q.callee]); !ok {
+				continue
 			}
 		}
-	}
 
-	if !found {
-		if m := tuCall.FindStringSubmatch(all); m != nil && m[2] != m[3] {
-			if _, ok := callsignCountry(m[2]); ok {
-				if country, found = callsignCountry(m[3]); found {
-					r.Callsign, r.Callee, r.Message = m[3], m[2], m[1]
-				}
-			}
+		country, ok := callsignCountry(m[q.call])
+		if !ok {
+			continue
 		}
-	}
 
-	if !found {
-		if m := twoTimes.FindStringSubmatch(all); m != nil && m[2] == m[3] && !strings.Contains(m[2], "NN") {
-			if country, found = callsignCountry(m[2]); found {
-				r.Callsign, r.Message = m[2], m[1]
-			}
+		r := SkimmerRecord{
+			Kind: "spot", Mode: p.mode, OffsetHz: offset, DB: db, Callsign: m[q.call], Message: strings.TrimSpace(m[1]),
+			CountryCode: country[0], Country: country[1],
 		}
-	}
 
-	if !found {
-		if m := cqCall.FindStringSubmatch(all); m != nil {
-			if country, found = callsignCountry(m[3]); found {
-				r.Callsign, r.Message = m[3], m[1]
-			}
+		if q.callee > 0 {
+			r.Callee = m[q.callee]
 		}
+
+		delete(p.text, offset)
+
+		return r, true
 	}
 
-	if !found {
-		if m := deCall.FindStringSubmatch(all); m != nil {
-			if country, found = callsignCountry(m[2]); found {
-				r.Callsign, r.Message = m[2], m[1]
-			}
-		}
-	}
+	p.text[offset] = lastChars(all, skimmerKeep)
 
-	if !found {
-		p.text[offset] = lastChars(all, skimmerKeep)
-
-		return SkimmerRecord{}, false
-	}
-
-	delete(p.text, offset)
-	r.CountryCode, r.Country = country[0], country[1]
-	r.Message = strings.TrimSpace(r.Message)
-
-	return r, true
+	return SkimmerRecord{}, false
 }
 
 // lastChars keeps the last n bytes of s, on a rune boundary.

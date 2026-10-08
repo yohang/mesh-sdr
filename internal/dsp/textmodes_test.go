@@ -173,10 +173,7 @@ func TestTextConfigValidate(t *testing.T) {
 func TestIQResampler(t *testing.T) {
 	const in = 24094.117647
 
-	r, err := dsp.NewIQResampler(in, dsp.TextRate)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := dsp.NewIQResampler(dsp.TextRate)
 	defer r.Close()
 
 	tone := dsptest.CW("TTTTTTTTTT", 5, in, 1000)
@@ -184,7 +181,7 @@ func TestIQResampler(t *testing.T) {
 	var out []complex64
 
 	for i := 0; i < len(tone); i += 777 {
-		b, err := r.Process(tone[i:min(i+777, len(tone))])
+		b, err := r.Process(tone[i:min(i+777, len(tone))], in)
 		if err != nil {
 			t.Fatal(err)
 		}

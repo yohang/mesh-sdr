@@ -69,18 +69,45 @@ func (p decoderProber) Capabilities(ctx context.Context) ctl.Capabilities {
 	return c
 }
 
-// slotSettings are the slot decoder settings of the desired state (none
-// from a hub that predates them: the node defaults).
-func slotSettings(d *ctl.StateDecoders) decoder.Settings {
-	if d == nil {
-		return decoder.Settings{}
+// decoderSettings are the decoding settings of the desired state. The
+// enabled FST4, FST4W, Q65 and JS8 lists it lacks (no state yet, a hub
+// that predates them) take the defaults of the hub settings; the other
+// zero values take the node defaults (decoder.Settings).
+func decoderSettings(d *ctl.StateDecoders, def config.SettingsDecoders) decoder.Settings {
+	s := decoder.Settings{
+		FST4Intervals: seconds(def.FST4Intervals), FST4WIntervals: seconds(def.FST4WIntervals),
+		Q65Combinations: def.Q65Combinations, JS8Profiles: def.JS8Profiles,
 	}
 
-	return decoder.Settings{
-		WSJTDepth: d.WSJTDepth, WSJTDepths: d.WSJTDepths, FST4Intervals: d.FST4Intervals, FST4WIntervals: d.FST4WIntervals,
-		Q65Combinations: d.Q65Combinations, JS8Profiles: d.JS8Profiles, JS8Depth: d.JS8Depth,
-		PagingFilter: d.PagingFilter, PagingCharset: d.PagingCharset, ISMReportLevels: d.ISMReportLevels,
+	if d == nil {
+		return s
 	}
+
+	s.MaxRestarts, s.FFTSize, s.ShowCW = d.MaxRestarts, d.DigimodesFFTSize, d.ShowCW
+	s.WSJTDepth, s.WSJTDepths, s.JS8Depth = d.WSJTDepth, d.WSJTDepths, d.JS8Depth
+	s.PagingFilter, s.PagingCharset, s.ISMReportLevels = d.PagingFilter, d.PagingCharset, d.ISMReportLevels
+
+	if f := d.FAX; f != nil {
+		s.FAX = decoder.FAXSettings{LPM: f.LPM, MinLength: f.MinLength, MaxLength: f.MaxLength, PostProcess: f.PostProcess, Color: f.Color, AM: f.AM}
+	}
+
+	if len(d.FST4Intervals) > 0 {
+		s.FST4Intervals = d.FST4Intervals
+	}
+
+	if len(d.FST4WIntervals) > 0 {
+		s.FST4WIntervals = d.FST4WIntervals
+	}
+
+	if len(d.Q65Combinations) > 0 {
+		s.Q65Combinations = d.Q65Combinations
+	}
+
+	if len(d.JS8Profiles) > 0 {
+		s.JS8Profiles = d.JS8Profiles
+	}
+
+	return s
 }
 
 // queueProber adds the depth of the batch decoder queue to the heartbeats
@@ -206,43 +233,18 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	// pushed to the hub over the control channel.
 	deviceLog := devlog.New(slices.Collect(maps.Keys(cfg.Devices)), devlog.DefaultSize, time.Now)
 
-	// Decoders: decoded messages and images go to the hub, the crash-loop
-	// threshold and the FAX settings come with the desired state, and a
-	// missing tool re-probes the node.
+	// Decoders: decoded messages and images go to the hub, the decoding
+	// settings come with the desired state, and a missing tool re-probes
+	// the node.
+	defaults := config.DefaultSettings().Decoders
 	dec := radioDecoding{
 		publisher: decodePublisher{ag: ag},
 		files: filePublisher{
 			outbox: outbox, dir: filepath.Join(cfg.Node.RuntimeDir, "produced"), logger: component(logger, "radio.infra.files"),
 		},
-		maxRestarts: func() int {
-			if d := state.Policy().Decoders; d != nil {
-				return d.MaxRestarts
-			}
-
-			return 0
-		},
-		fax: func() decoder.FAXSettings {
-			if d := state.Policy().Decoders; d != nil && d.FAX != nil {
-				f := d.FAX
-
-				return decoder.FAXSettings{
-					LPM: f.LPM, MinLength: f.MinLength, MaxLength: f.MaxLength, PostProcess: f.PostProcess, Color: f.Color, AM: f.AM,
-				}
-			}
-
-			return decoder.DefaultFAX
-
-		},
-		text: func() decoder.TextSettings {
-			if d := state.Policy().Decoders; d != nil {
-				return decoder.TextSettings{FFTSize: d.DigimodesFFTSize, ShowCW: d.ShowCW}
-			}
-
-			return decoder.TextSettings{}
-		},
+		settings: func() decoder.Settings { return decoderSettings(state.Policy().Decoders, defaults) },
 		reprobe:  (&coalesced{run: func() { ag.EmitCapabilities(context.Background()) }}).trigger,
 		queue:    queue,
-		settings: func() decoder.Settings { return slotSettings(state.Policy().Decoders) },
 		// Slot decoders need the node clock synchronised and within the
 		// offset beyond which the hub marks the node degraded (DEC-026,
 		// §4.5).
