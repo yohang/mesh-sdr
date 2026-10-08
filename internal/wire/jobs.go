@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/files"
 	"github.com/yohang/mesh-sdr/internal/jobs"
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
@@ -20,7 +21,7 @@ import (
 // newJobs builds the hub's jobs scheduler with the retention jobs, and the
 // retention view (ADM-011, ADR 0010).
 func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobs.RetentionValues, audit audit.Appender,
-	logger *slog.Logger,
+	filesRetention *files.Retention, filesPolicy func() files.RetentionPolicy, logger *slog.Logger,
 ) (*jobs.Scheduler, *jobs.Retention, error) {
 	sched := jobs.NewScheduler(jobs.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.app.scheduler"))
 	sched.Register(idm.Reaper, identityapp.SessionReapEvery)
@@ -35,6 +36,9 @@ func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobs.
 	for _, j := range idm.Purges {
 		sched.Register(j, identityapp.LinkPurgeEvery)
 	}
+
+	// FIL-004: the files the nodes sent, and the files left incomplete.
+	sched.Register(filesRetention, files.RetentionEvery)
 
 	sessions, err := jobs.NewTableStats(adapter, "sessions")
 	if err != nil {
@@ -55,6 +59,10 @@ func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, values jobs.
 		{Name: "sessions", Label: "Ended sessions", SettingKey: "retention.sessions", Job: identityapp.JobSessionsReap, Stats: sessions},
 		{Name: "audit_log", Label: "Audit log", SettingKey: "retention.audit_log", Job: identityapp.JobAuditPurge, Stats: auditLog},
 		{Name: "connections", Label: "Connections", SettingKey: "retention.connections", Job: gridapp.JobConnectionsPurge, Stats: connections},
+		{
+			Name: "files", Label: "Files", Job: files.JobRetention, Stats: filesRetention,
+			Policy: func() string { return filesPolicy().String() },
+		},
 	}
 
 	return sched, jobs.NewRetention(stores, sched, values, audit), nil
@@ -74,7 +82,7 @@ func (a retentionRows) Stores(ctx context.Context) ([]settings.RetentionRow, err
 
 	for _, v := range views {
 		out = append(out, settings.RetentionRow{
-			Store: v.Store.Name, Label: v.Store.Label, SettingKey: v.Store.SettingKey, Retention: v.Retention,
+			Store: v.Store.Name, Label: v.Store.Label, SettingKey: v.Store.SettingKey, Retention: v.Retention, Policy: v.Policy,
 			Rows: v.Rows, Bytes: v.Bytes, Sized: v.Sized, Running: v.LastRun.Running(), LastFinished: v.LastRun.LastFinished(),
 			LastFailed: v.LastRun.Status() == jobs.StatusError, LastError: v.LastRun.LastError(), LastRows: v.LastRun.Rows(),
 		})

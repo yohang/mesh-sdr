@@ -1,0 +1,312 @@
+package files
+
+import (
+	"fmt"
+	"net/url"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// kindLabels name the kinds for people.
+var kindLabels = map[Kind]string{
+	KindSSTV: "SSTV image", KindFAX: "FAX image", KindTextLog: "Text log",
+	"recording": "Recording", "speech": "Transcript", "satellite": "Satellite image",
+}
+
+func kindLabel(k Kind) string {
+	if l, ok := kindLabels[k]; ok {
+		return l
+	}
+
+	return string(k)
+}
+
+// utcText is a reception time as shown everywhere (FEATURE_SPEC §10.12).
+func utcText(t time.Time) string { return t.UTC().Format("2006-01-02 15:04:05") + " UTC" }
+
+// freqText is a reception frequency in MHz, to the kHz.
+func freqText(hz int64) string { return strconv.FormatFloat(float64(hz)/1e6, 'f', 3, 64) + " MHz" }
+
+func detailURL(e Entry) string { return GalleryPath + "/" + e.ID.String() }
+
+func contentURL(e Entry) string { return "/api/v1/files/" + e.ID.String() + "/content" }
+
+func thumbnailURL(e Entry) string { return "/api/v1/files/" + e.ID.String() + "/thumbnail" }
+
+// receiverURL is the receiver deep link at the reception frequency (RX-028).
+func receiverURL(e Entry) string {
+	return "/receiver/" + url.PathEscape(e.NodeID) + "/" + url.PathEscape(e.DeviceID) + "?f=" + strconv.FormatInt(e.FrequencyHz, 10)
+}
+
+// badge is the short type shown on a tile without a thumbnail.
+func badge(e Entry) string {
+	switch {
+	case e.IsText():
+		return "TXT"
+	case e.IsAudio():
+		return "AUDIO"
+	default:
+		return "IMG"
+	}
+}
+
+// metadataRows are the per-kind details, sorted, as text.
+func metadataRows(e Entry) [][2]string {
+	keys := make([]string, 0, len(e.Metadata))
+	for k := range e.Metadata {
+		keys = append(keys, k)
+	}
+
+	slices.Sort(keys)
+
+	out := make([][2]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, [2]string{strings.ReplaceAll(k, "_", " "), fmt.Sprint(e.Metadata[k])})
+	}
+
+	return out
+}
+
+// galleryPage is the Files section (FIL-001): filters, tiles, pages.
+templ galleryPage(v galleryView) {
+	<h1 class="text-2xl font-semibold">Files</h1>
+	<p class="text-fg-muted">Images and logs the decoders received, newest first. Times are in UTC. Files are kept: { v.Policy }.</p>
+	if v.Notice != "" {
+		<p class="font-semibold text-success" role="status">{ v.Notice }</p>
+	}
+	@filtersForm(v)
+	<section id="files-results" class="flex flex-col gap-4" aria-labelledby="title-results">
+		<h2 id="title-results" class="sr-only">Files</h2>
+		if len(v.Files) == 0 {
+			<p>No files{ noFilesSuffix(v) }.</p>
+		} else {
+			<ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+				for _, f := range v.Files {
+					<li class="flex flex-col gap-2 rounded border border-border bg-surface p-3">
+						<a href={ templ.SafeURL(detailURL(f)) } class="flex flex-col gap-2 font-medium">
+							if f.HasThumbnail {
+								<img src={ thumbnailURL(f) } alt="" loading="lazy" class="aspect-[4/3] w-full rounded border border-border object-contain"/>
+							} else {
+								<span class="flex aspect-[4/3] w-full items-center justify-center rounded border border-border font-mono text-lg text-fg-muted" aria-hidden="true">{ badge(f) }</span>
+							}
+							<span class="break-all">{ f.Name }</span>
+						</a>
+						<p class="text-sm">{ utcText(f.ReceivedStart) } · { freqText(f.FrequencyHz) }</p>
+						<p class="text-sm text-fg-muted">
+							{ kindLabel(f.Kind) }
+							if m, ok := f.Metadata["sstv_mode"].(string); ok && m != "" {
+								({ m })
+							}
+							· { HumanSize(f.Size) }
+							if f.DeviceID != "" {
+								· { f.DeviceID }
+							}
+						</p>
+					</li>
+				}
+			</ul>
+		}
+		if v.Page > 1 || v.More {
+			<nav aria-label="Pages of files" class="flex flex-wrap gap-4">
+				if v.Page > 1 {
+					<a href={ templ.SafeURL(v.pageURL(v.Page - 1)) }>Newer files</a>
+				}
+				<span class="text-fg-muted">Page { strconv.Itoa(v.Page) }</span>
+				if v.More {
+					<a href={ templ.SafeURL(v.pageURL(v.Page + 1)) }>Older files</a>
+				}
+			</nav>
+		}
+	</section>
+	if v.CanBulkDelete {
+		@bulkDeleteForm(v)
+	}
+}
+
+func noFilesSuffix(v galleryView) string {
+	if v.Filter.active() {
+		return " match these filters"
+	}
+
+	return " yet"
+}
+
+templ filtersForm(v galleryView) {
+	<form class="flex flex-wrap items-end gap-4" method="get" action={ templ.SafeURL(GalleryPath) } aria-label="Filter the files">
+		<div class="flex flex-col gap-1">
+			<label for="filter-media" class="font-medium">Type</label>
+			<select id="filter-media" name="media" class="rounded border border-border px-2 py-1">
+				<option value="" selected?={ v.Filter.Media == "" }>Any</option>
+				<option value="image" selected?={ v.Filter.Media == "image" }>Images</option>
+				<option value="audio" selected?={ v.Filter.Media == "audio" }>Audio</option>
+				<option value="text" selected?={ v.Filter.Media == "text" }>Text</option>
+			</select>
+		</div>
+		<div class="flex max-w-full flex-col gap-1">
+			<label for="filter-device" class="font-medium">Device</label>
+			<select id="filter-device" name="device" class="max-w-full rounded border border-border px-2 py-1">
+				<option value="" selected?={ v.Filter.Device == "" }>Any</option>
+				for _, d := range v.Devices {
+					<option value={ d } selected?={ v.Filter.Device == d }>{ d }</option>
+				}
+			</select>
+		</div>
+		<div class="flex max-w-full flex-col gap-1">
+			<label for="filter-mode" class="font-medium">Decoder</label>
+			<select id="filter-mode" name="mode" class="max-w-full rounded border border-border px-2 py-1">
+				<option value="" selected?={ v.Filter.Mode == "" }>Any</option>
+				for _, m := range v.Modes {
+					<option value={ m } selected?={ v.Filter.Mode == m }>{ m }</option>
+				}
+			</select>
+		</div>
+		@filterInput("from", "Received from (UTC)", "datetime-local", v.Filter.From, v.Filter.Errors["from"])
+		@filterInput("to", "Received before (UTC)", "datetime-local", v.Filter.To, v.Filter.Errors["to"])
+		@filterInput("freq_min", "Lowest frequency (kHz)", "number", v.Filter.FreqMin, v.Filter.Errors["freq_min"])
+		@filterInput("freq_max", "Highest frequency (kHz)", "number", v.Filter.FreqMax, v.Filter.Errors["freq_max"])
+		<div class="flex items-center gap-4">
+			<button type="submit" class="rounded border border-border px-3 py-1 font-semibold">Filter</button>
+			if v.Filter.active() {
+				<a href={ templ.SafeURL(GalleryPath) }>Clear the filters</a>
+			}
+		</div>
+	</form>
+}
+
+templ filterInput(name, label, kind, value, failure string) {
+	<div class="flex flex-col gap-1">
+		<label for={ "filter-" + name } class="font-medium">{ label }</label>
+		if kind == "number" {
+			<input
+				id={ "filter-" + name }
+				name={ name }
+				value={ value }
+				type="number"
+				min="0"
+				step="any"
+				class="w-40 rounded border border-border px-2 py-1"
+				if failure != "" {
+					aria-invalid="true"
+					aria-describedby={ "filter-" + name + "-error" }
+				}
+			/>
+		} else {
+			<input
+				id={ "filter-" + name }
+				name={ name }
+				value={ value }
+				type="datetime-local"
+				class="rounded border border-border px-2 py-1"
+				if failure != "" {
+					aria-invalid="true"
+					aria-describedby={ "filter-" + name + "-error" }
+				}
+			/>
+		}
+		if failure != "" {
+			<p id={ "filter-" + name + "-error" } class="text-sm text-danger">{ failure }</p>
+		}
+	</div>
+}
+
+// bulkDeleteForm deletes every file matching the filters (FIL-003,
+// admins).
+templ bulkDeleteForm(v galleryView) {
+	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-bulk">
+		<h2 id="title-bulk" class="text-lg font-semibold">Delete files</h2>
+		<form method="post" action={ templ.SafeURL(GalleryPath + "/delete") } hx-post={ GalleryPath + "/delete" } hx-confirm={ bulkQuestion(v) } data-confirm-action="Delete" class="flex flex-wrap items-center gap-4">
+			for k, vals := range v.Filter.query() {
+				<input type="hidden" name={ k } value={ vals[0] }/>
+			}
+			<button type="submit" class="rounded border border-danger px-3 py-1 font-semibold text-danger">
+				if v.Filter.active() {
+					Delete every file matching these filters
+				} else {
+					Delete every file
+				}
+			</button>
+		</form>
+	</section>
+}
+
+func bulkQuestion(v galleryView) string {
+	if v.Filter.active() {
+		return "Delete every file matching these filters, on every page? This cannot be undone."
+	}
+
+	return "Delete every file? This cannot be undone."
+}
+
+// detailPage is the detail view of a file (FIL-007).
+templ detailPage(v detailView) {
+	<p><a href={ templ.SafeURL(GalleryPath) }>Files</a></p>
+	<h1 class="break-all text-2xl font-semibold">{ v.File.Name }</h1>
+	<div class="flex flex-col gap-4 lg:flex-row">
+		<section class="min-w-0 flex-1" aria-labelledby="title-preview">
+			<h2 id="title-preview" class="sr-only">Preview</h2>
+			switch {
+				case v.File.IsImage():
+					<a href={ templ.SafeURL(contentURL(v.File)) } hx-boost="false">
+						<img
+							src={ contentURL(v.File) }
+							alt={ kindLabel(v.File.Kind) + " received " + utcText(v.File.ReceivedStart) + " on " + freqText(v.File.FrequencyHz) }
+							width={ strconv.Itoa(v.File.Width) }
+							height={ strconv.Itoa(v.File.Height) }
+							class="h-auto max-w-full rounded border border-border"
+						/>
+					</a>
+				case v.File.IsAudio():
+					<audio controls preload="metadata" src={ contentURL(v.File) } class="w-full">
+						<a href={ templ.SafeURL(contentURL(v.File)) } hx-boost="false">Download the recording</a>
+					</audio>
+				case v.File.IsText():
+					<pre class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-surface p-3 font-mono text-sm" tabindex="0" aria-label="Text of the file">{ v.Text }</pre>
+					if v.Truncated {
+						<p class="text-sm text-fg-muted">Only the first 4 KiB are shown: download the file for the whole text.</p>
+					}
+			}
+		</section>
+		<section class="flex flex-col gap-4 lg:w-96" aria-labelledby="title-details">
+			<h2 id="title-details" class="text-lg font-semibold">Details</h2>
+			<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+				@detailRow("Kind", kindLabel(v.File.Kind))
+				@detailRow("Decoder", v.File.Mode)
+				@detailRow("Frequency", freqText(v.File.FrequencyHz))
+				@detailRow("Reception start", utcText(v.File.ReceivedStart))
+				if !v.File.ReceivedEnd.IsZero() {
+					@detailRow("Reception end", utcText(v.File.ReceivedEnd))
+				}
+				@detailRow("Node", v.File.NodeID)
+				@detailRow("Device", v.File.DeviceID)
+				if !v.File.PresetID.IsZero() {
+					@detailRow("Preset", v.File.PresetID.String())
+				}
+				@detailRow("Size", HumanSize(v.File.Size))
+				if v.File.Width > 0 {
+					@detailRow("Dimensions", strconv.Itoa(v.File.Width)+" × "+strconv.Itoa(v.File.Height)+" pixels")
+				}
+				for _, m := range metadataRows(v.File) {
+					@detailRow(m[0], m[1])
+				}
+			</dl>
+			<ul class="flex flex-col gap-2">
+				<li><a href={ templ.SafeURL(contentURL(v.File)) } hx-boost="false">Download { v.File.Name }</a></li>
+				if v.File.NodeID != "" && v.File.DeviceID != "" {
+					<li><a href={ templ.SafeURL(receiverURL(v.File)) }>Open the receiver on { freqText(v.File.FrequencyHz) }</a></li>
+				}
+			</ul>
+			if v.CanDelete {
+				<form method="post" action={ templ.SafeURL(detailURL(v.File) + "/delete") } hx-post={ detailURL(v.File) + "/delete" } hx-confirm={ "Delete " + v.File.Name + "? This cannot be undone." } data-confirm-action="Delete">
+					<button type="submit" class="rounded border border-danger px-3 py-1 font-semibold text-danger">Delete the file</button>
+				</form>
+			}
+		</section>
+	</div>
+}
+
+templ detailRow(label, value string) {
+	<dt class="font-medium">{ label }</dt>
+	<dd class="break-all">{ value }</dd>
+}

@@ -1,10 +1,14 @@
 // Package files is the files module (TECHNICAL_SPEC §7.1 `files`,
-// `file_blobs`, ADR 0010). This part has the admin-uploaded receiver images
-// (ADM-004): the use case (upload, restore default, read), the SQLite
-// repository (metadata in files, content in file_blobs chunks of at most
-// 1 MiB), the image re-encoder and the images section of the admin Site
-// page. The images themselves are served by GET /api/v1/branding/{slot}
-// (internal/http/api). The files epic (FIL) adds decoder and recording files.
+// `file_blobs`, ADR 0010): the SQLite repository (metadata in files,
+// content in file_blobs chunks of at most 1 MiB) and the image re-encoder,
+// with
+//   - the admin-uploaded receiver images (ADM-004): the use case (upload,
+//     restore default, read) and the images section of the admin Site page;
+//     the images are served by GET /api/v1/branding/{slot};
+//   - the files the nodes send (FIL): their ingest from the control channel
+//     (Ingest), their retention (Retention), and the Files section
+//     (Gallery: gallery, detail view, deletions); their content and
+//     thumbnail are served by GET /api/v1/files/{id}/… (internal/http/api).
 package files
 
 import (

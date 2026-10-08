@@ -16,6 +16,7 @@
 / 200 signed-in
 /receiver/local/no-such-device 200 signed-in
 /files 200 signed-in
+/files/0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b 404
 /account/password 200 signed-in
 /admin 200 signed-in
 /admin/site 200 signed-in

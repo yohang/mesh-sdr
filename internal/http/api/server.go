@@ -35,6 +35,7 @@ type Server struct {
 	FeatureHandlers
 	StatusHandlers
 	BookmarkHandlers
+	FileHandlers
 }
 
 // BookmarkHandlers serve GET /bookmarks and GET /bandplan; the bookmarks

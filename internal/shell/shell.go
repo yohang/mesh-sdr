@@ -21,6 +21,9 @@ type Deps struct {
 	// AdminGate tells whether the visitor may open the admin area (admin
 	// role, from an allowed network). Nil: the Admin section is never shown.
 	AdminGate Gate
+	// FilesGate tells whether the visitor may open the Files section (the
+	// files module, from the listen policy). Nil: open to every visitor.
+	FilesGate Gate
 	// Bookmarks admits the visitors who manage the hub bookmarks (operators
 	// and admins) and names their page: the receiver's Bookmarks tab then
 	// links its add form, pre-filled from the tuning (BMK-001, BMK-003).
@@ -53,13 +56,18 @@ func New(d Deps) Wired {
 	settings := NewStoreSettings(d.Settings)
 	lookAndFeel := NewLookAndFeel(settings, component("shell.app.look_and_feel"))
 	policy := NewPolicy(settings, component("shell.app.policy"))
-	// Receiver, Map, Decodes and Files are open to everyone until their
-	// modules bring their own access policies (FEATURE_SPEC §10.2).
+	// Receiver, Map and Decodes are open to everyone until their modules
+	// bring their own access policies (FEATURE_SPEC §10.2).
+	files := d.FilesGate
+	if files == nil {
+		files = Everyone
+	}
+
 	nav := NewNavigation(map[Section]Gate{
 		SectionReceiver: Everyone,
 		SectionMap:      Everyone,
 		SectionDecodes:  Everyone,
-		SectionFiles:    Everyone,
+		SectionFiles:    files,
 		SectionAdmin:    d.AdminGate,
 	})
 	now := d.Now

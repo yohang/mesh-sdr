@@ -116,7 +116,6 @@ func (m *Module) Routes(r chi.Router) {
 	get(ReceiverLinkPattern, m.receiverLink)
 	get(SectionMap.Path(), m.placeholder(SectionMap, "The live map is not available yet."))
 	get(SectionDecodes.Path(), m.placeholder(SectionDecodes, "Decoded messages are not available yet."))
-	get(SectionFiles.Path(), m.placeholder(SectionFiles, "Received files are not available yet."))
 	get("/robots.txt", robots)
 	get("/policy", m.policyPage)
 	get(AboutPath, m.aboutPage)
@@ -218,7 +217,7 @@ func (m *Module) receiverLink(w http.ResponseWriter, r *http.Request) {
 }
 
 // placeholder serves the entry page of a section whose module does not
-// exist yet (Map, Decodes, Files): its heading and a short notice. The
+// exist yet (Map, Decodes): its heading and a short notice. The
 // section's module takes the route over when it lands.
 func (m *Module) placeholder(sec Section, notice string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

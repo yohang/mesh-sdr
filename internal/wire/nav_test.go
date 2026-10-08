@@ -72,7 +72,7 @@ func TestShellNavigationByRole(t *testing.T) {
 				t.Errorf("admin link = %v, want %v", got, tt.admin)
 			}
 
-			if !strings.Contains(body, `<a href="/files" data-section="files" class="nav-link" aria-current="page">`) {
+			if !strings.Contains(body, `<a href="/files" data-section="files" class="nav-link" aria-current="page"`) {
 				t.Error("Files is not the current section")
 			}
 

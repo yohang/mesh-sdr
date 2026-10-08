@@ -125,6 +125,11 @@ templ mainNav(nav []Link, current string) {
 							if l.Section != "" && l.Section == current {
 								aria-current="page"
 							}
+							if l.Section == SectionFiles {
+								data-shortcut="f"
+								data-shortcut-label="Open Files"
+								aria-keyshortcuts="f"
+							}
 						>
 							@sectionIcon(l.Section)
 							<span>{ l.Label }</span>

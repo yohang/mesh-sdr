@@ -473,6 +473,11 @@ func happyPaths(t *testing.T, h *contractHub) {
 	expect(anon, http.MethodGet, "/bookmarks?device_id=hf&from=100000&to=30000000", nil, http.StatusOK)
 	expect(anon, http.MethodGet, "/bandplan?from=100000&to=30000000", nil, http.StatusOK)
 
+	// A file the node of the device sent (FIL-002), and its thumbnail.
+	file := storeNodeFile(t, h.adapter, "hf")
+	expect(anon, http.MethodGet, "/files/"+file+"/content", nil, http.StatusOK)
+	expect(anon, http.MethodGet, "/files/"+file+"/thumbnail", nil, http.StatusOK)
+
 	// POST /auth/token refreshes a media connection the gateway authz
 	// issued to the caller (ADR 0012): here an anonymous one, so another
 	// caller is refused.
