@@ -72,7 +72,8 @@ type Streams struct {
 	log     *slog.Logger
 
 	// switching serialises the shared changes of the devices
-	// (preset.select, device.retune) and guards lastSwitch and applied.
+	// (preset.select, device.retune) and guards lastSwitch, applied and
+	// waterfall.
 	switching sync.Mutex
 	// lastSwitch is the time of the last preset switch of each device
 	// (§5.11 limit).
@@ -80,6 +81,8 @@ type Streams struct {
 	// applied is the active preset of each device as it was switched: an
 	// edit or an unassignment by the hub clears it.
 	applied map[string]activePreset
+	// waterfall are the waterfall defaults the listeners last received.
+	waterfall media.Waterfall
 	// retunes limits the device.retune of each device (§5.11).
 	retunes *ratelimit.Limiter[string]
 	now     func() time.Time
@@ -99,11 +102,14 @@ const (
 // NewStreams returns the handler. state may be nil (no hub state: no
 // preset, the node defaults apply).
 func NewStreams(d Devices, state DesiredState, log *slog.Logger) *Streams {
-	return &Streams{
+	s := &Streams{
 		devices: d, state: state, log: log, sessions: map[*session]struct{}{},
 		lastSwitch: map[string]time.Time{}, applied: map[string]activePreset{},
 		retunes: ratelimit.New[string](RetuneEvery, RetuneBurst, ratelimit.DefaultCapacity), now: time.Now,
 	}
+	s.waterfall = s.waterfallDefaults()
+
+	return s
 }
 
 // presets returns what device.config shows of the presets of a device: the
@@ -149,11 +155,24 @@ type activePreset struct {
 }
 
 // StateApplied clears the active preset of the devices whose preset the
-// hub edited or no longer assigns to them. Call it after every applied
+// hub edited or no longer assigns to them, and sends new waterfall defaults
+// to every listener (device.config.patch). Call it after every applied
 // desired state.
 func (s *Streams) StateApplied() {
 	s.switching.Lock()
 	defer s.switching.Unlock()
+
+	if w := s.waterfallDefaults(); w != s.waterfall {
+		s.waterfall = w
+
+		s.mu.Lock()
+		all := slices.Collect(maps.Keys(s.sessions))
+		s.mu.Unlock()
+
+		for _, ss := range all {
+			ss.waterfallChanged(w)
+		}
+	}
 
 	for device, was := range s.applied {
 		if p, err := s.resolve(device, was.id); err == nil && reflect.DeepEqual(p, was.p) {
@@ -208,9 +227,9 @@ func (s *Streams) listeners(device string) []*session {
 	return out
 }
 
-// waterfall returns the waterfall defaults of device.config: the hub
-// settings when the desired state carries them, else the node defaults.
-func (s *Streams) waterfall() media.Waterfall {
+// waterfallDefaults returns the waterfall defaults of device.config: the
+// hub settings when the desired state carries them, else the node defaults.
+func (s *Streams) waterfallDefaults() media.Waterfall {
 	w := media.Waterfall{Levels: media.Levels{Min: waterfallMin, Max: waterfallMax}, AutoMinRange: autoMinRange, Scheme: waterfallScheme}
 
 	if s.state == nil {
@@ -394,7 +413,7 @@ func (ss *session) deviceConfig(rev int, snap domain.Snapshot, info app.Spectrum
 		DeviceID: snap.ID, Revision: rev, CenterHz: snap.CenterHz, SampleRate: snap.RateHz,
 		ActivePreset: ref, PresetsAvailable: avail, TuningStepHz: tuningStepHz,
 		Start:     media.Start{Mode: media.ModeNFM},
-		Waterfall: ss.s.waterfall(),
+		Waterfall: ss.s.waterfallDefaults(),
 		FFT:       media.FFTConfig{Size: info.Size, FPS: info.FPS},
 		Squelch:   media.Squelch{Initial: squelchInitial, AutoMargin: squelchMargin},
 		Limits:    media.FreqLimits{MinHz: snap.MinHz, MaxHz: snap.MaxHz},
@@ -536,6 +555,28 @@ func (ss *session) onState(a *attached, s domain.Snapshot) {
 			DeviceID: s.ID, Revision: rev, Set: map[string]any{"center_hz": s.CenterHz, "sample_rate": s.RateHz}, Unset: []string{},
 		})
 		ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: a.stream, FFT: fftOf(a.lease.Engine().Spectrum())})
+	}
+}
+
+// waterfallChanged sends new waterfall defaults for every attached device.
+func (ss *session) waterfallChanged(w media.Waterfall) {
+	ss.mu.Lock()
+	if ss.closed {
+		ss.mu.Unlock()
+
+		return
+	}
+
+	patches := make([]media.DeviceConfigPatch, 0, len(ss.devices))
+
+	for id, a := range ss.devices {
+		a.revision++
+		patches = append(patches, media.DeviceConfigPatch{DeviceID: id, Revision: a.revision, Set: map[string]any{"waterfall": w}, Unset: []string{}})
+	}
+	ss.mu.Unlock()
+
+	for _, p := range patches {
+		ss.peer.Send(rxv1.TypeDeviceConfigPatch, p)
 	}
 }
 
