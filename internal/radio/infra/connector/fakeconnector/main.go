@@ -8,8 +8,11 @@
 // The device argument (-d) selects a misbehaviour: "crash" exits after
 // 300 ms, "stall" stops streaming after 500 ms, "noiq" never opens its IQ
 // port; "zvei" modulates the NFM carrier with the ZVEI1 sequence 12345
-// every 2 s instead of the 1 kHz tone (decoder tests); anything else
-// streams.
+// every 2 s instead of the 1 kHz tone (decoder tests); "text" replaces
+// the NFM carrier with the text modes of the native decoders around a USB
+// dial at the same frequency (SITOR-B at +600 Hz, BPSK31 at +1000 Hz, CW
+// at +1500 Hz, RTTY-170 at +2200 Hz, each message repeated); anything
+// else streams.
 //
 // It is not part of the product images.
 package main
@@ -29,6 +32,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/dsp/dsptest"
 )
 
 func main() {
@@ -84,6 +89,10 @@ func main() {
 	fmt.Fprintln(os.Stderr, "fakeconnector streaming at", *rate)
 
 	s := &synth{rate: float64(*rate), carrier: float64(*freq) + float64(*rate)/8, tone: float64(*freq) - float64(*rate)/5, zvei: *device == "zvei"}
+	if *device == "text" {
+		s.text = textSignals()
+	}
+
 	s.rng = rand.New(rand.NewPCG(1, 2))
 	stallAfter := time.Duration(0)
 
@@ -142,7 +151,39 @@ type synth struct {
 	phaseB        float64
 	phaseM        float64
 	zvei          bool
-	rng           *rand.Rand
+	// text are the text mode signals at textRate (device "text").
+	text [][]complex64
+	rng  *rand.Rand
+}
+
+// textRate is the rate the text mode signals are synthesised at.
+const textRate = 12000
+
+// textSignals synthesises the text mode signals of the "text" device.
+func textSignals() [][]complex64 {
+	return [][]complex64{
+		dsptest.SITORB("ZCZC EA01 DEV NAVAREA TEST MESSAGE NNNN\n", 170, textRate, 600),
+		dsptest.PSK("CQ CQ CQ de F4DEV F4DEV pse k\n", 31.25, textRate, 1000),
+		dsptest.CW("CQ CQ DE F4DEV F4DEV K", 18, textRate, 1500),
+		dsptest.RTTY("RYRYRY CQ CQ DE F4DEV F4DEV K\r\n", 45.45, 170, false, textRate, 2200),
+	}
+}
+
+// textAt returns the sum of the text signals at time t, linearly
+// interpolated, each one repeated.
+func (s *synth) textAt(t float64) complex128 {
+	x := t * textRate
+	i := int(x)
+	f := x - float64(i)
+
+	var v complex128
+
+	for _, sig := range s.text {
+		a, b := sig[i%len(sig)], sig[(i+1)%len(sig)]
+		v += complex128(a)*complex(1-f, 0) + complex128(b)*complex(f, 0)
+	}
+
+	return v
 }
 
 // zveiTones are the ZVEI1 tones of the digits 1 to 5, 70 ms each.
@@ -150,6 +191,10 @@ var zveiTones = []float64{1060, 1160, 1270, 1400, 1530}
 
 // modulation returns the audio tone at t (0: silence).
 func (s *synth) modulation(t float64) float64 {
+	if s.text != nil {
+		return 0
+	}
+
 	if !s.zvei {
 		return 1000
 	}
@@ -194,6 +239,13 @@ func (s *synth) stream(conn net.Conn, center *atomic.Int64, stallAfter time.Dura
 
 			re := 0.3*math.Cos(s.phaseA) + 0.05*math.Cos(s.phaseB) + 0.003*s.rng.NormFloat64()
 			im := 0.3*math.Sin(s.phaseA) + 0.05*math.Sin(s.phaseB) + 0.003*s.rng.NormFloat64()
+
+			if s.text != nil {
+				// The text signals around the carrier frequency, no carrier.
+				v := s.textAt(t) * complex(0.2*math.Cos(s.phaseA)/0.5, 0.2*math.Sin(s.phaseA)/0.5)
+				re = real(v) + 0.05*math.Cos(s.phaseB) + 0.003*s.rng.NormFloat64()
+				im = imag(v) + 0.05*math.Sin(s.phaseB) + 0.003*s.rng.NormFloat64()
+			}
 
 			binary.LittleEndian.PutUint32(buf[8*i:], math.Float32bits(float32(re)))
 			binary.LittleEndian.PutUint32(buf[8*i+4:], math.Float32bits(float32(im)))
