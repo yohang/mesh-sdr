@@ -395,6 +395,16 @@ func (s *scheduling) presetName(ctx context.Context, id shared.UUID) string {
 	return p.Name()
 }
 
+// presetBand describes a preset for Admin › Connections.
+func (s *scheduling) presetBand(ctx context.Context, id shared.UUID) (gridhttp.PresetBand, bool) {
+	p, err := s.presets.Get(ctx, id.String())
+	if err != nil {
+		return gridhttp.PresetBand{}, false
+	}
+
+	return gridhttp.PresetBand{Name: p.Name(), CenterFreq: p.CenterFreq(), SampRate: p.SampRate()}, true
+}
+
 // NeedingAttention counts the schedules the hub disabled (Admin › Overview).
 func (a deviceSchedules) NeedingAttention(ctx context.Context) (int, error) {
 	list, err := a.schedules.List(ctx)

@@ -24,6 +24,7 @@ type Settings struct {
 	WFMDeemphasis    int    `toml:"wfm_deemphasis" env:"WFM_DEEMPHASIS" jsonschema:"enum=50,enum=75" jsonschema_extras:"x-label=WFM de-emphasis (µs)" jsonschema_description:"Broadcast FM de-emphasis time constant, in microseconds: 50 (Europe and most of the world) or 75 (Americas, South Korea). Nodes apply it to their WFM demodulators."`
 
 	Receiver  SettingsReceiver  `toml:"receiver" envPrefix:"RECEIVER__" jsonschema:"description=Receiver identity and policies."`
+	Privacy   SettingsPrivacy   `toml:"privacy" envPrefix:"PRIVACY__" jsonschema:"description=Privacy of client data."`
 	UI        SettingsUI        `toml:"ui" envPrefix:"UI__" jsonschema:"description=Look and feel."`
 	Waterfall SettingsWaterfall `toml:"waterfall" envPrefix:"WATERFALL__" jsonschema:"description=Waterfall defaults of the receiver (ADR 0026)."`
 	Session   SettingsSession   `toml:"session" envPrefix:"SESSION__" jsonschema:"description=Session lifetimes."`
@@ -37,14 +38,23 @@ type Settings struct {
 
 // SettingsReceiver is the [settings.receiver] table (ADM-003).
 type SettingsReceiver struct {
-	Name            string   `toml:"name" env:"NAME" jsonschema:"minLength=1,maxLength=64" jsonschema_extras:"x-public=true,x-label=Station name" jsonschema_description:"Station name, shown in the top bar and the page titles."`
-	Location        string   `toml:"location" env:"LOCATION" jsonschema:"maxLength=128" jsonschema_extras:"x-public=true,x-label=Location" jsonschema_description:"Station location, as free text (for example a town and a country)."`
-	GPS             GeoPoint `toml:"gps" env:"GPS" jsonschema_extras:"x-public=true,x-label=Position" jsonschema_description:"Station position in decimal degrees (WGS 84). In the env: \"<lat>,<lon>\"."`
-	HelpURL         string   `toml:"help_url" env:"HELP_URL" jsonschema:"format=uri,maxLength=2048" jsonschema_extras:"x-public=true,x-label=Help link" jsonschema_description:"Help link in the header: an http or https URL."`
-	PhotoTitle      string   `toml:"photo_title" env:"PHOTO_TITLE" jsonschema:"maxLength=128" jsonschema_extras:"x-public=true,x-label=Panorama title" jsonschema_description:"Title of the station panorama."`
-	PhotoDesc       string   `toml:"photo_desc" env:"PHOTO_DESC" jsonschema:"maxLength=4000" jsonschema_extras:"x-public=true,x-widget=markdown,x-label=Panorama description" jsonschema_description:"Description of the station panorama, in Markdown (raw HTML is not rendered)."`
-	UsagePolicyText string   `toml:"usage_policy_text" env:"USAGE_POLICY_TEXT" jsonschema:"maxLength=20000" jsonschema_extras:"x-widget=markdown,x-label=Usage policy" jsonschema_description:"Usage policy shown at /policy (UI-003), in Markdown (raw HTML is not rendered). Empty: the built-in default policy."`
-	UsagePolicyURL  string   `toml:"usage_policy_url" env:"USAGE_POLICY_URL" jsonschema:"format=uri-reference,maxLength=2048" jsonschema_extras:"x-public=true,x-label=Usage policy link" jsonschema_description:"Usage policy link of the footer: a path on this hub (/policy) or an http or https URL."`
+	Name     string   `toml:"name" env:"NAME" jsonschema:"minLength=1,maxLength=64" jsonschema_extras:"x-public=true,x-label=Station name" jsonschema_description:"Station name, shown in the top bar and the page titles."`
+	Location string   `toml:"location" env:"LOCATION" jsonschema:"maxLength=128" jsonschema_extras:"x-public=true,x-label=Location" jsonschema_description:"Station location, as free text (for example a town and a country)."`
+	GPS      GeoPoint `toml:"gps" env:"GPS" jsonschema_extras:"x-public=true,x-label=Position" jsonschema_description:"Station position in decimal degrees (WGS 84). In the env: \"<lat>,<lon>\"."`
+	// AdminEmail is the contact e-mail; the public status (API-003) shows
+	// it only when AdminEmailPublic is true.
+	AdminEmail       string `toml:"admin_email" env:"ADMIN_EMAIL" jsonschema:"format=email,maxLength=254" jsonschema_extras:"x-label=Contact e-mail" jsonschema_description:"Contact e-mail of the station administrator."`
+	AdminEmailPublic bool   `toml:"admin_email_public" env:"ADMIN_EMAIL_PUBLIC" jsonschema_extras:"x-label=Publish the contact e-mail" jsonschema_description:"Include the contact e-mail in the public status (GET /api/v1/status). Off: the e-mail stays private."`
+	HelpURL          string `toml:"help_url" env:"HELP_URL" jsonschema:"format=uri,maxLength=2048" jsonschema_extras:"x-public=true,x-label=Help link" jsonschema_description:"Help link in the header: an http or https URL."`
+	PhotoTitle       string `toml:"photo_title" env:"PHOTO_TITLE" jsonschema:"maxLength=128" jsonschema_extras:"x-public=true,x-label=Panorama title" jsonschema_description:"Title of the station panorama."`
+	PhotoDesc        string `toml:"photo_desc" env:"PHOTO_DESC" jsonschema:"maxLength=4000" jsonschema_extras:"x-public=true,x-widget=markdown,x-label=Panorama description" jsonschema_description:"Description of the station panorama, in Markdown (raw HTML is not rendered)."`
+	UsagePolicyText  string `toml:"usage_policy_text" env:"USAGE_POLICY_TEXT" jsonschema:"maxLength=20000" jsonschema_extras:"x-widget=markdown,x-label=Usage policy" jsonschema_description:"Usage policy shown at /policy (UI-003), in Markdown (raw HTML is not rendered). Empty: the built-in default policy."`
+	UsagePolicyURL   string `toml:"usage_policy_url" env:"USAGE_POLICY_URL" jsonschema:"format=uri-reference,maxLength=2048" jsonschema_extras:"x-public=true,x-label=Usage policy link" jsonschema_description:"Usage policy link of the footer: a path on this hub (/policy) or an http or https URL."`
+}
+
+// SettingsPrivacy is the [settings.privacy] table (PRS-001).
+type SettingsPrivacy struct {
+	MaskIPs bool `toml:"mask_ips" env:"MASK_IPS" jsonschema_extras:"x-label=Mask client addresses" jsonschema_description:"Mask client IP addresses in Admin › Connections: IPv4 to the /24 network, IPv6 to the /48 prefix. An admin can reveal one address at a time; each reveal is audited."`
 }
 
 // SettingsUI is the [settings.ui] table (ADM-006, UI-001).
@@ -120,6 +130,7 @@ func DefaultSettings() Settings {
 		AudioCompression: "adpcm",
 		WFMDeemphasis:    50,
 		Receiver:         SettingsReceiver{Name: "MeshSDR", UsagePolicyURL: "/policy"},
+		Privacy:          SettingsPrivacy{MaskIPs: true},
 		UI: SettingsUI{
 			ThemeMode: "auto", ShortcutSet: "default",
 		},

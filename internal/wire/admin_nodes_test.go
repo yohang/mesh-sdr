@@ -218,7 +218,7 @@ func TestAdminNodesPages(t *testing.T) {
 	}
 
 	// Admin › Connections and the heartbeat settings are for admins.
-	if st, page := root.page("/admin/connections"); st != http.StatusOK || !strings.Contains(page, "listeners") {
+	if st, page := root.page("/admin/connections"); st != http.StatusOK || !strings.Contains(page, "receivers") {
 		t.Errorf("connections = %d", st)
 	}
 

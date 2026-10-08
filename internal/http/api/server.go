@@ -33,6 +33,7 @@ type Server struct {
 	BrandingHandlers
 	TokenHandlers
 	FeatureHandlers
+	StatusHandlers
 }
 
 var _ StrictServerInterface = Server{}

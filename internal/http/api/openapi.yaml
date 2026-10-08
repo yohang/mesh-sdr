@@ -119,6 +119,29 @@ paths:
                 $ref: "#/components/schemas/Features"
         default:
           $ref: "#/components/responses/Problem"
+  /status:
+    get:
+      operationId: getStatus
+      x-meshsdr-access: anonymous
+      summary: Public station status (API-003)
+      description: |
+        Station name, location, global position, version, and a summary of
+        every enabled device across the nodes: name, type family, the
+        active preset with its centre frequency and sample rate, listener
+        count and online state. The administrator e-mail is present only
+        when `receiver.admin_email_public` is true. It never carries node
+        addresses or client addresses. Also served at `/status.json` (an
+        alias for receiver directory sites, same body, outside `/api/v1`).
+      tags: [meta]
+      responses:
+        "200":
+          description: Station status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+        default:
+          $ref: "#/components/responses/Problem"
   /config/effective:
     get:
       operationId: getEffectiveConfig
@@ -247,6 +270,80 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DeviceFeatures"
+    Status:
+      type: object
+      additionalProperties: false
+      required: [name, version, device_count, devices]
+      properties:
+        name:
+          type: string
+          description: Station name (`receiver.name`).
+        location:
+          type: string
+          description: Station location, free text (`receiver.location`); absent when unset.
+        position:
+          $ref: "#/components/schemas/StatusPosition"
+        version:
+          type: string
+          description: Hub version.
+        admin_email:
+          type: string
+          description: Contact e-mail; present only when `receiver.admin_email_public` is true and an e-mail is set.
+        device_count:
+          type: integer
+          description: Number of devices listed in `devices`.
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatusDevice"
+    StatusPosition:
+      type: object
+      additionalProperties: false
+      required: [lat, lon]
+      description: Station position in decimal degrees (WGS 84); absent when unset.
+      properties:
+        lat:
+          type: number
+          format: double
+        lon:
+          type: number
+          format: double
+    StatusDevice:
+      type: object
+      additionalProperties: false
+      required: [id, name, type, online, listeners]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          description: Device type family (the driver, for example `rtlsdr`).
+        online:
+          type: boolean
+          description: The device's node is connected and the device can run (ready or busy).
+        listeners:
+          type: integer
+          description: Open listener connections on the device.
+        preset:
+          $ref: "#/components/schemas/StatusPreset"
+    StatusPreset:
+      type: object
+      additionalProperties: false
+      required: [name, center_freq, samp_rate]
+      description: Active preset of the device; absent when none.
+      properties:
+        name:
+          type: string
+        center_freq:
+          type: integer
+          format: int64
+          description: Centre frequency in Hz.
+        samp_rate:
+          type: integer
+          format: int64
+          description: Sample rate in S/s.
     DeviceFeatures:
       type: object
       additionalProperties: false
