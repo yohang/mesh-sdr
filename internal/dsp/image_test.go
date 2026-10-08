@@ -105,7 +105,7 @@ func bands(_, y int) uint8 {
 
 // A FAX page ends complete at the stop tone with the lines received.
 func TestFAXReceiver(t *testing.T) {
-	r, err := dsp.NewFAXReceiver(csdr.FAXOptions{LPM: 120, MaxLines: 300})
+	r, err := dsp.NewFAXReceiver(csdr.FAXOptions{LPM: 120, MaxLines: 300}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestFAXReceiver(t *testing.T) {
 
 // A FAX page longer than its longest length ends complete there.
 func TestFAXReceiverMaxLines(t *testing.T) {
-	r, err := dsp.NewFAXReceiver(csdr.FAXOptions{LPM: 120, MaxLines: 30})
+	r, err := dsp.NewFAXReceiver(csdr.FAXOptions{LPM: 120, MaxLines: 30}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,5 +137,45 @@ func TestFAXReceiverMaxLines(t *testing.T) {
 
 	if rows != 30 || len(ends) != 1 || ends[0].Lines != 30 || !ends[0].Complete {
 		t.Fatalf("%d rows, ends %v", rows, ends)
+	}
+}
+
+// A colour FAX page is decoded in RGB; a page beyond the cap ends there,
+// incomplete, and its rows left are dropped.
+func TestFAXReceiverColor(t *testing.T) {
+	for _, limit := range []int{0, 10 * 1812 * 3} {
+		r, err := dsp.NewFAXReceiver(csdr.FAXOptions{LPM: 120, MaxLines: 300, Color: true}, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		starts, rows, ends := feed(t, r, dsptest.ColorFAX(csdr.FAXRate, 120, 20, func(x, _ int) (uint8, uint8, uint8) {
+			if x < 900 {
+				return 220, 30, 30
+			}
+
+			return 30, 30, 220
+		}), csdr.FAXRate)
+		r.Close()
+
+		want := 20
+		if limit > 0 {
+			want = 10
+		}
+
+		if starts != 1 || rows != want || len(ends) != 1 {
+			t.Fatalf("cap %d: %d starts, %d rows, %d ends", limit, starts, rows, len(ends))
+		}
+
+		m := ends[0]
+		if m.Channels != 3 || m.Lines != want || m.Complete != (limit == 0) || cap(m.Pix) > max(limit, 300*1812*3) {
+			t.Fatalf("cap %d: page %+v", limit, *m)
+		}
+
+		// Red on the left, blue on the right.
+		row := m.Row(5)
+		if l, rr := row[400*3:400*3+3], row[1400*3:1400*3+3]; l[0] < 150 || l[2] > 100 || rr[2] < 150 || rr[0] > 100 {
+			t.Errorf("cap %d: row 5 left RGB %v, right RGB %v", limit, l, rr)
+		}
 	}
 }

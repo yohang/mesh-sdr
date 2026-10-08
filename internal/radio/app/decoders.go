@@ -73,10 +73,11 @@ type ProducedFile struct {
 	FreqHz int64
 }
 
-// FilePublisher sends the files of the decoders to the hub. It must not
-// block.
+// FilePublisher sends the files of the decoders to the hub: it queues the
+// file (disk I/O, no network) and reports whether it could. It is called
+// from the decoder goroutines.
 type FilePublisher interface {
-	Produced(f ProducedFile)
+	Produced(f ProducedFile) error
 }
 
 // DecoderEvents receive the output of a decoder session. They are called
@@ -84,9 +85,9 @@ type FilePublisher interface {
 type DecoderEvents struct {
 	Decode func(DecodeRecord)
 	Status func(DecoderStatus)
-	// File receives the files of the session, even after Close: the image
-	// in progress is saved then.
-	File func(ProducedFile)
+	// File receives the files of the session, even after Close (the image
+	// in progress), and reports whether the file was queued for the hub.
+	File func(ProducedFile) error
 }
 
 // DecoderSpec describes a decoder session to start.

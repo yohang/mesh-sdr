@@ -94,8 +94,13 @@ func TestSSTVDecoderPD290(t *testing.T) {
 	audio = append(audio, make([]float32, 8*SSTVRate)...)
 
 	stream := decodeAll(t, d, audio)
-	if w, _, _, _ := bmpHeader(t, stream); w != 800 {
-		t.Fatalf("width %d", w)
+	if w, _, _, _ := bmpHeader(t, stream); w != 800 || len(stream) < 54+4*800*3 {
+		t.Fatalf("width %d, %d bytes", w, len(stream))
+	}
+
+	// The overflow stays within the first half of the slack.
+	if !d.canaryIntact() {
+		t.Error("the SSTV decoder wrote past half its slack: re-check sstvSlack")
 	}
 }
 

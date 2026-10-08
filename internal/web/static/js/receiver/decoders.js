@@ -7,7 +7,7 @@
 // through textContent only, cut to 4 KiB.
 //
 // The image decoders (SSTV DEC-037, FAX DEC-038) send image.v1 messages:
-// a start, then each row, drawn on the card's canvas as it arrives, and an
+// a start, then its rows, drawn on the card's canvas as it arrives, and an
 // end. The canvas has a text equivalent (its label and caption) and can be
 // saved as PNG (FIL-006).
 
@@ -78,8 +78,9 @@ function mhz(hz) {
  * @property {ImageView | null} image
  */
 
-/** Largest image side accepted from a node (the hub's limit). */
+/** Largest image accepted from a node (the hub's limits). */
 const MAX_SIDE = 16384;
+const MAX_PIXELS = 16_000_000;
 
 /**
  * imageName is the file name of an image received at ms on hz:
@@ -93,9 +94,14 @@ function imageName(mode, ms, hz) {
   return `${mode.toUpperCase().replace(/[^A-Z0-9]/g, "")}-${stamp}-${Math.round(hz / 1000)}.png`;
 }
 
-/** @param {string} b64 @returns {Uint8Array} */
+/** @param {string} b64 @returns {Uint8Array | null} null when invalid */
 function fromBase64(b64) {
-  const bin = atob(b64);
+  let bin;
+  try {
+    bin = atob(b64);
+  } catch {
+    return null;
+  }
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
@@ -247,12 +253,12 @@ export class DecodersTab {
    * @returns {ImageView | null}
    */
   imageView(c, mode, width, height) {
-    if (!(width > 0 && height > 0 && width <= MAX_SIDE && height <= MAX_SIDE)) return null;
+    if (!(width > 0 && height > 0 && width <= MAX_SIDE && height <= MAX_SIDE && width * height <= MAX_PIXELS)) return null;
     const have = c.image;
     if (have && have.canvas.width === width && have.height === height) return have;
     have?.figure.remove();
     const figure = el("figure", { class: "flex flex-col gap-1" });
-    const scroll = el("div", { class: "max-h-96 overflow-auto rounded border border-border", tabindex: "0", "aria-label": `${this.label(mode)} image` });
+    const scroll = el("div", { class: "max-h-96 overflow-auto rounded border border-border", tabindex: "0", role: "region", "aria-label": `${this.label(mode)} image` });
     const canvas = /** @type {HTMLCanvasElement} */ (el("canvas", { role: "img", class: "block h-auto w-full bg-surface" }));
     canvas.width = width;
     canvas.height = height;
@@ -283,7 +289,7 @@ export class DecodersTab {
   }
 
   /**
-   * onImage draws an image.v1 message: start, row or end.
+   * onImage draws an image.v1 message: start, rows or end.
    * @param {Card} c @param {any} p decode
    */
   onImage(c, p) {
@@ -302,27 +308,27 @@ export class DecodersTab {
         this.describe(v, `receiving, 0 of ${height} lines`);
         break;
       }
-      case "row": {
+      case "rows": {
         const v = this.imageView(c, p.mode, width, height);
-        const y = Number(m.row);
+        const y0 = Number(m.row);
+        const count = Number(m.count);
         const channels = Number(m.channels) === 1 ? 1 : 3;
-        if (!v || !(y >= 0 && y < height) || typeof m.pixels !== "string") return;
+        if (!v || !(y0 >= 0 && count > 0 && y0 + count <= height) || typeof m.pixels !== "string") return;
         if (v.freq === 0) {
           v.ts = Number(p.ts) || Date.now();
           v.freq = Number(p.freq_hz) || 0;
         }
         const px = fromBase64(m.pixels);
-        if (px.length !== width * channels) return;
-        const row = new ImageData(width, 1);
-        for (let x = 0; x < width; x++) {
-          const i = x * channels;
-          row.data[x * 4] = px[i];
-          row.data[x * 4 + 1] = px[channels === 1 ? i : i + 1];
-          row.data[x * 4 + 2] = px[channels === 1 ? i : i + 2];
-          row.data[x * 4 + 3] = 255;
+        if (!px || px.length !== width * channels * count) return;
+        const rows = new ImageData(width, count);
+        for (let i = 0, j = 0; i < px.length; i += channels, j += 4) {
+          rows.data[j] = px[i];
+          rows.data[j + 1] = px[channels === 1 ? i : i + 1];
+          rows.data[j + 2] = px[channels === 1 ? i : i + 2];
+          rows.data[j + 3] = 255;
         }
-        v.canvas.getContext("2d")?.putImageData(row, 0, y);
-        v.rows = Math.max(v.rows, y + 1);
+        v.canvas.getContext("2d")?.putImageData(rows, 0, y0);
+        v.rows = Math.max(v.rows, y0 + count);
         this.describe(v, `receiving, ${v.rows} of ${height} lines`);
         break;
       }
@@ -338,7 +344,7 @@ export class DecodersTab {
           if (kept) ctx?.putImageData(kept, 0, 0);
         }
         const done = m.complete ? "complete" : "incomplete";
-        const saved = m.saved ? "saved to Files" : "too short to be saved to Files";
+        const saved = m.sent ? "sent to Files" : m.short ? "too short to be kept" : "could not be sent to Files";
         this.describe(v, `${done}, ${lines} of ${v.height} lines, ${saved}`);
         break;
       }

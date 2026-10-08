@@ -27,6 +27,10 @@ long msdr_image_process(msdr_image* s, const float* in, size_t n_in, unsigned ch
 // msdr_image_pending returns the number of samples kept in the carry.
 size_t msdr_image_pending(msdr_image* s);
 
+// msdr_sstv_canary_intact reports whether the second half of the slack of
+// an SSTV decoder is untouched (tests).
+int msdr_sstv_canary_intact(msdr_image* s);
+
 void msdr_image_free(msdr_image* s);
 
 #ifdef __cplusplus

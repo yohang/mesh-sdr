@@ -25,8 +25,12 @@ using ImageModule = Csdr::Module<float, unsigned char>;
 // SstvDecoder keeps the chroma of the previous scanline in a buffer of
 // 640 pixels, but PD-290 lines are 800 pixels wide: a PD-290 header (VIS
 // 94, from any signal) makes it write 160 bytes past the end of the object.
-// The decoder is built in storage that has room for them.
+// The decoder is built in storage that has room for them. Re-check this
+// slack whenever the csdr pin changes (sstv.hpp MAX_LINE_WIDTH and the
+// widest mode); the second half of it is a canary, checked by the PD-290
+// test through msdr_sstv_canary_intact.
 constexpr size_t sstvSlack = 1024;
+constexpr unsigned char canary = 0xA5;
 
 class FloatCarry : public Csdr::Reader<float> {
   public:
@@ -103,7 +107,8 @@ msdr_image* msdr_sstv_new(unsigned sample_rate) {
     try {
         s = new msdr_image();
         storage = ::operator new(sizeof(Csdr::SstvDecoder<float>) + sstvSlack);
-        std::memset(storage, 0, sizeof(Csdr::SstvDecoder<float>) + sstvSlack);
+        std::memset(storage, 0, sizeof(Csdr::SstvDecoder<float>));
+        std::memset(static_cast<unsigned char*>(storage) + sizeof(Csdr::SstvDecoder<float>), canary, sstvSlack);
         {
             std::lock_guard<std::mutex> lock(fftwPlanner);
             s->module = new (storage) Csdr::SstvDecoder<float>(sample_rate, 0);
@@ -134,6 +139,7 @@ msdr_image* msdr_fax_new(unsigned sample_rate, unsigned lpm, unsigned max_lines,
 }
 
 long msdr_image_process(msdr_image* s, const float* in, size_t n_in, unsigned char* out, size_t cap_out) {
+    long n = -1;
     try {
         s->reader.append(in, n_in);
         s->writer.reset(out, cap_out);
@@ -145,10 +151,21 @@ long msdr_image_process(msdr_image* s, const float* in, size_t n_in, unsigned ch
                 break;
             }
         }
-        return static_cast<long>(s->writer.written());
+        n = static_cast<long>(s->writer.written());
     } catch (...) {
-        return -1;
     }
+    // out is Go memory: it is not kept past the call.
+    s->writer.reset(nullptr, 0);
+    return n;
+}
+
+int msdr_sstv_canary_intact(msdr_image* s) {
+    if (s->storage == nullptr) return 1;
+    const auto* end = static_cast<const unsigned char*>(s->storage) + sizeof(Csdr::SstvDecoder<float>);
+    for (size_t i = sstvSlack / 2; i < sstvSlack; i++) {
+        if (end[i] != canary) return 0;
+    }
+    return 1;
 }
 
 size_t msdr_image_pending(msdr_image* s) { return s->reader.available(); }

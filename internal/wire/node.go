@@ -178,9 +178,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	// missing tool re-probes the node.
 	dec := radioDecoding{
 		publisher: decodePublisher{ag: ag},
-		files: filePublisher{
-			outbox: outbox, dir: filepath.Join(cfg.Node.RuntimeDir, "produced"), logger: component(logger, "radio.infra.files"),
-		},
+		files:     newFilePublisher(outbox, filepath.Join(cfg.Node.RuntimeDir, "produced"), component(logger, "radio.infra.files")),
 		maxRestarts: func() int {
 			if d := state.Policy().Decoders; d != nil {
 				return d.MaxRestarts
@@ -359,44 +357,41 @@ func (p decodePublisher) Decoded(d radioapp.Decoded) {
 
 // filePublisher sends the images of the decoders to the hub through the
 // file outbox (FIL-005): each is written under dir (in node.runtime_dir),
-// then moved to the outbox, in the background.
+// then moved to the outbox. dir is emptied before the first file, like the
+// outbox: the files a previous process left there are not sent.
 type filePublisher struct {
-	outbox *agent.Outbox
-	dir    string
-	logger *slog.Logger
+	outbox  *agent.Outbox
+	dir     string
+	logger  *slog.Logger
+	prepare func() error
 }
 
-func (p filePublisher) Produced(f radioapp.ProducedFile) {
-	go func() {
-		meta := agent.FileMeta{
-			Kind: f.Kind, DeviceID: f.DeviceID, PresetID: f.PresetID, DecoderSessionID: f.SessionID, Mode: f.Mode,
-			FrequencyHz: f.FreqHz, ReceivedStart: f.Start, ReceivedEnd: f.End, Metadata: f.Metadata,
+func newFilePublisher(outbox *agent.Outbox, dir string, logger *slog.Logger) *filePublisher {
+	return &filePublisher{outbox: outbox, dir: dir, logger: logger, prepare: sync.OnceValue(func() error {
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("empty the produced files directory: %w", err)
 		}
 
-		err := p.send(meta, f.Data)
-		if err != nil {
-			p.logger.Warn("decoded file not sent to the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
-				slog.Int("bytes", len(f.Data)), slog.Any("error", err))
-
-			return
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create the produced files directory: %w", err)
 		}
 
-		p.logger.Debug("decoded file queued for the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
-			slog.Int("bytes", len(f.Data)))
-	}()
+		return nil
+	})}
 }
 
-func (p filePublisher) send(meta agent.FileMeta, data []byte) error {
-	if err := os.MkdirAll(p.dir, 0o700); err != nil {
-		return fmt.Errorf("create the produced files directory: %w", err)
+// Produced implements radioapp.FilePublisher.
+func (p *filePublisher) Produced(f radioapp.ProducedFile) error {
+	if err := p.prepare(); err != nil {
+		return err
 	}
 
-	tmp, err := os.CreateTemp(p.dir, meta.Kind+"-*.png")
+	tmp, err := os.CreateTemp(p.dir, f.Kind+"-*.png")
 	if err != nil {
 		return fmt.Errorf("write produced file: %w", err)
 	}
 
-	_, err = tmp.Write(data)
+	_, err = tmp.Write(f.Data)
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
@@ -407,7 +402,19 @@ func (p filePublisher) send(meta agent.FileMeta, data []byte) error {
 		return fmt.Errorf("write produced file: %w", err)
 	}
 
-	return p.outbox.SendFile(context.Background(), meta, tmp.Name())
+	meta := agent.FileMeta{
+		Kind: f.Kind, DeviceID: f.DeviceID, PresetID: f.PresetID, DecoderSessionID: f.SessionID, Mode: f.Mode,
+		FrequencyHz: f.FreqHz, ReceivedStart: f.Start, ReceivedEnd: f.End, Metadata: f.Metadata,
+	}
+
+	if err := p.outbox.SendFile(context.Background(), meta, tmp.Name()); err != nil {
+		return fmt.Errorf("queue produced file: %w", err)
+	}
+
+	p.logger.Debug("decoded file queued for the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
+		slog.Int("bytes", len(f.Data)))
+
+	return nil
 }
 
 // Enrollment is the one-off process of `meshsdr node enroll`.

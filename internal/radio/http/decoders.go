@@ -289,7 +289,7 @@ func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant str
 		return app.DecoderEvents{
 			Decode: func(rec app.DecodeRecord) { ss.decoded(d, id, m, rec, rx) },
 			Status: func(st app.DecoderStatus) { ss.sessionStatus(d, id, m.Name, variant, st) },
-			File:   func(f app.ProducedFile) { ss.produced(d, id, m, rx, f) },
+			File:   func(f app.ProducedFile) error { return ss.produced(d, id, m, rx, f) },
 		}
 	})
 	if err != nil {
@@ -382,17 +382,28 @@ func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, 
 // once the session is over (its image in progress). It is stamped with the
 // reception of the session's last kept message: an image without its
 // start is dropped.
-func (ss *session) produced(d *demodState, id shared.UUID, m domain.DigitalMode, rx *reception, f app.ProducedFile) {
+func (ss *session) produced(d *demodState, id shared.UUID, m domain.DigitalMode, rx *reception, f app.ProducedFile) error {
 	freq, preset := rx.get()
 
 	pub := ss.s.dec.Files
-	if pub == nil || freq <= 0 {
-		return
+
+	switch {
+	case pub == nil:
+		return errNoFiles
+	case freq <= 0:
+		return errNoReception
 	}
 
 	f.DeviceID, f.PresetID, f.SessionID, f.Mode, f.FreqHz = d.device, preset, id.String(), m.Name, freq
-	pub.Produced(f)
+
+	return pub.Produced(f)
 }
+
+// Errors of produced.
+var (
+	errNoFiles     = errors.New("files are not sent to the hub")
+	errNoReception = errors.New("no reception start: the file is dropped")
+)
 
 // capText cuts s to at most n bytes on a rune boundary.
 func capText(s string, n int) string {

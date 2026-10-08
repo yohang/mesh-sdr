@@ -138,9 +138,25 @@ func martin1Line(o *osc, line int, px Pixel) {
 }
 
 // FAX returns rate Hz audio of an HF FAX page at lpm lines per minute
-// (IOC 576): 5 s of start tone, 20 s of phasing, the lines of the picture
+// (IOC 576): 5 s of start tone, 40 lines of phasing, the lines of the picture
 // (grey levels), 5 s of stop tone and 3 s of silence.
 func FAX(rate, lpm, lines int, grey func(x, y int) uint8) []float32 {
+	return fax(rate, lpm, lines, 1, func(x, y, _ int) uint8 { return grey(x, y) })
+}
+
+// ColorFAX is FAX for a colour page: each line is sent as three scans,
+// blue, green then red (the order the libcsdr++ decoder writes them in its
+// BMP rows, as OpenWebRX+ reads them). Its start and stop tones are at a
+// third of their frequency and three times as long: the decoder finds no
+// other in colour.
+func ColorFAX(rate, lpm, lines int, px Pixel) []float32 {
+	return fax(rate, lpm, lines, 3, func(x, y, c int) uint8 {
+		r, g, b := px(x, y)
+		return [3]uint8{b, g, r}[c]
+	})
+}
+
+func fax(rate, lpm, lines, channels int, level func(x, y, c int) uint8) []float32 {
 	o := &osc{rate: float64(rate)}
 	line := 60 / float64(lpm)
 
@@ -156,21 +172,29 @@ func FAX(rate, lpm, lines int, grey func(x, y int) uint8) []float32 {
 		})
 	}
 
-	square(300, 5)
+	// The libcsdr++ decoder looks for the tones over a whole colour line
+	// (three scans): in colour, it only finds them at a third of their
+	// frequency, and needs them three times as long.
+	ch := float64(channels)
 
-	// Phasing: black lines with a white pulse at their start.
-	for range int(20 / line) {
+	square(300/ch, 5*ch)
+
+	// Phasing: 40 black lines (the decoder counts them) with a white pulse
+	// at their start.
+	for range 40 {
 		o.scan(line*0.05, 1, func(int) uint8 { return 255 })
-		o.scan(line*0.95, 1, func(int) uint8 { return 0 })
+		o.scan(line*(ch-0.05), 1, func(int) uint8 { return 0 })
 	}
 
 	const width = 1809
 
 	for y := range lines {
-		o.scan(line, width, func(x int) uint8 { return grey(x, y) })
+		for c := range channels {
+			o.scan(line, width, func(x int) uint8 { return level(x, y, c) })
+		}
 	}
 
-	square(450, 5)
+	square(450/ch, 5*ch)
 	o.out = append(o.out, make([]float32, 3*rate)...)
 
 	return o.out

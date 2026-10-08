@@ -18,10 +18,13 @@ type ImageDecoder struct {
 	h *C.msdr_image
 }
 
-// Input rates the image decoders are built for (OpenWebRX+ chains).
+// Input rates the image decoders are built for (OpenWebRX+ chains), and
+// the LPM range of the FAX decoder.
 const (
-	SSTVRate = 24000
-	FAXRate  = 12000
+	SSTVRate  = 24000
+	FAXRate   = 12000
+	MinFAXLPM = 30
+	MaxFAXLPM = 480
 )
 
 // NewSSTVDecoder returns Csdr::SstvDecoder at rate Hz: it finds the VIS
@@ -56,7 +59,7 @@ type FAXOptions struct {
 // before MaxLines (stop tone) is padded with rows that start with
 // "END-PAGE!".
 func NewFAXDecoder(rate int, o FAXOptions) (*ImageDecoder, error) {
-	if rate < 8000 || rate > 192000 || o.LPM < 30 || o.LPM > 480 || o.MaxLines < 1 || o.MaxLines > 100000 {
+	if rate < 8000 || rate > 192000 || o.LPM < MinFAXLPM || o.LPM > MaxFAXLPM || o.MaxLines < 1 || o.MaxLines > 100000 {
 		return nil, fmt.Errorf("%w: fax rate %d %+v", ErrBuild, rate, o)
 	}
 
@@ -120,6 +123,10 @@ func (d *ImageDecoder) Pending() int {
 
 	return int(C.msdr_image_pending(d.h))
 }
+
+// canaryIntact reports whether the SSTV decoder stayed within half its
+// slack (the PD-290 overflow, tests).
+func (d *ImageDecoder) canaryIntact() bool { return C.msdr_sstv_canary_intact(d.h) != 0 }
 
 // Close releases the decoder. It is safe to call twice.
 func (d *ImageDecoder) Close() {

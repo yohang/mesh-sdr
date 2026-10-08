@@ -70,9 +70,14 @@ const (
 	// PD-290).
 	imageOut = 2 << 20
 	// imageBlock bounds the input of one decoder call: the FAX decoder
-	// stops if it gets more than one line of samples at once.
+	// stalls when one call brings more samples than a line (it needs
+	// 2 lines buffered at most).
 	imageBlock = 1024
 )
+
+// The FAX decoder's shortest line (the highest LPM) is longer than an
+// input block (compile-time check).
+const _ = uint(csdr.FAXRate*60/csdr.MaxFAXLPM - imageBlock)
 
 // faxEndMark starts the padding rows of a FAX page.
 var faxEndMark = []byte("END-PAGE!")
@@ -92,9 +97,12 @@ type ImageReceiver struct {
 	// pending are the stream bytes not parsed yet.
 	pending []byte
 	cur     *Image
-	// padding: the rows left of the current image are FAX end marks.
-	padding bool
-	events  []ImageEvent
+	// skip: the current image ended, its rows left are dropped (the FAX
+	// end marks, or the rows beyond the cap).
+	skip bool
+	// maxBytes caps the pixels of an image (0: no cap).
+	maxBytes int
+	events   []ImageEvent
 }
 
 // NewSSTVReceiver returns a receiver of SSTV images.
@@ -107,14 +115,15 @@ func NewSSTVReceiver() (*ImageReceiver, error) {
 	return &ImageReceiver{dec: d, rate: csdr.SSTVRate, out: make([]byte, imageOut)}, nil
 }
 
-// NewFAXReceiver returns a receiver of FAX pages.
-func NewFAXReceiver(o csdr.FAXOptions) (*ImageReceiver, error) {
+// NewFAXReceiver returns a receiver of FAX pages; a page whose pixels
+// would exceed maxBytes (0: no cap) ends there, incomplete.
+func NewFAXReceiver(o csdr.FAXOptions, maxBytes int) (*ImageReceiver, error) {
 	d, err := csdr.NewFAXDecoder(csdr.FAXRate, o)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ImageReceiver{dec: d, fax: true, rate: csdr.FAXRate, out: make([]byte, imageOut)}, nil
+	return &ImageReceiver{dec: d, fax: true, rate: csdr.FAXRate, out: make([]byte, imageOut), maxBytes: maxBytes}, nil
 }
 
 // Lag returns how far the decoder works behind the last input sample.
@@ -195,25 +204,39 @@ func (r *ImageReceiver) parse() {
 			continue
 		}
 
+		// A row is longer than a header (480 bytes at least).
 		n := r.cur.Width * r.cur.Channels
 		if len(r.pending) < n {
 			return
 		}
 
-		row := r.pending[:n]
-
-		if r.fax && bytes.HasPrefix(row, faxEndMark) {
-			if !r.padding {
-				r.end(true)
-				r.padding = true
+		// A new image started before the rows of this one ended: an SSTV
+		// decoder that lost the start sync of a Scottie image writes its
+		// header and no row; a FAX page restarted before its end marks.
+		if r.isHeader(r.pending) {
+			if !r.skip {
+				r.end(false)
 			}
-		} else if r.padding {
-			// A new page started before the end marks of the last one
-			// were all written.
-			r.cur, r.padding = nil, false
+
+			r.cur, r.skip = nil, false
 
 			continue
-		} else {
+		}
+
+		row := r.pending[:n]
+
+		switch {
+		case r.fax && bytes.HasPrefix(row, faxEndMark):
+			if !r.skip {
+				r.end(true)
+				r.skip = true
+			}
+		case r.skip:
+		case r.maxBytes > 0 && len(r.cur.Pix)+n > r.maxBytes:
+			// The page would exceed the file cap: it ends here.
+			r.end(false)
+			r.skip = true
+		default:
 			r.row(row)
 		}
 
@@ -221,15 +244,41 @@ func (r *ImageReceiver) parse() {
 		r.cur.Rows++
 
 		if r.cur.Rows == r.cur.Height {
-			if !r.padding {
+			if !r.skip {
 				// The SSTV decoder blanks the rows of an image it lost;
 				// a FAX page reached its longest length.
 				r.end(r.fax || r.cur.Lines == r.cur.Height)
 			}
 
-			r.cur, r.padding = nil, false
+			r.cur, r.skip = nil, false
 		}
 	}
+}
+
+// sstvWidths are the line widths of the SSTV modes of libcsdr++.
+var sstvWidths = map[int]bool{160: true, 256: true, 320: true, 512: true, 640: true, 800: true}
+
+// isHeader reports whether b starts with a BMP header of the receiver's
+// decoder: 24-bit with 's' in byte 7 for SSTV, IOC/4 in byte 6 for FAX.
+func (r *ImageReceiver) isHeader(b []byte) bool {
+	if len(b) < 54 || b[0] != 'B' || b[1] != 'M' || binary.LittleEndian.Uint32(b[14:]) != 40 || binary.LittleEndian.Uint16(b[26:]) != 1 {
+		return false
+	}
+
+	w := int(int32(binary.LittleEndian.Uint32(b[18:])))
+	h := -int(int32(binary.LittleEndian.Uint32(b[22:])))
+	bpp := int(binary.LittleEndian.Uint16(b[28:]))
+	off := int(binary.LittleEndian.Uint32(b[10:]))
+
+	if h < 1 || h > maxImageSide {
+		return false
+	}
+
+	if !r.fax {
+		return b[7] == 0x73 && bpp == 24 && off == 54 && sstvWidths[w]
+	}
+
+	return (b[6] == 144 && w == 1812 || b[6] == 72 && w == 908) && (bpp == 8 && off == 54+1024 || bpp == 24 && off == 54)
 }
 
 // header parses the BMP header at the start of the pending stream, if
@@ -248,28 +297,34 @@ func (r *ImageReceiver) header() bool {
 	}
 
 	h := r.pending
-	off := int(binary.LittleEndian.Uint32(h[10:]))
-	w := int(int32(binary.LittleEndian.Uint32(h[18:])))
-	height := -int(int32(binary.LittleEndian.Uint32(h[22:])))
-	bpp := int(binary.LittleEndian.Uint16(h[28:]))
-
-	if off < 54 || off > 54+1024 || w < 1 || w > maxImageSide || height < 1 || height > maxImageSide || (bpp != 8 && bpp != 24) {
+	if !r.isHeader(h) {
 		r.pending = r.pending[2:]
 
 		return true
 	}
 
+	off := int(binary.LittleEndian.Uint32(h[10:]))
 	if len(r.pending) < off {
 		return false
 	}
 
-	m := &Image{Width: w, Height: height, Channels: bpp / 8}
+	m := &Image{
+		Width: int(binary.LittleEndian.Uint32(h[18:])), Height: -int(int32(binary.LittleEndian.Uint32(h[22:]))),
+		Channels: int(binary.LittleEndian.Uint16(h[28:])) / 8,
+	}
+
 	if r.fax {
 		m.IOC = int(h[6]) * 4
 	} else {
 		m.VIS = int(h[6])
 	}
 
+	size := m.Width * m.Height * m.Channels
+	if r.maxBytes > 0 {
+		size = min(size, r.maxBytes)
+	}
+
+	m.Pix = make([]byte, 0, size)
 	r.pending = r.pending[off:]
 	r.cur = m
 	r.events = append(r.events, ImageEvent{Kind: ImageStart, Image: m})
@@ -317,7 +372,7 @@ func (r *ImageReceiver) end(complete bool) {
 // it is not complete.
 func (r *ImageReceiver) Close() *Image {
 	m := r.cur
-	if r.padding {
+	if r.skip {
 		m = nil
 	}
 

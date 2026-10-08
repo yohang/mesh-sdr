@@ -134,10 +134,12 @@ type files struct {
 	got []app.ProducedFile
 }
 
-func (f *files) Produced(p app.ProducedFile) {
+func (f *files) Produced(p app.ProducedFile) error {
 	f.mu.Lock()
 	f.got = append(f.got, p)
 	f.mu.Unlock()
+
+	return nil
 }
 
 func (f *files) all() []app.ProducedFile {
@@ -375,7 +377,9 @@ func TestDecoderImages(t *testing.T) {
 	r := e.run.last()
 
 	// Without its start, an image has no reception: it is dropped.
-	r.ev.File(app.ProducedFile{Kind: "sstv", Data: []byte("png"), Start: time.Now()})
+	if err := r.ev.File(app.ProducedFile{Kind: "sstv", Data: []byte("png"), Start: time.Now()}); err == nil {
+		t.Error("an image without its start was sent")
+	}
 
 	r.ev.Decode(app.DecodeRecord{Time: time.Now(), Schema: "image.v1", Text: "Robot 36 (VIS 8), 320×240", Payload: json.RawMessage(`{"event":"start"}`)})
 	r.ev.Decode(app.DecodeRecord{Time: time.Now(), Schema: "image.v1", Payload: json.RawMessage(`{"event":"row","row":0}`), Live: true})
@@ -391,7 +395,9 @@ func TestDecoderImages(t *testing.T) {
 	}
 
 	start := time.UnixMilli(1_800_000_000_000)
-	r.ev.File(app.ProducedFile{Kind: "sstv", Data: []byte("png"), Start: start, Metadata: map[string]any{"vis_code": 8}})
+	if err := r.ev.File(app.ProducedFile{Kind: "sstv", Data: []byte("png"), Start: start, Metadata: map[string]any{"vis_code": 8}}); err != nil {
+		t.Fatal(err)
+	}
 
 	got := e.files.all()
 	if len(got) != 1 {

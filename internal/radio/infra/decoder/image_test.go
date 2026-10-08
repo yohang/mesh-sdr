@@ -42,10 +42,12 @@ func (e *imageEvents) events() app.DecoderEvents {
 			e.status = append(e.status, s.State)
 			e.mu.Unlock()
 		},
-		File: func(f app.ProducedFile) {
+		File: func(f app.ProducedFile) error {
 			e.mu.Lock()
 			e.files = append(e.files, f)
 			e.mu.Unlock()
+
+			return nil
 		},
 	}
 }
@@ -82,6 +84,16 @@ func (e *imageEvents) waitEnd(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("no image end")
 	}
+}
+
+// countRows counts the rows of rows messages.
+func countRows(msgs []ImageRecord) int {
+	n := 0
+	for _, m := range msgs {
+		n += m.Count
+	}
+
+	return n
 }
 
 // startImage starts a session of mode and feeds it audio at rate in 20 ms
@@ -127,15 +139,15 @@ func TestImageSSTV(t *testing.T) {
 	run.Close()
 
 	p := ev.payloads(t)
-	if len(p["start"]) != 1 || p["start"][0].SSTVMode != "Robot 36" || *p["start"][0].VISCode != 8 || len(p["row"]) != 240 {
-		t.Fatalf("%d starts (%+v), %d rows", len(p["start"]), p["start"], len(p["row"]))
+	if len(p["start"]) != 1 || p["start"][0].SSTVMode != "Robot 36" || *p["start"][0].VISCode != 8 || countRows(p["rows"]) != 240 {
+		t.Fatalf("%d starts (%+v), %d rows", len(p["start"]), p["start"], countRows(p["rows"]))
 	}
 
-	if row := p["row"][10]; *row.Row != 10 || row.Width != 320 || row.Channels != 3 || len(row.Pixels) != 960 {
-		t.Errorf("row %+v", row)
+	if rows := p["rows"][1]; rows.Width != 320 || rows.Channels != 3 || len(rows.Pixels) != rows.Count*960 || *rows.Row != *p["rows"][0].Row+p["rows"][0].Count {
+		t.Errorf("rows %+v", rows)
 	}
 
-	if end := p["end"]; len(end) != 1 || end[0].Lines != 240 || !end[0].Complete || !end[0].Saved {
+	if end := p["end"]; len(end) != 1 || end[0].Lines != 240 || !end[0].Complete || !end[0].Sent || end[0].Short {
 		t.Errorf("end %+v", end)
 	}
 
@@ -173,7 +185,7 @@ func TestImageSSTVShort(t *testing.T) {
 	ev.waitEnd(t)
 
 	p := ev.payloads(t)
-	if end := p["end"]; len(end) != 1 || end[0].Complete || end[0].Saved || end[0].Lines < 55 || end[0].Lines >= 120 {
+	if end := p["end"]; len(end) != 1 || end[0].Complete || end[0].Sent || !end[0].Short || end[0].Lines < 55 || end[0].Lines >= 120 {
 		t.Errorf("end %+v", end)
 	}
 
@@ -204,7 +216,7 @@ func TestImageFAX(t *testing.T) {
 
 		saved := minLength < 40
 
-		if end := p["end"]; len(end) != 1 || end[0].Lines != 40 || !end[0].Complete || end[0].Saved != saved {
+		if end := p["end"]; len(end) != 1 || end[0].Lines != 40 || !end[0].Complete || end[0].Sent != saved || end[0].Short == saved {
 			t.Errorf("min %d: end %+v", minLength, end)
 		}
 
