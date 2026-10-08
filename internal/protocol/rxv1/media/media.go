@@ -3,6 +3,8 @@
 // is pure: plain structs with their JSON shape, no I/O.
 package media
 
+import "encoding/json"
+
 // Client names the client software.
 type Client struct {
 	Name    string `json:"name"`
@@ -78,6 +80,7 @@ const (
 	CodecADPCM   = "adpcm-ima"
 	CodecOpus    = "opus"
 	KindFFT      = "fft"
+	KindFFT2     = "fft2"
 	KindAudio    = "audio"
 	ModeNFM      = "nfm"
 	ReasonClosed = "closed"
@@ -254,6 +257,24 @@ type DeviceConfig struct {
 	NRInitial        int         `json:"nr_initial"`
 	Limits           FreqLimits  `json:"limits"`
 	Permissions      Permissions `json:"permissions"`
+	// Decoders are the digital modes of the node's catalogue (additive
+	// field, DEC-001, DEC-002): the available ones, and the others with
+	// the reason (DIAG-004).
+	Decoders []DigitalMode `json:"decoders"`
+}
+
+// DigitalMode is one digital mode of device.config: a decoder run on top
+// of an underlying (analog) mode.
+type DigitalMode struct {
+	Mode  string `json:"mode"`
+	Label string `json:"label"`
+	// Underlying are the allowed underlying modes, the default first
+	// (DEC-003).
+	Underlying []string `json:"underlying"`
+	Available  bool     `json:"available"`
+	// Reason says why an unavailable mode cannot run: the missing tool for
+	// admins, a generic text for the others.
+	Reason string `json:"reason,omitempty"`
 }
 
 // DeviceConfigPatch is device.config.patch (node → client).
@@ -340,6 +361,67 @@ type Applied struct {
 	Bandpass  Bandpass `json:"bandpass"`
 	SquelchDB *float64 `json:"squelch_db"`
 	NR        NR       `json:"nr"`
+	// Decoder is the digital mode decoding the demodulator's output
+	// (additive field, DEC-002); null: none.
+	Decoder *string `json:"decoder"`
+}
+
+// DecoderSet is decoder.set (client → node, §6.4): start the decoder of a
+// digital mode on a demodulator (decoder null: stop it). A demodulator
+// whose mode the digital mode does not allow switches to the mode's
+// default underlying mode (DEC-003). Offset and options belong to later
+// decoders and are ignored.
+type DecoderSet struct {
+	DemodID  string         `json:"demod_id"`
+	Decoder  *string        `json:"decoder"`
+	OffsetHz *int64         `json:"offset_hz,omitempty"`
+	Options  map[string]any `json:"options,omitempty"`
+}
+
+// DecoderStarted is the ack result of decoder.set.
+type DecoderStarted struct {
+	// DecoderSessionID is empty when the decoder was stopped.
+	DecoderSessionID string  `json:"decoder_session_id,omitempty"`
+	Applied          Applied `json:"applied"`
+}
+
+// Decode is decode (node → client, §6.5): one message of the client's own
+// decoder. Text is the plain-text rendering (untrusted RF text, at most
+// MaxDecodeText bytes); Payload the typed record named by Schema.
+type Decode struct {
+	DemodID          string          `json:"demod_id"`
+	DecoderSessionID string          `json:"decoder_session_id"`
+	Mode             string          `json:"mode"`
+	TS               int64           `json:"ts"`
+	FreqHz           int64           `json:"freq_hz"`
+	Schema           string          `json:"schema"`
+	Text             string          `json:"text"`
+	Payload          json.RawMessage `json:"payload"`
+}
+
+// MaxDecodeText bounds the text of a decoded message (§8.4 typed output
+// rule 4).
+const MaxDecodeText = 4096
+
+// Decoder session states of diag.state (DEC-002: the minimal status; the
+// diagnostics state machine was dropped, ADR 0024).
+const (
+	DecoderRunning     = "running"
+	DecoderUnavailable = "unavailable"
+	DecoderError       = "error"
+	DecoderStopped     = "stopped"
+)
+
+// DiagState is diag.state (node → client): the status of a decoder
+// session, on every change.
+type DiagState struct {
+	DemodID          string `json:"demod_id"`
+	DecoderSessionID string `json:"decoder_session_id"`
+	Decoder          string `json:"decoder"`
+	State            string `json:"state"`
+	Reason           string `json:"reason,omitempty"`
+	// Since is the time of the change in Unix milliseconds.
+	Since int64 `json:"since"`
 }
 
 // AppliedResult is the ack result of demod.set.

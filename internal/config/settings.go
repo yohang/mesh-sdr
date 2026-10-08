@@ -33,6 +33,7 @@ type Settings struct {
 	Retention SettingsRetention `toml:"retention" envPrefix:"RETENTION__" jsonschema:"description=Retention of DB-backed stores."`
 	Files     SettingsFiles     `toml:"files" envPrefix:"FILES__" jsonschema:"description=Retention of the files the nodes send (FIL-004)."`
 	Grid      SettingsGrid      `toml:"grid" envPrefix:"GRID__" jsonschema:"description=Node health (GRID-009)."`
+	Decoders  SettingsDecoders  `toml:"decoders" envPrefix:"DECODERS__" jsonschema:"description=Decoding settings pushed to the nodes (Admin › Decoding)."`
 
 	Invitations   SettingsInvitations   `toml:"invitations" envPrefix:"INVITATIONS__" jsonschema:"description=Invitations (ACC-002)."`
 	PasswordReset SettingsPasswordReset `toml:"password_reset" envPrefix:"PASSWORD_RESET__" jsonschema:"description=Password reset links (ACC-003)."`
@@ -113,6 +114,23 @@ type SettingsRetention struct {
 	AuditLog Duration `toml:"audit_log" env:"AUDIT_LOG" jsonschema_extras:"x-min-duration=30d,x-max-duration=3650d,x-label=Audit log" jsonschema_description:"Audit log entries are deleted after this long (at least 30 days)."`
 	// Connections is the retention of closed presence rows (GRID-017).
 	Connections Duration `toml:"connections" env:"CONNECTIONS" jsonschema_extras:"x-min-duration=1d,x-max-duration=3650d,x-label=Closed connections" jsonschema_description:"Closed connections of the presence registry are deleted after this long."`
+	// DecodedMessages bounds the decoded messages (DEC-047, ADR 0028).
+	DecodedMessages SettingsDecodedRetention `toml:"decoded_messages" envPrefix:"DECODED_MESSAGES__" jsonschema:"description=Retention of the decoded messages (DEC-047)."`
+}
+
+// SettingsDecodedRetention is the [settings.retention.decoded_messages]
+// table: one age for every mode, plus a row cap (ADR 0028).
+type SettingsDecodedRetention struct {
+	MaxAge  Duration `toml:"max_age" env:"MAX_AGE" jsonschema_extras:"x-min-duration=1d,x-max-duration=3650d,x-label=Decoded messages" jsonschema_description:"Decoded messages are deleted after this long."`
+	MaxRows int      `toml:"max_rows" env:"MAX_ROWS" jsonschema:"minimum=1000,maximum=100000000" jsonschema_extras:"x-label=Decoded messages kept at most" jsonschema_description:"Beyond this many decoded messages, the oldest are deleted (1000 to 100000000)."`
+}
+
+// SettingsDecoders is the [settings.decoders] table (Admin › Decoding):
+// the decoding settings the hub pushes to the nodes in the desired state.
+type SettingsDecoders struct {
+	// MaxRestarts is the crash-loop threshold of decoder processes (ADR 0017
+	// decision 4, DIAG-003).
+	MaxRestarts int `toml:"max_restarts" env:"MAX_RESTARTS" jsonschema:"minimum=1,maximum=100" jsonschema_extras:"x-label=Restarts before a decoder gives up" jsonschema_description:"A decoder process that exits unexpectedly this many times within 5 minutes stops restarting: the session shows an error and retries every 10 minutes, or when the listener selects the decoder again (1 to 100). Applies to sessions started from now on."`
 }
 
 // SettingsFiles is the [settings.files] table: retention of the files the
@@ -168,9 +186,11 @@ func DefaultSettings() Settings {
 		},
 		Retention: SettingsRetention{
 			Sessions: MustDuration("30d"), AuditLog: MustDuration("365d"), Connections: MustDuration("30d"),
+			DecodedMessages: SettingsDecodedRetention{MaxAge: MustDuration("30d"), MaxRows: 1_000_000},
 		},
 		Files:         SettingsFiles{RetentionCount: 20},
 		Grid:          SettingsGrid{HeartbeatIntervalS: 10, OfflineAfterS: 60},
+		Decoders:      SettingsDecoders{MaxRestarts: 5},
 		Invitations:   SettingsInvitations{TTLHours: 168},
 		PasswordReset: SettingsPasswordReset{TTLMinutes: 30},
 	}

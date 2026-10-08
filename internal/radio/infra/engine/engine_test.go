@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"log/slog"
+	"strings"
 	"math"
 	"math/cmplx"
 	"slices"
@@ -246,6 +247,8 @@ func TestModeSwitch(t *testing.T) {
 		{"usb", 12000, 300, 2700},
 		{"cw", 12000, 650, 950},
 		{"wfm", 48000, -75_000, 75_000},
+		{"usbd", 48000, 0, 24_000},
+		{"lsbd", 48000, -24_000, 0},
 		{"sam", 12000, -4000, 4000},
 	} {
 		p := d.Params()
@@ -266,8 +269,60 @@ func TestModeSwitch(t *testing.T) {
 		eventually(t, func() bool { return audio.Load() > before+3 })
 	}
 
-	if got := Modes(); len(got) != 7 || got[0] != "am" {
+	if got := Modes(); len(got) != 9 || got[0] != "am" {
 		t.Fatalf("modes %v", got)
+	}
+}
+
+// The DATA modes have their own capabilities (DEM-013).
+func TestCapabilities(t *testing.T) {
+	got := Capabilities()
+	if len(got) != 3 || got[0].Cap != AnalogCap || strings.Join(got[0].Modes, ",") != "am,sam,nfm,usb,lsb,cw,wfm" ||
+		got[1].Cap != "cap:usbd" || strings.Join(got[1].Modes, ",") != "usbd" || got[2].Cap != "cap:lsbd" {
+		t.Errorf("capabilities = %+v", got)
+	}
+}
+
+// A tap receives the demodulated audio at the output rate until cancelled
+// (decoder sessions, DEC-002).
+func TestTap(t *testing.T) {
+	e := New(slog.New(slog.DiscardHandler))
+	defer e.Close()
+
+	e.Start(tuning())
+
+	d, err := e.NewDemod(params(), func(app.AudioOut) {}, func(app.Meter) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	var (
+		samples atomic.Int64
+		tapRate atomic.Int64
+	)
+
+	cancel := d.Tap(func(b app.AudioBlock) {
+		samples.Add(int64(len(b.Samples)))
+		tapRate.Store(int64(b.Rate))
+	})
+
+	next := feed(e, 0, 300*time.Millisecond, 30_000)
+	eventually(t, func() bool { return samples.Load() > 1000 })
+
+	if tapRate.Load() != int64(params().OutputRate) {
+		t.Errorf("tap rate %d", tapRate.Load())
+	}
+
+	cancel()
+
+	n := samples.Load()
+	feed(e, next, 100*time.Millisecond, 30_000)
+
+	time.Sleep(50 * time.Millisecond)
+
+	if samples.Load() != n {
+		t.Error("audio after cancel")
 	}
 }
 

@@ -65,6 +65,16 @@ type StatePolicy struct {
 	// Waterfall are the waterfall defaults of device.config (hub settings
 	// waterfall.*, ADR 0026); nil: the node defaults.
 	Waterfall *StateWaterfall `json:"waterfall,omitempty"`
+	// Decoders are the decoding settings (hub settings decoders.*, Admin ›
+	// Decoding); nil: the node defaults.
+	Decoders *StateDecoders `json:"decoders,omitempty"`
+}
+
+// StateDecoders are the decoding settings a node applies.
+type StateDecoders struct {
+	// MaxRestarts is the crash-loop threshold of decoder processes: that
+	// many unexpected exits within 5 minutes (1 to 100).
+	MaxRestarts int `json:"max_restarts"`
 }
 
 // StateWaterfall are the waterfall levels (dB) and palette of the receiver.

@@ -159,6 +159,9 @@ type Tool struct {
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
 	OK      bool   `json:"ok"`
+	// Reason says why a tool is not usable ("jt9 not found", "version
+	// 2.2.0 is older than 2.3"; additive field, DIAG-004).
+	Reason string `json:"reason,omitempty"`
 }
 
 // Decoder is one decoder capability.
@@ -215,6 +218,44 @@ type Connection struct {
 	// Reason is the close reason of connection.closed.
 	Reason string `json:"reason,omitempty"`
 }
+
+// DecodeBatch is decode.batch (node → hub, §4.4): decoded messages for
+// decoded_messages (DEC-047).
+type DecodeBatch struct {
+	Seq     int64    `json:"seq"`
+	Decodes []Decode `json:"decodes"`
+}
+
+// Decode is one decoded message of a decode.batch.
+type Decode struct {
+	DeviceID string `json:"device_id"`
+	// SessionID is the decoder session (decoder_session_id).
+	SessionID string `json:"session_id,omitempty"`
+	// PresetID is the active preset of the device, if any.
+	PresetID string `json:"preset_id,omitempty"`
+	Mode     string `json:"mode"`
+	// Family is the decoder family of the mode (§9.4: paging, wsjt…).
+	Family string `json:"family"`
+	// Freq is the absolute RF frequency in Hz.
+	Freq int64 `json:"freq"`
+	// TS is the decode time in Unix milliseconds (the slot start for slot
+	// modes).
+	TS int64 `json:"ts"`
+	// Source is listener or background.
+	Source string `json:"source"`
+	// CID is the media connection of a listener's decoder.
+	CID    string `json:"cid,omitempty"`
+	Schema string `json:"schema"`
+	// Text is the plain-text rendering (untrusted RF text, at most 4 KiB).
+	Text    string          `json:"text,omitempty"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// Decode sources.
+const (
+	SourceListener   = "listener"
+	SourceBackground = "background"
+)
 
 // EventsDropped is node.events_dropped (node → hub, §4.9).
 type EventsDropped struct {

@@ -27,6 +27,10 @@ const (
 	// WideChannelRate is the minimum channel rate of broadcast FM (200 kHz
 	// IF, DEM-015).
 	WideChannelRate = 200000
+	// DataChannelRate is the minimum channel rate of the DATA modes (usbd,
+	// lsbd: a 24 kHz side band, DEM-013), the band plus the channelizer
+	// transition on each side.
+	DataChannelRate = 2 * (24000 + Transition/2)
 )
 
 // Broadcast FM de-emphasis time constants in µs (DEM-016, hub setting

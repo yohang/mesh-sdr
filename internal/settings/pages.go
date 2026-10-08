@@ -67,6 +67,7 @@ var formPages = []formPage{
 		Forms: []sectionSpec{
 			{ID: "retention", Title: "Retention policies", Keys: []string{
 				"retention.sessions", "retention.audit_log", "retention.connections",
+				"retention.decoded_messages.max_age", "retention.decoded_messages.max_rows",
 			}},
 			{ID: "files", Title: "Files", Description: "Files sent by the nodes (SSTV and FAX images, text logs): the hub applies these limits after each new file and every 5 minutes, oldest files first.",
 				Keys: []string{"files.retention_count", "files.retention_days", "files.max_total_bytes"}},
@@ -80,6 +81,13 @@ var formPages = []formPage{
 				Keys: []string{"grid.heartbeat_interval_s", "grid.offline_after_s"}},
 			{ID: "demodulation", Title: "Demodulation", Description: "Nodes apply the de-emphasis to their running demodulators; the audio compression applies to receivers opened from now on.",
 				Keys: []string{"audio_compression", "wfm_deemphasis"}},
+		},
+	},
+	{
+		Section: "decoding", Title: "Decoding", Path: "/admin/decoding",
+		Intro: "Settings of the digital decoders, pushed to every node. The decoder resources of a node (batch workers, queue, process limits) are in its node config.",
+		Forms: []sectionSpec{
+			{ID: "supervision", Title: "Decoder processes", Keys: []string{"decoders.max_restarts"}},
 		},
 	},
 }

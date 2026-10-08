@@ -69,6 +69,7 @@ type DesiredState interface {
 type Streams struct {
 	devices Devices
 	state   DesiredState
+	dec     Decoding
 	log     *slog.Logger
 
 	// switching serialises the shared changes of the devices
@@ -100,10 +101,10 @@ const (
 )
 
 // NewStreams returns the handler. state may be nil (no hub state: no
-// preset, the node defaults apply).
-func NewStreams(d Devices, state DesiredState, log *slog.Logger) *Streams {
+// preset, the node defaults apply); a zero dec offers no digital mode.
+func NewStreams(d Devices, state DesiredState, dec Decoding, log *slog.Logger) *Streams {
 	s := &Streams{
-		devices: d, state: state, log: log, sessions: map[*session]struct{}{},
+		devices: d, state: state, dec: dec, log: log, sessions: map[*session]struct{}{},
 		lastSwitch: map[string]time.Time{}, applied: map[string]activePreset{},
 		retunes: ratelimit.New[string](RetuneEvery, RetuneBurst, ratelimit.DefaultCapacity), now: time.Now,
 	}
@@ -294,9 +295,11 @@ type demodState struct {
 	stream uint16
 	demod  app.Demod
 	// mu makes each read-modify-write of the parameters atomic: the
-	// listener's demod.set and audio.configure, and the moves of a shared
-	// centre change made by another session.
+	// listener's demod.set, decoder.set and audio.configure, and the moves
+	// of a shared centre change made by another session. It guards dec.
 	mu sync.Mutex
+	// dec is the decoder of the demodulator (DEC-002), nil when none.
+	dec *decoderSession
 }
 
 func wireCodec(c app.AudioCodec) rxv1.Codec {
@@ -355,6 +358,8 @@ func (ss *session) Handle(_ context.Context, req rxv1.Envelope) {
 		ss.retune(req)
 	case rxv1.TypePresetSelect:
 		ss.selectPreset(req)
+	case rxv1.TypeDecoderSet:
+		ss.setDecoder(req)
 	default:
 		ss.peer.Fail(req, rxv1.CodeUnsupportedType, "not a device message")
 	}
@@ -422,6 +427,7 @@ func (ss *session) deviceConfig(rev int, snap domain.Snapshot, info app.Spectrum
 		Permissions: media.Permissions{
 			Preset: c.Allows(snap.ID, token.PermPreset), Retune: perm,
 		},
+		Decoders: ss.digitalModes(),
 	}
 
 	if p := active; p != nil {
@@ -972,13 +978,19 @@ func (ss *session) setDemod(req rxv1.Envelope) {
 		params.NR = app.NR{Enabled: p.NR.Enabled, ThresholdDB: p.NR.Threshold}
 	}
 
+	before := d.demod.Params().Mode
+
 	if err := d.demod.Set(params); err != nil {
 		ss.fail(req, err)
 
 		return
 	}
 
-	ss.peer.Ack(req, media.AppliedResult{Applied: applied(d.demod.Params())})
+	if d.demod.Params().Mode != before {
+		ss.underlyingChanged(d)
+	}
+
+	ss.peer.Ack(req, media.AppliedResult{Applied: appliedFor(d)})
 
 	if p.Mode != nil {
 		ss.report()
@@ -1008,6 +1020,10 @@ func (ss *session) removeDemod(req rxv1.Envelope) {
 }
 
 func (ss *session) closeDemod(d *demodState) {
+	d.mu.Lock()
+	ss.stopDecoder(d, true)
+	d.mu.Unlock()
+
 	d.demod.Close()
 	ss.q.RemoveStream(d.stream)
 	ss.peer.Send(rxv1.TypeStreamClose, media.StreamClose{StreamID: d.stream, Reason: media.ReasonClosed})
@@ -1301,7 +1317,11 @@ func (ss *session) moveDemod(d *demodState, oldCenter, startHz int64, snap domai
 		return
 	}
 
-	res := applied(d.demod.Params())
+	if d.demod.Params().Mode != cur.Mode {
+		ss.underlyingChanged(d)
+	}
+
+	res := appliedFor(d)
 	ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: d.stream, Applied: &res})
 }
 
@@ -1409,6 +1429,10 @@ func (ss *session) Close() {
 	ss.mu.Unlock()
 
 	for _, d := range demods {
+		d.mu.Lock()
+		ss.stopDecoder(d, false)
+		d.mu.Unlock()
+
 		d.demod.Close()
 	}
 

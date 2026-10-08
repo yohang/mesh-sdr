@@ -175,6 +175,13 @@ func (s *DesiredState) Apply(st ctl.StateApply) ctl.StateApplied {
 		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: "invalid wfm_deemphasis"})
 	}
 
+	// The decoding settings: none from a hub that predates them.
+	if d := st.Policy.Decoders; d != nil && (d.MaxRestarts < 1 || d.MaxRestarts > 100) {
+		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: "invalid decoders.max_restarts"})
+	} else {
+		s.policy.Decoders = d
+	}
+
 	s.presets, s.devices = presets, devices
 
 	// The revision is recorded only when every part was accepted: after a
