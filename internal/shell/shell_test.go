@@ -30,6 +30,16 @@ func (v values) String(key string) string {
 	return map[string]string{"ui.theme_mode": "auto", "receiver.name": "MeshSDR", "receiver.usage_policy_url": "/policy", "ui.shortcut_set": "default"}[key]
 }
 
+// Bool reads a boolean setting stored as "true" or "false"; the defaults
+// the shell reads apply otherwise.
+func (v values) Bool(key string) bool {
+	if s, ok := v[key]; ok {
+		return s == "true"
+	}
+
+	return key == "ui.recorder_enabled"
+}
+
 // router serves the shell module the way the hub does, with a stub API.
 func router(settings values) http.Handler {
 	m := shell.New(shell.Deps{Settings: settings, Logger: discard})

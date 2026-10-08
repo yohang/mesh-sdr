@@ -19,6 +19,8 @@
 // Demodulator controls (RX-007, RX-020, RX-023/024, RX-027): mode, pass
 // band, squelch and noise reduction go to the node with demod.set; the ack
 // names the values in force (clamped by the node), which the engine keeps.
+// The pass band the listener sets is saved per mode (RX-021, bandpasses.js)
+// and sent with each new demodulator and mode switch.
 // Broadcast FM needs 48 kHz audio (HD path), so a switch to or from it
 // reconfigures the audio stream around the mode change. The demodulator
 // settings are kept across reconnections to the same device.
@@ -63,6 +65,7 @@
 import { apiFetch } from "../csrf.js";
 import { decodeADPCM } from "./adpcm.js";
 import { AudioPlayer } from "./audio.js";
+import { savedBandpass, saveBandpass } from "./bandpasses.js";
 import { Codec, envelope, Flag, FrameType, parseADPCM, parseFFTU8, parseFrame, seqGap } from "./rxv1.js";
 
 const SUBPROTOCOL = "rx.v1";
@@ -165,14 +168,14 @@ class Engine extends EventTarget {
     this.codec = "adpcm-ima";
     // Display settings, kept across navigation (per-session runtime state):
     // zoom factor and first visible bin, spectrum visibility (RX-016), manual
-    // levels (null: the device defaults, RX-017/018), side panel open
-    // (UI-019).
+    // levels (null: the device defaults, RX-017/018), docked side panel
+    // open (UI-019; null: the layout's default, UI-007).
     this.display = {
       zoom: 1,
       start: 0,
       spectrum: true,
       /** @type {{min: number, max: number} | null} */ levels: null,
-      panel: true,
+      /** @type {boolean | null} */ panel: null,
     };
     /** @type {Wanted | null} deep link tuning, applied at the next attach */
     this.want = null;
@@ -597,7 +600,10 @@ class Engine extends EventTarget {
         offset_hz: k.offset_hz ?? start.offset_hz ?? 0,
         squelch_db: k.squelch_db ?? this.device?.squelch?.initial ?? SQUELCH_MIN_DB,
       };
-      if (k.bandpass) create.bandpass = k.bandpass;
+      // The pass band kept for this device, else the one saved for the
+      // mode (RX-021), else the mode's default.
+      const bandpass = k.bandpass ?? savedBandpass(mode);
+      if (bandpass) create.bandpass = bandpass;
       if (k.nr) create.nr = k.nr;
       const d = await this.request("demod.create", create);
       if (gen !== this.gen) return;
@@ -803,6 +809,7 @@ class Engine extends EventTarget {
     d.lowHz = low;
     d.highHz = high;
     this.kept.bandpass = { low_hz: low, high_hz: high };
+    saveBandpass(d.mode, low, high);
     this.emit("tune");
     this.queue({ bandpass: { low_hz: low, high_hz: high } });
   }
@@ -914,10 +921,16 @@ class Engine extends EventTarget {
         if (gen !== this.gen) return;
       }
       delete this.queued.bandpass;
-      const res = await this.request("demod.set", { demod_id: d.id, mode });
+      // The pass band saved for the new mode (RX-021), else its default.
+      const saved = savedBandpass(mode);
+      /** @type {Record<string, any>} */
+      const set = { demod_id: d.id, mode };
+      if (saved) set.bandpass = saved;
+      const res = await this.request("demod.set", set);
       if (gen !== this.gen || this.demod !== d) return;
       this.kept.mode = mode;
-      delete this.kept.bandpass;
+      if (saved) this.kept.bandpass = saved;
+      else delete this.kept.bandpass;
       this.applied(res?.applied ?? {});
       if (rate < (this.audioStream?.rate ?? AUDIO_RATE)) {
         await this.request("audio.configure", { codec: this.audioCodec(), sample_rate: rate });

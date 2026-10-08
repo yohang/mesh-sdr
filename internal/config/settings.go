@@ -63,8 +63,9 @@ type SettingsPrivacy struct {
 
 // SettingsUI is the [settings.ui] table (ADM-006, UI-001).
 type SettingsUI struct {
-	ThemeMode   string `toml:"theme_mode" env:"THEME_MODE" jsonschema:"enum=light,enum=dark,enum=auto" jsonschema_extras:"x-public=true,x-label=Theme" jsonschema_description:"Theme mode (UI-001): light or dark, or auto to follow the visitor's prefers-color-scheme. A change applies on the next full page load."`
-	ShortcutSet string `toml:"shortcut_set" env:"SHORTCUT_SET" jsonschema:"enum=default,enum=off" jsonschema_extras:"x-public=true,x-label=Keyboard shortcuts" jsonschema_description:"Keyboard shortcut set: default, or off to disable single-key shortcuts."`
+	ThemeMode       string `toml:"theme_mode" env:"THEME_MODE" jsonschema:"enum=light,enum=dark,enum=auto" jsonschema_extras:"x-public=true,x-label=Theme" jsonschema_description:"Theme mode (UI-001): light or dark, or auto to follow the visitor's prefers-color-scheme. A change applies on the next full page load."`
+	ShortcutSet     string `toml:"shortcut_set" env:"SHORTCUT_SET" jsonschema:"enum=default,enum=off" jsonschema_extras:"x-public=true,x-label=Keyboard shortcuts" jsonschema_description:"Keyboard shortcut set: default, or off to disable single-key shortcuts."`
+	RecorderEnabled bool   `toml:"recorder_enabled" env:"RECORDER_ENABLED" jsonschema_extras:"x-public=true,x-label=Browser recorder" jsonschema_description:"Show the Record button and the R shortcut of the receiver to every listener (REC-001); admins always have them. A convenience switch: it cannot prevent recording, because the audio is streamed to the browser anyway."`
 }
 
 // SettingsBandplan is the [settings.bandplan] table (RX-029, BMK-002).
@@ -141,7 +142,7 @@ func DefaultSettings() Settings {
 		Receiver:         SettingsReceiver{Name: "MeshSDR", UsagePolicyURL: "/policy"},
 		Privacy:          SettingsPrivacy{MaskIPs: true},
 		UI: SettingsUI{
-			ThemeMode: "auto", ShortcutSet: "default",
+			ThemeMode: "auto", ShortcutSet: "default", RecorderEnabled: true,
 		},
 		Bandplan:  SettingsBandplan{Region: "r1"},
 		Waterfall: SettingsWaterfall{MinDB: -88, MaxDB: -20, Palette: "turbo"},

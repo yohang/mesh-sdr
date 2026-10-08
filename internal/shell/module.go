@@ -79,17 +79,22 @@ type Module struct {
 	station  *Station
 	static   fs.FS
 	markdown *markdown
+	admin    Gate
 	logger   *slog.Logger
 	// bookmarks is the Bookmarks › Manage link of the receiver (nil: none).
 	bookmarks *BookmarksLink
 }
 
 // NewModule returns the shell router module. static is the embedded static
-// assets filesystem (web.Static).
+// assets filesystem (web.Static). admin tells whether the visitor is an
+// admin, who always gets the browser recorder (REC-001); nil: nobody.
 func NewModule(rd *render.Renderer, shell render.ShellSource, policy *Policy, station *Station, static fs.FS,
-	logger *slog.Logger,
+	admin Gate, logger *slog.Logger,
 ) *Module {
-	return &Module{render: rd, shell: shell, policy: policy, station: station, static: static, markdown: newMarkdown(), logger: logger}
+	return &Module{
+		render: rd, shell: shell, policy: policy, station: station, static: static, markdown: newMarkdown(), admin: admin,
+		logger: logger,
+	}
 }
 
 // Middlewares implements internal/http.Module: the shell has none.
@@ -152,11 +157,15 @@ func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 // BookmarksURL is the Bookmarks › Manage page, set for the visitors who may
 // add hub bookmarks (operators and admins): the Bookmarks tab links its add
 // form, pre-filled from the tuning.
+// Recorder shows the Record button and the R shortcut (REC-001): to every
+// listener with ui.recorder_enabled, to admins always. It is a convenience,
+// not an enforcement: the audio reaches the browser anyway.
 type receiverConfig struct {
 	SignedIn     bool   `json:"signed_in"`
 	LoginURL     string `json:"login_url"`
 	AudioCodec   string `json:"audio_codec"`
 	BookmarksURL string `json:"bookmarks_url,omitempty"`
+	Recorder     bool   `json:"recorder"`
 }
 
 // receiver is the Receiver section's entry page: the station (name,
@@ -172,7 +181,10 @@ func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sh := m.shell.Shell(r)
-	rx := receiverConfig{SignedIn: sh.User != nil, LoginURL: "/login", AudioCodec: st.AudioCodec}
+	rx := receiverConfig{
+		SignedIn: sh.User != nil, LoginURL: "/login", AudioCodec: st.AudioCodec,
+		Recorder: st.RecorderEnabled || (m.admin != nil && m.admin.Allows(r.Context())),
+	}
 	if b := m.bookmarks; b != nil && b.Gate != nil && b.Gate.Allows(r.Context()) {
 		rx.BookmarksURL = b.Path
 	}

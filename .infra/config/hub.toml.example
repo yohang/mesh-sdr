@@ -176,6 +176,10 @@ trusted_proxies = []
 # A change applies on the next full page load.
 # theme_mode = "auto"
 # shortcut_set = "default"               # default | off
+# Record button and R shortcut of the receiver for every listener (REC-001;
+# admins always have them). A convenience switch only: it cannot prevent
+# recording, because the audio is streamed to the browser anyway.
+# recorder_enabled = true
 
 [settings.bandplan]
 # IARU region of the band plan and of the region bookmark pack:

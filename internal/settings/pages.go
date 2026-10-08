@@ -52,6 +52,9 @@ var formPages = []formPage{
 		Forms: []sectionSpec{
 			{ID: "theme", Title: "Theme", Description: "A change applies on the next full page load.", Keys: []string{"ui.theme_mode"}},
 			{ID: "display", Title: "Display defaults", Keys: []string{"ui.shortcut_set"}},
+			{ID: "recorder", Title: "Recorder", Description: "Off hides the Record button and the R shortcut from listeners and operators; admins keep them. " +
+				"This is a convenience switch: it cannot prevent recording, because the audio is streamed to the browser anyway.",
+				Keys: []string{"ui.recorder_enabled"}},
 			{ID: "bandplan", Title: "Band plan", Description: "The region selects the band plan and the region bookmark pack shown to every listener.",
 				Keys: []string{"bandplan.region"}},
 			{ID: "waterfall", Title: "Waterfall", Description: "Levels and palette every receiver starts with; listeners can still set automatic levels.",

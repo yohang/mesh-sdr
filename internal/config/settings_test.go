@@ -87,6 +87,8 @@ func TestValidateSetting(t *testing.T) {
 		{"ui.theme_mode", `"dark"`, ""},
 		{"ui.theme_mode", `"sepia"`, CodeInvalidValue},
 		{"ui.theme_mode", `3`, CodeInvalidType},
+		{"ui.recorder_enabled", `false`, ""},
+		{"ui.recorder_enabled", `"no"`, CodeInvalidType},
 		{"grid.heartbeat_interval_s", `300`, ""},
 		{"grid.heartbeat_interval_s", `301`, CodeInvalidValue},
 		{"grid.heartbeat_interval_s", `1.5`, CodeInvalidType},
@@ -226,6 +228,7 @@ func TestSettingsCatalog(t *testing.T) {
 
 	for key, want := range map[string]settings.InputKind{
 		"ui.theme_mode":              settings.InputEnum,
+		"ui.recorder_enabled":        settings.InputBoolean,
 		"grid.heartbeat_interval_s":  settings.InputInteger,
 		"retention.audit_log":        settings.InputDuration,
 		"auth.login_rate_limit":      settings.InputRate,

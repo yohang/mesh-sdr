@@ -3,13 +3,15 @@ package shell
 import "context"
 
 // StationSettings reads the station description the Receiver page shows
-// (receiver.location, receiver.photo_title, receiver.photo_desc) and the
-// audio compression its receiver asks for (audio_compression).
+// (receiver.location, receiver.photo_title, receiver.photo_desc), the
+// audio compression its receiver asks for (audio_compression) and whether
+// the browser recorder is offered to every listener (ui.recorder_enabled).
 type StationSettings interface {
 	Location(ctx context.Context) string
 	PhotoTitle(ctx context.Context) string
 	PhotoDesc(ctx context.Context) string
 	AudioCompression(ctx context.Context) string
+	RecorderEnabled(ctx context.Context) bool
 }
 
 // Audio codecs of the rx.v1 media streams (DEM-010).
@@ -40,6 +42,9 @@ type StationView struct {
 	// AudioCodec is the codec the receiver asks the node for: CodecPCM
 	// when audio_compression is pcm, else CodecADPCM.
 	AudioCodec string
+	// RecorderEnabled offers the browser recorder (REC-001) to every
+	// listener; admins have it either way.
+	RecorderEnabled bool
 }
 
 // Station describes the station (Receiver page).
@@ -57,7 +62,7 @@ func NewStation(settings StationSettings, images StationImages) *Station {
 func (s *Station) View(ctx context.Context) StationView {
 	v := StationView{
 		Location: s.settings.Location(ctx), PhotoTitle: s.settings.PhotoTitle(ctx), PhotoDesc: s.settings.PhotoDesc(ctx),
-		AudioCodec: CodecADPCM,
+		AudioCodec: CodecADPCM, RecorderEnabled: s.settings.RecorderEnabled(ctx),
 	}
 
 	if s.settings.AudioCompression(ctx) == "pcm" {
