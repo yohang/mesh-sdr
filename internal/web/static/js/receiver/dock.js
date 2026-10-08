@@ -5,6 +5,7 @@
 // listens to a device. Not a live region: the receiver page announces the
 // connection states.
 
+import { syncTopics } from "../events.js";
 import { getEngine } from "./engine.js";
 
 const BUTTON = "rounded border border-border px-3 py-1 text-sm";
@@ -59,6 +60,14 @@ class MsdrAudioDock extends HTMLElement {
     const e = getEngine();
     const a = e.audio;
     this.hidden = !e.target;
+    // While listening, the grid state (receiver/grid.js) stays live on
+    // every page: node offline and back (GRID-021), notices (UI-011).
+    const topics = e.target ? "nodes devices" : "";
+    if ((this.dataset.msdrTopics ?? "") !== topics) {
+      if (topics) this.dataset.msdrTopics = topics;
+      else delete this.dataset.msdrTopics;
+      syncTopics();
+    }
     if (!this.play || !this.mute || !this.volume || !this.name) return;
     this.play.textContent = a.running ? "Stop audio" : "Start audio";
     this.mute.setAttribute("aria-pressed", String(a.muted));
