@@ -72,7 +72,7 @@ func New(d Deps) Wired {
 
 	station := NewStation(settings, d.Images)
 
-	mod := NewModule(rd, source, policy, station, web.Static(), component("shell.http"))
+	mod := NewModule(rd, source, policy, station, web.Static(), d.AdminGate, component("shell.http"))
 	mod.bookmarks = d.Bookmarks
 
 	return Wired{Renderer: rd, HTTP: mod}

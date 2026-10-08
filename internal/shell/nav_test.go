@@ -2,6 +2,7 @@ package shell_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
@@ -337,5 +338,33 @@ func TestReceiverStation(t *testing.T) {
 
 	if !strings.Contains(body, `"audio_codec":"pcm-s16le"`) {
 		t.Error("audio_compression = pcm does not ask for pcm-s16le")
+	}
+}
+
+// TestReceiverRecorder: the island offers the browser recorder (REC-001)
+// with ui.recorder_enabled, and to admins whatever the setting.
+func TestReceiverRecorder(t *testing.T) {
+	admin := shell.GateFunc(func(context.Context) bool { return true })
+	nobody := shell.GateFunc(func(context.Context) bool { return false })
+
+	for _, tc := range []struct {
+		name    string
+		enabled string
+		gate    shell.Gate
+		want    bool
+	}{
+		{"enabled", "true", nobody, true},
+		{"disabled", "false", nobody, false},
+		{"disabled, no admin gate", "false", nil, false},
+		{"disabled, admin", "false", admin, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := shell.New(shell.Deps{Settings: values{"ui.recorder_enabled": tc.enabled}, AdminGate: tc.gate, Logger: discard})
+			_, body := do(t, httpserver.NewRouter(discard, "", http.NotFoundHandler(), m.HTTP), http.MethodGet, "/", nil)
+
+			if want := fmt.Sprintf(`"recorder":%t`, tc.want); !strings.Contains(body, want) {
+				t.Errorf("receiver config lacks %s", want)
+			}
+		})
 	}
 }

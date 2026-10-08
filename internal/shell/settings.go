@@ -18,11 +18,13 @@ const (
 	KeyPhotoTitle      = "receiver.photo_title"
 	KeyPhotoDesc       = "receiver.photo_desc"
 	KeyAudioCompress   = "audio_compression"
+	KeyRecorderEnabled = "ui.recorder_enabled"
 )
 
 // Values reads the current effective settings (the settings store).
 type Values interface {
 	String(key string) string
+	Bool(key string) bool
 }
 
 // StoreSettings reads the shell settings from the settings store: config
@@ -117,4 +119,9 @@ func (s *StoreSettings) PhotoDesc(context.Context) string { return s.values.Stri
 // AudioCompression returns audio_compression (adpcm or pcm).
 func (s *StoreSettings) AudioCompression(context.Context) string {
 	return s.values.String(KeyAudioCompress)
+}
+
+// RecorderEnabled returns ui.recorder_enabled.
+func (s *StoreSettings) RecorderEnabled(context.Context) bool {
+	return s.values.Bool(KeyRecorderEnabled)
 }
