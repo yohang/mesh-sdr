@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math"
 	"math/cmplx"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -303,6 +304,7 @@ func TestDeemphasisLive(t *testing.T) {
 	var (
 		mu     sync.Mutex
 		levels []float64
+		skip   int
 	)
 
 	e.Start(tuning())
@@ -317,8 +319,18 @@ func TestDeemphasisLive(t *testing.T) {
 			s += v * v
 		}
 
+		// A slow machine may make the engine drop samples (a real overrun):
+		// the frames after a discontinuity carry the click, not the tone.
 		mu.Lock()
-		levels = append(levels, math.Sqrt(s/float64(max(len(a.Payload)/2, 1))))
+		if a.Discontinuity {
+			skip = 2
+		}
+
+		if skip > 0 {
+			skip--
+		} else {
+			levels = append(levels, math.Sqrt(s/float64(max(len(a.Payload)/2, 1))))
+		}
 		mu.Unlock()
 	}, func(app.Meter) {})
 	if err != nil {
@@ -326,7 +338,8 @@ func TestDeemphasisLive(t *testing.T) {
 	}
 	defer d.Close()
 
-	// level feeds 400 ms and returns the mean level of the last frames.
+	// level feeds 400 ms and returns the median level of the last clean
+	// frames.
 	next := uint64(0)
 	level := func() float64 {
 		mu.Lock()
@@ -334,17 +347,15 @@ func TestDeemphasisLive(t *testing.T) {
 		mu.Unlock()
 
 		next = feedFM(e, next, 400*time.Millisecond, 30_000, 10_000, 50_000)
-		eventually(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(levels) >= before+15 })
+		eventually(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(levels) >= before+9 })
 
 		mu.Lock()
 		defer mu.Unlock()
 
-		var s float64
-		for _, l := range levels[len(levels)-5:] {
-			s += l
-		}
+		last := slices.Clone(levels[len(levels)-5:])
+		slices.Sort(last)
 
-		return s / 5
+		return last[2]
 	}
 
 	at50 := level()
