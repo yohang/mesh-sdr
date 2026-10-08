@@ -420,3 +420,72 @@ func TestToolsAndPorts(t *testing.T) {
 		t.Fatal("privileged range accepted")
 	}
 }
+
+// levels counts the records logged at each level.
+type levels struct {
+	mu sync.Mutex
+	n  map[slog.Level]int
+}
+
+func (l *levels) Enabled(context.Context, slog.Level) bool { return true }
+func (l *levels) WithAttrs([]slog.Attr) slog.Handler       { return l }
+func (l *levels) WithGroup(string) slog.Handler            { return l }
+func (l *levels) Handle(_ context.Context, r slog.Record) error {
+	l.mu.Lock()
+	l.n[r.Level]++
+	l.mu.Unlock()
+
+	return nil
+}
+
+func (l *levels) count(lv slog.Level) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.n[lv]
+}
+
+// TestVersionProbe: a connector that prints its version and exits non-zero
+// (the fake, like owrx_connector) is available and logs no error; one that
+// prints no version is unavailable, logged once at Warn.
+func TestVersionProbe(t *testing.T) {
+	ctx := context.Background()
+	rec := &levels{n: map[slog.Level]int{}}
+	log := slog.New(rec)
+
+	sup, err := process.New(process.Options{RuntimeDir: filepath.Join(t.TempDir(), "run"), Logger: log})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ok := connector.NewSources(connector.Options{Supervisor: sup, Tools: connector.Tools{Dirs: []string{toolDir}}, Logger: log})
+	for _, d := range ok.Drivers(ctx) {
+		if !d.Available {
+			t.Errorf("driver %+v", d)
+		}
+	}
+
+	if n := rec.count(slog.LevelError) + rec.count(slog.LevelWarn); n != 0 {
+		t.Errorf("available drivers logged %d warnings or errors", n)
+	}
+
+	broken := t.TempDir()
+	for _, name := range []string{"rtl_connector", "rtl_tcp_connector"} {
+		if err := os.WriteFile(filepath.Join(broken, name), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	bad := connector.NewSources(connector.Options{Supervisor: sup, Tools: connector.Tools{Dirs: []string{broken}}, Logger: log})
+	for range 2 {
+		for _, d := range bad.Drivers(ctx) {
+			if d.Available || d.Reason == "" {
+				t.Errorf("broken driver %+v", d)
+			}
+		}
+	}
+
+	if e, w := rec.count(slog.LevelError), rec.count(slog.LevelWarn); e != 0 || w != 2 {
+		t.Errorf("broken drivers logged %d errors, %d warnings; want 0, 2 (once per type)", e, w)
+	}
+}

@@ -6,6 +6,7 @@
 package connector
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -19,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -108,6 +110,10 @@ type Options struct {
 // Sources implements app.Sources with owrx_connector processes.
 type Sources struct {
 	o Options
+
+	mu sync.Mutex
+	// unavailable is the reason last logged for each driver type.
+	unavailable map[string]string
 }
 
 // NewSources returns the sources.
@@ -120,7 +126,7 @@ func NewSources(o Options) *Sources {
 		o.StallTimeout = StallTimeout
 	}
 
-	return &Sources{o: o}
+	return &Sources{o: o, unavailable: map[string]string{}}
 }
 
 func (s *Sources) tool(t domain.DeviceType) (string, error) {
@@ -146,10 +152,14 @@ type Driver struct {
 }
 
 // Drivers probes the connector of every registered device type, like
-// Probe does for a device.
+// Probe does for a device. An unavailable type is logged when its reason
+// changes, not at every report.
 func (s *Sources) Drivers(ctx context.Context) []Driver {
 	types := domain.SupportedTypes()
 	out := make([]Driver, 0, len(types))
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	for _, t := range types {
 		d := Driver{Type: t.String(), Available: true}
@@ -158,10 +168,37 @@ func (s *Sources) Drivers(ctx context.Context) []Driver {
 			d.Available, d.Reason = false, err.Error()
 		}
 
+		if d.Reason != "" && d.Reason != s.unavailable[d.Type] {
+			s.o.Logger.Warn("device type unavailable: its connector cannot run",
+				slog.String("type", d.Type), slog.String("reason", d.Reason))
+		}
+
+		s.unavailable[d.Type] = d.Reason
 		out = append(out, d)
 	}
 
 	return out
+}
+
+// versionLines records whether a probe printed a version line.
+type versionLines struct {
+	mu   sync.Mutex
+	seen bool
+}
+
+func (v *versionLines) add(line string) {
+	if strings.Contains(strings.ToLower(line), "version") {
+		v.mu.Lock()
+		v.seen = true
+		v.mu.Unlock()
+	}
+}
+
+func (v *versionLines) printed() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	return v.seen
 }
 
 func (s *Sources) probe(ctx context.Context, id string, t domain.DeviceType) error {
@@ -174,18 +211,33 @@ func (s *Sources) probe(ctx context.Context, id string, t domain.DeviceType) err
 		return errors.New("node.runtime_dir is not set: no tool can run")
 	}
 
+	// The connectors may exit non-zero after printing their version: the
+	// probe succeeds when a version line was printed, on stdout or stderr.
+	var v versionLines
+
 	in, err := s.o.Supervisor.NewInstance(process.Spec{
-		ID: id, Kind: "probe", Mode: process.Batch, Path: path, Args: []string{"--version"},
+		ID: id, Kind: "probe", Mode: process.Batch, Probe: true, Path: path, Args: []string{"--version"},
 		ToolDirs: s.o.Tools.Dirs, Timeouts: process.Timeouts{Job: ProbeTimeout, Stop: time.Second},
+		Stdout: func(_ context.Context, r io.Reader) error {
+			sc := bufio.NewScanner(r)
+			for sc.Scan() {
+				v.add(sc.Text())
+			}
+
+			return sc.Err()
+		},
+		OnLine: func(l process.Line) { v.add(l.Text) },
 	})
 	if err != nil {
 		return err
 	}
 
-	// The connectors exit non-zero after printing their version: only a
-	// missing tool, a refused exec or a hang fails the probe.
-	if err := in.Run(ctx); err != nil && !errors.Is(err, process.ErrDecoderError) {
+	if err := in.Run(ctx); err != nil {
 		return err
+	}
+
+	if !v.printed() {
+		return fmt.Errorf("%s --version printed no version", filepath.Base(path))
 	}
 
 	return nil

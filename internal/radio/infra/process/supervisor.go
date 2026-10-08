@@ -66,6 +66,10 @@ type Spec struct {
 	// activity. Pipe back-pressure applies: a slow consumer blocks the tool.
 	// Nil: stdout is drained and only marks activity.
 	Stdout func(ctx context.Context, r io.Reader) error
+	// Probe marks a batch version probe (§8.4 capability probing): any
+	// exit code completes it (the caller judges its output) and its
+	// transitions log at Debug.
+	Probe bool
 	// TouchOnly: stdout output is drained but marks neither readiness nor
 	// activity; only Touch does (connectors: readiness is the IQ socket).
 	TouchOnly bool
@@ -296,6 +300,9 @@ func (in *Instance) Run(ctx context.Context) error {
 			ex.LastErr = lineTexts(in.ring.tail(20))
 		}
 		out := decide(in.spec.Mode, res, ex)
+		if in.spec.Probe && errors.Is(out.err, ErrDecoderError) && res.sticky != ClassInputError {
+			out = outcome{state: StateStopped, reason: "completed"}
+		}
 		ev := Event{PID: res.pid, State: out.state, Reason: out.reason, Diag: out.diag, Reprobe: out.reprobe, Exit: &ex}
 		if !out.restart {
 			in.emit(ev)
@@ -358,6 +365,9 @@ func (in *Instance) emit(ev Event) {
 	}
 	if ev.Diag == DiagTimeout && ev.State == StateRunning {
 		level = slog.LevelWarn
+	}
+	if in.spec.Probe {
+		level = slog.LevelDebug
 	}
 	attrs := []slog.Attr{slog.String("state", string(ev.State))}
 	if ev.PID != 0 {
