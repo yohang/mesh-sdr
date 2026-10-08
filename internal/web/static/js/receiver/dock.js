@@ -1,7 +1,7 @@
 // <msdr-audio-dock>: the shell-level audio controls, a row of the top bar
 // outside #main (ADR 0015 decision 9). It stays in the DOM across boosted
 // navigation, so the listener can start or stop the audio (RX-004), mute it
-// and set the volume (RX-026) from any page. It shows only while the engine
+// (shortcut M) and set the volume (RX-026) from any page. It shows only while the engine
 // listens to a device. Not a live region: the receiver page announces the
 // connection states.
 
@@ -24,6 +24,9 @@ class MsdrAudioDock extends HTMLElement {
     this.mute.type = "button";
     this.mute.className = BUTTON;
     this.mute.textContent = "Mute";
+    // Shortcut M (shortcuts.js), on every page while listening.
+    this.mute.dataset.shortcut = "m";
+    this.mute.setAttribute("aria-keyshortcuts", "M");
     this.mute.addEventListener("click", () => e.setMuted(!e.audio.muted));
 
     const label = document.createElement("label");

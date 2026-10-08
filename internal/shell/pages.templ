@@ -4,10 +4,12 @@ import (
 	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
-// receiverPage is the Receiver section: the station, the receiver island
-// (static/js/receiver/island.js, ADR 0015) with its initial state, then the
-// station panorama and description. descHTML is goldmark output, which
-// carries no raw HTML nor dangerous URLs (see markdown.go).
+// receiverPage is the Receiver section: the station, then the receiver
+// island (static/js/receiver/island.js, ADR 0015) with its initial state and
+// the station identity set on the hub (RX-036: name, location, panorama and
+// description), which the island moves into its Info panel (UI-019).
+// descHTML is goldmark output, which carries no raw HTML nor dangerous URLs
+// (see markdown.go).
 templ receiverPage(siteName string, st StationView, descHTML string, rx receiverConfig) {
 	<div class="flex items-center gap-3">
 		if st.HasAvatar {
@@ -23,22 +25,33 @@ templ receiverPage(siteName string, st StationView, descHTML string, rx receiver
 	<msdr-receiver class="block">
 		@templ.JSONScript("msdr-receiver-config", rx)
 		<p class="mt-4 text-fg-muted">The receiver needs JavaScript to play audio and draw the waterfall.</p>
-	</msdr-receiver>
-	if st.HasPanorama || st.PhotoTitle != "" || descHTML != "" {
-		<figure class="mt-6 flex max-w-4xl flex-col gap-2">
-			if st.HasPanorama {
-				<img src="/api/v1/branding/panorama" alt={ st.PhotoTitle } class="w-full rounded-md"/>
-			}
-			if st.PhotoTitle != "" || descHTML != "" {
-				<figcaption class="prose-text">
-					if st.PhotoTitle != "" {
-						<p class="font-semibold">{ st.PhotoTitle }</p>
+		<div data-rx-station class="mt-4 flex min-w-0 flex-col gap-2 text-sm">
+			<h3 class="font-semibold">Station</h3>
+			<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+				<dt class="text-fg-muted">Name</dt>
+				<dd class="min-w-0 break-words">{ siteName }</dd>
+				if st.Location != "" {
+					<dt class="text-fg-muted">Location</dt>
+					<dd class="min-w-0 break-words">{ st.Location }</dd>
+				}
+			</dl>
+			if st.HasPanorama || st.PhotoTitle != "" || descHTML != "" {
+				<figure class="flex flex-col gap-2">
+					if st.HasPanorama {
+						<img src="/api/v1/branding/panorama" alt={ st.PhotoTitle } class="w-full rounded-md"/>
 					}
-					@templ.Raw(descHTML)
-				</figcaption>
+					if st.PhotoTitle != "" || descHTML != "" {
+						<figcaption class="prose-text">
+							if st.PhotoTitle != "" {
+								<p class="font-semibold">{ st.PhotoTitle }</p>
+							}
+							@templ.Raw(descHTML)
+						</figcaption>
+					}
+				</figure>
 			}
-		</figure>
-	}
+		</div>
+	</msdr-receiver>
 }
 
 // placeholderPage is a section whose module does not exist yet.

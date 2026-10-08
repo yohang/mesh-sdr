@@ -16,6 +16,13 @@
 // (§5.8). A lost connection is retried with a jittered exponential delay
 // (RX-003); each new upgrade gets a fresh token from the gateway.
 //
+// Demodulator controls (RX-007, RX-020, RX-023/024, RX-027): mode, pass
+// band, squelch and noise reduction go to the node with demod.set; the ack
+// names the values in force (clamped by the node), which the engine keeps.
+// Broadcast FM needs 48 kHz audio (HD path), so a switch to or from it
+// reconfigures the audio stream around the mode change. The demodulator
+// settings are kept across reconnections to the same device.
+//
 // Changes are announced with a "change" event whose detail names what
 // changed: "state", "config", "tune", "meter" or "audio". FFT lines go to
 // the attached views directly (hot path).
@@ -38,6 +45,20 @@ const REFRESH_MARGIN_MS = 60_000;
 const RETRY_REFRESH_MS = 15_000;
 // demod.set at most every TUNE_INTERVAL_MS while dragging (msg_rate, §6.9).
 const TUNE_INTERVAL_MS = 100;
+// Squelch range of the node (dBFS); the minimum keeps the squelch open.
+export const SQUELCH_MIN_DB = -150;
+export const SQUELCH_MAX_DB = 0;
+// NR threshold range of the node (dB).
+export const NR_MIN_DB = -20;
+export const NR_MAX_DB = 20;
+// Narrowest pass band the node accepts (Hz).
+export const MIN_BANDWIDTH_HZ = 100;
+// Auto squelch margin over the signal level when device.config has none.
+const SQUELCH_AUTO_MARGIN_DB = 10;
+// Audio rates: speech band, and the HD path broadcast FM needs.
+const AUDIO_RATE = 12000;
+const HD_AUDIO_RATE = 48000;
+const HD_MODES = new Set(["wfm"]);
 // Audio frames last 20 ms (§6.7); a sequence gap of n frames is n × 20 ms.
 const FRAME_MS = 20;
 // Close codes after which reconnecting cannot help (§6.2 client behaviour).
@@ -48,6 +69,27 @@ const NO_RETRY = new Set([1000, 1003, 1008, 1009, 4400, 4403, 4426]);
  * @property {string} node_id
  * @property {string} device_id
  * @property {string} name
+ */
+
+/**
+ * @typedef {object} Demod the demodulator in use, as last applied
+ * @property {string} id
+ * @property {number} streamId
+ * @property {string} mode
+ * @property {number} offsetHz
+ * @property {number} lowHz pass band, relative to the offset
+ * @property {number} highHz
+ * @property {number | null} squelchDb null: open
+ * @property {{enabled: boolean, threshold: number}} nr
+ */
+
+/**
+ * @typedef {object} Kept demod.create fields kept across reconnections
+ * @property {string} [mode]
+ * @property {number} [offset_hz]
+ * @property {{low_hz: number, high_hz: number}} [bandpass]
+ * @property {number} [squelch_db]
+ * @property {{enabled: boolean, threshold: number}} [nr]
  */
 
 /**
@@ -70,12 +112,20 @@ class Engine extends EventTarget {
     this.gen = 0;
     this.retry = 0;
     this.retryTimer = 0;
-    this.keptOffset = null;
+    /** @type {Kept} */
+    this.kept = {};
     this.offsetMs = 0; // node clock − client clock
     // Display settings, kept across navigation (per-session runtime state):
     // zoom factor and first visible bin, spectrum visibility (RX-016), manual
-    // levels (null: the device defaults, RX-017/018).
-    this.display = { zoom: 1, start: 0, spectrum: true, /** @type {{min: number, max: number} | null} */ levels: null };
+    // levels (null: the device defaults, RX-017/018), side panel open
+    // (UI-019).
+    this.display = {
+      zoom: 1,
+      start: 0,
+      spectrum: true,
+      /** @type {{min: number, max: number} | null} */ levels: null,
+      panel: true,
+    };
     this.reset();
     document.addEventListener("visibilitychange", () => this.onVisibility());
   }
@@ -85,7 +135,9 @@ class Engine extends EventTarget {
     clearTimeout(this.refreshTimer);
     clearTimeout(this.tuneTimer);
     this.tuneTimer = 0;
-    this.state = this.target ? "connecting" : "idle";
+    /** @type {Record<string, any>} demod.set fields waiting for the next send */
+    this.queued = {};
+    this.state =this.target ? "connecting" : "idle";
     this.detail = "";
     this.cid = "";
     this.tokenExp = 0;
@@ -98,7 +150,7 @@ class Engine extends EventTarget {
     this.deviceState = null;
     /** @type {{streamId: number, size: number, startHz: number, spanHz: number, dbMin: number, dbStep: number} | null} */
     this.fft = null;
-    /** @type {{id: string, streamId: number, mode: string, offsetHz: number, lowHz: number, highHz: number} | null} */
+    /** @type {Demod | null} */
     this.demod = null;
     /** @type {{id: number, rate: number, codec: string} | null} */
     this.audioStream = null;
@@ -106,7 +158,6 @@ class Engine extends EventTarget {
     this.meter = null;
     /** @type {Map<number, number>} */
     this.lastSeq = new Map();
-    this.sentOffset = null;
   }
 
   /** @param {string} what */
@@ -134,9 +185,8 @@ class Engine extends EventTarget {
     this.disconnect();
     this.target = target;
     this.history = [];
-    // Tuned offset kept across reconnections of this device (null: the
-    // device's start offset).
-    this.keptOffset = null;
+    // Demodulator settings kept across reconnections of this device.
+    this.kept = {};
     this.open();
   }
 
@@ -170,7 +220,7 @@ class Engine extends EventTarget {
         capabilities: {
           audio_codecs: ["adpcm-ima", "pcm-s16le"],
           fft_codecs: ["u8-db"],
-          audio_rates: [12000],
+          audio_rates: [AUDIO_RATE, HD_AUDIO_RATE],
           max_fft_fps: 60,
         },
       });
@@ -354,22 +404,35 @@ class Engine extends EventTarget {
       if (res?.device) this.device = res.device;
       for (const s of res?.streams ?? []) this.openStream(s);
       const start = this.device?.start ?? {};
-      const d = await this.request("demod.create", {
+      const k = this.kept;
+      const mode = k.mode || start.mode || "nfm";
+      // Each connection starts with speech-band audio.
+      if (HD_MODES.has(mode)) {
+        await this.request("audio.configure", { codec: this.audioCodec(), sample_rate: HD_AUDIO_RATE });
+        if (gen !== this.gen) return;
+      }
+      /** @type {Record<string, any>} */
+      const create = {
         device_id: target.device_id,
-        mode: start.mode || "nfm",
-        offset_hz: this.keptOffset ?? start.offset_hz ?? 0,
-      });
+        mode,
+        offset_hz: k.offset_hz ?? start.offset_hz ?? 0,
+        squelch_db: k.squelch_db ?? this.device?.squelch?.initial ?? SQUELCH_MIN_DB,
+      };
+      if (k.bandpass) create.bandpass = k.bandpass;
+      if (k.nr) create.nr = k.nr;
+      const d = await this.request("demod.create", create);
       if (gen !== this.gen) return;
-      const a = d.applied ?? {};
       this.demod = {
         id: d.demod_id,
         streamId: d.audio_stream_id,
-        mode: a.mode ?? start.mode ?? "",
-        offsetHz: a.offset_hz ?? 0,
-        lowHz: a.bandpass?.low_hz ?? 0,
-        highHz: a.bandpass?.high_hz ?? 0,
+        mode,
+        offsetHz: d.applied?.offset_hz ?? create.offset_hz,
+        lowHz: 0,
+        highHz: 0,
+        squelchDb: null,
+        nr: { enabled: false, threshold: 0 },
       };
-      this.sentOffset = this.demod.offsetHz;
+      this.applied(d.applied ?? {});
       this.setState("listening");
       this.emit("tune");
     } catch (err) {
@@ -497,37 +560,195 @@ class Engine extends EventTarget {
     return this.demod ? this.centerHz + this.demod.offsetHz : 0;
   }
 
-  /**
-   * tune moves the demodulator to hz (RX-008 click/drag), snapped to the
-   * device tuning step and kept inside the capture band. Sent at most every
-   * TUNE_INTERVAL_MS; the last position wins.
-   * @param {number} hz
-   */
-  tune(hz) {
-    if (!this.demod || !this.device) return;
-    const step = this.device.tuning_step_hz || 1;
-    const half = Math.floor((this.device.sample_rate || 0) / 2);
-    const snapped = Math.round(hz / step) * step;
-    const offset = Math.min(half, Math.max(-half, snapped - this.centerHz));
-    if (offset === this.demod.offsetHz) return;
-    this.demod.offsetHz = offset;
-    this.keptOffset = offset;
-    this.emit("tune");
-    if (!this.tuneTimer) this.flushTune();
+  /** @returns {[number, number]} the capture band, in Hz */
+  band() {
+    const half = Math.floor((this.device?.sample_rate || 0) / 2);
+    return [this.centerHz - half, this.centerHz + half];
   }
 
-  flushTune() {
+  /**
+   * tune moves the demodulator to hz (RX-008 click/drag, RX-009 steps),
+   * snapped to the device tuning step and kept inside the capture band.
+   * Sent at most every TUNE_INTERVAL_MS; the last position wins.
+   * @param {number} hz
+   * @param {boolean} [snap] false: direct entry (RX-011), not snapped, and
+   *   refused outside the capture band instead of clamped
+   * @returns {boolean} false when the frequency was refused
+   */
+  tune(hz, snap = true) {
+    if (!this.demod || !this.device) return false;
+    const step = this.device.tuning_step_hz || 1;
+    const half = Math.floor((this.device.sample_rate || 0) / 2);
+    const wanted = Math.round(snap ? Math.round(hz / step) * step : hz) - this.centerHz;
+    if (!snap && Math.abs(wanted) > half) return false;
+    const offset = Math.min(half, Math.max(-half, wanted));
+    if (offset === this.demod.offsetHz) return true;
+    this.demod.offsetHz = offset;
+    this.kept.offset_hz = offset;
+    this.emit("tune");
+    this.queue({ offset_hz: offset });
+    return true;
+  }
+
+  /** @param {number} steps tune by this many tuning steps (RX-009) */
+  step(steps) {
+    if (!this.demod || !this.device) return;
+    const step = this.device.tuning_step_hz || 1;
+    this.tune(this.tunedHz + steps * step);
+  }
+
+  /**
+   * setBandpass sets the pass band edges relative to the tuned frequency
+   * (RX-020); the node clamps them to the mode's limits.
+   * @param {number} lowHz @param {number} highHz
+   */
+  setBandpass(lowHz, highHz) {
     const d = this.demod;
-    if (!d || d.offsetHz === this.sentOffset) {
+    if (!d) return;
+    const low = Math.round(Math.min(lowHz, highHz - MIN_BANDWIDTH_HZ));
+    const high = Math.round(Math.max(highHz, low + MIN_BANDWIDTH_HZ));
+    if (low === d.lowHz && high === d.highHz) return;
+    d.lowHz = low;
+    d.highHz = high;
+    this.kept.bandpass = { low_hz: low, high_hz: high };
+    this.emit("tune");
+    this.queue({ bandpass: { low_hz: low, high_hz: high } });
+  }
+
+  /**
+   * setSquelch sets the squelch level in dBFS (RX-023); null opens it.
+   * @param {number | null} db
+   */
+  setSquelch(db) {
+    const d = this.demod;
+    if (!d) return;
+    const level = db === null ? SQUELCH_MIN_DB : Math.round(Math.min(SQUELCH_MAX_DB, Math.max(SQUELCH_MIN_DB, db)));
+    d.squelchDb = level === SQUELCH_MIN_DB ? null : level;
+    this.kept.squelch_db = level;
+    this.emit("tune");
+    this.queue({ squelch_db: level });
+  }
+
+  /**
+   * autoSquelch sets the squelch once from the current signal level plus
+   * the device's constant margin (RX-024).
+   * @returns {number | null} the level set, null without a meter reading
+   */
+  autoSquelch() {
+    if (!this.demod || !this.meter) return null;
+    const margin = this.device?.squelch?.auto_margin || SQUELCH_AUTO_MARGIN_DB;
+    const level = Math.round(Math.min(SQUELCH_MAX_DB, Math.max(SQUELCH_MIN_DB + 1, this.meter.levelDb + margin)));
+    this.setSquelch(level);
+    return level;
+  }
+
+  /**
+   * setNR sets the noise reduction (RX-027).
+   * @param {boolean} enabled @param {number} threshold dB
+   */
+  setNR(enabled, threshold) {
+    const d = this.demod;
+    if (!d) return;
+    const nr = { enabled, threshold: Math.round(Math.min(NR_MAX_DB, Math.max(NR_MIN_DB, threshold))) };
+    d.nr = nr;
+    this.kept.nr = nr;
+    this.emit("tune");
+    this.queue({ nr });
+  }
+
+  /** @returns {string} the codec of the audio stream */
+  audioCodec() {
+    return this.audioStream?.codec || "adpcm-ima";
+  }
+
+  /**
+   * setMode switches the demodulator mode (RX-007); the node applies the
+   * mode's default pass band. Broadcast FM needs the 48 kHz audio stream:
+   * the audio is reconfigured before switching to it and after leaving it.
+   * @param {string} mode
+   */
+  async setMode(mode) {
+    const d = this.demod;
+    if (!d || mode === d.mode) return;
+    const gen = this.gen;
+    const rate = HD_MODES.has(mode) ? HD_AUDIO_RATE : AUDIO_RATE;
+    try {
+      if (rate > (this.audioStream?.rate ?? AUDIO_RATE)) {
+        await this.request("audio.configure", { codec: this.audioCodec(), sample_rate: rate });
+        if (gen !== this.gen) return;
+      }
+      delete this.queued.bandpass;
+      const res = await this.request("demod.set", { demod_id: d.id, mode });
+      if (gen !== this.gen || this.demod !== d) return;
+      this.kept.mode = mode;
+      delete this.kept.bandpass;
+      this.applied(res?.applied ?? {});
+      if (rate < (this.audioStream?.rate ?? AUDIO_RATE)) {
+        await this.request("audio.configure", { codec: this.audioCodec(), sample_rate: rate });
+      }
+    } catch (err) {
+      if (gen !== this.gen) return;
+      this.detail = err?.message ?? "";
+      this.emit("state");
+    }
+  }
+
+  /**
+   * queue merges fields into the next demod.set, sent at most every
+   * TUNE_INTERVAL_MS (msg_rate, §6.9); the last value of a field wins.
+   * @param {Record<string, any>} fields
+   */
+  queue(fields) {
+    Object.assign(this.queued, fields);
+    if (!this.tuneTimer) this.flushQueue();
+  }
+
+  flushQueue() {
+    const d = this.demod;
+    const fields = this.queued;
+    this.queued = {};
+    if (!d || Object.keys(fields).length === 0) {
       this.tuneTimer = 0;
       return;
     }
-    this.sentOffset = d.offsetHz;
-    this.request("demod.set", { demod_id: d.id, offset_hz: d.offsetHz }).catch((err) => {
-      this.detail = err?.message ?? "";
-      this.emit("state");
-    });
-    this.tuneTimer = setTimeout(() => this.flushTune(), TUNE_INTERVAL_MS);
+    const gen = this.gen;
+    this.request("demod.set", { demod_id: d.id, ...fields }).then(
+      (res) => {
+        if (gen === this.gen && this.demod === d) this.applied(res?.applied ?? {});
+      },
+      (err) => {
+        if (gen !== this.gen) return;
+        this.detail = err?.message ?? "";
+        this.emit("state");
+      },
+    );
+    this.tuneTimer = setTimeout(() => this.flushQueue(), TUNE_INTERVAL_MS);
+  }
+
+  /**
+   * applied keeps the demodulator values in force (clamped by the node)
+   * from a demod.create or demod.set ack. A field with a newer change
+   * waiting to be sent keeps its local value, so a drag never jumps back.
+   * The offset is not read back: the node refuses one outside the band
+   * rather than clamping it.
+   * @param {any} a Applied
+   */
+  applied(a) {
+    const d = this.demod;
+    if (!d) return;
+    const q = this.queued;
+    if (a.mode) d.mode = a.mode;
+    if (a.bandpass && !("bandpass" in q)) {
+      d.lowHz = a.bandpass.low_hz;
+      d.highHz = a.bandpass.high_hz;
+    }
+    if (!("squelch_db" in q)) {
+      const sq = typeof a.squelch_db === "number" ? a.squelch_db : null;
+      d.squelchDb = sq === null || sq <= SQUELCH_MIN_DB ? null : sq;
+    }
+    if (a.nr && !("nr" in q)) d.nr = { enabled: !!a.nr.enabled, threshold: a.nr.threshold ?? 0 };
+    this.emit("tune");
+    if (this.detail && this.state === "listening") this.setState("listening");
   }
 
   onVisibility() {
