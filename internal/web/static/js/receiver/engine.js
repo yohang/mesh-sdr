@@ -644,11 +644,13 @@ class Engine extends EventTarget {
         decoder: null,
       };
       delete k.hz;
+      // The decoder of the previous connection, or of the link (m2): the
+      // new demodulator has none yet.
+      const decoder = k.decoder;
       this.applied(d.applied ?? {});
       this.setState("listening");
       this.emit("tune");
-      // The decoder of the previous connection, or of the link (m2).
-      if (k.decoder) this.setDecoder(k.decoder);
+      if (decoder) this.setDecoder(decoder);
     } catch (err) {
       if (gen !== this.gen) return;
       this.setState("error", err?.message ?? String(err));

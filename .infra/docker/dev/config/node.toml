@@ -25,3 +25,14 @@ freq_range = { min = "144MHz", max = "146MHz" }
 sample_rates = [1_024_000]
 listen_policy = "anonymous"
 operator_can_retune = true
+
+# A second synthetic device whose NFM carrier (centre + 128 kHz) carries the
+# ZVEI1 sequence 12345 every 2 s: the ZVEI digital mode decodes it with
+# multimon-ng (DEC-035).
+[devices.dev-zvei]
+name = "Synthetic ZVEI"
+type = "rtl_sdr"
+freq_range = { min = "430MHz", max = "432MHz" }
+sample_rates = [1_024_000]
+listen_policy = "anonymous"
+driver = { device = "zvei" }
