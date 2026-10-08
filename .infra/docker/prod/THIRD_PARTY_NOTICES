@@ -10,8 +10,9 @@ Corresponding sources
 ---------------------
 
 The corresponding sources of the GPL and LGPL components bundled in this
-image (csdr, owrx_connector and the Debian source packages of FFTW,
-rtl-sdr, libusb and libsamplerate, at the exact versions installed) are
+image (csdr, owrx_connector, csdr-skimmer and the Debian source packages
+of FFTW, rtl-sdr, libusb, libsamplerate, WSJT-X, JS8Call, Dire Wolf,
+multimon-ng and rtl_433, at the exact versions installed) are
 published with every release as the OCI image tagged `<version>-sources`
 next to this image (same repository), under /sources. That image also
 holds the source of MeshSDR itself (/sources/meshsdr-src.tar.gz).
@@ -39,6 +40,11 @@ owrx_connector 0.6.5 (https://github.com/luarvique/owrx_connector, tag 0.6.5)
   separate processes. GPL-3.0-or-later. Text: /usr/share/doc/owrx-connector/.
   Copyright (c) 2019-2026 Jakob Ketterl, Marat Fayzullin and contributors.
 
+csdr-skimmer 1.12 (https://github.com/luarvique/csdr-skimmer, tag 1.12)
+  csdr-cwskimmer, a CW decoder run by the node as a separate process.
+  GPL-3.0-or-later. Text: /usr/share/doc/csdr-skimmer/.
+  Copyright (c) Marat Fayzullin.
+
 Debian packages (copyright files under /usr/share/doc/<package>/copyright)
 -------------------------------------------------------------------------
 
@@ -47,6 +53,17 @@ libsamplerate0 (0.2.2)           BSD-2-Clause
 librtlsdr0 (rtl-sdr 2.0.2)       GPL-2.0-or-later (used under GPL-3.0)
 libusb-1.0-0                     LGPL-2.1-or-later
 ca-certificates                  MPL-2.0 / GPL-2.0-or-later
+
+External decoders, run by the node as separate processes:
+
+wsjtx (WSJT-X 2.7.0)             GPL-3.0 (jt9, wsprd)
+js8call (JS8Call 2.2.0)          GPL-3.0 (js8)
+direwolf (Dire Wolf 1.7)         GPL-2.0-or-later
+multimon-ng (1.3.1)              GPL-2.0-or-later
+rtl-433 (rtl_433 25.02)          GPL-2.0-or-later
+
+They pull further Debian packages (Qt 5, Boost, Hamlib, ...), each with its
+copyright file under /usr/share/doc/<package>/copyright.
 
 Go modules
 ----------
