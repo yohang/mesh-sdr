@@ -68,6 +68,8 @@ var formPages = []formPage{
 			{ID: "retention", Title: "Retention policies", Keys: []string{
 				"retention.sessions", "retention.audit_log", "retention.connections",
 			}},
+			{ID: "files", Title: "Files", Description: "Files sent by the nodes (SSTV and FAX images, text logs): the hub applies these limits after each new file and every 5 minutes, oldest files first.",
+				Keys: []string{"files.retention_count", "files.retention_days", "files.max_total_bytes"}},
 		},
 	},
 	{
@@ -192,7 +194,14 @@ func (m *Module) purge(w http.ResponseWriter, r *http.Request) {
 	fragment := storesView(rows, notice, failure)
 
 	p := formPages[3]
-	content := formPageView(p, []sectionView{buildSection(p.Forms[0], p.Path, m.d.Store.Snapshot())}, fragment)
+	snap := m.d.Store.Snapshot()
+
+	views := make([]sectionView, 0, len(p.Forms))
+	for _, spec := range p.Forms {
+		views = append(views, buildSection(spec, p.Path, snap))
+	}
+
+	content := formPageView(p, views, fragment)
 
 	m.page(w, r, status, p.Title, p.Section, content, fragment)
 }
@@ -252,6 +261,24 @@ func formatDuration(d time.Duration) string {
 	}
 
 	return d.String()
+}
+
+// retentionText is the retention of a store, for people.
+func retentionText(r RetentionRow) string {
+	if r.Policy != "" {
+		return r.Policy
+	}
+
+	return formatDuration(r.Retention)
+}
+
+// purgeQuestion is the confirmation of "purge now".
+func purgeQuestion(r RetentionRow) string {
+	if r.Policy != "" {
+		return "Apply the " + r.Label + " retention (" + r.Policy + ") now?"
+	}
+
+	return "Delete the " + r.Label + " rows older than " + formatDuration(r.Retention) + " now?"
 }
 
 func humanBytes(n int64) string {

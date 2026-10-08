@@ -31,6 +31,7 @@ type Settings struct {
 	Session   SettingsSession   `toml:"session" envPrefix:"SESSION__" jsonschema:"description=Session lifetimes."`
 	Auth      SettingsAuth      `toml:"auth" envPrefix:"AUTH__" jsonschema:"description=Sign-in throttling."`
 	Retention SettingsRetention `toml:"retention" envPrefix:"RETENTION__" jsonschema:"description=Retention of DB-backed stores."`
+	Files     SettingsFiles     `toml:"files" envPrefix:"FILES__" jsonschema:"description=Retention of the files the nodes send (FIL-004)."`
 	Grid      SettingsGrid      `toml:"grid" envPrefix:"GRID__" jsonschema:"description=Node health (GRID-009)."`
 
 	Invitations   SettingsInvitations   `toml:"invitations" envPrefix:"INVITATIONS__" jsonschema:"description=Invitations (ACC-002)."`
@@ -114,6 +115,15 @@ type SettingsRetention struct {
 	Connections Duration `toml:"connections" env:"CONNECTIONS" jsonschema_extras:"x-min-duration=1d,x-max-duration=3650d,x-label=Closed connections" jsonschema_description:"Closed connections of the presence registry are deleted after this long."`
 }
 
+// SettingsFiles is the [settings.files] table: retention of the files the
+// nodes send (FIL-004), applied after each new file and by a periodic job,
+// oldest files first.
+type SettingsFiles struct {
+	RetentionCount int `toml:"retention_count" env:"RETENTION_COUNT" jsonschema:"minimum=1,maximum=100000" jsonschema_extras:"x-label=Files kept per kind" jsonschema_description:"The newest files of each kind (SSTV, FAX, text log…) are kept, up to this many (1 to 100000); older ones are deleted."`
+	RetentionDays  int `toml:"retention_days" env:"RETENTION_DAYS" jsonschema:"minimum=0,maximum=3650" jsonschema_extras:"x-label=Maximum age (days)" jsonschema_description:"Files older than this many days are deleted (0 to 3650). 0 keeps files whatever their age."`
+	MaxTotalBytes  int `toml:"max_total_bytes" env:"MAX_TOTAL_BYTES" jsonschema:"minimum=0,maximum=1099511627776" jsonschema_extras:"x-label=Total size cap (bytes)" jsonschema_description:"When the files take more than this many bytes, the oldest are deleted (0 to 1 TiB). 0: no size cap."`
+}
+
 // SettingsGrid is the [settings.grid] table: node heartbeats and health
 // (GRID-009, ADR 0018).
 type SettingsGrid struct {
@@ -159,6 +169,7 @@ func DefaultSettings() Settings {
 		Retention: SettingsRetention{
 			Sessions: MustDuration("30d"), AuditLog: MustDuration("365d"), Connections: MustDuration("30d"),
 		},
+		Files:         SettingsFiles{RetentionCount: 20, RetentionDays: 30, MaxTotalBytes: 2 << 30},
 		Grid:          SettingsGrid{HeartbeatIntervalS: 10, OfflineAfterS: 60},
 		Invitations:   SettingsInvitations{TTLHours: 168},
 		PasswordReset: SettingsPasswordReset{TTLMinutes: 30},
