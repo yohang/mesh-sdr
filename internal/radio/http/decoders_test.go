@@ -18,11 +18,11 @@ import (
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
-// tools reports cap:multimon-ng as ok or missing.
+// tools reports cap:multimon-ng and cap:native-dsp as ok or missing.
 type tools struct{ ok bool }
 
 func (t tools) Available(c string) (bool, string) {
-	if c == domain.CapMultimonNG && t.ok {
+	if (c == domain.CapMultimonNG || c == domain.CapNativeDSP) && t.ok {
 		return true, ""
 	}
 
@@ -128,24 +128,44 @@ func clock(step time.Duration) func() time.Time {
 	}
 }
 
+// files records the files of the decoders.
+type files struct {
+	mu  sync.Mutex
+	got []app.ProducedFile
+}
+
+func (f *files) Produced(p app.ProducedFile) {
+	f.mu.Lock()
+	f.got = append(f.got, p)
+	f.mu.Unlock()
+}
+
+func (f *files) all() []app.ProducedFile {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return append([]app.ProducedFile(nil), f.got...)
+}
+
 type decoderEnv struct {
 	t  *testing.T
 	p  *peer
 	ss interface {
 		Handle(context.Context, rxv1.Envelope)
 	}
-	run *runner
-	pub *publisher
-	dec *app.Decoders
+	run   *runner
+	pub   *publisher
+	files *files
+	dec   *app.Decoders
 }
 
 func newDecoderEnv(t *testing.T, ok bool, maxSessions int, step time.Duration, roles ...string) *decoderEnv {
 	t.Helper()
 
 	m := runManager(t)
-	e := &decoderEnv{t: t, run: &runner{}, pub: &publisher{}}
+	e := &decoderEnv{t: t, run: &runner{}, pub: &publisher{}, files: &files{}}
 	e.dec = app.NewDecoders(tools{ok: ok}, e.run, maxSessions, time.Now)
-	dec := radiohttp.Decoding{Decoders: e.dec, Publisher: e.pub}
+	dec := radiohttp.Decoding{Decoders: e.dec, Publisher: e.pub, Files: e.files}
 
 	e.p = &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen, token.PermDemod)}
 	e.p.claims.ConnectionID = "c1"
@@ -181,7 +201,7 @@ func TestDecoderSet(t *testing.T) {
 	e := newDecoderEnv(t, true, 0, time.Minute)
 
 	attach := e.check(rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}, "").result.(media.AttachResult)
-	if d := attach.Device.Decoders; len(d) != 2 || d[0].Mode != "selcall" || !d[0].Available || d[0].Underlying[0] != "nfm" || d[1].Variants[0] != "ZVEI1" {
+	if d := attach.Device.Decoders; len(d) < 2 || d[0].Mode != "selcall" || !d[0].Available || d[0].Underlying[0] != "nfm" || d[1].Variants[0] != "ZVEI1" {
 		t.Fatalf("device.config decoders %+v", d)
 	}
 
@@ -329,11 +349,56 @@ func TestDecoderUnavailable(t *testing.T) {
 			want = "multimon-ng not found"
 		}
 
-		if d := cfg.Decoders; len(d) != 2 || d[0].Available || d[0].Reason != want {
+		if d := cfg.Decoders; len(d) < 2 || d[0].Available || d[0].Reason != want {
 			t.Errorf("admin=%v: decoders %+v", admin, d)
 		}
 
 		id := e.check(rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm"}, "").result.(media.DemodCreated).DemodID
 		e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "selcall"}, rxv1.CodeDemodError)
+	}
+}
+
+// Image decoders (DEC-037, DEC-038): the image start is kept by the hub,
+// the rows go to the listener only, and an image saved after the session
+// ended is stamped with the reception of its start (FIL-008).
+func TestDecoderImages(t *testing.T) {
+	e := newDecoderEnv(t, true, 0, time.Minute)
+
+	e.check(rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}, "")
+	id := e.check(rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm", "offset_hz": 12_500}, "").result.(media.DemodCreated).DemodID
+
+	started := e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "sstv"}, "").result.(media.DecoderStarted)
+	if started.Applied.Mode != "nfm" {
+		t.Fatalf("SSTV switched NFM to %s", started.Applied.Mode)
+	}
+
+	r := e.run.last()
+
+	// Without its start, an image has no reception: it is dropped.
+	r.ev.File(app.ProducedFile{Kind: "sstv", Data: []byte("png"), Start: time.Now()})
+
+	r.ev.Decode(app.DecodeRecord{Time: time.Now(), Schema: "image.v1", Text: "Robot 36 (VIS 8), 320×240", Payload: json.RawMessage(`{"event":"start"}`)})
+	r.ev.Decode(app.DecodeRecord{Time: time.Now(), Schema: "image.v1", Payload: json.RawMessage(`{"event":"row","row":0}`), Live: true})
+
+	if n := len(sentOf[media.Decode](e.p, rxv1.TypeDecode)); n != 2 || e.pub.count() != 1 {
+		t.Fatalf("%d decodes sent, %d published", n, e.pub.count())
+	}
+
+	e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": nil}, "")
+
+	if !r.isClosed() {
+		t.Fatal("decoder kept")
+	}
+
+	start := time.UnixMilli(1_800_000_000_000)
+	r.ev.File(app.ProducedFile{Kind: "sstv", Data: []byte("png"), Start: start, Metadata: map[string]any{"vis_code": 8}})
+
+	got := e.files.all()
+	if len(got) != 1 {
+		t.Fatalf("files %+v", got)
+	}
+
+	if f := got[0]; f.DeviceID != "vhf" || f.Mode != "sstv" || f.FreqHz != 144_000_000+125_000+12_500 || f.SessionID != started.DecoderSessionID || !f.Start.Equal(start) {
+		t.Errorf("file %+v", f)
 	}
 }

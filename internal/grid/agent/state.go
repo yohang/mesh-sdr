@@ -176,10 +176,10 @@ func (s *DesiredState) Apply(st ctl.StateApply) ctl.StateApplied {
 	}
 
 	// The decoding settings: none from a hub that predates them.
-	if d := st.Policy.Decoders; d != nil && (d.MaxRestarts < 1 || d.MaxRestarts > 100) {
-		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: "invalid decoders.max_restarts"})
+	if reason := checkDecoders(st.Policy.Decoders); reason != "" {
+		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: reason})
 	} else {
-		s.policy.Decoders = d
+		s.policy.Decoders = st.Policy.Decoders
 	}
 
 	s.presets, s.devices = presets, devices
@@ -217,6 +217,22 @@ func checkWaterfall(w *ctl.StateWaterfall) string {
 		return "invalid waterfall levels"
 	case w.Palette != "default" && w.Palette != "turbo":
 		return "invalid waterfall palette"
+	}
+
+	return ""
+}
+
+// checkDecoders range-checks the decoding settings like the hub does.
+func checkDecoders(d *ctl.StateDecoders) string {
+	switch {
+	case d == nil:
+		return ""
+	case d.MaxRestarts < 1 || d.MaxRestarts > 100:
+		return "invalid decoders.max_restarts"
+	case d.FAX == nil:
+		return ""
+	case d.FAX.LPM < 30 || d.FAX.LPM > 480 || d.FAX.MinLength < 50 || d.FAX.MinLength > 450 || d.FAX.MaxLength < 500 || d.FAX.MaxLength > 8000:
+		return "invalid fax settings"
 	}
 
 	return ""

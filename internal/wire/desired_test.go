@@ -19,6 +19,8 @@ func (s fixedSettings) String(key string) string { v, _ := s[key].(string); retu
 
 func (s fixedSettings) Int(key string) int { v, _ := s[key].(int); return v }
 
+func (s fixedSettings) Bool(key string) bool { v, _ := s[key].(bool); return v }
+
 func (fixedSettings) Duration(string) time.Duration { return 0 }
 
 type noDevices struct{}
@@ -42,6 +44,7 @@ func TestDesiredStateCarriesSettings(t *testing.T) {
 		presets: presets.NewService(presets.Deps{Repo: presets.NewPresets(a), Tx: a, Logger: logger}),
 		settings: fixedSettings{
 			"listen_policy": "registered", "waterfall.min_db": -110, "waterfall.max_db": -40, "waterfall.palette": "default",
+			"fax_lpm": 60, "fax_min_length": 100, "fax_max_length": 900, "fax_color": true,
 		},
 		now: time.Now,
 	}
@@ -54,5 +57,10 @@ func TestDesiredStateCarriesSettings(t *testing.T) {
 	want := ctl.StateWaterfall{MinDB: -110, MaxDB: -40, Palette: "default"}
 	if st.Policy.ListenPolicy != "registered" || st.Policy.Waterfall == nil || *st.Policy.Waterfall != want {
 		t.Errorf("policy = %+v", st.Policy)
+	}
+
+	fax := ctl.StateFAX{LPM: 60, MinLength: 100, MaxLength: 900, Color: true}
+	if d := st.Policy.Decoders; d == nil || d.FAX == nil || *d.FAX != fax {
+		t.Errorf("decoders = %+v", st.Policy.Decoders)
 	}
 }

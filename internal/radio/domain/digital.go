@@ -119,6 +119,11 @@ var digitalModes = []DigitalMode{
 		Name: "zvei", Label: "ZVEI", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050,
 		Variants: []string{"ZVEI1", "ZVEI2", "ZVEI3", "DZVEI", "PZVEI"}, DedupStep: 1000,
 	},
+	// DEC-037: the libcsdr++ SSTV decoder on the audio at 24 kHz
+	// (OpenWebRX+ chain).
+	{Name: "sstv", Label: "SSTV", Cap: CapNativeDSP, Family: "image", Underlying: []string{"usb", "lsb", "nfm"}, Input: InputAudio, InputRate: 24000, DedupStep: 1000},
+	// DEC-038: the libcsdr++ HF FAX decoder on the USB audio at 12 kHz.
+	{Name: "fax", Label: "FAX", Cap: CapNativeDSP, Family: "image", Underlying: []string{"usb"}, Input: InputAudio, InputRate: 12000, DedupStep: 1000},
 }
 
 // DigitalModes returns the catalogue, in display order.

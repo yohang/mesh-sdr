@@ -159,7 +159,7 @@ func TestDesiredStateOlderHub(t *testing.T) {
 	}
 }
 
-// The decoding settings (decoders.max_restarts) are range-checked.
+// The decoding settings (decoders.max_restarts, fax_*) are range-checked.
 func TestDesiredStateDecoders(t *testing.T) {
 	s := agent.NewDesiredState(nil)
 
@@ -173,5 +173,21 @@ func TestDesiredStateDecoders(t *testing.T) {
 
 	if out := s.Apply(ctl.StateApply{Revision: 2, Policy: bad}); len(out.Errors) != 1 || s.Policy().Decoders.MaxRestarts != 7 {
 		t.Fatalf("invalid: %+v %+v", out, s.Policy())
+	}
+
+	// The FAX settings (DEC-038).
+	fax := ok
+	fax.Decoders = &ctl.StateDecoders{MaxRestarts: 5, FAX: &ctl.StateFAX{LPM: 60, MinLength: 100, MaxLength: 800, Color: true}}
+
+	if out := s.Apply(ctl.StateApply{Revision: 3, Policy: fax}); len(out.Errors) != 0 || s.Policy().Decoders.FAX.LPM != 60 {
+		t.Fatalf("fax: %+v %+v", out, s.Policy())
+	}
+
+	for _, f := range []ctl.StateFAX{{LPM: 20, MinLength: 100, MaxLength: 800}, {LPM: 120, MinLength: 100, MaxLength: 9000}} {
+		bad.Decoders = &ctl.StateDecoders{MaxRestarts: 5, FAX: &f}
+
+		if out := s.Apply(ctl.StateApply{Revision: 4, Policy: bad}); len(out.Errors) != 1 || s.Policy().Decoders.FAX.LPM != 60 {
+			t.Fatalf("invalid fax %+v: %+v %+v", f, out, s.Policy())
+		}
 	}
 }

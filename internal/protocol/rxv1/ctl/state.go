@@ -75,6 +75,22 @@ type StateDecoders struct {
 	// MaxRestarts is the crash-loop threshold of decoder processes: that
 	// many unexpected exits within 5 minutes (1 to 100).
 	MaxRestarts int `json:"max_restarts"`
+	// FAX are the HF FAX decoder settings (fax_*, DEC-038); nil: the node
+	// defaults.
+	FAX *StateFAX `json:"fax,omitempty"`
+}
+
+// StateFAX are the settings of the FAX decoders a node starts.
+type StateFAX struct {
+	// LPM is the line rate in lines per minute (30 to 480).
+	LPM int `json:"lpm"`
+	// MinLength is the shortest page saved to Files, in lines (50 to 450).
+	MinLength int `json:"min_length"`
+	// MaxLength ends a page, in lines (500 to 8000).
+	MaxLength   int  `json:"max_length"`
+	PostProcess bool `json:"postprocess"`
+	Color       bool `json:"color"`
+	AM          bool `json:"am"`
 }
 
 // StateWaterfall are the waterfall levels (dB) and palette of the receiver.

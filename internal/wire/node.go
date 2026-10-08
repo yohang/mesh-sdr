@@ -173,16 +173,31 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	// pushed to the hub over the control channel.
 	deviceLog := devlog.New(slices.Collect(maps.Keys(cfg.Devices)), devlog.DefaultSize, time.Now)
 
-	// Decoders: decoded messages go to the hub, the crash-loop threshold
-	// comes with the desired state, and a missing tool re-probes the node.
+	// Decoders: decoded messages and images go to the hub, the crash-loop
+	// threshold and the FAX settings come with the desired state, and a
+	// missing tool re-probes the node.
 	dec := radioDecoding{
 		publisher: decodePublisher{ag: ag},
+		files: filePublisher{
+			outbox: outbox, dir: filepath.Join(cfg.Node.RuntimeDir, "produced"), logger: component(logger, "radio.infra.files"),
+		},
 		maxRestarts: func() int {
 			if d := state.Policy().Decoders; d != nil {
 				return d.MaxRestarts
 			}
 
 			return 0
+		},
+		fax: func() decoder.FAXSettings {
+			if d := state.Policy().Decoders; d != nil && d.FAX != nil {
+				f := d.FAX
+
+				return decoder.FAXSettings{
+					LPM: f.LPM, MinLength: f.MinLength, MaxLength: f.MaxLength, PostProcess: f.PostProcess, Color: f.Color, AM: f.AM,
+				}
+			}
+
+			return decoder.DefaultFAX
 		},
 		reprobe: (&coalesced{run: func() { ag.EmitCapabilities(context.Background()) }}).trigger,
 	}
@@ -340,6 +355,59 @@ func (p decodePublisher) Decoded(d radioapp.Decoded) {
 			TS: d.Time.UnixMilli(), Source: source, CID: d.CID, Schema: d.Schema, Text: d.Text, Payload: d.Payload,
 		}}}
 	})
+}
+
+// filePublisher sends the images of the decoders to the hub through the
+// file outbox (FIL-005): each is written under dir (in node.runtime_dir),
+// then moved to the outbox, in the background.
+type filePublisher struct {
+	outbox *agent.Outbox
+	dir    string
+	logger *slog.Logger
+}
+
+func (p filePublisher) Produced(f radioapp.ProducedFile) {
+	go func() {
+		meta := agent.FileMeta{
+			Kind: f.Kind, DeviceID: f.DeviceID, PresetID: f.PresetID, DecoderSessionID: f.SessionID, Mode: f.Mode,
+			FrequencyHz: f.FreqHz, ReceivedStart: f.Start, ReceivedEnd: f.End, Metadata: f.Metadata,
+		}
+
+		err := p.send(meta, f.Data)
+		if err != nil {
+			p.logger.Warn("decoded file not sent to the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
+				slog.Int("bytes", len(f.Data)), slog.Any("error", err))
+
+			return
+		}
+
+		p.logger.Debug("decoded file queued for the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
+			slog.Int("bytes", len(f.Data)))
+	}()
+}
+
+func (p filePublisher) send(meta agent.FileMeta, data []byte) error {
+	if err := os.MkdirAll(p.dir, 0o700); err != nil {
+		return fmt.Errorf("create the produced files directory: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(p.dir, meta.Kind+"-*.png")
+	if err != nil {
+		return fmt.Errorf("write produced file: %w", err)
+	}
+
+	_, err = tmp.Write(data)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+
+		return fmt.Errorf("write produced file: %w", err)
+	}
+
+	return p.outbox.SendFile(context.Background(), meta, tmp.Name())
 }
 
 // Enrollment is the one-off process of `meshsdr node enroll`.

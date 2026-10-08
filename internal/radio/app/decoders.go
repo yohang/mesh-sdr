@@ -45,6 +45,38 @@ type DecodeRecord struct {
 	Schema  string
 	Text    string
 	Payload json.RawMessage
+	// Live records (the rows of an image) go to the listener only: the hub
+	// does not keep them.
+	Live bool
+}
+
+// File kinds of the decoders (FIL-005).
+const (
+	FileSSTV = "sstv"
+	FileFAX  = "fax"
+)
+
+// ProducedFile is a file a decoder session produced for Files (FIL-005):
+// an SSTV or FAX image as PNG, with its reception metadata (FIL-008).
+type ProducedFile struct {
+	Kind string
+	Data []byte
+	// Start is the reception start; End is zero when the reception was
+	// cut short.
+	Start, End time.Time
+	// Metadata are the per-kind details (SSTV mode, VIS code, FAX LPM…).
+	Metadata map[string]any
+
+	// The stream handler adds where the file comes from.
+	DeviceID, PresetID, SessionID, Mode string
+	// FreqHz is the dial frequency when the reception started.
+	FreqHz int64
+}
+
+// FilePublisher sends the files of the decoders to the hub. It must not
+// block.
+type FilePublisher interface {
+	Produced(f ProducedFile)
 }
 
 // DecoderEvents receive the output of a decoder session. They are called
@@ -52,6 +84,9 @@ type DecodeRecord struct {
 type DecoderEvents struct {
 	Decode func(DecodeRecord)
 	Status func(DecoderStatus)
+	// File receives the files of the session, even after Close: the image
+	// in progress is saved then.
+	File func(ProducedFile)
 }
 
 // DecoderSpec describes a decoder session to start.
