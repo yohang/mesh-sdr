@@ -119,6 +119,37 @@ func TestSectionPages(t *testing.T) {
 	}
 }
 
+// TestReceiverBookmarksLink covers BMK-001: the receiver's initial state
+// names Bookmarks › Manage only for the visitors who may manage bookmarks.
+func TestReceiverBookmarksLink(t *testing.T) {
+	tests := []struct {
+		name  string
+		link  *shell.BookmarksLink
+		allow bool
+		want  bool
+	}{
+		{"no link", nil, false, false},
+		{"listener", &shell.BookmarksLink{Path: "/bookmarks/manage"}, false, false},
+		{"operator", &shell.BookmarksLink{Path: "/bookmarks/manage"}, true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.link != nil {
+				tt.link.Gate = shell.GateFunc(func(context.Context) bool { return tt.allow })
+			}
+
+			m := shell.New(shell.Deps{Settings: values{}, Bookmarks: tt.link, Logger: discard})
+			h := httpserver.NewRouter(discard, "", http.NotFoundHandler(), m.HTTP)
+
+			_, body := do(t, h, http.MethodGet, "/", nil)
+			if got := strings.Contains(body, `"bookmarks_url":"/bookmarks/manage"`); got != tt.want {
+				t.Errorf("bookmarks_url present = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestUTCClock covers the top bar clock: HH:MM UTC of the render time, with
 // a machine-readable datetime, not a live region.
 func TestUTCClock(t *testing.T) {

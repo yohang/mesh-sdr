@@ -80,6 +80,8 @@ type Module struct {
 	static   fs.FS
 	markdown *markdown
 	logger   *slog.Logger
+	// bookmarks is the Bookmarks › Manage link of the receiver (nil: none).
+	bookmarks *BookmarksLink
 }
 
 // NewModule returns the shell router module. static is the embedded static
@@ -147,10 +149,14 @@ func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 // (templ.JSONScript): the island lists the devices itself (GET
 // /api/v1/features) and offers to sign in when it may list none.
 // AudioCodec is the audio codec it asks the nodes for (audio_compression).
+// BookmarksURL is the Bookmarks › Manage page, set for the visitors who may
+// add hub bookmarks (operators and admins): the Bookmarks tab links its add
+// form, pre-filled from the tuning.
 type receiverConfig struct {
-	SignedIn   bool   `json:"signed_in"`
-	LoginURL   string `json:"login_url"`
-	AudioCodec string `json:"audio_codec"`
+	SignedIn     bool   `json:"signed_in"`
+	LoginURL     string `json:"login_url"`
+	AudioCodec   string `json:"audio_codec"`
+	BookmarksURL string `json:"bookmarks_url,omitempty"`
 }
 
 // receiver is the Receiver section's entry page: the station (name,
@@ -167,6 +173,9 @@ func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
 
 	sh := m.shell.Shell(r)
 	rx := receiverConfig{SignedIn: sh.User != nil, LoginURL: "/login", AudioCodec: st.AudioCodec}
+	if b := m.bookmarks; b != nil && b.Gate != nil && b.Gate.Allows(r.Context()) {
+		rx.BookmarksURL = b.Path
+	}
 
 	page := layout.Page{Section: SectionReceiver.ID()}
 	m.render.Page(w, r, http.StatusOK, page, receiverPage(sh.SiteName, st, desc, rx), nil)
