@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
@@ -37,6 +38,50 @@ type settingsReader interface {
 	Int(key string) int
 	Bool(key string) bool
 	Duration(key string) time.Duration
+	Strings(key string) []string
+}
+
+// wsjtModes are the modes of decoders.wsjt_decoding_depths.
+var wsjtModes = []string{"ft8", "ft4", "jt65", "jt9", "wspr", "fst4", "fst4w", "q65"}
+
+// stateDecoders are the decoding settings of the desired state (Admin ›
+// Decoding).
+func stateDecoders(s settingsReader) *ctl.StateDecoders {
+	d := &ctl.StateDecoders{
+		MaxRestarts: s.Int("decoders.max_restarts"), DigimodesFFTSize: s.Int("decoders.digimodes_fft_size"), ShowCW: s.Bool("decoders.cw_showcw"),
+		WSJTDepth: s.Int("decoders.wsjt_decoding_depth"), WSJTDepths: map[string]int{},
+		Q65Combinations: s.Strings("decoders.q65_enabled_combinations"), JS8Profiles: s.Strings("decoders.js8_enabled_profiles"),
+		JS8Depth: s.Int("decoders.js8_decoding_depth"),
+		FAX: &ctl.StateFAX{
+			LPM: s.Int("fax_lpm"), MinLength: s.Int("fax_min_length"), MaxLength: s.Int("fax_max_length"),
+			PostProcess: s.Bool("fax_postprocess"), Color: s.Bool("fax_color"), AM: s.Bool("fax_am"),
+		},
+	}
+
+	// Every mode gets its effective depth: its own, else the global one.
+	for _, m := range wsjtModes {
+		d.WSJTDepths[m] = d.WSJTDepth
+		if v := s.Int("decoders.wsjt_decoding_depths." + m); v > 0 {
+			d.WSJTDepths[m] = v
+		}
+	}
+
+	seconds := func(list []string) []int {
+		var out []int
+
+		for _, v := range list {
+			if n, err := strconv.Atoi(v); err == nil {
+				out = append(out, n)
+			}
+		}
+
+		return out
+	}
+
+	d.FST4Intervals = seconds(s.Strings("decoders.fst4_enabled_intervals"))
+	d.FST4WIntervals = seconds(s.Strings("decoders.fst4w_enabled_intervals"))
+
+	return d
 }
 
 // newScheduling builds the modules. g.states may be nil (grid disabled):
@@ -289,14 +334,7 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 			Waterfall: &ctl.StateWaterfall{
 				MinDB: s.settings.Int("waterfall.min_db"), MaxDB: s.settings.Int("waterfall.max_db"), Palette: s.settings.String("waterfall.palette"),
 			},
-			Decoders: &ctl.StateDecoders{
-				MaxRestarts: s.settings.Int("decoders.max_restarts"), DigimodesFFTSize: s.settings.Int("decoders.digimodes_fft_size"),
-				ShowCW: s.settings.Bool("decoders.cw_showcw"),
-				FAX: &ctl.StateFAX{
-					LPM: s.settings.Int("fax_lpm"), MinLength: s.settings.Int("fax_min_length"), MaxLength: s.settings.Int("fax_max_length"),
-					PostProcess: s.settings.Bool("fax_postprocess"), Color: s.settings.Bool("fax_color"), AM: s.settings.Bool("fax_am"),
-				},
-			},
+			Decoders: stateDecoders(s.settings),
 		},
 	}
 

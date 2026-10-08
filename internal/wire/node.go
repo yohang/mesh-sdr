@@ -12,12 +12,14 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/grid/agent"
+	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
@@ -66,6 +68,34 @@ func (p decoderProber) Capabilities(ctx context.Context) ctl.Capabilities {
 	c.Decoders = append(c.Decoders, p.decoders(ctx)...)
 
 	return c
+}
+
+// slotSettings are the slot decoder settings of the desired state (none
+// from a hub that predates them: the node defaults).
+func slotSettings(d *ctl.StateDecoders) decoder.Settings {
+	if d == nil {
+		return decoder.Settings{}
+	}
+
+	return decoder.Settings{
+		WSJTDepth: d.WSJTDepth, WSJTDepths: d.WSJTDepths, FST4Intervals: d.FST4Intervals, FST4WIntervals: d.FST4WIntervals,
+		Q65Combinations: d.Q65Combinations, JS8Profiles: d.JS8Profiles, JS8Depth: d.JS8Depth,
+	}
+}
+
+// queueProber adds the depth of the batch decoder queue to the heartbeats
+// (DEC-025).
+type queueProber struct {
+	agent.Prober
+
+	depth func() int
+}
+
+func (p queueProber) Heartbeat(ctx context.Context) ctl.Heartbeat {
+	hb := p.Prober.Heartbeat(ctx)
+	hb.QueueDepth = p.depth()
+
+	return hb
 }
 
 // WithProber replaces the host prober.
@@ -145,6 +175,12 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 		o.prober = decoderProber{Prober: o.prober, decoders: func(ctx context.Context) []ctl.Decoder { return decoderCapabilities(ctx, toolbox) }}
 	}
 
+	// The batch decoder queue of the node (DEC-025): its depth goes with
+	// the heartbeat.
+	queue := decoder.NewQueue(cfg.Decoders.BatchWorkerCount(runtime.NumCPU()), cfg.Decoders.QueueLength, time.Now,
+		component(logger, "radio.infra.decoder.queue"))
+	o.prober = queueProber{Prober: o.prober, depth: queue.Depth}
+
 	ag, err := agent.New(agent.Options{
 		NodeID: id.String(), Version: version.String(),
 		Buffer: agent.NewBuffer(cfg.Node.EventBuffer.MaxEvents, int(cfg.Node.EventBuffer.MaxBytes.Bytes())),
@@ -207,7 +243,17 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 
 			return decoder.TextSettings{}
 		},
-		reprobe: (&coalesced{run: func() { ag.EmitCapabilities(context.Background()) }}).trigger,
+		reprobe:  (&coalesced{run: func() { ag.EmitCapabilities(context.Background()) }}).trigger,
+		queue:    queue,
+		settings: func() decoder.Settings { return slotSettings(state.Policy().Decoders) },
+		// Slot decoders need the node clock synchronised and within the
+		// offset beyond which the hub marks the node degraded (DEC-026,
+		// §4.5).
+		clockSynced: func() bool {
+			off, limit := ag.ClockOffsetMS(), gridapp.MaxClockOffset.Milliseconds()
+
+			return o.prober.NTPSynced() && off >= -limit && off <= limit
+		},
 	}
 
 	manager, streams, sources, toolbox, err := newRadio(cfg, logger, deviceReporter{ag: ag, log: deviceLog}, state, deviceLog, dec)
@@ -235,7 +281,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 
 	return &Process{
 		addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server"),
-		workers: []func(context.Context){ag.Run, ctlServer.Run, mediaServer.Run, manager.Run},
+		workers: []func(context.Context){ag.Run, ctlServer.Run, mediaServer.Run, manager.Run, queue.Run},
 	}, nil
 }
 

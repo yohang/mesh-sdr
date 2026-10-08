@@ -92,6 +92,19 @@ var formPages = []formPage{
 				Keys: []string{"fax_lpm", "fax_min_length", "fax_max_length", "fax_postprocess", "fax_color", "fax_am"}},
 			{ID: "text", Title: "Text decoders", Description: "PSK, RTTY, SITOR-B and CW decoders of the receiver.",
 				Keys: []string{"decoders.digimodes_fft_size", "decoders.cw_showcw"}},
+			{
+				ID: "wsjt", Title: "WSJT-X decoders", Description: "Depths and slot periods of FT8, FT4, JT65, JT9, WSPR, FST4, FST4W and Q65. A change applies from the next slot of the running decoders.",
+				Keys: []string{
+					"decoders.wsjt_decoding_depth", "decoders.wsjt_decoding_depths.ft8", "decoders.wsjt_decoding_depths.ft4",
+					"decoders.wsjt_decoding_depths.jt65", "decoders.wsjt_decoding_depths.jt9", "decoders.wsjt_decoding_depths.wspr",
+					"decoders.wsjt_decoding_depths.fst4", "decoders.wsjt_decoding_depths.fst4w", "decoders.wsjt_decoding_depths.q65",
+					"decoders.fst4_enabled_intervals", "decoders.fst4w_enabled_intervals", "decoders.q65_enabled_combinations",
+				},
+			},
+			{
+				ID: "js8", Title: "JS8Call decoder", Description: "A change applies from the next slot of the running decoders.",
+				Keys: []string{"decoders.js8_enabled_profiles", "decoders.js8_decoding_depth"},
+			},
 		},
 	},
 }

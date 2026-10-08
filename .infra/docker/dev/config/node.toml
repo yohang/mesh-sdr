@@ -47,3 +47,14 @@ freq_range = { min = "14MHz", max = "15MHz" }
 sample_rates = [1_024_000]
 listen_policy = "anonymous"
 driver = { device = "text" }
+
+# A fourth synthetic device sends the FT8 message "CQ K1ABC FN42" in every
+# 15 s UTC slot, 1500 Hz above centre + 31.25 kHz (144.15625 MHz): tune USB
+# there and choose FT8 (DEC-016).
+[devices.dev-ft8]
+name = "Synthetic FT8"
+type = "rtl_sdr"
+freq_range = { min = "144MHz", max = "146MHz" }
+sample_rates = [250_000]
+listen_policy = "anonymous"
+driver = { device = "ft8" }

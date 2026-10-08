@@ -442,6 +442,9 @@ type DiagState struct {
 	Variant          string `json:"variant,omitempty"`
 	State            string `json:"state"`
 	Reason           string `json:"reason,omitempty"`
+	// Warning degrades a running decoder (additive field, DEC-026):
+	// "clock_unsynced" when the node clock is not synchronised.
+	Warning string `json:"warning,omitempty"`
 	// Since is the time of the change in Unix milliseconds.
 	Since int64 `json:"since"`
 }

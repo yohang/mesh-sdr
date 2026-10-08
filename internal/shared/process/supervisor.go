@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,6 +57,12 @@ type Spec struct {
 	ToolDirs []string // PATH of the child
 	Env      []string // extra declared variables, KEY=VALUE
 
+	// Workdir, when set, is an existing workdir made by
+	// Supervisor.CreateWorkdir: the instance runs there and Run neither
+	// creates nor removes it (the batch jobs of one decoder session share
+	// its workdir, §8.4 "Batch slot decoders"). Empty: Run creates
+	// <runtime>/sessions/<ID> and removes it on return.
+	Workdir string
 	// Prepare runs after the workdir exists and before the first spawn
 	// (generated config files, FIFOs).
 	Prepare func(workdir string) error
@@ -165,6 +172,9 @@ func (s *Supervisor) NewInstance(spec Spec) (*Instance, error) {
 	if err := validArgs(spec.Args); err != nil {
 		return nil, err
 	}
+	if spec.Workdir != "" && !s.ownWorkdir(spec.Workdir) {
+		return nil, fmt.Errorf("%w: workdir %q is not a session workdir", ErrInvalidSpec, spec.Workdir)
+	}
 	for _, d := range spec.ToolDirs {
 		if !filepath.IsAbs(d) || strings.Contains(d, ":") {
 			return nil, fmt.Errorf("%w: tool dir %q", ErrInvalidSpec, d)
@@ -227,9 +237,26 @@ func (in *Instance) buildArgv(args []string) []string {
 	return argv
 }
 
-// Workdir is the instance's private directory (exists only while Run runs).
+// Workdir is the instance's private directory (exists only while Run runs,
+// unless Spec.Workdir is set).
 func (in *Instance) Workdir() string {
+	if in.spec.Workdir != "" {
+		return in.spec.Workdir
+	}
 	return filepath.Join(in.s.opts.RuntimeDir, "sessions", in.spec.ID)
+}
+
+// CreateWorkdir creates the private workdir <runtime>/sessions/<id> (0700,
+// exclusive) of a session whose instances set Spec.Workdir. The caller
+// removes it with os.RemoveAll when the session ends.
+func (s *Supervisor) CreateWorkdir(id string) (string, error) {
+	return createWorkdir(s.opts.RuntimeDir, id)
+}
+
+// ownWorkdir reports whether wd is a session workdir of the supervisor.
+func (s *Supervisor) ownWorkdir(wd string) bool {
+	return filepath.Clean(wd) == wd && filepath.Dir(wd) == filepath.Join(s.opts.RuntimeDir, "sessions") &&
+		idPattern.MatchString(filepath.Base(wd))
 }
 
 // Kick ends a back-off or crash-loop wait immediately (admin reset, user
@@ -271,15 +298,18 @@ func (in *Instance) buildEnv(wd string) []string {
 // ErrDecoderError, ErrFailed or ErrJobTimeout, already emitted and logged).
 // The workdir is created first and removed on return.
 func (in *Instance) Run(ctx context.Context) error {
-	wd, err := createWorkdir(in.s.opts.RuntimeDir, in.spec.ID)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := os.RemoveAll(wd); err != nil {
-			in.log.LogAttrs(context.Background(), slog.LevelWarn, "workdir cleanup failed", slog.Any("error", err))
+	wd := in.spec.Workdir
+	if wd == "" {
+		var err error
+		if wd, err = createWorkdir(in.s.opts.RuntimeDir, in.spec.ID); err != nil {
+			return err
 		}
-	}()
+		defer func() {
+			if err := os.RemoveAll(wd); err != nil {
+				in.log.LogAttrs(context.Background(), slog.LevelWarn, "workdir cleanup failed", slog.Any("error", err))
+			}
+		}()
+	}
 	in.env = in.buildEnv(wd)
 	if in.spec.Prepare != nil {
 		if err := in.spec.Prepare(wd); err != nil {
@@ -553,9 +583,7 @@ func (in *Instance) runOnce(ctx context.Context, wd string) (res result) {
 			ar = outR
 		}
 		if in.spec.Stdout != nil {
-			if err := in.spec.Stdout(runCtx, ar); err != nil && runCtx.Err() == nil {
-				in.log.LogAttrs(ctx, slog.LevelDebug, "stdout consumer ended", slog.Any("error", err))
-			}
+			in.consumeStdout(runCtx, r, ar)
 		}
 		_, _ = io.Copy(io.Discard, ar) // keep draining so the tool never blocks on a dead consumer
 	})
@@ -651,6 +679,32 @@ loop:
 	res.sticky = r.sticky
 	r.mu.Unlock()
 	return res
+}
+
+// consumeStdout runs the stdout consumer of a run. A panic of the consumer
+// (an adapter parser on hostile tool output) fails this run only: it is
+// logged, and the tool is stopped as an input error (no restart).
+func (in *Instance) consumeStdout(ctx context.Context, r *run, rd io.Reader) {
+	defer func() {
+		p := recover()
+		if p == nil {
+			return
+		}
+		in.log.LogAttrs(context.Background(), slog.LevelError, "stdout consumer panicked: the run is stopped",
+			slog.Any("panic", p), slog.String("stack", string(debug.Stack())))
+		r.mu.Lock()
+		if stickyRank[ClassInputError] > stickyRank[r.sticky] {
+			r.sticky = ClassInputError
+		}
+		r.mu.Unlock()
+		select {
+		case r.fatal <- ClassInputError:
+		default:
+		}
+	}()
+	if err := in.spec.Stdout(ctx, rd); err != nil && ctx.Err() == nil {
+		in.log.LogAttrs(ctx, slog.LevelDebug, "stdout consumer ended", slog.Any("error", err))
+	}
 }
 
 // drain waits for the pipe readers. A process that left the group (setsid)

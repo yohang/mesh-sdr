@@ -41,7 +41,30 @@ const REASONS = /** @type {Record<string, string>} */ ({
   workdir: "the node could not prepare the decoder",
   start_failed: "the decoder could not be started",
   "node busy": "the node runs as many decoders as it can; try again later",
+  queue_overflow: "the node could not decode every slot in time; a slot was skipped",
+  job_timeout: "a slot took too long to decode and was skipped",
 });
+
+/** Readable warnings of a running decoder. */
+const WARNINGS = /** @type {Record<string, string>} */ ({
+  clock_unsynced: "the receiver clock is not synchronised, decodes may be missed",
+});
+
+/** Frames of a JS8 thread are within this many hertz (DEC-030). */
+const THREAD_SPAN_HZ = 5;
+/** A JS8 thread whose next frame does not come within this ends. */
+const THREAD_GAP_MS = 5 * 60 * 1000;
+
+/**
+ * @typedef {object} Thread
+ * @property {number} df
+ * @property {string} submode
+ * @property {number} last
+ * @property {string[]} calls
+ * @property {HTMLSpanElement} body
+ * @property {HTMLSpanElement} more
+ * @property {HTMLSpanElement} callsEl
+ */
 
 /**
  * el creates an element with attributes and optional text content.
@@ -249,11 +272,20 @@ export class DecodersTab {
     c.live.textContent = p.partial ? text : "";
     c.live.hidden = !p.partial;
     if (p.partial || !text) return;
+    if (p.schema === "js8.v1" && this.thread(c, p, text)) return;
     const li = el("li", { class: "break-all whitespace-pre-wrap" });
-    const meta = el("span", { class: "text-fg-muted" }, `${utcTime(Number(p.ts) || Date.now())} ${mhz(Number(p.freq_hz))} `);
+    let head = `${utcTime(Number(p.ts) || Date.now())} ${mhz(Number(p.freq_hz))} `;
+    const db = Number(p.payload?.db);
+    if (p.schema === "wsjt.v1" && Number.isFinite(db)) head += `${db} dB `;
+    const meta = el("span", { class: "text-fg-muted" }, head);
     const body = el("span");
     body.textContent = text;
     li.append(meta, body);
+    this.add(c, li);
+  }
+
+  /** add puts a message at the top of a card. @param {Card} c @param {HTMLElement} li */
+  add(c, li) {
     c.list.prepend(li);
     while (c.list.childElementCount > MAX_MESSAGES) c.list.lastElementChild?.remove();
   }
@@ -364,6 +396,46 @@ export class DecodersTab {
     }
   }
 
+  /**
+   * thread adds a JS8 frame to its thread (DEC-030): frames on one audio
+   * frequency (±5 Hz) and submode, from a first frame (thread type bit 1)
+   * to a last one (bit 2), are shown on one line with their call signs; an
+   * unfinished thread ends with a continuation marker. Returns false when
+   * the frame needs a line of its own.
+   * @param {Card & {threads?: Thread[]}} c @param {any} p @param {string} text
+   */
+  thread(c, p, text) {
+    const f = p.payload ?? {};
+    const df = Number(f.df), type = Number(f.thread_type), submode = String(f.submode ?? "");
+    if (!Number.isFinite(df) || !Number.isFinite(type)) return false;
+    const now = Number(p.ts) || Date.now();
+    c.threads = (c.threads ?? []).filter((t) => now - t.last <= THREAD_GAP_MS && t.body.isConnected);
+    let t = (type & 1) === 0 ? c.threads.find((x) => x.submode === submode && Math.abs(x.df - df) <= THREAD_SPAN_HZ) : undefined;
+    if (!t) {
+      const li = el("li", { class: "break-all whitespace-pre-wrap" });
+      const meta = el("span", { class: "text-fg-muted" }, `${utcTime(now)} ${mhz(Number(p.freq_hz))} `);
+      const body = /** @type {HTMLSpanElement} */ (el("span"));
+      const more = /** @type {HTMLSpanElement} */ (el("span"));
+      more.append(el("span", { "aria-hidden": "true" }, " …"), el("span", { class: "sr-only" }, " (continues)"));
+      const callsEl = /** @type {HTMLSpanElement} */ (el("span", { class: "block font-sans text-fg-muted" }));
+      li.append(meta, body, more, callsEl);
+      t = { df, submode, last: now, calls: [], body, more, callsEl };
+      c.threads.push(t);
+      this.add(c, li);
+    }
+    t.last = now;
+    t.body.textContent = (t.body.textContent + text).slice(0, MAX_TEXT);
+    for (const call of [f.callsign, f.to]) {
+      if (typeof call === "string" && call && !t.calls.includes(call)) t.calls.push(call);
+    }
+    t.callsEl.textContent = t.calls.length ? `Calls: ${t.calls.join(", ")}` : "";
+    if (type & 2) {
+      t.more.remove();
+      c.threads = c.threads.filter((x) => x !== t);
+    }
+    return true;
+  }
+
   /** @param {any} p diag.state */
   onStatus(p) {
     const variant = typeof p?.variant === "string" ? p.variant : "";
@@ -374,7 +446,7 @@ export class DecodersTab {
     let text = "";
     switch (p?.state) {
       case "running":
-        text = `${label}: decoding.`;
+        text = `${label}: decoding${p.warning ? ` (warning: ${WARNINGS[p.warning] ?? p.warning})` : ""}.`;
         this.card(String(p.decoder));
         break;
       case "unavailable":

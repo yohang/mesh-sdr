@@ -59,6 +59,14 @@ type Options struct {
 	// cw_showcw pushed by the hub); nil: the defaults.
 	Text   func() TextSettings
 	Logger *slog.Logger
+	// Queue runs the jobs of the slot decoders (DEC-025).
+	Queue *Queue
+	// Settings returns the decoding settings pushed by the hub (DEC-024).
+	Settings func() Settings
+	// ClockSynced reports whether the node clock is synchronised (NTP and
+	// within 1 s of the hub's): slot decoders warn when it is not
+	// (DEC-026).
+	ClockSynced func() bool
 	// Now is the decode time source (tests).
 	Now func() time.Time
 }
@@ -91,6 +99,15 @@ func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderR
 	// The native image decoders run in the node (DEC-037, DEC-038).
 	if spec.Mode.Name == app.FileSSTV || spec.Mode.Name == app.FileFAX {
 		return r.startImage(spec, ev)
+	}
+
+	// The slot decoders run batch jobs on the node queue (DEC-025).
+	if spec.Mode.Slot > 0 && spec.Mode.Input == domain.InputAudio && len(profiles(spec.Mode.Name, Settings{})) > 0 {
+		if r.o.Supervisor == nil {
+			return nil, errors.New("node.runtime_dir is not set: no tool can run")
+		}
+
+		return r.startSlots(spec, ev)
 	}
 
 	if spec.Mode.Cap == domain.CapNativeDSP {

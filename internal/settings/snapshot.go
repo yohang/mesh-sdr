@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"slices"
 	"time"
 )
 
@@ -54,6 +55,13 @@ func (s *Snapshot) Bool(key string) bool {
 	v, _ := s.typed[key].(bool)
 
 	return v
+}
+
+// Strings returns the value of a list setting (a copy; nil when unset).
+func (s *Snapshot) Strings(key string) []string {
+	v, _ := s.typed[key].([]string)
+
+	return slices.Clone(v)
 }
 
 // Int returns an integer setting (0 when unknown).
@@ -125,6 +133,9 @@ func (s *Store) Int(key string) int { return s.Snapshot().Int(key) }
 
 // Duration reads a duration setting of the current snapshot.
 func (s *Store) Duration(key string) time.Duration { return s.Snapshot().Duration(key) }
+
+// Strings reads a list setting of the current snapshot.
+func (s *Store) Strings(key string) []string { return s.Snapshot().Strings(key) }
 
 // Rate reads a rate setting of the current snapshot.
 func (s *Store) Rate(key string) (int, time.Duration) { return s.Snapshot().Rate(key) }

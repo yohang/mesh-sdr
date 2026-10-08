@@ -176,7 +176,12 @@ func (s *DesiredState) Apply(st ctl.StateApply) ctl.StateApplied {
 	}
 
 	// The decoding settings: none from a hub that predates them.
-	if reason := checkDecoders(st.Policy.Decoders); reason != "" {
+	reason := checkDecoders(st.Policy.Decoders)
+	if reason == "" {
+		reason = invalidSlotSettings(st.Policy.Decoders)
+	}
+
+	if reason != "" {
 		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: reason})
 	} else {
 		s.policy.Decoders = st.Policy.Decoders
@@ -299,4 +304,50 @@ func check(cfg ctl.Device, want ctl.DesiredDevice, presets map[string]ctl.Preset
 	}
 
 	return "", ""
+}
+
+// Bounds of the slot decoder settings: the decoders ignore the entries
+// they do not know (an FST4 period, a Q65 combination).
+const (
+	maxSlotSettings = 32
+	maxSlotPeriod   = 3600
+	maxSlotName     = 16
+)
+
+// invalidSlotSettings checks the bounds of the slot decoder settings and
+// returns why they are refused ("" when valid).
+func invalidSlotSettings(d *ctl.StateDecoders) string {
+	if d == nil {
+		return ""
+	}
+
+	depth := func(v int) bool { return v >= 0 && v <= 3 }
+
+	switch {
+	case !depth(d.WSJTDepth) || !depth(d.JS8Depth):
+		return "invalid decoders depth"
+	case len(d.WSJTDepths) > maxSlotSettings || len(d.FST4Intervals) > maxSlotSettings || len(d.FST4WIntervals) > maxSlotSettings ||
+		len(d.Q65Combinations) > maxSlotSettings || len(d.JS8Profiles) > maxSlotSettings:
+		return "too many decoders settings"
+	}
+
+	for k, v := range d.WSJTDepths {
+		if len(k) > maxSlotName || !depth(v) {
+			return "invalid decoders.wsjt_decoding_depths"
+		}
+	}
+
+	for _, v := range slices.Concat(d.FST4Intervals, d.FST4WIntervals) {
+		if v < 1 || v > maxSlotPeriod {
+			return "invalid decoders intervals"
+		}
+	}
+
+	for _, v := range slices.Concat(d.Q65Combinations, d.JS8Profiles) {
+		if v == "" || len(v) > maxSlotName {
+			return "invalid decoders profiles"
+		}
+	}
+
+	return ""
 }

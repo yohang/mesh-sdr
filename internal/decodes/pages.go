@@ -64,7 +64,7 @@ type listView struct {
 	Filter   filter
 	Devices  []Device
 	Modes    []string
-	Rows     []Message
+	Rows     []Entry
 	SignedIn bool
 	// Retention is the retention notice ("Decodes are kept for N days").
 	Retention string
@@ -127,7 +127,7 @@ func (m *Module) listPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v := listView{Filter: f, Devices: devices, Modes: m.d.Modes, SignedIn: m.d.SignedIn(ctx), Rows: []Message{}}
+	v := listView{Filter: f, Devices: devices, Modes: m.d.Modes, SignedIn: m.d.SignedIn(ctx), Rows: []Entry{}}
 
 	if d := m.d.Retention(); d > 0 {
 		v.Retention = "Decoded messages are kept for " + strconv.Itoa(int(d.Hours()/24)) + " days."
@@ -164,7 +164,8 @@ func (m *Module) listPage(w http.ResponseWriter, r *http.Request) {
 			v.Next = f.query(rows[len(rows)-1].ID)
 		}
 
-		v.Rows = rows
+		// JS8 frames are grouped into threads (DEC-030).
+		v.Rows = Threads(rows)
 	}
 
 	m.d.Render.Page(w, r, status, layout.Page{Title: "Decodes", Section: layout.SectionDecodes}, listPage(v), nil)

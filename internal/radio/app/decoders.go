@@ -48,7 +48,15 @@ const (
 type DecoderStatus struct {
 	State  string
 	Reason string
+	// Warning is a condition that degrades a running decoder:
+	// WarningClock when the node clock is not synchronised (slot decoders,
+	// DEC-026).
+	Warning string
 }
+
+// WarningClock: the node clock is not NTP synchronised or is more than 1 s
+// off the hub's, and slot decoders depend on it (DEC-026).
+const WarningClock = "clock_unsynced"
 
 // DecodeRecord is one typed message of a decoder (§8.4 "Typed framed
 // output"): its plain-text rendering, already sanitised and capped, and the
@@ -64,6 +72,12 @@ type DecodeRecord struct {
 	// Partial is the line a text decoder is printing (DEC-006 to DEC-012):
 	// the listener sees it at once, the hub only gets the whole line.
 	Partial bool
+	// AudioHz is the audio frequency of the signal the tool reports (WSJT,
+	// JS8): the message's frequency is the dial frequency plus it.
+	AudioHz int64
+	// DialHz is the dial frequency the record was received on (the slot's
+	// at its start); 0: the demodulator's current dial.
+	DialHz int64
 }
 
 // File kinds of the decoders (FIL-005).
@@ -105,6 +119,10 @@ type DecoderEvents struct {
 	File func(ProducedFile)
 	// Spectrum receives the secondary FFT lines while it is on (DEC-004).
 	Spectrum func(SpectrumFrame)
+	// Dial returns the current dial frequency of the demodulator (0:
+	// unknown): slot decoders stamp each slot with the dial at its start
+	// (DecodeRecord.DialHz). It must not block.
+	Dial func() int64
 }
 
 // DecoderSpec describes a decoder session to start.

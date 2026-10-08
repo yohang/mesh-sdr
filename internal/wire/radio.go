@@ -94,6 +94,7 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 	core := uint64(0)
 	runner := decoder.NewRunner(decoder.Options{
 		Supervisor: sup, Tools: tools, MaxRestarts: dec.maxRestarts, Reprobe: dec.reprobe, FAX: dec.fax, Text: dec.text, Logger: component(logger, "radio.infra.decoder"),
+		Queue: dec.queue, Settings: dec.settings, ClockSynced: dec.clockSynced,
 		Limits: process.Limits{
 			Nice: lim.Nice, OpenFiles: uint64(lim.OpenFiles), AddressSpace: uint64(lim.Memory.Bytes()), Core: &core, NoNewPrivs: true,
 		},
@@ -115,6 +116,12 @@ type radioDecoding struct {
 	reprobe     func()
 	// text are the settings of the text decoders.
 	text func() decoder.TextSettings
+	// queue runs the slot decoder jobs (DEC-025), settings are their
+	// settings from the desired state and clockSynced the node clock state
+	// (DEC-026).
+	queue       *decoder.Queue
+	settings    func() decoder.Settings
+	clockSynced func() bool
 }
 
 // radioDevices builds the devices of the node configuration, ordered by id.

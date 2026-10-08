@@ -378,6 +378,37 @@ func TestBatchJobCompletes(t *testing.T) {
 	}
 }
 
+// A panicking stdout consumer fails its run only: input_format, the node
+// keeps running.
+func TestStdoutConsumerPanic(t *testing.T) {
+	rec := newRecorder()
+	sup, _ := newSup(t, rec)
+	buf := NewDropOldest(1 << 20)
+	in, err := sup.NewInstance(Spec{
+		ID: "job-panic", Kind: "decoder", Mode: Batch, Path: fakeDecoder,
+		Args:  []string{"-frame", "8", "-exit-code", "0"},
+		Stdin: buf.Feed,
+		Stdout: func(context.Context, io.Reader) error {
+			var base [8]int
+			i := len(base)
+			_ = base[i%16] // index out of range, like a parser on hostile output
+			return nil
+		},
+		Timeouts: Timeouts{Job: 5 * time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = buf.Write(bytes.Repeat([]byte{1}, 8))
+	buf.Close()
+	if err := start(t, in).wait(t, 5*time.Second); !errors.Is(err, ErrDecoderError) {
+		t.Fatalf("Run = %v", err)
+	}
+	if last := rec.events()[len(rec.events())-1]; last.Reason != "input_format" {
+		t.Fatalf("last %+v", last)
+	}
+}
+
 // --- process group and parent death ------------------------------------------------
 
 func TestProcessGroupKill(t *testing.T) {
