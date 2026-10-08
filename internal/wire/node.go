@@ -46,8 +46,8 @@ type nodeOptions struct {
 	devices        func() []ctl.Device
 	mediaHeartbeat time.Duration
 	// outbox is told the file outbox (tests send files through it).
-	outbox func(*agent.Outbox)
-	probeDecoders  bool
+	outbox        func(*agent.Outbox)
+	probeDecoders bool
 }
 
 // WithDecoderProbe adds the decoder capabilities of the node to the

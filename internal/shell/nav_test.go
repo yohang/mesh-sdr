@@ -63,7 +63,7 @@ func TestNavigation(t *testing.T) {
 	}{
 		{"visitor home", false, "/", []string{"/ receiver*", "/map map", "/decodes decodes", "/files files"}},
 		{"visitor map", false, "/map", []string{"/ receiver", "/map map*", "/decodes decodes", "/files files"}},
-		{"admin decodes", true, "/decodes", []string{"/ receiver", "/map map", "/decodes decodes*", "/files files", "/admin admin"}},
+		{"admin map", true, "/map", []string{"/ receiver", "/map map*", "/decodes decodes", "/files files", "/admin admin"}},
 		{"admin policy", true, "/policy", []string{"/ receiver", "/map map", "/decodes decodes", "/files files", "/admin admin"}},
 	}
 

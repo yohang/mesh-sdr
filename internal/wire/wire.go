@@ -430,7 +430,6 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		Policy: filesPolicy, Logger: component(logger, "files.http.gallery"),
 	})
 
-	
 	// Decoded messages (DEC-047): stored from the control channels, shown
 	// on the Decodes page.
 	var features *gridapp.Features
