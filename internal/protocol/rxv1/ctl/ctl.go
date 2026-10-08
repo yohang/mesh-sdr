@@ -299,6 +299,11 @@ type FileEnd struct {
 	FileID string `json:"file_id"`
 }
 
+// MaxFileMetadata bounds the Metadata of a file.begin, as JSON: with the
+// other fields, the message stays far under the 64 KiB inbound limit of the
+// control channel.
+const MaxFileMetadata = 4 << 10
+
 // FileChunkBytes is the content of a full file.chunk: 45 KiB, 60 KiB in
 // base64, so that the message stays under the 64 KiB inbound limit of the
 // control channel (§6.9) and under the 256 KiB chunk bound of §4.4.

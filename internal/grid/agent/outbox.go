@@ -120,14 +120,22 @@ type Outbox struct {
 
 	prepare func() error
 
-	mu    sync.Mutex
-	files map[int64]outboxFile // by seq of file.end
-	bytes int64
+	mu     sync.Mutex
+	files  map[int64]outboxFile // by seq of file.end
+	bytes  int64
+	events int
 }
 
 type outboxFile struct {
-	path string
-	size int64
+	path   string
+	size   int64
+	events int
+}
+
+// fileEvents returns the events of a file of size bytes: file.begin, the
+// chunks and file.end.
+func fileEvents(size int64) int {
+	return 2 + int((size+ctl.FileChunkBytes-1)/ctl.FileChunkBytes)
 }
 
 // NewOutbox returns the outbox of dir. The directory is emptied and
@@ -184,6 +192,11 @@ func (o *Outbox) send(meta FileMeta, path string) error {
 		extra = b
 	}
 
+	// file.begin must fit a control channel message (64 KiB).
+	if len(extra) > ctl.MaxFileMetadata {
+		return fmt.Errorf("%w: metadata of %d bytes, at most %d", ErrInvalidFile, len(extra), ctl.MaxFileMetadata)
+	}
+
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("stat produced file: %w", err)
@@ -230,15 +243,20 @@ func (o *Outbox) send(meta FileMeta, path string) error {
 	return nil
 }
 
+// reserve books room for a file of n bytes: at most MaxOutboxBytes, and
+// at most half the event buffer for the events of the files, so that the
+// buffer never drops a file event to make room for another.
 func (o *Outbox) reserve(n int64) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	if o.bytes+n > MaxOutboxBytes {
+	events := fileEvents(n)
+	if o.bytes+n > MaxOutboxBytes || o.events+events > o.agent.Buffer().MaxEvents()/2 {
 		return false
 	}
 
 	o.bytes += n
+	o.events += events
 
 	return true
 }
@@ -246,6 +264,7 @@ func (o *Outbox) reserve(n int64) bool {
 func (o *Outbox) release(n int64) {
 	o.mu.Lock()
 	o.bytes -= n
+	o.events -= fileEvents(n)
 	o.mu.Unlock()
 }
 
@@ -265,7 +284,7 @@ func (o *Outbox) queue(id, path string, size int64, sum []byte, meta FileMeta, e
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	o.agent.emitRef(rxv1.TypeFileBegin, ClassDecode, 512+len(extra), func(seq int64) any {
+	o.agent.emitRef(rxv1.TypeFileBegin, ClassFile, 512+len(extra), func(seq int64) any {
 		begin.Seq = seq
 
 		return begin
@@ -273,15 +292,15 @@ func (o *Outbox) queue(id, path string, size int64, sum []byte, meta FileMeta, e
 
 	for off := int64(0); off < size; off += ctl.FileChunkBytes {
 		n := int(min(size-off, ctl.FileChunkBytes))
-		o.agent.emitRef(rxv1.TypeFileChunk, ClassDecode, 128, func(seq int64) any {
+		o.agent.emitRef(rxv1.TypeFileChunk, ClassFile, 128, func(seq int64) any {
 			return chunkRef{seq: seq, id: id, path: path, off: off, n: n}
 		})
 	}
 
-	end := o.agent.emitRef(rxv1.TypeFileEnd, ClassDecode, 128, func(seq int64) any {
+	end := o.agent.emitRef(rxv1.TypeFileEnd, ClassFile, 128, func(seq int64) any {
 		return ctl.FileEnd{Seq: seq, FileID: id}
 	})
-	o.files[end] = outboxFile{path: path, size: size}
+	o.files[end] = outboxFile{path: path, size: size, events: fileEvents(size)}
 
 	o.logger.Debug("file queued for the hub", slog.String("file_id", id), slog.String("kind", meta.Kind),
 		slog.Int64("size", size), slog.Int64("end_seq", end))
@@ -304,6 +323,7 @@ func (o *Outbox) acked(seq int64) {
 		}
 
 		o.bytes -= f.size
+		o.events -= f.events
 		delete(o.files, end)
 	}
 }

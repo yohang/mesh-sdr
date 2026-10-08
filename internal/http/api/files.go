@@ -1,9 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,7 +17,8 @@ type FileService interface {
 	// Visible returns a file the caller of ctx may see, or
 	// files.ErrFileNotFound.
 	Visible(ctx context.Context, id string) (files.Entry, error)
-	Content(ctx context.Context, e files.Entry) ([]byte, error)
+	// WriteContent writes the content of a file Visible returned.
+	WriteContent(ctx context.Context, e files.Entry, w io.Writer) error
 	Thumbnail(ctx context.Context, e files.Entry) ([]byte, error)
 }
 
@@ -38,7 +39,7 @@ func (h FileHandlers) GetFileContent(ctx context.Context, req GetFileContentRequ
 	}
 
 	etag := strconv.Quote(hex.EncodeToString(e.SHA256))
-	res := fileResponse{etag: etag, mime: string(e.MIME), name: e.Name}
+	res := fileResponse{etag: etag, mime: string(e.MIME), name: e.Name, size: e.Size}
 
 	if req.Params.IfNoneMatch != nil && *req.Params.IfNoneMatch == etag {
 		res.notModified = true
@@ -46,9 +47,8 @@ func (h FileHandlers) GetFileContent(ctx context.Context, req GetFileContentRequ
 		return res, nil
 	}
 
-	if res.data, err = h.files.Content(ctx, e); err != nil {
-		return nil, err
-	}
+	// The content is streamed one stored chunk at a time.
+	res.stream = func(w io.Writer) error { return h.files.WriteContent(ctx, e, w) }
 
 	return res, nil
 }
@@ -69,8 +69,16 @@ func (h FileHandlers) GetFileThumbnail(ctx context.Context, req GetFileThumbnail
 		return res, nil
 	}
 
-	if res.data, err = h.files.Thumbnail(ctx, e); err != nil {
+	data, err := h.files.Thumbnail(ctx, e)
+	if err != nil {
 		return nil, err
+	}
+
+	res.size = int64(len(data))
+	res.stream = func(w io.Writer) error {
+		_, err := w.Write(data)
+
+		return err
 	}
 
 	return res, nil
@@ -80,7 +88,8 @@ func (h FileHandlers) GetFileThumbnail(ctx context.Context, req GetFileThumbnail
 // revalidated on every use (rights may change), the content as an
 // attachment with the name the hub generated.
 type fileResponse struct {
-	data        []byte
+	stream      func(w io.Writer) error
+	size        int64
 	etag        string
 	mime        string
 	name        string
@@ -106,7 +115,7 @@ func (r fileResponse) write(w http.ResponseWriter) error {
 	}
 
 	h.Set("Content-Type", ctype)
-	h.Set("Content-Length", strconv.Itoa(len(r.data)))
+	h.Set("Content-Length", strconv.FormatInt(r.size, 10))
 
 	if !r.inline {
 		h.Set("Content-Disposition", `attachment; filename="`+SafeFileName(r.name)+`"`)
@@ -114,9 +123,7 @@ func (r fileResponse) write(w http.ResponseWriter) error {
 
 	w.WriteHeader(http.StatusOK)
 
-	_, err := bytes.NewReader(r.data).WriteTo(w)
-
-	return err
+	return r.stream(w)
 }
 
 func (r fileResponse) VisitGetFileContentResponse(w http.ResponseWriter) error { return r.write(w) }

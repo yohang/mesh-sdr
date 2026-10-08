@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -29,9 +30,14 @@ const (
 	// MaxWireChunk bounds the content of one file.chunk (§4.4).
 	MaxWireChunk = 256 << 10
 	// MaxMetadata bounds the per-kind metadata, as JSON.
-	MaxMetadata = 4 << 10
-	// MaxProducedPixels bounds a decoded image (FAX pages are long).
+	MaxMetadata = ctl.MaxFileMetadata
+	// MaxProducedPixels and MaxProducedSide bound a decoded image (FAX
+	// pages are long).
 	MaxProducedPixels = 16_000_000
+	MaxProducedSide   = 16384
+	// MaxReceivingPerNode bounds the announced size of the files a node
+	// sends at once (the node's outbox bound).
+	MaxReceivingPerNode = 48 << 20
 	// ThumbnailSide is the longest side of a thumbnail, in pixels.
 	ThumbnailSide = 320
 	// ClockSkewLimit is the clock difference above which a file records

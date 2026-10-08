@@ -160,9 +160,11 @@ func (f fileEvents) register(c *gridapp.Control) {
 	c.Handle(rxv1.TypeFileBegin, f.begin)
 	c.Handle(rxv1.TypeFileChunk, f.chunk)
 	c.Handle(rxv1.TypeFileEnd, f.end)
-	c.OnApplied(func(ctx context.Context, _ griddomain.NodeID, types []rxv1.MessageType) {
+	c.OnApplied(func(ctx context.Context, id griddomain.NodeID, types []rxv1.MessageType) {
 		if slices.Contains(types, rxv1.TypeFileEnd) {
-			f.ingest.Finalize(ctx)
+			// The batch is committed: a closing channel must not cut the
+			// completion short.
+			f.ingest.Finalize(context.WithoutCancel(ctx), id.String())
 		}
 	})
 }
@@ -238,7 +240,7 @@ func (f fileEvents) begin(ctx context.Context, n *griddomain.Node, ev gridapp.Ev
 	return f.ingest.Begin(ctx, in, n.Runtime().ClockOffsetMS, now)
 }
 
-func (f fileEvents) chunk(ctx context.Context, n *griddomain.Node, ev gridapp.Event, _ time.Time) error {
+func (f fileEvents) chunk(ctx context.Context, n *griddomain.Node, ev gridapp.Event, now time.Time) error {
 	var p ctl.FileChunk
 	if err := json.Unmarshal(ev.Payload, &p); err != nil {
 		return f.refused(ctx, n, ev, "invalid payload")
@@ -259,7 +261,7 @@ func (f fileEvents) chunk(ctx context.Context, n *griddomain.Node, ev gridapp.Ev
 		}
 	}
 
-	return f.ingest.Chunk(ctx, n.ID().String(), id, p.Offset, data)
+	return f.ingest.Chunk(ctx, n.ID().String(), id, p.Offset, data, now)
 }
 
 func (f fileEvents) end(ctx context.Context, n *griddomain.Node, ev gridapp.Event, _ time.Time) error {

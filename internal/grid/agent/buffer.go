@@ -21,6 +21,10 @@ const (
 	ClassMap
 	ClassDecode
 	ClassState
+	// ClassFile are the events of a file (FIL-005): the outbox bounds them
+	// to half the buffer, so they are dropped only when nothing else is
+	// left to drop; a file missing an event is refused by the hub.
+	ClassFile
 )
 
 // Event is one numbered node → hub event.
@@ -58,6 +62,9 @@ func (b *Buffer) OnAck(f func(seq int64)) { b.onAck = f }
 func NewBuffer(maxEvents, maxBytes int) *Buffer {
 	return &Buffer{maxEvents: max(maxEvents, 1), maxBytes: max(maxBytes, 1), dropped: map[string]int64{}, notify: make(chan struct{}, 1)}
 }
+
+// MaxEvents returns the bound on the number of events.
+func (b *Buffer) MaxEvents() int { return b.maxEvents }
 
 // Notify is signalled when events are pushed.
 func (b *Buffer) Notify() <-chan struct{} { return b.notify }

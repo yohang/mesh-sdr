@@ -220,6 +220,9 @@ templ bulkDeleteForm(v galleryView) {
 			for k, vals := range v.Filter.query() {
 				<input type="hidden" name={ k } value={ vals[0] }/>
 			}
+			if !v.Filter.active() {
+				<input type="hidden" name="all" value="1"/>
+			}
 			<button type="submit" class="rounded border border-danger px-3 py-1 font-semibold text-danger">
 				if v.Filter.active() {
 					Delete every file matching these filters

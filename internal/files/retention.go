@@ -2,6 +2,7 @@ package files
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"sync"
@@ -65,7 +66,7 @@ func (r *Retention) Name() string { return JobRetention }
 // Run implements jobs.Job: the files incomplete for IncompleteAfter go
 // with their chunks, then the retention applies.
 func (r *Retention) Run(ctx context.Context) (int64, error) {
-	n, err := sqlc.New(r.db.Writer(ctx)).PurgeIncompleteFiles(ctx, r.now().Add(-IncompleteAfter).UnixMilli())
+	n, err := sqlc.New(r.db.Writer(ctx)).PurgeIncompleteFiles(ctx, sql.NullInt64{Int64: r.now().Add(-IncompleteAfter).UnixMilli(), Valid: true})
 	if err != nil {
 		return 0, fmt.Errorf("purge incomplete files: %w", err)
 	}

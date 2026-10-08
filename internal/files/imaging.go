@@ -77,7 +77,7 @@ func supportedModel(m color.Model) bool {
 
 // Reencode implements ImageProcessor.
 func (p *Processor) Reencode(ctx context.Context, data []byte, out MIMEType, maxPixels int) (Image, error) {
-	img, err := p.decode(ctx, data, maxPixels)
+	img, err := p.decode(ctx, data, MaxImageSide, maxPixels)
 	if err != nil {
 		return Image{}, err
 	}
@@ -85,10 +85,11 @@ func (p *Processor) Reencode(ctx context.Context, data []byte, out MIMEType, max
 	return encode(img, out)
 }
 
-// ReencodeWithThumbnail re-encodes an image like Reencode and also returns
-// a JPEG thumbnail whose longest side is at most side pixels.
-func (p *Processor) ReencodeWithThumbnail(ctx context.Context, data []byte, out MIMEType, maxPixels, side int) (Image, Image, error) {
-	img, err := p.decode(ctx, data, maxPixels)
+// ReencodeWithThumbnail re-encodes an image of at most maxSide pixels per
+// side like Reencode, and also returns a JPEG thumbnail whose longest side
+// is at most side pixels.
+func (p *Processor) ReencodeWithThumbnail(ctx context.Context, data []byte, out MIMEType, maxSide, maxPixels, side int) (Image, Image, error) {
+	img, err := p.decode(ctx, data, maxSide, maxPixels)
 	if err != nil {
 		return Image{}, Image{}, err
 	}
@@ -108,7 +109,7 @@ func (p *Processor) ReencodeWithThumbnail(ctx context.Context, data []byte, out 
 
 // decode checks an image's type, dimensions and colour model before
 // decoding it, one image at a time.
-func (p *Processor) decode(ctx context.Context, data []byte, maxPixels int) (image.Image, error) {
+func (p *Processor) decode(ctx context.Context, data []byte, maxSide, maxPixels int) (image.Image, error) {
 	t, err := Sniff(data)
 	if err != nil {
 		return nil, err
@@ -122,8 +123,9 @@ func (p *Processor) decode(ctx context.Context, data []byte, maxPixels int) (ima
 	}
 
 	switch {
-	case cfg.Width < 1 || cfg.Height < 1 || cfg.Width > MaxImageSide || cfg.Height > MaxImageSide:
-		return nil, ErrImageDimensions
+	case cfg.Width < 1 || cfg.Height < 1 || cfg.Width > maxSide || cfg.Height > maxSide:
+		return nil, ErrImageDimensions.WithDetail(fmt.Sprintf("the image has %d × %d pixels; at most %d per side are accepted",
+			cfg.Width, cfg.Height, maxSide))
 	case cfg.Width*cfg.Height > maxPixels:
 		return nil, ErrImageDimensions.WithDetail(fmt.Sprintf("the image has %d × %d pixels; at most %d pixels are accepted",
 			cfg.Width, cfg.Height, maxPixels))

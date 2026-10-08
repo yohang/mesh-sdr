@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/db/sqlite/sqlc"
@@ -88,43 +89,89 @@ func (r *Files) received(ctx context.Context, id shared.UUID) (int64, error) {
 	return n, nil
 }
 
-// appendContent adds data at the end of a file's content: into its last
-// chunk while it stays within ChunkSize, else as a new chunk.
-func (r *Files) appendContent(ctx context.Context, id shared.UUID, data []byte) error {
+// addChunk stores the content of one wire chunk as the next chunk of a
+// file being received, and records the activity (a file without content
+// for IncompleteAfter is purged). The content is re-chunked in rows of up
+// to ChunkSize when the file completes.
+func (r *Files) addChunk(ctx context.Context, id shared.UUID, data []byte, now time.Time) error {
 	q := sqlc.New(r.db.Writer(ctx))
 
-	last, err := q.LastFileChunk(ctx, id.Bytes())
-
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		last = sqlc.LastFileChunkRow{ChunkNo: -1}
-	case err != nil:
-		return fmt.Errorf("last chunk of file %s: %w", id, err)
+	next, err := q.NextFileChunk(ctx, id.Bytes())
+	if err != nil {
+		return fmt.Errorf("next chunk of file %s: %w", id, err)
 	}
 
-	for len(data) > 0 {
-		if last.ChunkNo >= 0 && len(last.Data) < ChunkSize {
-			n := min(ChunkSize-len(last.Data), len(data))
-			last.Data = append(last.Data, data[:n]...)
-			data = data[n:]
+	if err := q.InsertFileChunk(ctx, sqlc.InsertFileChunkParams{FileID: id.Bytes(), ChunkNo: next, Data: data}); err != nil {
+		return fmt.Errorf("insert chunk %d of file %s: %w", next, id, err)
+	}
 
-			if err := q.UpdateFileChunk(ctx, sqlc.UpdateFileChunkParams{Data: last.Data, FileID: id.Bytes(), ChunkNo: last.ChunkNo}); err != nil {
-				return fmt.Errorf("append to chunk %d of file %s: %w", last.ChunkNo, id, err)
-			}
+	if err := q.TouchReceivingFile(ctx, sqlc.TouchReceivingFileParams{ReceivedAt: nullTime(now), ID: id.Bytes()}); err != nil {
+		return fmt.Errorf("touch file %s: %w", id, err)
+	}
 
-			continue
-		}
+	return nil
+}
 
-		n := min(ChunkSize, len(data))
-		last = sqlc.LastFileChunkRow{ChunkNo: last.ChunkNo + 1, Data: bytes.Clone(data[:n])}
-		data = data[n:]
+// writeContent stores content as the chunks of a file without any, in
+// rows of at most ChunkSize.
+func (r *Files) writeContent(ctx context.Context, id shared.UUID, content []byte) error {
+	q := sqlc.New(r.db.Writer(ctx))
 
-		if err := q.InsertFileChunk(ctx, sqlc.InsertFileChunkParams{FileID: id.Bytes(), ChunkNo: last.ChunkNo, Data: last.Data}); err != nil {
-			return fmt.Errorf("insert chunk %d of file %s: %w", last.ChunkNo, id, err)
+	for i := 0; i*ChunkSize < len(content); i++ {
+		chunk := content[i*ChunkSize : min((i+1)*ChunkSize, len(content))]
+
+		if err := q.InsertFileChunk(ctx, sqlc.InsertFileChunkParams{FileID: id.Bytes(), ChunkNo: int64(i), Data: chunk}); err != nil {
+			return fmt.Errorf("insert chunk %d of file %s: %w", i, id, err)
 		}
 	}
 
 	return nil
+}
+
+// receivingBytes returns the announced size of the files a node is
+// sending.
+func (r *Files) receivingBytes(ctx context.Context, node string) (int64, error) {
+	n, err := sqlc.New(r.db.Reader(ctx)).ReceivingBytesOfNode(ctx, nullString(node))
+	if err != nil {
+		return 0, fmt.Errorf("files received from %s: %w", node, err)
+	}
+
+	return n, nil
+}
+
+// WriteContent writes the content of a complete file to w, one stored
+// chunk at a time.
+func (r *Files) WriteContent(ctx context.Context, e Entry, w io.Writer) error {
+	q := sqlc.New(r.db.Reader(ctx))
+
+	nums, err := q.FileChunkNumbers(ctx, e.ID.Bytes())
+	if err != nil {
+		return fmt.Errorf("chunks of file %s: %w", e.ID, err)
+	}
+
+	for _, n := range nums {
+		data, err := q.FileChunk(ctx, sqlc.FileChunkParams{FileID: e.ID.Bytes(), ChunkNo: n})
+		if err != nil {
+			return fmt.Errorf("read chunk %d of file %s: %w", n, e.ID, err)
+		}
+
+		if _, err := w.Write(data); err != nil {
+			return fmt.Errorf("write file %s: %w", e.ID, err)
+		}
+	}
+
+	return nil
+}
+
+// FirstChunk returns the first stored chunk of a file (at most ChunkSize
+// bytes): the start of a text, for its preview.
+func (r *Files) FirstChunk(ctx context.Context, e Entry) ([]byte, error) {
+	data, err := sqlc.New(r.db.Reader(ctx)).FileChunk(ctx, sqlc.FileChunkParams{FileID: e.ID.Bytes(), ChunkNo: 0})
+	if err != nil {
+		return nil, fmt.Errorf("read file %s: %w", e.ID, err)
+	}
+
+	return data, nil
 }
 
 // contentOf returns the stored content of a file, whatever its state.
@@ -153,7 +200,7 @@ func (r *Files) complete(ctx context.Context, id shared.UUID, c completed) (bool
 		return false, fmt.Errorf("replace content of file %s: %w", id, err)
 	}
 
-	if err := r.appendContent(ctx, id, c.content); err != nil {
+	if err := r.writeContent(ctx, id, c.content); err != nil {
 		return false, err
 	}
 

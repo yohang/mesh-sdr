@@ -3,6 +3,7 @@ package files
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -208,22 +209,31 @@ func parseFilter(v url.Values) (filterForm, Filter) {
 		ff.Errors[name] = msg
 	}
 
+	// An invalid choice is dropped and reported: the gallery shows the
+	// rest, a deletion refuses it.
 	switch Media(ff.Media) {
+	case "":
 	case MediaImage, MediaAudio, MediaText:
 		f.Media = Media(ff.Media)
 	default:
+		fail("media", "Choose a type.")
+
 		ff.Media = ""
 	}
 
 	if _, err := shared.NewDeviceID(ff.Device); err == nil {
 		f.DeviceID = ff.Device
-	} else {
+	} else if ff.Device != "" {
+		fail("device", "Choose a device.")
+
 		ff.Device = ""
 	}
 
 	if modePattern.MatchString(ff.Mode) {
 		f.Mode = ff.Mode
-	} else {
+	} else if ff.Mode != "" {
+		fail("mode", "Choose a decoder.")
+
 		ff.Mode = ""
 	}
 
@@ -424,7 +434,7 @@ func (g *Gallery) detail(w http.ResponseWriter, r *http.Request) {
 	v := detailView{File: e, CanDelete: g.d.CanDelete(ctx)}
 
 	if e.IsText() {
-		data, err := g.d.Repo.EntryContent(ctx, e)
+		data, err := g.d.Repo.FirstChunk(ctx, e)
 		if err != nil {
 			g.d.Logger.ErrorContext(ctx, "read file content", slog.String("file_id", e.ID.String()), slog.Any("error", err))
 			g.d.Render.Error(w, r, http.StatusInternalServerError)
@@ -483,8 +493,10 @@ func (g *Gallery) deleteMatching(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Every filter must be valid (an ignored one would widen the
+	// deletion), and deleting every file must be asked for explicitly.
 	ff, f := parseFilter(r.PostForm)
-	if len(ff.Errors) > 0 {
+	if len(ff.Errors) > 0 || (!ff.active() && r.PostForm.Get("all") != "1") {
 		g.d.Render.Error(w, r, http.StatusUnprocessableEntity)
 
 		return
@@ -517,9 +529,9 @@ func redirect(w http.ResponseWriter, r *http.Request, path string) {
 	http.Redirect(w, r, path, http.StatusSeeOther)
 }
 
-// Content returns the content of a file Visible returned.
-func (g *Gallery) Content(ctx context.Context, e Entry) ([]byte, error) {
-	return g.d.Repo.EntryContent(ctx, e)
+// WriteContent writes the content of a file Visible returned to w.
+func (g *Gallery) WriteContent(ctx context.Context, e Entry, w io.Writer) error {
+	return g.d.Repo.WriteContent(ctx, e, w)
 }
 
 // Thumbnail returns the thumbnail of a file Visible returned, or

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,7 +23,14 @@ import (
 func newOutbox(t *testing.T) (*agent.Outbox, *agent.Buffer, string) {
 	t.Helper()
 
-	buf := agent.NewBuffer(10_000, 1<<20)
+	return newOutboxOf(t, 10_000)
+}
+
+// newOutboxOf returns an outbox over an event buffer of maxEvents.
+func newOutboxOf(t *testing.T, maxEvents int) (*agent.Outbox, *agent.Buffer, string) {
+	t.Helper()
+
+	buf := agent.NewBuffer(maxEvents, 1<<20)
 
 	a, err := agent.New(agent.Options{NodeID: "attic", Buffer: buf, Now: time.Now, Logger: slog.New(slog.DiscardHandler)})
 	if err != nil {
@@ -217,4 +225,57 @@ func TestOutboxRefuses(t *testing.T) {
 			t.Errorf("SendFile over the outbox bound = %v", err)
 		}
 	})
+
+	t.Run("metadata over 4 KiB", func(t *testing.T) {
+		o, buf, _ := newOutbox(t)
+		m := sstvMeta()
+		m.Metadata = map[string]any{"note": strings.Repeat("x", ctl.MaxFileMetadata)}
+
+		if err := o.SendFile(ctx, m, produced(t, []byte("x"))); !errors.Is(err, agent.ErrInvalidFile) || buf.Len() != 0 {
+			t.Errorf("SendFile = %v, %d events", err, buf.Len())
+		}
+	})
+
+	t.Run("event buffer budget", func(t *testing.T) {
+		// 100 events: the files may take 50; a 3 MiB file needs 2 + 69.
+		o, buf, _ := newOutboxOf(t, 100)
+
+		if err := o.SendFile(ctx, sstvMeta(), produced(t, make([]byte, 3<<20))); !errors.Is(err, agent.ErrOutboxFull) || buf.Len() != 0 {
+			t.Errorf("SendFile = %v, %d events", err, buf.Len())
+		}
+
+		if err := o.SendFile(ctx, sstvMeta(), produced(t, make([]byte, 1<<20))); err != nil {
+			t.Errorf("a file within the budget: %v", err)
+		}
+	})
+}
+
+// TestOutboxEventsFitTheControlChannel: the largest file.begin and a full
+// file.chunk stay under the control channel's inbound limit.
+func TestOutboxEventsFitTheControlChannel(t *testing.T) {
+	o, buf, _ := newOutbox(t)
+	m := sstvMeta()
+	m.DeviceID, m.Mode = strings.Repeat("d", 63), strings.Repeat("m", 24)
+	m.PresetID, m.DecoderSessionID = "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b", "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2c"
+	m.Metadata = map[string]any{"note": strings.Repeat("\"", ctl.MaxFileMetadata/2-20)}
+
+	if err := o.SendFile(context.Background(), m, produced(t, make([]byte, ctl.FileChunkBytes+1))); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, e := range buf.After(0) {
+		env, err := rxv1.NewEnvelope(e.Type, rxv1.CorrelationID{}, time.Now().UnixMilli(), e.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		raw, err := env.MarshalJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(raw) > rxv1.MaxInboundControlTextBytes {
+			t.Errorf("%s encodes to %d bytes", e.Type, len(raw))
+		}
+	}
 }

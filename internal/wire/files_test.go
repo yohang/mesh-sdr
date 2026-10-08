@@ -95,7 +95,7 @@ func storeNodeFile(t *testing.T, adapter *db.DB, device string) string {
 			return err
 		}
 
-		if err := ingest.Chunk(ctx, "attic", id, 0, content); err != nil {
+		if err := ingest.Chunk(ctx, "attic", id, 0, content, time.Now()); err != nil {
 			return err
 		}
 
@@ -105,7 +105,7 @@ func storeNodeFile(t *testing.T, adapter *db.DB, device string) string {
 		t.Fatal(err)
 	}
 
-	ingest.Finalize(ctx)
+	ingest.Finalize(ctx, "attic")
 
 	return id.String()
 }
@@ -350,6 +350,14 @@ func TestFilesPages(t *testing.T) {
 	// An admin deletes by filter.
 	storeNodeFile(t, h.adapter, "hf")
 
+	// An invalid filter, or no filter without all=1, is refused: it would
+	// widen the deletion.
+	for _, values := range []url.Values{{"device": {"../vhf"}}, {"media": {"video"}}, {"mode": {"SSTV!"}}, {"freq_min": {"x"}}, nil} {
+		if status := admin.form("/files/delete", values); status != http.StatusUnprocessableEntity {
+			t.Errorf("bulk delete %v = %d, want 422", values, status)
+		}
+	}
+
 	if status := admin.form("/files/delete", url.Values{"device": {"vhf"}}); status != http.StatusSeeOther {
 		t.Errorf("admin bulk delete = %d", status)
 	}
@@ -373,6 +381,10 @@ func TestFilesPages(t *testing.T) {
 
 	if n := count("SELECT count(*) FROM audit_log WHERE action = 'file.delete_bulk'"); n != 1 {
 		t.Errorf("bulk delete audit = %d", n)
+	}
+
+	if status := admin.form("/files/delete", url.Values{"all": {"1"}}); status != http.StatusSeeOther || count("SELECT count(*) FROM files WHERE kind = 'sstv'") != 0 {
+		t.Errorf("delete every file = %d", status)
 	}
 
 	// Under the registered policy, visitors are sent to sign in and see

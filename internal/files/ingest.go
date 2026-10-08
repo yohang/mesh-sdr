@@ -34,8 +34,10 @@ type Ingest struct {
 	published func(ctx context.Context, e Entry)
 	logger    *slog.Logger
 
-	mu    sync.Mutex
-	ended []shared.UUID
+	mu sync.Mutex
+	// ended are the files whose content arrived, per node, waiting for
+	// the commit of that node's batch.
+	ended map[string][]shared.UUID
 }
 
 // IngestDeps are the dependencies of Ingest.
@@ -53,12 +55,18 @@ type IngestDeps struct {
 
 // NewIngest returns the use case.
 func NewIngest(d IngestDeps) *Ingest {
-	return &Ingest{repo: d.Repo, tx: d.Tx, proc: d.Processor, retention: d.Retention, published: d.Published, logger: d.Logger}
+	return &Ingest{
+		repo: d.Repo, tx: d.Tx, proc: d.Processor, retention: d.Retention, published: d.Published, logger: d.Logger,
+		ended: map[string][]shared.UUID{},
+	}
 }
 
 // Begin stores a file a node announces (file.begin), receiving.
 // clockOffsetMS is the hub − node clock offset the node last reported (nil
 // when unknown): beyond ClockSkewLimit the file records it (FIL-008).
+// Reception times later than now + ClockSkewLimit are brought back to it.
+// A node may have at most MaxReceivingPerNode bytes of files announced and
+// not complete yet.
 func (i *Ingest) Begin(ctx context.Context, in Incoming, clockOffsetMS *int64, now time.Time) error {
 	if err := in.Check(); err != nil {
 		i.logger.WarnContext(ctx, "file from a node refused", slog.String("node_id", in.Node),
@@ -72,13 +80,33 @@ func (i *Ingest) Begin(ctx context.Context, in Incoming, clockOffsetMS *int64, n
 		return err
 	}
 
+	pending, err := i.repo.receivingBytes(ctx, in.Node)
+	if err != nil {
+		return err
+	}
+
+	if pending+in.Size > MaxReceivingPerNode {
+		i.logger.WarnContext(ctx, "file from a node refused: too many files being received", slog.String("node_id", in.Node),
+			slog.String("file_id", in.ID.String()), slog.Int64("receiving_bytes", pending))
+
+		return nil
+	}
+
+	if latest := now.Add(ClockSkewLimit); in.ReceivedStart.After(latest) {
+		in.ReceivedStart = latest
+	}
+
+	if latest := now.Add(ClockSkewLimit); in.ReceivedEnd.After(latest) {
+		in.ReceivedEnd = latest
+	}
+
 	var skew int64
 	if clockOffsetMS != nil {
 		skew = *clockOffsetMS
 	}
 
 	if skew > ClockSkewLimit.Milliseconds() || skew < -ClockSkewLimit.Milliseconds() {
-		i.logger.WarnContext(ctx, "file from a node with a skewed clock: its reception times are kept as sent",
+		i.logger.WarnContext(ctx, "file from a node with a skewed clock: its reception times are kept as sent, up to now",
 			slog.String("node_id", in.Node), slog.String("file_id", in.ID.String()), slog.Int64("clock_skew_ms", skew))
 	}
 
@@ -129,7 +157,7 @@ func (i *Ingest) refuse(ctx context.Context, node string, id shared.UUID, reason
 
 // Chunk appends content to a file being received (file.chunk). The chunks
 // must follow each other without gap nor overlap.
-func (i *Ingest) Chunk(ctx context.Context, node string, id shared.UUID, offset int64, data []byte) error {
+func (i *Ingest) Chunk(ctx context.Context, node string, id shared.UUID, offset int64, data []byte, now time.Time) error {
 	f, ok, err := i.open(ctx, node, id)
 	if err != nil || !ok {
 		return err
@@ -148,7 +176,7 @@ func (i *Ingest) Chunk(ctx context.Context, node string, id shared.UUID, offset 
 		return i.refuse(ctx, node, id, fmt.Sprintf("chunk at %d of %d bytes after %d of %d bytes", offset, len(data), got, f.size))
 	}
 
-	return i.repo.appendContent(ctx, id, data)
+	return i.repo.addChunk(ctx, id, data, now)
 }
 
 // End checks the size and digest of a received file (file.end) and queues
@@ -169,20 +197,20 @@ func (i *Ingest) End(ctx context.Context, node string, id shared.UUID) error {
 	}
 
 	i.mu.Lock()
-	i.ended = append(i.ended, id)
+	i.ended[node] = append(i.ended[node], id)
 	i.mu.Unlock()
 
 	return nil
 }
 
-// Finalize completes the files whose content arrived, once the ingestion
-// transaction committed. It is the boundary of the post-commit work: it
-// logs its failures; a file it cannot complete is deleted after
-// IncompleteAfter by the retention job.
-func (i *Ingest) Finalize(ctx context.Context) {
+// Finalize completes the files of node whose content arrived, once the
+// transaction of that node's batch committed. It is the boundary of the
+// post-commit work: it logs its failures; a file it cannot complete is
+// deleted after IncompleteAfter by the retention job.
+func (i *Ingest) Finalize(ctx context.Context, node string) {
 	i.mu.Lock()
-	ids := i.ended
-	i.ended = nil
+	ids := i.ended[node]
+	delete(i.ended, node)
 	i.mu.Unlock()
 
 	for _, id := range ids {
@@ -245,9 +273,22 @@ func (i *Ingest) finalize(ctx context.Context, id shared.UUID) error {
 		}
 	}
 
-	if i.published != nil {
-		i.published(ctx, e)
+	if i.published == nil {
+		return nil
 	}
+
+	// The retention may have deleted it at once (a count of one per kind
+	// with an older file stored later, a size cap).
+	_, err = i.repo.Entry(ctx, id)
+
+	switch {
+	case errors.Is(err, ErrFileNotFound):
+		return nil
+	case err != nil:
+		return err
+	}
+
+	i.published(ctx, e)
 
 	return nil
 }
@@ -261,7 +302,7 @@ func (i *Ingest) validate(ctx context.Context, f receiving, data []byte) (comple
 			return completed{}, "the content is not a PNG image", nil
 		}
 
-		img, thumb, err := i.proc.ReencodeWithThumbnail(ctx, data, MIMEPNG, MaxProducedPixels, ThumbnailSide)
+		img, thumb, err := i.proc.ReencodeWithThumbnail(ctx, data, MIMEPNG, MaxProducedSide, MaxProducedPixels, ThumbnailSide)
 
 		var de *shared.Error
 
@@ -270,8 +311,6 @@ func (i *Ingest) validate(ctx context.Context, f receiving, data []byte) (comple
 			return completed{}, "invalid image: " + de.Message(), nil
 		case err != nil:
 			return completed{}, "", err
-		case int64(len(img.Data)) > MaxSize(f.kind):
-			return completed{}, "the re-encoded image exceeds the size cap", nil
 		}
 
 		return completed{content: img.Data, width: img.Width, height: img.Height, thumbnail: thumb.Data}, "", nil

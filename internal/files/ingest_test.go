@@ -37,7 +37,7 @@ type ingestEnv struct {
 func newIngest(t *testing.T, policy files.RetentionPolicy) *ingestEnv {
 	t.Helper()
 
-	e := &ingestEnv{t: t, db: dbtest.NewSQLite(t), now: received.Add(time.Minute)}
+	e := &ingestEnv{t: t, db: dbtest.NewSQLite(t), now: received.Add(3 * time.Minute)}
 	e.repo = files.NewFiles(e.db)
 	e.ingest = files.NewIngest(files.IngestDeps{
 		Repo: e.repo, Tx: e.db, Processor: files.NewProcessor(),
@@ -80,7 +80,7 @@ func (e *ingestEnv) send(in files.Incoming, content []byte, size int, offset *in
 		}
 
 		for off := 0; off < len(content); off += size {
-			if err := e.ingest.Chunk(ctx, in.Node, in.ID, int64(off), content[off:min(off+size, len(content))]); err != nil {
+			if err := e.ingest.Chunk(ctx, in.Node, in.ID, int64(off), content[off:min(off+size, len(content))], e.now); err != nil {
 				return err
 			}
 		}
@@ -88,7 +88,7 @@ func (e *ingestEnv) send(in files.Incoming, content []byte, size int, offset *in
 		return e.ingest.End(ctx, in.Node, in.ID)
 	})
 
-	e.ingest.Finalize(context.Background())
+	e.ingest.Finalize(context.Background(), "attic")
 }
 
 func (e *ingestEnv) count(query string) int {
@@ -181,12 +181,17 @@ func TestIngestRechunks(t *testing.T) {
 
 	for off := 0; off < len(content); off += 45 << 10 {
 		e.tx(func(ctx context.Context) error {
-			return e.ingest.Chunk(ctx, "attic", in.ID, int64(off), content[off:min(off+45<<10, len(content))])
+			return e.ingest.Chunk(ctx, "attic", in.ID, int64(off), content[off:min(off+45<<10, len(content))], e.now)
 		})
 	}
 
+	// While the file is received, each wire chunk is one row (no rewrite).
+	if n := e.count("SELECT count(*) FROM file_blobs"); n != 66 {
+		t.Errorf("chunks while receiving = %d, want 66", n)
+	}
+
 	e.tx(func(ctx context.Context) error { return e.ingest.End(ctx, "attic", in.ID) })
-	e.ingest.Finalize(context.Background())
+	e.ingest.Finalize(context.Background(), "attic")
 
 	if len(e.published) != 1 || e.published[0].Name != "LOG-261006-143205-14230.txt" || e.published[0].Metadata["clock_skew_ms"] != nil {
 		t.Fatalf("published = %+v", e.published)
@@ -200,8 +205,8 @@ func TestIngestRechunks(t *testing.T) {
 		t.Errorf("chunks = %d, want 3", n)
 	}
 
-	data, err := e.repo.EntryContent(context.Background(), e.published[0])
-	if err != nil || !bytes.Equal(data, content) {
+	var buf bytes.Buffer
+	if err := e.repo.WriteContent(context.Background(), e.published[0], &buf); err != nil || !bytes.Equal(buf.Bytes(), content) {
 		t.Errorf("content differs: %v", err)
 	}
 }
@@ -243,7 +248,7 @@ func TestIngestRefuses(t *testing.T) {
 					return err
 				}
 
-				return e.ingest.Chunk(ctx, "attic", in.ID, 10, content[10:])
+				return e.ingest.Chunk(ctx, "attic", in.ID, 10, content[10:], e.now)
 			})
 		}},
 		{"another node's file", with(files.KindSSTV, files.MIMEPNG, img, nil), func(e *ingestEnv, in files.Incoming, content []byte) {
@@ -252,13 +257,13 @@ func TestIngestRefuses(t *testing.T) {
 					return err
 				}
 
-				if err := e.ingest.Chunk(ctx, "cellar", in.ID, 0, content); err != nil {
+				if err := e.ingest.Chunk(ctx, "cellar", in.ID, 0, content, e.now); err != nil {
 					return err
 				}
 
 				return e.ingest.End(ctx, "cellar", in.ID)
 			})
-			e.ingest.Finalize(context.Background())
+			e.ingest.Finalize(context.Background(), "attic")
 		}},
 	}
 
@@ -358,14 +363,23 @@ func TestRetention(t *testing.T) {
 			return err
 		}
 
-		return e.ingest.Chunk(ctx, "attic", late.ID, 0, []byte("ab"))
+		return e.ingest.Chunk(ctx, "attic", late.ID, 0, []byte("ab"), e.now)
 	})
 
 	if n, _ := r.Run(ctx); n != 0 {
 		t.Errorf("a recent incomplete file was purged")
 	}
 
-	e.now = e.now.Add(files.IncompleteAfter + time.Second)
+	// Content still arriving keeps it: the delay runs from the last chunk.
+	e.now = e.now.Add(files.IncompleteAfter - time.Minute)
+	e.tx(func(ctx context.Context) error { return e.ingest.Chunk(ctx, "attic", late.ID, 2, []byte("c"), e.now) })
+	e.now = e.now.Add(2 * time.Minute)
+
+	if n, _ := r.Run(ctx); n != 0 {
+		t.Errorf("an incomplete file still receiving was purged")
+	}
+
+	e.now = e.now.Add(files.IncompleteAfter)
 
 	if n, err := r.Run(ctx); err != nil || n != 1 || e.count("SELECT count(*) FROM file_blobs WHERE file_id NOT IN (SELECT id FROM files)") != 0 {
 		t.Errorf("incomplete: deleted %d, %v", n, err)
