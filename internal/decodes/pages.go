@@ -63,7 +63,7 @@ func (f filter) query(before int64) string {
 type listView struct {
 	Filter   filter
 	Devices  []Device
-	Modes    []string
+	Modes    []Mode
 	Rows     []Entry
 	SignedIn bool
 	// Retention is the retention notice ("Decodes are kept for N days").

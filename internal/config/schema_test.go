@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/yohang/mesh-sdr/internal/shell"
@@ -78,6 +79,42 @@ func TestSchema(t *testing.T) {
 
 	if _, err := Schema("gateway"); err == nil {
 		t.Error("unknown role accepted")
+	}
+}
+
+// TestSchemaDescriptionsUnescaped catches a tag escape left in a
+// description: commas are escaped (`\,`) in the jsonschema tag only, never
+// in jsonschema_description, which is used verbatim.
+func TestSchemaDescriptionsUnescaped(t *testing.T) {
+	for _, role := range []Role{RoleHub, RoleNode} {
+		b, err := Schema(role)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var s any
+		if err := json.Unmarshal(b, &s); err != nil {
+			t.Fatal(err)
+		}
+
+		var walk func(path string, v any)
+		walk = func(path string, v any) {
+			switch v := v.(type) {
+			case map[string]any:
+				for k, c := range v {
+					if d, ok := c.(string); ok && k == "description" && strings.Contains(d, `\`) {
+						t.Errorf("%s %s description = %q", role, path, d)
+					}
+
+					walk(path+"/"+k, c)
+				}
+			case []any:
+				for _, c := range v {
+					walk(path, c)
+				}
+			}
+		}
+		walk("", s)
 	}
 }
 

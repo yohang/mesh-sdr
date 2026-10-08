@@ -3,6 +3,7 @@ package settings
 import (
 	"strconv"
 
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // formPageView is a page of form sections. extra is a page-specific block
@@ -289,7 +290,7 @@ templ storesView(rows []RetentionRow, notice, failure string) {
 		if failure != "" {
 			<p class="font-semibold text-danger" role="alert">{ failure }</p>
 		}
-		<div class="relative overflow-x-auto">
+		@layout.TableScroll("Stores") {
 			<table class="w-full text-left">
 				<caption class="sr-only">Row count, size and last purge of each store</caption>
 				<thead>
@@ -326,7 +327,7 @@ templ storesView(rows []RetentionRow, notice, failure string) {
 					}
 				</tbody>
 			</table>
-		</div>
+		}
 	</section>
 }
 
@@ -391,7 +392,7 @@ templ systemPage(v ConfigView) {
 		<p class="text-sm text-fg-muted">
 			Every key with its effective value and where it comes from. Keys of class cfg are set only in the hub configuration; keys of class db are admin settings, locked when the configuration sets them. Secrets are never shown.
 		</p>
-		<div class="relative overflow-x-auto">
+		@layout.TableScroll("Effective configuration") {
 			<table class="w-full text-left text-sm">
 				<caption class="sr-only">Effective configuration</caption>
 				<thead>
@@ -420,6 +421,6 @@ templ systemPage(v ConfigView) {
 					}
 				</tbody>
 			</table>
-		</div>
+		}
 	</section>
 }

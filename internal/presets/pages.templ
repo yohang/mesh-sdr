@@ -1,6 +1,10 @@
 package presets
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+)
 
 // listPage is Admin › Presets: every preset by position, with its band.
 templ listPage(list []*Preset, notice string) {
@@ -22,7 +26,7 @@ templ presetsList(list []*Preset, notice string) {
 			<p>No presets yet.</p>
 		} else {
 			<p class="text-fg-muted">The position sets the order of the receiver's preset list. Drag a row, or use the Move up and Move down buttons.</p>
-			<div class="relative overflow-x-auto">
+			@layout.TableScroll("Presets") {
 				<table class="w-full text-left">
 					<caption class="sr-only">Presets</caption>
 					<thead>
@@ -74,7 +78,7 @@ templ presetsList(list []*Preset, notice string) {
 						}
 					</tbody>
 				</table>
-			</div>
+			}
 		}
 	</div>
 }

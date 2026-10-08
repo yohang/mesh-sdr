@@ -181,7 +181,7 @@ func (s *Capabilities) Handler() EventHandler {
 			return err
 		}
 
-		rep, err := domain.NewCapabilityReport(n.ID(), hash, truncate(caps.ProductVersion, 32), caps.Protocols, platform, doc, now, rows)
+		rep, err := domain.NewCapabilityReport(n.ID(), hash, truncate(caps.ProductVersion, domain.MaxSoftwareVersionLen), caps.Protocols, platform, doc, now, rows)
 		if err != nil {
 			s.logger.WarnContext(ctx, "invalid node.capabilities skipped", slog.String("node_id", n.ID().String()), slog.Any("error", err))
 

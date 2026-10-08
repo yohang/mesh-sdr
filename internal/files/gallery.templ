@@ -149,7 +149,7 @@ templ filtersForm(v galleryView) {
 			<select id="filter-device" name="device" class="max-w-full rounded border border-border px-2 py-1">
 				<option value="" selected?={ v.Filter.Device == "" }>Any</option>
 				for _, d := range v.Devices {
-					<option value={ d } selected?={ v.Filter.Device == d }>{ d }</option>
+					<option value={ d.ID } selected?={ v.Filter.Device == d.ID }>{ d.Name }</option>
 				}
 			</select>
 		</div>

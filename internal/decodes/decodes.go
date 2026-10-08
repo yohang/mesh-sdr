@@ -43,6 +43,13 @@ type Device struct {
 	Name string
 }
 
+// Mode is a digital mode of the catalogue: its id (the stored mode, the
+// filter value) and its label for people.
+type Mode struct {
+	ID    string
+	Label string
+}
+
 // Renderer renders the pages (internal/web/render).
 type Renderer interface {
 	Page(w http.ResponseWriter, r *http.Request, status int, page layout.Page, content, fragment templ.Component)
@@ -68,7 +75,7 @@ type Deps struct {
 	// unknown device). A node stores messages of its own devices only.
 	DeviceNode func(ctx context.Context, device string) (node string, ok bool, err error)
 	// Modes are the digital modes of the catalogue (the mode filter).
-	Modes []string
+	Modes []Mode
 	// Dedup returns the duplicate key rounding of a mode: its frequency
 	// step (Hz) and time bucket (ADR 0028).
 	Dedup  func(mode string) (step int64, bucket time.Duration)

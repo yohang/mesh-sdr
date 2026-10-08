@@ -1,0 +1,10 @@
+package layout
+
+// TableScroll wraps a table wider than the viewport in a horizontal scroll
+// region (UI-009): focusable so keyboard users can scroll it, named after
+// the table, focus ring from the global :focus-visible style.
+templ TableScroll(label string) {
+	<div class="relative overflow-x-auto" tabindex="0" role="region" aria-label={ label }>
+		{ children... }
+	</div>
+}

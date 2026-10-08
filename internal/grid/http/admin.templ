@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // devicesPage lists the device registry, read-only (devices are configured
@@ -29,7 +30,7 @@ templ devicesTable(rows []deviceListRow) {
 		if len(rows) == 0 {
 			<p>No device has been reported yet.</p>
 		} else {
-			<div class="relative overflow-x-auto">
+			@layout.TableScroll("Device registry") {
 				<table class="w-full text-left">
 					<caption class="sr-only">Device registry</caption>
 					<thead>
@@ -76,7 +77,7 @@ templ devicesTable(rows []deviceListRow) {
 						}
 					</tbody>
 				</table>
-			</div>
+			}
 		}
 	</div>
 }
@@ -190,7 +191,7 @@ templ devicePage(v deviceView) {
 			case len(v.Schedules) == 0:
 				<p>No schedule drives this device.</p>
 			default:
-				<div class="relative overflow-x-auto">
+				@layout.TableScroll("Schedules of " + v.Device.Name()) {
 					<table class="w-full text-left">
 						<caption class="sr-only">Schedules of { v.Device.Name() }, in UTC</caption>
 						<thead>
@@ -223,7 +224,7 @@ templ devicePage(v deviceView) {
 							}
 						</tbody>
 					</table>
-				</div>
+				}
 		}
 	</section>
 }

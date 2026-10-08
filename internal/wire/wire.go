@@ -427,7 +427,8 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		Repo: filesRepo, Tx: adapter, Audit: auditLog, Render: shellModule.Renderer, Visibility: filesAccess.visibility,
 		Listener: idm.HTTP.Require(identitydomain.RoleListener), Operator: idm.HTTP.Require(identitydomain.RoleOperator),
 		Admin: idm.HTTP.Require(identitydomain.RoleAdmin), CanDelete: operatorGate.Allows, CanBulkDelete: adminGate.Allows,
-		Policy: filesPolicy, Logger: component(logger, "files.http.gallery"),
+		Policy: filesPolicy, DeviceNames: deviceNames(gridsqlite.NewDeviceRepository(adapter)),
+		Logger: component(logger, "files.http.gallery"),
 	})
 
 	// Decoded messages (DEC-047): stored from the control channels, shown

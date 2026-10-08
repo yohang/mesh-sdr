@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // regionLabel is a region as shown to people (R1, R2, R3).
@@ -162,7 +164,7 @@ templ bookmarksTable(v listView) {
 			}
 		</p>
 		if len(v.Rows) > 0 {
-			<div class="relative overflow-x-auto">
+			@layout.TableScroll("Bookmarks, by frequency") {
 				<table class="w-full text-left">
 					<caption class="sr-only">Bookmarks, by frequency</caption>
 					<thead>
@@ -181,7 +183,7 @@ templ bookmarksTable(v listView) {
 						}
 					</tbody>
 				</table>
-			</div>
+			}
 		}
 	</section>
 }

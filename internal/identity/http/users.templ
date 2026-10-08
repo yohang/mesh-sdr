@@ -3,6 +3,7 @@ package http
 import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 func lastLogin(u *domain.User) string {
@@ -53,7 +54,7 @@ templ usersPage(v usersView) {
 		if len(v.Users) == 0 {
 			<p>No user matches.</p>
 		} else {
-			<div class="relative overflow-x-auto">
+			@layout.TableScroll("Users") {
 				<table class="w-full text-left text-sm">
 					<thead>
 						<tr><th scope="col">Username</th><th scope="col">Display name</th><th scope="col">E-mail</th><th scope="col">Roles</th><th scope="col">State</th><th scope="col">Last sign-in</th></tr>
@@ -77,7 +78,7 @@ templ usersPage(v usersView) {
 						}
 					</tbody>
 				</table>
-			</div>
+			}
 		}
 		if v.NextQS != "" {
 			<p><a href={ templ.SafeURL("/admin/users?" + v.NextQS) }>Next page</a></p>
