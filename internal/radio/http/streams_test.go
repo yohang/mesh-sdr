@@ -50,6 +50,7 @@ type peer struct {
 	payload []any
 	q       *sendq.Queue
 	claims  token.Claims
+	hello   media.Hello
 }
 
 func (p *peer) Claims() token.Claims {
@@ -79,7 +80,7 @@ func (p *peer) count(typ rxv1.MessageType) int {
 
 	return n
 }
-func (p *peer) Hello() media.Hello { return media.Hello{} }
+func (p *peer) Hello() media.Hello { return p.hello }
 func (p *peer) Send(typ rxv1.MessageType, payload any) {
 	p.mu.Lock()
 	p.sent = append(p.sent, typ)
@@ -599,5 +600,25 @@ func TestPresetSelectUnknownMode(t *testing.T) {
 	u, ok := p.lastSent(rxv1.TypeStreamUpdate).(media.StreamUpdate)
 	if !ok || u.Applied == nil || u.Applied.OffsetHz != 10_000 || u.Applied.Mode != "nfm" {
 		t.Errorf("demodulator after a switch to an unknown mode: %+v", u.Applied)
+	}
+}
+
+// TestPCMHello: a client listing pcm-s16le alone (audio_compression = pcm)
+// gets PCM audio (DEM-010).
+func TestPCMHello(t *testing.T) {
+	m := runManager(t)
+	ctx := context.Background()
+
+	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen, token.PermDemod)}
+	p.hello.Capabilities.AudioCodecs = []string{media.CodecPCM}
+	ss := radiohttp.NewStreams(m, nil, slog.New(slog.DiscardHandler)).Open(p)
+
+	defer ss.Close()
+
+	ss.Handle(ctx, env(t, rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}))
+	ss.Handle(ctx, env(t, rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm"}))
+
+	if open, ok := p.lastSent(rxv1.TypeStreamOpen).(media.StreamOpen); !ok || open.Kind != media.KindAudio || open.Codec != media.CodecPCM {
+		t.Fatalf("audio stream = %+v", p.lastSent(rxv1.TypeStreamOpen))
 	}
 }

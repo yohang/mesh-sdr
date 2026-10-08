@@ -95,6 +95,8 @@ func TestValidateSetting(t *testing.T) {
 		{"listen_policy", `"registered"`, ""},
 		{"listen_policy", `"everyone"`, CodeInvalidValue},
 		{"wfm_deemphasis", `75`, ""},
+		{"audio_compression", `"pcm"`, ""},
+		{"audio_compression", `"opus"`, CodeInvalidValue},
 		{"wfm_deemphasis", `60`, CodeInvalidValue},
 		{"no.such_key", `1`, "unknown_setting"},
 	}

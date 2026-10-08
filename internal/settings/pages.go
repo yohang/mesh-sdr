@@ -70,8 +70,8 @@ var formPages = []formPage{
 		Forms: []sectionSpec{
 			{ID: "heartbeats", Title: "Heartbeats", Description: "Nodes take a new heartbeat interval when their control channel reconnects.",
 				Keys: []string{"grid.heartbeat_interval_s", "grid.offline_after_s"}},
-			{ID: "demodulation", Title: "Demodulation", Description: "Nodes apply a change to their running demodulators.",
-				Keys: []string{"wfm_deemphasis"}},
+			{ID: "demodulation", Title: "Demodulation", Description: "Nodes apply the de-emphasis to their running demodulators; the audio compression applies to receivers opened from now on.",
+				Keys: []string{"audio_compression", "wfm_deemphasis"}},
 		},
 	},
 }

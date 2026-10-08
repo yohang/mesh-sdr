@@ -144,9 +144,11 @@ func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 // receiverConfig is the initial state of the <msdr-receiver> island
 // (templ.JSONScript): the island lists the devices itself (GET
 // /api/v1/features) and offers to sign in when it may list none.
+// AudioCodec is the audio codec it asks the nodes for (audio_compression).
 type receiverConfig struct {
-	SignedIn bool   `json:"signed_in"`
-	LoginURL string `json:"login_url"`
+	SignedIn   bool   `json:"signed_in"`
+	LoginURL   string `json:"login_url"`
+	AudioCodec string `json:"audio_codec"`
 }
 
 // receiver is the Receiver section's entry page: the station (name,
@@ -162,7 +164,7 @@ func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sh := m.shell.Shell(r)
-	rx := receiverConfig{SignedIn: sh.User != nil, LoginURL: "/login"}
+	rx := receiverConfig{SignedIn: sh.User != nil, LoginURL: "/login", AudioCodec: st.AudioCodec}
 
 	page := layout.Page{Section: SectionReceiver.ID()}
 	m.render.Page(w, r, http.StatusOK, page, receiverPage(sh.SiteName, st, desc, rx), nil)

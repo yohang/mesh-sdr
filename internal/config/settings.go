@@ -18,7 +18,10 @@ type Settings struct {
 	ListenPolicy string `toml:"listen_policy" env:"LISTEN_POLICY" jsonschema:"enum=anonymous,enum=registered" jsonschema_extras:"x-public=true,x-label=Listen policy" jsonschema_description:"Global listen policy: anonymous lets visitors listen without an account, registered requires a signed-in listener. A device can override it in its node config."`
 	// WFMDeemphasis is the broadcast FM de-emphasis time constant in µs
 	// (DEM-016), pushed to the nodes in the desired state.
-	WFMDeemphasis int `toml:"wfm_deemphasis" env:"WFM_DEEMPHASIS" jsonschema:"enum=50,enum=75" jsonschema_extras:"x-label=WFM de-emphasis (µs)" jsonschema_description:"Broadcast FM de-emphasis time constant, in microseconds: 50 (Europe and most of the world) or 75 (Americas, South Korea). Nodes apply it to their WFM demodulators."`
+	// AudioCompression is the codec the receivers ask the nodes for
+	// (DEM-010): adpcm (ADPCM IMA, 4:1) or pcm (16-bit PCM).
+	AudioCompression string `toml:"audio_compression" env:"AUDIO_COMPRESSION" jsonschema:"enum=adpcm,enum=pcm" jsonschema_extras:"x-public=true,x-label=Audio compression" jsonschema_description:"Audio sent to the listeners: adpcm (ADPCM, a quarter of the bandwidth) or pcm (uncompressed 16-bit PCM). Applies to receivers opened from now on."`
+	WFMDeemphasis    int    `toml:"wfm_deemphasis" env:"WFM_DEEMPHASIS" jsonschema:"enum=50,enum=75" jsonschema_extras:"x-label=WFM de-emphasis (µs)" jsonschema_description:"Broadcast FM de-emphasis time constant, in microseconds: 50 (Europe and most of the world) or 75 (Americas, South Korea). Nodes apply it to their WFM demodulators."`
 
 	Receiver  SettingsReceiver  `toml:"receiver" envPrefix:"RECEIVER__" jsonschema:"description=Receiver identity and policies."`
 	UI        SettingsUI        `toml:"ui" envPrefix:"UI__" jsonschema:"description=Look and feel."`
@@ -113,9 +116,10 @@ type SettingsPasswordReset struct {
 // DefaultSettings returns the built-in defaults of the settings.
 func DefaultSettings() Settings {
 	return Settings{
-		ListenPolicy:  "anonymous",
-		WFMDeemphasis: 50,
-		Receiver:      SettingsReceiver{Name: "MeshSDR", UsagePolicyURL: "/policy"},
+		ListenPolicy:     "anonymous",
+		AudioCompression: "adpcm",
+		WFMDeemphasis:    50,
+		Receiver:         SettingsReceiver{Name: "MeshSDR", UsagePolicyURL: "/policy"},
 		UI: SettingsUI{
 			ThemeMode: "auto", ShortcutSet: "default",
 		},

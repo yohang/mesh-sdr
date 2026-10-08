@@ -17,6 +17,7 @@ const (
 	KeyLocation        = "receiver.location"
 	KeyPhotoTitle      = "receiver.photo_title"
 	KeyPhotoDesc       = "receiver.photo_desc"
+	KeyAudioCompress   = "audio_compression"
 )
 
 // Values reads the current effective settings (the settings store).
@@ -112,3 +113,8 @@ func (s *StoreSettings) PhotoTitle(context.Context) string {
 
 // PhotoDesc returns receiver.photo_desc (Markdown).
 func (s *StoreSettings) PhotoDesc(context.Context) string { return s.values.String(KeyPhotoDesc) }
+
+// AudioCompression returns audio_compression (adpcm or pcm).
+func (s *StoreSettings) AudioCompression(context.Context) string {
+	return s.values.String(KeyAudioCompress)
+}

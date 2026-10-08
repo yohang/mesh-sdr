@@ -149,11 +149,13 @@ const GROUP = "flex flex-wrap items-center gap-2";
 class MsdrReceiver extends HTMLElement {
   connectedCallback() {
     const script = this.querySelector('script[type="application/json"]');
-    /** @type {{signed_in?: boolean, login_url?: string}} */
+    /** @type {{signed_in?: boolean, login_url?: string, audio_codec?: string}} */
     this.cfg = JSON.parse(script?.textContent || "{}");
     // Station description rendered by the hub, moved into the Info panel.
     this.station = this.querySelector("[data-rx-station]");
     this.engine = getEngine();
+    // The codec applies from the next connection.
+    if (this.cfg.audio_codec) this.engine.codec = this.cfg.audio_codec;
     /** @type {any[]} */
     this.devices = [];
     this.devicesError = false;
