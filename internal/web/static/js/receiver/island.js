@@ -1293,7 +1293,12 @@ class MsdrReceiver extends HTMLElement {
     const state = e.deviceState?.state ?? c.state;
     const text = STATE_TEXT[state] ?? state;
     const reason = e.deviceState?.reason ? ` (${e.deviceState.reason})` : "";
-    if (state === "running") {
+    // While its node is offline the device's state is unknown: the Node
+    // chip says so, and the Device chip comes back with the live state.
+    const nodeOffline = (e.state === "connecting" || e.state === "reconnecting") && !c.node_online;
+    if (nodeOffline) {
+      // No Device chip.
+    } else if (state === "running") {
       out.push({ id: "device", label: "Device: running", tone: "ok", reason: `${c.name} is running.`, hint: "" });
     } else if (state === "failed" || state === "disabled" || state === "unavailable") {
       out.push({
