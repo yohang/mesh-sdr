@@ -22,31 +22,32 @@ import (
 // the node refuses to start on a shared or foreign directory) and sweeps
 // the workdirs left by a previous run. The engines and the stream handler
 // read the desired state pushed by the hub (WFM de-emphasis, presets,
-// waterfall defaults).
+// waterfall defaults). The sources also probe the device types of the
+// capability report (SRC-001).
 func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, state radiohttp.DesiredState,
-) (*radioapp.Manager, *radiohttp.Streams, error) {
+) (*radioapp.Manager, *radiohttp.Streams, *connector.Sources, error) {
 	devices, err := radioDevices(cfg, logger)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	runtimeDir := cfg.Node.RuntimeDir
 
 	// Without a runtime dir (configs built in code), the node runs no tool.
 	if runtimeDir == "" && slices.ContainsFunc(devices, (*radiodomain.Device).Usable) {
-		return nil, nil, fmt.Errorf("node.runtime_dir is required to run devices")
+		return nil, nil, nil, fmt.Errorf("node.runtime_dir is required to run devices")
 	}
 
 	var sup *process.Supervisor
 
 	if runtimeDir != "" {
 		if sup, err = process.New(process.Options{RuntimeDir: runtimeDir, Logger: component(logger, "radio.infra.process")}); err != nil {
-			return nil, nil, fmt.Errorf("node.runtime_dir: %w", err)
+			return nil, nil, nil, fmt.Errorf("node.runtime_dir: %w", err)
 		}
 
 		n, err := process.SweepSessions(runtimeDir)
 		if err != nil {
-			return nil, nil, fmt.Errorf("node.runtime_dir: %w", err)
+			return nil, nil, nil, fmt.Errorf("node.runtime_dir: %w", err)
 		}
 
 		if n > 0 {
@@ -56,13 +57,13 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 
 	lo, hi, err := config.ParsePortRange(cfg.Node.IPCPortRange)
 	if err != nil && len(devices) > 0 {
-		return nil, nil, fmt.Errorf("node.ipc_port_range: %w", err)
+		return nil, nil, nil, fmt.Errorf("node.ipc_port_range: %w", err)
 	}
 
 	var ports *connector.Ports
 	if err == nil {
 		if ports, err = connector.NewPorts(lo, hi); err != nil {
-			return nil, nil, fmt.Errorf("node.ipc_port_range: %w", err)
+			return nil, nil, nil, fmt.Errorf("node.ipc_port_range: %w", err)
 		}
 	}
 
@@ -76,10 +77,10 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 		Reporter: reporter, Logger: component(logger, "radio.app.manager"), MaxDemods: cfg.Node.MaxDemods,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return m, radiohttp.NewStreams(m, state, component(logger, "radio.http.streams")), nil
+	return m, radiohttp.NewStreams(m, state, component(logger, "radio.http.streams")), sources, nil
 }
 
 // radioDevices builds the devices of the node configuration, ordered by id.

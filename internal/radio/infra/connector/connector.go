@@ -39,12 +39,6 @@ const (
 	dialInterval = 50 * time.Millisecond
 )
 
-// Tool names per device type.
-var toolOf = map[string]string{
-	domain.TypeRTLSDR: "rtl_connector",
-	domain.TypeRTLTCP: "rtl_tcp_connector",
-}
-
 // Tools resolves the external programs (ADR 0017 decision 10).
 type Tools struct {
 	// Paths are the tools.<name> absolute paths.
@@ -129,25 +123,59 @@ func NewSources(o Options) *Sources {
 	return &Sources{o: o}
 }
 
-func (s *Sources) tool(p domain.DeviceParams) (string, error) {
-	name, ok := toolOf[p.Type.String()]
-	if !ok {
-		return "", fmt.Errorf("device type %s: %w", p.Type, app.ErrSourceUnavailable)
+func (s *Sources) tool(t domain.DeviceType) (string, error) {
+	if !t.Supported() {
+		return "", fmt.Errorf("device type %s: %w", t, app.ErrSourceUnavailable)
 	}
 
-	return s.o.Tools.Resolve(name)
+	return s.o.Tools.Resolve(t.Tool())
 }
 
 // Probe implements app.Sources: the connector must start (--version) within
 // ProbeTimeout (§8.4 capability probing: a batch instance).
 func (s *Sources) Probe(ctx context.Context, p domain.DeviceParams) error {
-	path, err := s.tool(p)
+	return s.probe(ctx, instanceID("probe", p.ID.String()), p.Type)
+}
+
+// Driver is the availability of a registered device type on this node
+// (SRC-001); Reason says why an unavailable one cannot run.
+type Driver struct {
+	Type      string
+	Available bool
+	Reason    string
+}
+
+// Drivers probes the connector of every registered device type, like
+// Probe does for a device.
+func (s *Sources) Drivers(ctx context.Context) []Driver {
+	types := domain.SupportedTypes()
+	out := make([]Driver, 0, len(types))
+
+	for _, t := range types {
+		d := Driver{Type: t.String(), Available: true}
+
+		if err := s.probe(ctx, "driver-"+t.String(), t); err != nil {
+			d.Available, d.Reason = false, err.Error()
+		}
+
+		out = append(out, d)
+	}
+
+	return out
+}
+
+func (s *Sources) probe(ctx context.Context, id string, t domain.DeviceType) error {
+	path, err := s.tool(t)
 	if err != nil {
 		return err
 	}
 
+	if s.o.Supervisor == nil {
+		return errors.New("node.runtime_dir is not set: no tool can run")
+	}
+
 	in, err := s.o.Supervisor.NewInstance(process.Spec{
-		ID: instanceID("probe", p.ID.String()), Kind: "probe", Mode: process.Batch, Path: path, Args: []string{"--version"},
+		ID: id, Kind: "probe", Mode: process.Batch, Path: path, Args: []string{"--version"},
 		ToolDirs: s.o.Tools.Dirs, Timeouts: process.Timeouts{Job: ProbeTimeout, Stop: time.Second},
 	})
 	if err != nil {
@@ -165,7 +193,7 @@ func (s *Sources) Probe(ctx context.Context, p domain.DeviceParams) error {
 
 // New implements app.Sources.
 func (s *Sources) New(p domain.DeviceParams) (app.Source, error) {
-	if _, ok := toolOf[p.Type.String()]; !ok {
+	if !p.Type.Supported() {
 		return nil, fmt.Errorf("device type %s: %w", p.Type, app.ErrSourceUnavailable)
 	}
 
@@ -185,7 +213,7 @@ type source struct {
 
 // Run implements app.Source.
 func (src *source) Run(ctx context.Context, t domain.Tuning, sink app.IQSink, report func(app.SourceEvent)) error {
-	path, err := src.s.tool(src.p)
+	path, err := src.s.tool(src.p.Type)
 	if err != nil {
 		report(app.SourceEvent{State: domain.StateUnavailable, Reason: "tool_missing"})
 

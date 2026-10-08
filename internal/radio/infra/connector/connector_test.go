@@ -366,6 +366,17 @@ func TestStartTimeoutAndMissingTool(t *testing.T) {
 	if err := srcOK.Probe(context.Background(), dev.Params()); err != nil {
 		t.Fatal(err)
 	}
+
+	// The capability report lists every registered type with the
+	// availability of its connector (SRC-001).
+	if got := srcOK.Drivers(context.Background()); len(got) != 2 || got[0].Type != domain.TypeRTLSDR || got[1].Type != domain.TypeRTLTCP ||
+		!got[0].Available || !got[1].Available {
+		t.Errorf("drivers = %+v", got)
+	}
+
+	if got := src.Drivers(context.Background()); len(got) != 2 || got[0].Available || got[0].Reason == "" {
+		t.Errorf("drivers without tools = %+v", got)
+	}
 }
 
 func TestToolsAndPorts(t *testing.T) {

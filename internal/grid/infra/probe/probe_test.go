@@ -4,8 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 )
 
 func TestProberReadsProc(t *testing.T) {
@@ -29,7 +32,11 @@ func TestProberReadsProc(t *testing.T) {
 		}
 	}
 
-	p := New("1.2.3", nil, []string{"am", "nfm"}, time.Now().Add(-time.Minute))
+	drivers := func(context.Context) []ctl.SDRDriver {
+		return []ctl.SDRDriver{{Type: "rtl_sdr", Available: true}, {Type: "rtl_tcp", Reason: "tool missing"}}
+	}
+
+	p := New("1.2.3", nil, drivers, []string{"am", "nfm"}, time.Now().Add(-time.Minute))
 	p.root = root + "/"
 
 	caps := p.Capabilities(context.Background())
@@ -39,6 +46,14 @@ func TestProberReadsProc(t *testing.T) {
 
 	if len(caps.Decoders) != 1 || caps.Decoders[0].Cap != AnalogCap || len(caps.Decoders[0].Modes) != 2 {
 		t.Errorf("analog modes = %+v", caps.Decoders)
+	}
+
+	if len(caps.SDRDrivers) != 2 || !caps.SDRDrivers[0].Available || caps.SDRDrivers[1].Available {
+		t.Errorf("sdr drivers = %+v", caps.SDRDrivers)
+	}
+
+	if !slices.Equal(caps.AudioCodecs, []string{"adpcm-ima", "pcm-s16le"}) {
+		t.Errorf("audio codecs = %v", caps.AudioCodecs)
 	}
 
 	hb := p.Heartbeat(context.Background())

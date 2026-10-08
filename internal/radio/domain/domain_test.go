@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -57,8 +58,17 @@ func TestValueObjects(t *testing.T) {
 	soapy, _ := NewDeviceType("soapy:sdrplay")
 	tcp, _ := NewDeviceType(TypeRTLTCP)
 
-	if soapy.Supported() || !tcp.Supported() {
+	if soapy.Supported() || !tcp.Supported() || soapy.Tool() != "" || tcp.Tool() != "rtl_tcp_connector" {
 		t.Fatal("supported types")
+	}
+
+	var types []string
+	for _, typ := range SupportedTypes() {
+		types = append(types, typ.String())
+	}
+
+	if strings.Join(types, ",") != "rtl_sdr,rtl_tcp" {
+		t.Errorf("registry = %v", types)
 	}
 
 	if _, err := NewDriver(tcp, DriverSettings{Device: "localhost"}); !errors.Is(err, ErrInvalidDriver) {

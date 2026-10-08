@@ -9,6 +9,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,12 +17,14 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/media"
 )
 
 // Prober implements agent.Prober.
 type Prober struct {
 	version string
 	devices func() []ctl.Device
+	drivers func(context.Context) []ctl.SDRDriver
 	modes   []string
 	started time.Time
 	root    string // filesystem root, "/" except in tests
@@ -35,11 +38,17 @@ type Prober struct {
 // demodulators.
 const AnalogCap = "cap:analog"
 
+// AudioCodecs are the audio codecs of the node media streams.
+var AudioCodecs = []string{media.CodecADPCM, media.CodecPCM}
+
 // New returns a prober. devices lists the devices of the node config,
-// modes the analog modes of the node DSP (reported as the AnalogCap
-// decoder, so the hub derives their mode:* capabilities).
-func New(version string, devices func() []ctl.Device, modes []string, started time.Time) *Prober {
-	return &Prober{version: version, devices: devices, modes: modes, started: started, root: "/"}
+// drivers probes the device types the node runs (SRC-001), modes the
+// analog modes of the node DSP (reported as the AnalogCap decoder, so the
+// hub derives their mode:* capabilities). devices and drivers may be nil.
+func New(version string, devices func() []ctl.Device, drivers func(context.Context) []ctl.SDRDriver, modes []string,
+	started time.Time,
+) *Prober {
+	return &Prober{version: version, devices: devices, drivers: drivers, modes: modes, started: started, root: "/"}
 }
 
 func (p *Prober) read(path string) []byte {
@@ -52,13 +61,18 @@ func (p *Prober) read(path string) []byte {
 }
 
 // Capabilities implements agent.Prober.
-func (p *Prober) Capabilities(context.Context) ctl.Capabilities {
+func (p *Prober) Capabilities(ctx context.Context) ctl.Capabilities {
 	host, _ := os.Hostname()
 	mem := p.meminfo()
 
 	devices := []ctl.Device{}
 	if p.devices != nil {
 		devices = p.devices()
+	}
+
+	drivers := []ctl.SDRDriver{}
+	if p.drivers != nil {
+		drivers = p.drivers(ctx)
 	}
 
 	decoders := []ctl.Decoder{}
@@ -73,11 +87,11 @@ func (p *Prober) Capabilities(context.Context) ctl.Capabilities {
 			OS: runtime.GOOS, Arch: runtime.GOARCH, CPUModel: p.cpuModel(), CPUCores: runtime.NumCPU(),
 			RAMBytes: mem["MemTotal"], Hostname: host,
 		},
-		SDRDrivers:      []ctl.SDRDriver{},
+		SDRDrivers:      drivers,
 		Devices:         devices,
 		DevicesDetected: []any{},
 		Decoders:        decoders,
-		AudioCodecs:     []string{},
+		AudioCodecs:     slices.Clone(AudioCodecs),
 		FFTCodecs:       []string{},
 	}
 }
