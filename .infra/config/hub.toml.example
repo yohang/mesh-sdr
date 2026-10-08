@@ -215,8 +215,8 @@ trusted_proxies = []
 
 [settings.files]
 # retention_count = 20                   # newest files kept per kind (1..100000)
-# retention_days = 30                    # maximum age in days (0: no age limit)
-# max_total_bytes = 2147483648           # total size cap in bytes (0: no cap)
+# retention_days = 0                     # maximum age in days (0: no age limit)
+# max_total_bytes = 0                    # total size cap in bytes (0: no cap)
 
 [settings.grid]
 # heartbeat_interval_s = 10              # node heartbeat period (1..300 s)

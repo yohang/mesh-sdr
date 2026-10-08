@@ -169,7 +169,7 @@ func DefaultSettings() Settings {
 		Retention: SettingsRetention{
 			Sessions: MustDuration("30d"), AuditLog: MustDuration("365d"), Connections: MustDuration("30d"),
 		},
-		Files:         SettingsFiles{RetentionCount: 20, RetentionDays: 30, MaxTotalBytes: 2 << 30},
+		Files:         SettingsFiles{RetentionCount: 20},
 		Grid:          SettingsGrid{HeartbeatIntervalS: 10, OfflineAfterS: 60},
 		Invitations:   SettingsInvitations{TTLHours: 168},
 		PasswordReset: SettingsPasswordReset{TTLMinutes: 30},
