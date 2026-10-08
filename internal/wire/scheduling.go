@@ -35,6 +35,7 @@ type scheduling struct {
 type settingsReader interface {
 	String(key string) string
 	Int(key string) int
+	Bool(key string) bool
 	Duration(key string) time.Duration
 }
 
@@ -288,7 +289,13 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 			Waterfall: &ctl.StateWaterfall{
 				MinDB: s.settings.Int("waterfall.min_db"), MaxDB: s.settings.Int("waterfall.max_db"), Palette: s.settings.String("waterfall.palette"),
 			},
-			Decoders: &ctl.StateDecoders{MaxRestarts: s.settings.Int("decoders.max_restarts")},
+			Decoders: &ctl.StateDecoders{
+				MaxRestarts: s.settings.Int("decoders.max_restarts"),
+				FAX: &ctl.StateFAX{
+					LPM: s.settings.Int("fax_lpm"), MinLength: s.settings.Int("fax_min_length"), MaxLength: s.settings.Int("fax_max_length"),
+					PostProcess: s.settings.Bool("fax_postprocess"), Color: s.settings.Bool("fax_color"), AM: s.settings.Bool("fax_am"),
+				},
+			},
 		},
 	}
 

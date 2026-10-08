@@ -32,11 +32,12 @@
 #include <new>
 #include <vector>
 
-namespace {
-
 // The FFTW planner (plan creation and destruction) is not thread-safe;
-// fftwf_execute is. Every Fft construction and deletion takes this lock.
+// fftwf_execute is. Every Fft construction and deletion takes this lock
+// (shim_image.cpp too).
 std::mutex fftwPlanner;
+
+namespace {
 
 template <typename T>
 class CarryReader : public Csdr::Reader<T> {

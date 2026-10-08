@@ -93,23 +93,25 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 	lim := cfg.Decoders.ProcessLimits
 	core := uint64(0)
 	runner := decoder.NewRunner(decoder.Options{
-		Supervisor: sup, Tools: tools, MaxRestarts: dec.maxRestarts, Reprobe: dec.reprobe, Logger: component(logger, "radio.infra.decoder"),
+		Supervisor: sup, Tools: tools, MaxRestarts: dec.maxRestarts, Reprobe: dec.reprobe, FAX: dec.fax, Logger: component(logger, "radio.infra.decoder"),
 		Limits: process.Limits{
 			Nice: lim.Nice, OpenFiles: uint64(lim.OpenFiles), AddressSpace: uint64(lim.Memory.Bytes()), Core: &core, NoNewPrivs: true,
 		},
 	})
 	sessions := cfg.Decoders.SessionCap(runtime.NumCPU())
-	decoding := radiohttp.Decoding{Decoders: radioapp.NewDecoders(toolbox, runner, sessions, time.Now), Publisher: dec.publisher}
+	decoding := radiohttp.Decoding{Decoders: radioapp.NewDecoders(toolbox, runner, sessions, time.Now), Publisher: dec.publisher, Files: dec.files}
 
 	return m, radiohttp.NewStreams(m, state, decoding, component(logger, "radio.http.streams")), sources, toolbox, nil
 }
 
 // radioDecoding are the node services the decoders use: the hub
-// (decode.batch), the decoding settings of the desired state and the
-// capability report.
+// (decode.batch, the file outbox), the decoding settings of the desired
+// state and the capability report.
 type radioDecoding struct {
 	publisher   radioapp.DecodePublisher
+	files       radioapp.FilePublisher
 	maxRestarts func() int
+	fax         func() decoder.FAXSettings
 	reprobe     func()
 }
 

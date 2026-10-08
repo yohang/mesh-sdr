@@ -5,6 +5,13 @@
 // mode with its messages, newest first, and a Clear button, and the digital
 // modes this receiver cannot run (DIAG-004: admins see the missing tool). Decoded text is untrusted RF text: it goes
 // through textContent only, cut to 4 KiB.
+//
+// The image decoders (SSTV DEC-037, FAX DEC-038) send image.v1 messages:
+// a start, then each row, drawn on the card's canvas as it arrives, and an
+// end. The canvas has a text equivalent (its label and caption) and can be
+// saved as PNG (FIL-006).
+
+import { saveFile } from "./recorder.js";
 
 /** Messages kept per card. */
 const MAX_MESSAGES = 200;
@@ -52,10 +59,47 @@ function mhz(hz) {
 }
 
 /**
+ * @typedef {object} ImageView
+ * @property {HTMLElement} figure
+ * @property {HTMLCanvasElement} canvas
+ * @property {HTMLElement} caption
+ * @property {HTMLButtonElement} save
+ * @property {string} title the image description
+ * @property {number} rows the rows drawn
+ * @property {number} height
+ * @property {number} ts start time (ms)
+ * @property {number} freq
+ */
+
+/**
  * @typedef {object} Card
  * @property {HTMLElement} el
  * @property {HTMLOListElement} list
+ * @property {ImageView | null} image
  */
+
+/** Largest image side accepted from a node (the hub's limit). */
+const MAX_SIDE = 16384;
+
+/**
+ * imageName is the file name of an image received at ms on hz:
+ * SSTV-<yymmdd-HHMMSS>-<kHz>.png.
+ * @param {string} mode @param {number} ms @param {number} hz
+ */
+function imageName(mode, ms, hz) {
+  const d = new Date(ms);
+  const p = (/** @type {number} */ n) => String(n).padStart(2, "0");
+  const stamp = `${p(d.getUTCFullYear() % 100)}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}-${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`;
+  return `${mode.toUpperCase().replace(/[^A-Z0-9]/g, "")}-${stamp}-${Math.round(hz / 1000)}.png`;
+}
+
+/** @param {string} b64 @returns {Uint8Array} */
+function fromBase64(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
 export class DecodersTab {
   /**
@@ -166,10 +210,15 @@ export class DecodersTab {
     const clear = el("button", { type: "button", class: "rounded border border-border px-2 py-1 text-sm" }, "Clear");
     head.append(title, clear);
     const list = /** @type {HTMLOListElement} */ (el("ol", { class: "flex max-h-80 flex-col gap-1 overflow-y-auto font-mono text-sm", "aria-label": `${this.label(mode)} messages, newest first`, tabindex: "0" }));
-    clear.addEventListener("click", () => list.replaceChildren());
     section.append(head, list);
     this.cardsEl.prepend(section);
-    const c = { el: section, list };
+    /** @type {Card} */
+    const c = { el: section, list, image: null };
+    clear.addEventListener("click", () => {
+      list.replaceChildren();
+      c.image?.figure.remove();
+      c.image = null;
+    });
     this.cards.set(mode, c);
     this.hint.hidden = true;
     return c;
@@ -179,7 +228,9 @@ export class DecodersTab {
   onDecode(p) {
     if (typeof p?.mode !== "string") return;
     const c = this.card(p.mode);
+    if (p.schema === "image.v1" && p.payload && typeof p.payload === "object") this.onImage(c, p);
     const text = String(p.text ?? "").slice(0, MAX_TEXT);
+    if (!text) return;
     const li = el("li", { class: "break-all whitespace-pre-wrap" });
     const meta = el("span", { class: "text-fg-muted" }, `${utcTime(Number(p.ts) || Date.now())} ${mhz(Number(p.freq_hz))} `);
     const body = el("span");
@@ -187,6 +238,112 @@ export class DecodersTab {
     li.append(meta, body);
     c.list.prepend(li);
     while (c.list.childElementCount > MAX_MESSAGES) c.list.lastElementChild?.remove();
+  }
+
+  /**
+   * imageView returns the canvas of a card for an image of width × height,
+   * a new one when the size changes.
+   * @param {Card} c @param {string} mode @param {number} width @param {number} height
+   * @returns {ImageView | null}
+   */
+  imageView(c, mode, width, height) {
+    if (!(width > 0 && height > 0 && width <= MAX_SIDE && height <= MAX_SIDE)) return null;
+    const have = c.image;
+    if (have && have.canvas.width === width && have.height === height) return have;
+    have?.figure.remove();
+    const figure = el("figure", { class: "flex flex-col gap-1" });
+    const scroll = el("div", { class: "max-h-96 overflow-auto rounded border border-border", tabindex: "0", "aria-label": `${this.label(mode)} image` });
+    const canvas = /** @type {HTMLCanvasElement} */ (el("canvas", { role: "img", class: "block h-auto w-full bg-surface" }));
+    canvas.width = width;
+    canvas.height = height;
+    scroll.append(canvas);
+    const caption = el("figcaption", { class: "text-sm text-fg-muted" });
+    const save = /** @type {HTMLButtonElement} */ (el("button", { type: "button", class: "self-start rounded border border-border px-2 py-1 text-sm" }, "Save image"));
+    figure.append(scroll, caption, save);
+    c.list.before(figure);
+    /** @type {ImageView} */
+    const v = { figure, canvas, caption, save, title: this.label(mode), rows: 0, height, ts: Date.now(), freq: 0 };
+    save.addEventListener("click", () => {
+      canvas.toBlob((blob) => {
+        if (blob) saveFile(blob, imageName(mode, v.ts, v.freq));
+      }, "image/png");
+    });
+    c.image = v;
+    return v;
+  }
+
+  /**
+   * describe sets the text equivalent of an image.
+   * @param {ImageView} v @param {string} state
+   */
+  describe(v, state) {
+    const text = `${v.title}: ${state}`;
+    v.caption.textContent = text;
+    v.canvas.setAttribute("aria-label", text);
+  }
+
+  /**
+   * onImage draws an image.v1 message: start, row or end.
+   * @param {Card} c @param {any} p decode
+   */
+  onImage(c, p) {
+    const m = p.payload;
+    const width = Number(m.width);
+    const height = Number(m.height);
+    switch (m.event) {
+      case "start": {
+        c.image?.figure.remove();
+        c.image = null;
+        const v = this.imageView(c, p.mode, width, height);
+        if (!v) return;
+        v.title = String(p.text ?? "").slice(0, 200) || this.label(p.mode);
+        v.ts = Number(p.ts) || Date.now();
+        v.freq = Number(p.freq_hz) || 0;
+        this.describe(v, `receiving, 0 of ${height} lines`);
+        break;
+      }
+      case "row": {
+        const v = this.imageView(c, p.mode, width, height);
+        const y = Number(m.row);
+        const channels = Number(m.channels) === 1 ? 1 : 3;
+        if (!v || !(y >= 0 && y < height) || typeof m.pixels !== "string") return;
+        if (v.freq === 0) {
+          v.ts = Number(p.ts) || Date.now();
+          v.freq = Number(p.freq_hz) || 0;
+        }
+        const px = fromBase64(m.pixels);
+        if (px.length !== width * channels) return;
+        const row = new ImageData(width, 1);
+        for (let x = 0; x < width; x++) {
+          const i = x * channels;
+          row.data[x * 4] = px[i];
+          row.data[x * 4 + 1] = px[channels === 1 ? i : i + 1];
+          row.data[x * 4 + 2] = px[channels === 1 ? i : i + 2];
+          row.data[x * 4 + 3] = 255;
+        }
+        v.canvas.getContext("2d")?.putImageData(row, 0, y);
+        v.rows = Math.max(v.rows, y + 1);
+        this.describe(v, `receiving, ${v.rows} of ${height} lines`);
+        break;
+      }
+      case "end": {
+        const v = c.image;
+        if (!v) return;
+        const lines = Math.min(Number(m.lines) || 0, v.height);
+        // The image keeps the lines received only.
+        if (lines > 0 && lines < v.canvas.height) {
+          const ctx = v.canvas.getContext("2d");
+          const kept = ctx?.getImageData(0, 0, v.canvas.width, lines);
+          v.canvas.height = lines;
+          if (kept) ctx?.putImageData(kept, 0, 0);
+        }
+        const done = m.complete ? "complete" : "incomplete";
+        const saved = m.saved ? "saved to Files" : "too short to be saved to Files";
+        this.describe(v, `${done}, ${lines} of ${v.height} lines, ${saved}`);
+        break;
+      }
+      default:
+    }
   }
 
   /** @param {any} p diag.state */

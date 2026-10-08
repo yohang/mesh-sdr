@@ -52,7 +52,10 @@ type Options struct {
 	// Reprobe is called when a decoder tool went missing (exit 127 or
 	// ENOENT): the capabilities are probed and reported again (§8.4).
 	Reprobe func()
-	Logger  *slog.Logger
+	// FAX returns the FAX settings pushed by the hub (DefaultFAX when
+	// nil).
+	FAX    func() FAXSettings
+	Logger *slog.Logger
 	// Now is the decode time source (tests).
 	Now func() time.Time
 }
@@ -79,8 +82,14 @@ func NewRunner(o Options) *Runner {
 var ErrNoAdapter = errors.New("no decoder adapter")
 
 // Start implements app.DecoderRunner: the tool of the session runs in a
-// private workdir (DEC-048) under the decoder restart policy until Close.
+// private workdir (DEC-048) under the decoder restart policy until Close;
+// the image decoders run in the node.
 func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderRun, error) {
+	// The native image decoders run in the node (DEC-037, DEC-038).
+	if spec.Mode.Name == app.FileSSTV || spec.Mode.Name == app.FileFAX {
+		return r.startImage(spec, ev)
+	}
+
 	ad, ok := adapters[spec.Mode.Name]
 	if !ok || spec.Mode.Input != domain.InputAudio {
 		return nil, fmt.Errorf("%w for %s", ErrNoAdapter, spec.Mode.Name)

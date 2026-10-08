@@ -543,3 +543,27 @@ func (g *Gallery) Thumbnail(ctx context.Context, e Entry) ([]byte, error) {
 
 	return g.d.Repo.Thumbnail(ctx, e.ID)
 }
+
+// decodesPath is the Decodes page (FEATURE_SPEC §10.11).
+const decodesPath = "/decodes"
+
+// decodesTimeLayout is the time filter of the Decodes page (UTC, to the
+// minute).
+const decodesTimeLayout = "2006-01-02T15:04"
+
+// decodesURL links the decoded messages related to a file (FIL-007): the
+// messages of its device and mode during its reception, a minute around.
+func decodesURL(e Entry) string {
+	end := e.ReceivedEnd
+	if end.IsZero() {
+		end = e.ReceivedStart
+	}
+
+	q := url.Values{}
+	q.Set("mode", e.Mode)
+	q.Set("device", e.DeviceID)
+	q.Set("from", e.ReceivedStart.UTC().Add(-time.Minute).Format(decodesTimeLayout))
+	q.Set("until", end.UTC().Add(2*time.Minute).Format(decodesTimeLayout))
+
+	return decodesPath + "?" + q.Encode()
+}

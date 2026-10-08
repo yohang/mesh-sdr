@@ -292,6 +292,7 @@ func TestFilesPages(t *testing.T) {
 
 	// The detail page, and the content with its headers (FIL-002, SR-30).
 	if res, body := anon.fetch("/files/"+hf, nil); res.StatusCode != http.StatusOK || !strings.Contains(string(body), "/receiver/attic/hf?f=14230000") ||
+		!strings.Contains(string(body), "/decodes?device=hf&amp;from=") ||
 		strings.Contains(string(body), "Delete the file") {
 		t.Errorf("anonymous detail = %d", res.StatusCode)
 	}

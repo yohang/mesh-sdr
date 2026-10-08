@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -21,6 +22,8 @@ import (
 type Decoding struct {
 	Decoders  *app.Decoders
 	Publisher app.DecodePublisher
+	// Files receives the images of the decoders (FIL-005).
+	Files app.FilePublisher
 }
 
 // decoder.set limit per connection: a decoder start spawns a process.
@@ -257,12 +260,36 @@ func (ss *session) underlyingChanged(d *demodState) {
 	}
 }
 
+// reception is where the last kept message of a decoder session was
+// received: the files of the session are stamped with it (FIL-008: the
+// image start is the last message kept before the image ends).
+type reception struct {
+	mu     sync.Mutex
+	freq   int64
+	preset string
+}
+
+func (r *reception) set(freq int64, preset string) {
+	r.mu.Lock()
+	r.freq, r.preset = freq, preset
+	r.mu.Unlock()
+}
+
+func (r *reception) get() (int64, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.freq, r.preset
+}
+
 // startDecoder starts a session of m on d and taps its audio (d.mu held).
 func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant string) error {
+	rx := &reception{}
 	id, run, err := ss.s.dec.Decoders.Start(m, variant, func(id shared.UUID) app.DecoderEvents {
 		return app.DecoderEvents{
-			Decode: func(rec app.DecodeRecord) { ss.decoded(d, id, m, rec) },
+			Decode: func(rec app.DecodeRecord) { ss.decoded(d, id, m, rec, rx) },
 			Status: func(st app.DecoderStatus) { ss.sessionStatus(d, id, m.Name, variant, st) },
+			File:   func(f app.ProducedFile) { ss.produced(d, id, m, rx, f) },
 		}
 	})
 	if err != nil {
@@ -316,9 +343,9 @@ func (ss *session) decoderStatus(d *demodState, id shared.UUID, mode, variant, s
 }
 
 // decoded sends a decoded message of the current session to the listener
-// (decode) and to the hub (decode.batch). Its frequency is the
-// demodulator's dial frequency.
-func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, rec app.DecodeRecord) {
+// (decode) and, unless live, to the hub (decode.batch). Its frequency is
+// the demodulator's dial frequency.
+func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, rec app.DecodeRecord, rx *reception) {
 	if !live(d, id) {
 		return
 	}
@@ -337,12 +364,34 @@ func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, 
 		Schema: rec.Schema, Text: text, Payload: rec.Payload,
 	})
 
+	if rec.Live {
+		return
+	}
+
+	rx.set(freq, snap.ActivePreset)
+
 	if pub := ss.s.dec.Publisher; pub != nil {
 		pub.Decoded(app.Decoded{
 			DeviceID: d.device, SessionID: id.String(), PresetID: snap.ActivePreset, Mode: m.Name, Family: m.Family,
 			FreqHz: freq, Time: rec.Time, CID: ss.peer.Claims().ConnectionID, Schema: rec.Schema, Text: text, Payload: rec.Payload,
 		})
 	}
+}
+
+// produced sends a file of a decoder session to the hub (FIL-005), even
+// once the session is over (its image in progress). It is stamped with the
+// reception of the session's last kept message: an image without its
+// start is dropped.
+func (ss *session) produced(d *demodState, id shared.UUID, m domain.DigitalMode, rx *reception, f app.ProducedFile) {
+	freq, preset := rx.get()
+
+	pub := ss.s.dec.Files
+	if pub == nil || freq <= 0 {
+		return
+	}
+
+	f.DeviceID, f.PresetID, f.SessionID, f.Mode, f.FreqHz = d.device, preset, id.String(), m.Name, freq
+	pub.Produced(f)
 }
 
 // capText cuts s to at most n bytes on a rune boundary.

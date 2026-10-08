@@ -299,6 +299,9 @@ templ detailPage(v detailView) {
 				if v.File.NodeID != "" && v.File.DeviceID != "" {
 					<li><a href={ templ.SafeURL(receiverURL(v.File)) }>Open the receiver on { freqText(v.File.FrequencyHz) }</a></li>
 				}
+				if v.File.Mode != "" && v.File.DeviceID != "" && !v.File.ReceivedStart.IsZero() {
+					<li><a href={ templ.SafeURL(decodesURL(v.File)) }>Decoded messages received meanwhile</a></li>
+				}
 			</ul>
 			if v.CanDelete {
 				<form method="post" action={ templ.SafeURL(detailURL(v.File) + "/delete") } hx-post={ detailURL(v.File) + "/delete" } hx-confirm={ "Delete " + v.File.Name + "? This cannot be undone." } data-confirm-action="Delete">

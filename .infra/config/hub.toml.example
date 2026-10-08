@@ -148,6 +148,15 @@ trusted_proxies = []
 # Audio sent to the listeners: adpcm (a quarter of the bandwidth) or pcm
 # (uncompressed). Applies to receivers opened from now on.
 # audio_compression = "adpcm"
+# HF FAX decoder (Admin › Decoding, pushed to the nodes): line rate in
+# lines per minute (30..480), shortest page saved to Files (50..450 lines),
+# longest page (500..8000 lines), noise reduction, colour, AM instead of FM.
+# fax_lpm = 120
+# fax_min_length = 200
+# fax_max_length = 1500
+# fax_postprocess = true
+# fax_color = false
+# fax_am = false
 
 [settings.receiver]
 # name = "MeshSDR"                       # station name (top bar, titles)
