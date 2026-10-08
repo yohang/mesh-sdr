@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"math"
 	"slices"
-	"sync"
 	"strconv"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -346,8 +346,15 @@ func (ss *session) underlyingChanged(d *demodState) {
 	m, variant, offset := d.dec.mode, d.dec.variant, d.dec.offset
 	ss.stopDecoder(d, true)
 
-	if !m.Allows(d.demod.Params().Mode) {
+	params := d.demod.Params()
+	if !m.Allows(params.Mode) {
 		return
+	}
+
+	// An offset outside the new pass band (the sideband flipped) moves to
+	// its middle.
+	if m.BandwidthHz > 0 && (float64(offset) < params.LowHz || float64(offset) > params.HighHz) {
+		offset = offsetOf(m, nil, &demodState{}, params)
 	}
 
 	err := ss.startDecoder(d, m, variant, offset)
@@ -455,9 +462,14 @@ func (ss *session) secondaryFPS(device string) int {
 	return max(fps, 1)
 }
 
-// secondaryFrame queues a secondary FFT line of the current session.
+// secondaryFrame queues a secondary FFT line of the current session while
+// its stream is open: d.mu is held so that a stopped session never queues
+// a frame after its stream was removed.
 func (ss *session) secondaryFrame(d *demodState, id shared.UUID, stream uint16, f app.SpectrumFrame) {
-	if !live(d, id) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if dec := d.dec; dec == nil || dec.id != id || !dec.hasFFT || dec.fft != stream || dec.paused {
 		return
 	}
 
@@ -525,7 +537,12 @@ func (ss *session) configureSecondary(req rxv1.Envelope, p media.StreamConfigure
 	}
 
 	ss.q.ConfigureFFT(dec.fft, dec.fps, dec.paused)
-	dec.run.Spectrum(!dec.paused)
+
+	if dec.paused {
+		dec.run.Spectrum(0)
+	} else {
+		dec.run.Spectrum(dec.fps)
+	}
 	ss.peer.Ack(req, media.StreamResult{Stream: media.StreamOpen{
 		StreamID: dec.fft, Kind: media.KindFFT2, Codec: media.CodecFFTU8, FFT: secondaryFFT(dec.mode, dec.run.SpectrumSize()),
 		DemodID: d.id, FPS: dec.fps, Paused: dec.paused,

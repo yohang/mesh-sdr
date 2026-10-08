@@ -72,14 +72,14 @@ func TestTextDecoderSet(t *testing.T) {
 	// Paused: nothing is computed nor sent.
 	r.ev.Spectrum(frame)
 
-	if _, on := r.state(); on || len(secondaryFrames(t, e)) != 0 {
+	if _, fps := r.state(); fps != 0 || len(secondaryFrames(t, e)) != 0 {
 		t.Fatal("secondary fft sent while paused")
 	}
 
 	e.check(rxv1.TypeStreamConfigure, map[string]any{"stream_id": fft, "paused": false}, "")
 
-	if _, on := r.state(); !on {
-		t.Fatal("secondary fft not switched on")
+	if _, fps := r.state(); fps != 9 {
+		t.Fatalf("secondary fft at %d fps", fps)
 	}
 
 	r.ev.Spectrum(frame)
@@ -89,6 +89,13 @@ func TestTextDecoderSet(t *testing.T) {
 	}
 
 	e.check(rxv1.TypeStreamConfigure, map[string]any{"stream_id": fft, "fps": 99}, rxv1.CodeOutOfRange)
+
+	// The listener's rate is the rate the node computes.
+	e.check(rxv1.TypeStreamConfigure, map[string]any{"stream_id": fft, "fps": 3}, "")
+
+	if _, fps := r.state(); fps != 3 {
+		t.Fatalf("secondary fft at %d fps, want 3", fps)
+	}
 
 	// A click: the same session moves; an offset whose band leaves the
 	// selector is refused.
@@ -133,6 +140,25 @@ func TestTextDecoderSet(t *testing.T) {
 	}
 
 	e.check(rxv1.TypeStreamConfigure, map[string]any{"stream_id": fft, "paused": false}, rxv1.CodeNotFound)
+
+	// A line of the stopped session is not queued, nor one of the new
+	// session while its stream is paused.
+	r.ev.Spectrum(frame)
+	e.run.last().ev.Spectrum(frame)
+
+	if f := secondaryFrames(t, e); len(f) != 0 {
+		t.Fatalf("frames after the stop %+v", f)
+	}
+
+	// The sideband flips: the offset moves to the middle of the new pass
+	// band.
+	e.check(rxv1.TypeDemodSet, map[string]any{"demod_id": id, "mode": "lsb"}, "")
+	e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "rtty170"}, "")
+	e.check(rxv1.TypeDemodSet, map[string]any{"demod_id": id, "mode": "usb"}, "")
+
+	if offs, _ := e.run.last().state(); offs[0] != 1500 {
+		t.Fatalf("offset after the sideband flip %v", offs)
+	}
 
 	// A decoder without a secondary selector has no offset nor stream.
 	sel := e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "selcall", "offset_hz": 1000}, "").result.(media.DecoderStarted)

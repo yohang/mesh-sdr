@@ -54,10 +54,10 @@ type Options struct {
 	Reprobe func()
 	// FAX returns the FAX settings pushed by the hub (DefaultFAX when
 	// nil).
-	FAX    func() FAXSettings
+	FAX func() FAXSettings
 	// Text returns the settings of the text decoders (digimodes_fft_size,
 	// cw_showcw pushed by the hub); nil: the defaults.
-	Text func() TextSettings
+	Text   func() TextSettings
 	Logger *slog.Logger
 	// Now is the decode time source (tests).
 	Now func() time.Time
@@ -248,7 +248,7 @@ func (s *session) Retune(float64) {}
 func (s *session) SpectrumSize() int { return 0 }
 
 // Spectrum implements app.DecoderRun: no secondary FFT.
-func (s *session) Spectrum(bool) {}
+func (s *session) Spectrum(int) {}
 
 // Close implements app.DecoderRun: nothing is reported after it.
 func (s *session) Close() {

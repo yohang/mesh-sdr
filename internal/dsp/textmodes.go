@@ -168,8 +168,12 @@ func (d *TextDecoder) build() error {
 
 		spb := int(math.Round(rate / cfg.Baud))
 		gain := float32(rate / cfg.BandwidthHz / 5)
+		// OpenWebRX+ clamps the error at 10; the clamp is lowered so that a
+		// correction stays within half a symbol (the error of these
+		// signals is far below it).
+		maxError := min(10, 1/gain)
 
-		if d.timing, err = csdr.NewTimingRecovery(spb, gain, 10); err != nil {
+		if d.timing, err = csdr.NewTimingRecovery(spb, gain, maxError); err != nil {
 			return err
 		}
 
@@ -418,11 +422,12 @@ func (r *IQResampler) Close() {
 }
 
 // SecondarySpectrum returns the configuration of the secondary FFT of a
-// text decoder (DEC-004): size bins over TextRate, at the frame rate and
-// overlap of the shared spectrum (fft_fps, fft_voverlap_factor).
-func SecondarySpectrum(size int) SpectrumConfig {
+// text decoder (DEC-004): size bins over TextRate at fps frames per second
+// (the listener's stream rate, at most the shared spectrum's fft_fps),
+// with the overlap of the shared spectrum (fft_voverlap_factor).
+func SecondarySpectrum(size, fps int) SpectrumConfig {
 	c := DefaultSpectrum(TextRate)
-	c.Size = size
+	c.Size, c.FPS = size, fps
 
 	return c
 }

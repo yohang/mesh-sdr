@@ -163,7 +163,7 @@ func (s *imageSession) Retune(float64) {}
 func (s *imageSession) SpectrumSize() int { return 0 }
 
 // Spectrum implements app.DecoderRun: no secondary FFT.
-func (s *imageSession) Spectrum(bool) {}
+func (s *imageSession) Spectrum(int) {}
 
 // Close implements app.DecoderRun: the goroutine ends after the queued
 // audio and saves the image in progress, if long enough.

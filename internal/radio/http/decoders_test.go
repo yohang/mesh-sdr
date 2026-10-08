@@ -32,14 +32,14 @@ func (t tools) Available(c string) (bool, string) {
 // fakeRun records whether it was closed, its offsets and its secondary
 // FFT state.
 type fakeRun struct {
-	mu       sync.Mutex
-	ev       app.DecoderEvents
-	mode     string
-	variant  string
-	closed   bool
-	offsets  []float64
-	size     int
-	spectrum bool
+	mu      sync.Mutex
+	ev      app.DecoderEvents
+	mode    string
+	variant string
+	closed  bool
+	offsets []float64
+	size    int
+	fps     int
 }
 
 func (r *fakeRun) Audio(app.AudioBlock) {}
@@ -52,17 +52,17 @@ func (r *fakeRun) Retune(hz float64) {
 	r.mu.Unlock()
 }
 
-func (r *fakeRun) Spectrum(on bool) {
+func (r *fakeRun) Spectrum(fps int) {
 	r.mu.Lock()
-	r.spectrum = on
+	r.fps = fps
 	r.mu.Unlock()
 }
 
-func (r *fakeRun) state() ([]float64, bool) {
+func (r *fakeRun) state() ([]float64, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	return append([]float64(nil), r.offsets...), r.spectrum
+	return append([]float64(nil), r.offsets...), r.fps
 }
 
 func (r *fakeRun) Close() {

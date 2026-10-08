@@ -87,15 +87,18 @@ type textSession struct {
 	wake chan struct{}
 	done chan struct{}
 
-	mu       sync.Mutex
-	queue    []iqItem
-	queued   int
-	gap      bool
-	offset   float64
-	retune   bool
-	spectrum bool
-	closed   bool
-	last     app.DecoderStatus
+	mu     sync.Mutex
+	queue  []iqItem
+	queued int
+	gap    bool
+	offset float64
+	retune bool
+	// fps is the frame rate of the secondary FFT; 0: off.
+	fps    int
+	closed bool
+	// failed: the decoder stopped on an error; input is dropped.
+	failed bool
+	last   app.DecoderStatus
 }
 
 // startText starts a native text decoder session.
@@ -144,7 +147,7 @@ func (s *textSession) IQ(b app.IQBlock) {
 	}
 
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || s.failed {
 		s.mu.Unlock()
 
 		return
@@ -179,9 +182,9 @@ func (s *textSession) Retune(offsetHz float64) {
 func (s *textSession) SpectrumSize() int { return s.size }
 
 // Spectrum implements app.DecoderRun.
-func (s *textSession) Spectrum(on bool) {
+func (s *textSession) Spectrum(fps int) {
 	s.mu.Lock()
-	s.spectrum = on
+	s.fps = max(fps, 0)
 	s.mu.Unlock()
 }
 
@@ -198,14 +201,21 @@ func (s *textSession) Close() {
 }
 
 // take returns the queued blocks and the pending changes.
-func (s *textSession) take() (items []iqItem, retune bool, offset float64, spectrum, closed bool) {
+func (s *textSession) take() (items []iqItem, retune bool, offset float64, fps int, closed bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	items, s.queue, s.queued = s.queue, nil, 0
 	retune, s.retune = s.retune, false
 
-	return items, retune, s.offset, s.spectrum, s.closed
+	return items, retune, s.offset, s.fps, s.closed
+}
+
+// fail stops the input of a session whose decoder failed.
+func (s *textSession) fail() {
+	s.mu.Lock()
+	s.failed, s.queue, s.queued = true, nil, 0
+	s.mu.Unlock()
 }
 
 // status reports a status change unless the session is closed.
@@ -274,7 +284,7 @@ func (s *textSession) run(dec *dsp.TextDecoder) {
 		case <-s.wake:
 		}
 
-		items, retune, offset, spectrum, closed := s.take()
+		items, retune, offset, fps, closed := s.take()
 		if closed {
 			return
 		}
@@ -285,11 +295,12 @@ func (s *textSession) run(dec *dsp.TextDecoder) {
 			}
 		}
 
-		s.setSpectrum(c, spectrum)
+		s.setSpectrum(c, fps)
 
 		for _, it := range items {
 			if err := s.process(c, lines, it); err != nil {
 				s.log.Error("text decoder failed", slog.Any("error", err))
+				s.fail()
 				s.status(app.DecoderStatus{State: app.DecoderError, Reason: "decoder_failed"})
 
 				return
@@ -300,27 +311,50 @@ func (s *textSession) run(dec *dsp.TextDecoder) {
 	}
 }
 
-// setSpectrum builds or drops the secondary FFT.
-func (s *textSession) setSpectrum(c *textChain, on bool) {
-	switch {
-	case on && c.spec == nil:
-		spec, err := dsp.NewSpectrum(dsp.SecondarySpectrum(s.size))
-		if err != nil {
-			s.log.Warn("secondary fft not started", slog.Int("size", s.size), slog.Any("error", err))
+// setSpectrum builds, rebuilds at a new frame rate or drops the secondary
+// FFT.
+func (s *textSession) setSpectrum(c *textChain, fps int) {
+	if c.spec != nil && c.spec.Config().FPS == fps {
+		return
+	}
 
-			return
-		}
-
-		c.spec, c.pushed = spec, 0
-	case !on && c.spec != nil:
+	if c.spec != nil {
 		c.spec.Close()
 		c.spec = nil
 	}
+
+	if fps <= 0 {
+		return
+	}
+
+	spec, err := dsp.NewSpectrum(dsp.SecondarySpectrum(s.size, fps))
+	if err != nil {
+		s.log.Warn("secondary fft not started", slog.Int("size", s.size), slog.Int("fps", fps), slog.Any("error", err))
+
+		return
+	}
+
+	c.spec, c.pushed = spec, 0
 }
 
 // process runs one input block: resampling to the decoder rate, secondary
 // FFT, decoder.
 func (s *textSession) process(c *textChain, lines *lineAssembler, it iqItem) error {
+	// Lost input: the line ends, the CW timing and the resampler start
+	// again.
+	if it.gap {
+		lines.flush()
+
+		if err := c.dec.Reset(); err != nil {
+			return err
+		}
+
+		if c.rs != nil {
+			c.rs.Close()
+			c.rs = nil
+		}
+	}
+
 	if c.rs == nil || c.rs.InRate() != it.rate {
 		if c.rs != nil {
 			c.rs.Close()

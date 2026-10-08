@@ -136,7 +136,7 @@ func TestTextSession(t *testing.T) {
 	}
 
 	run.Retune(2100)
-	run.Spectrum(true)
+	run.Spectrum(9)
 
 	iq := dsptest.RTTY("RYRYRY CQ CQ DE F4TEST F4TEST K\r\nTEST LINE TWO\r\n", 45.45, 170, false, rate, 2100)
 	at := time.Unix(1_800_000_000, 0)
@@ -192,6 +192,14 @@ func TestTextSessionQueue(t *testing.T) {
 
 	if q.queued != 2*24000 || len(q.queue) != 2 || !q.queue[0].gap {
 		t.Fatalf("queued %d samples in %d blocks", q.queued, len(q.queue))
+	}
+
+	// A failed session drops its input.
+	q.fail()
+	q.IQ(app.IQBlock{Samples: block, Rate: 24000})
+
+	if q.queued != 0 {
+		t.Fatalf("failed session queued %d samples", q.queued)
 	}
 
 	r := NewRunner(Options{})
@@ -257,4 +265,49 @@ func TestLineAssembler(t *testing.T) {
 	if len(got) != 2 || got[0].Text != strings.TrimSpace(strings.Repeat("ABCD ", 16)) || string(l.line) != "ABCD " {
 		t.Fatalf("wrap %+v, rest %q", got, l.line)
 	}
+}
+
+// TestTextSessionGap: lost input ends the line being printed.
+func TestTextSessionGap(t *testing.T) {
+	const rate = 24000.0
+
+	r := NewRunner(Options{})
+	ev := &textEvents{}
+
+	run, err := r.Start(app.DecoderSpec{Session: shared.MustParseUUID("01890a5d-ac96-7a3b-8000-000000000003"), Mode: textMode(t, "rtty170"), OffsetHz: 1500}, ev.events())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer run.Close()
+
+	s := run.(*textSession)
+	iq := dsptest.RTTY("RYRYRY CQ CQ DE F4TEST F4TEST", 45.45, 170, false, rate, 1500)
+
+	feed := func(b []complex64, gap bool) {
+		run.IQ(app.IQBlock{Samples: b, Rate: rate, Discontinuity: gap})
+		ev.wait(t, "the input taken", func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+
+			return s.queued == 0
+		})
+	}
+
+	for i := 0; i < len(iq); i += 2400 {
+		feed(iq[i:min(i+2400, len(iq))], false)
+	}
+
+	ev.mu.Lock()
+	lines := len(ev.lines)
+	ev.mu.Unlock()
+
+	if lines != 0 {
+		t.Fatalf("%d lines before the gap", lines)
+	}
+
+	feed(make([]complex64, 2400), true)
+
+	ev.wait(t, "the line ended by the gap", func() bool {
+		return len(ev.lines) == 1 && strings.Contains(ev.lines[0].Text, "CQ DE F4TEST")
+	})
 }

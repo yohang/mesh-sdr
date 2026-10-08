@@ -83,9 +83,13 @@ func NewComplexAGC() (*Stage[complex64, complex64], error) {
 	return newStage[complex64, complex64](C.msdr_agc_complex_new(), "complex agc")
 }
 
+// validTiming checks the timing recovery parameters: a correction is at
+// most loopGain × maxError half symbols, which must stay within half a
+// symbol (the module reads three half symbols ahead and skips one symbol
+// plus the correction).
 func validTiming(decimation int, loopGain, maxError float32) error {
 	// Written so that NaN fails every comparison.
-	if decimation < 4 || !(loopGain > 0) || !(maxError > 0) {
+	if decimation < 4 || !(loopGain > 0) || !(maxError > 0) || !(loopGain*maxError <= 1) {
 		return fmt.Errorf("%w: timing recovery decimation %d gain %g error %g", ErrBuild, decimation, loopGain, maxError)
 	}
 

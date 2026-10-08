@@ -7,6 +7,8 @@
 
 #include "shim.h"
 
+#include "shim_stage.hpp"
+
 #include <csdr/agc.hpp>
 #include <csdr/amdemod.hpp>
 #include <csdr/audioresampler.hpp>
@@ -32,105 +34,13 @@
 #include <new>
 #include <vector>
 
-// The FFTW planner (plan creation and destruction) is not thread-safe;
-// fftwf_execute is. Every Fft construction and deletion takes this lock
-// (shim_image.cpp too).
+// The FFTW planner lock (shim_stage.hpp; shim_image.cpp takes it too).
 std::mutex fftwPlanner;
 
 namespace {
 
-template <typename T>
-class CarryReader : public Csdr::Reader<T> {
-  public:
-    size_t available() override { return buf.size() - pos; }
-    T* getReadPointer() override { return buf.data() + pos; }
-    void advance(size_t n) override { pos += n; }
-    void wait() override {}
-    void unblock() override {}
-
-    void append(const T* in, size_t n) {
-        if (pos > 0) {
-            buf.erase(buf.begin(), buf.begin() + static_cast<std::ptrdiff_t>(pos));
-            pos = 0;
-        }
-        buf.insert(buf.end(), in, in + n);
-    }
-
-  private:
-    std::vector<T> buf;
-    size_t pos = 0;
-};
-
-template <typename U>
-class SpanWriter : public Csdr::Writer<U> {
-  public:
-    size_t writeable() override { return cap - n; }
-    U* getWritePointer() override { return out + n; }
-    void advance(size_t k) override { n += k; }
-
-    void reset(U* o, size_t c) {
-        out = o;
-        cap = c;
-        n = 0;
-    }
-    size_t written() const { return n; }
-
-  private:
-    U* out = nullptr;
-    size_t cap = 0;
-    size_t n = 0;
-};
-
-}  // namespace
-
-struct msdr_stage {
-    virtual ~msdr_stage() = default;
-    virtual long process(const void* in, size_t nIn, void* out, size_t capOut) = 0;
-    virtual size_t pending() = 0;
-};
-
-namespace {
-
-template <typename T, typename U>
-class Stage : public msdr_stage {
-  public:
-    explicit Stage(Csdr::Module<T, U>* m, bool fft = false) : module(m), fft(fft) {
-        module->setReader(&reader);
-        module->setWriter(&writer);
-    }
-
-    ~Stage() override {
-        if (fft) {
-            std::lock_guard<std::mutex> lock(fftwPlanner);
-            delete module;
-        } else {
-            delete module;
-        }
-    }
-
-    long process(const void* in, size_t nIn, void* out, size_t capOut) override {
-        reader.append(static_cast<const T*>(in), nIn);
-        writer.reset(static_cast<U*>(out), capOut);
-        while (module->canProcess()) {
-            size_t avail = reader.available();
-            size_t done = writer.written();
-            module->process();
-            if (reader.available() == avail && writer.written() == done) {
-                break;
-            }
-        }
-        return static_cast<long>(writer.written());
-    }
-
-    size_t pending() override { return reader.available(); }
-
-    Csdr::Module<T, U>* module;
-
-  private:
-    CarryReader<T> reader;
-    SpanWriter<U> writer;
-    bool fft;
-};
+using msdr::build;
+using msdr::Stage;
 
 using cf = Csdr::complex<float>;
 
@@ -141,15 +51,6 @@ class NoiseStage : public Stage<float, float> {
 
     Csdr::NoiseFilter<float>* filter;
 };
-
-template <typename F>
-msdr_stage* build(F f) {
-    try {
-        return f();
-    } catch (...) {
-        return nullptr;
-    }
-}
 
 }  // namespace
 

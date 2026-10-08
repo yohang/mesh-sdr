@@ -131,9 +131,9 @@ type DecoderRun interface {
 	// SpectrumSize is the size of the secondary FFT lines; 0: the session
 	// has none (DEC-004).
 	SpectrumSize() int
-	// Spectrum switches the secondary FFT on or off: it is computed only
-	// while the listener shows it (DEC-004).
-	Spectrum(on bool)
+	// Spectrum sets the frame rate of the secondary FFT, 0 to stop it: it
+	// is computed only while the listener shows it (DEC-004).
+	Spectrum(fps int)
 	// Close stops the session; it does not wait for the tool to exit.
 	Close()
 }
