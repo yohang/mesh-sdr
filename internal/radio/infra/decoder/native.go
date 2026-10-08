@@ -66,10 +66,6 @@ type TextRecord struct {
 	Text string `json:"text"`
 }
 
-// textQueue is the input buffer of a session: on overflow the oldest
-// blocks are dropped (§8.3).
-const textQueue = InputBuffer
-
 type iqItem struct {
 	samples []complex64
 	rate    float64
@@ -153,7 +149,7 @@ func (s *textSession) IQ(b app.IQBlock) {
 		return
 	}
 
-	limit := int(textQueue.Seconds() * b.Rate)
+	limit := int(InputBuffer.Seconds() * b.Rate)
 	for len(s.queue) > 0 && s.queued+len(b.Samples) > limit {
 		s.queued -= len(s.queue[0].samples)
 		s.queue = s.queue[1:]

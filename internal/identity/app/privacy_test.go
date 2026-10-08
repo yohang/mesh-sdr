@@ -51,7 +51,7 @@ func TestDeleteAccount(t *testing.T) {
 	}
 
 	// The audit keeps the id, never the username.
-	entries, _ := e.audit.Recent(ctx, 100)
+	entries, _ := e.recent(ctx, 100)
 	for _, en := range entries {
 		for _, m := range []map[string]string{en.Before(), en.After()} {
 			for _, v := range m {

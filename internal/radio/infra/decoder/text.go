@@ -3,7 +3,8 @@ package decoder
 import (
 	"strings"
 	"unicode"
-	"unicode/utf8"
+
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // MaxText caps the text of a record (§8.4 "Typed framed output" rule 4).
@@ -22,18 +23,5 @@ func cleanRF(s string) string {
 		return -1
 	}, s)
 
-	return capBytes(s, MaxText)
-}
-
-// capBytes cuts s to at most n bytes on a rune boundary.
-func capBytes(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-
-	return s[:n]
+	return shared.Truncate(s, MaxText)
 }

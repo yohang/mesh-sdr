@@ -107,8 +107,8 @@ func (s *Spectrum) Push(index uint64, t time.Time, iq []complex64, emit func(Lin
 	size := s.cfg.Size
 	// Every FFT of the block fits, plus the one the carry may complete.
 	ffts := (len(iq)+s.fft.Pending())/s.every + 2
-	s.spec = grow(s.spec, (ffts+1)*size+1)
-	s.db = grow(s.db, (ffts/s.avg+2)*size+1)
+	s.spec = Grow(s.spec, (ffts+1)*size+1)
+	s.db = Grow(s.db, (ffts/s.avg+2)*size+1)
 
 	n, err := s.fft.Process(iq, s.spec)
 	if err != nil {
@@ -121,7 +121,7 @@ func (s *Spectrum) Push(index uint64, t time.Time, iq []complex64, emit func(Lin
 	}
 
 	k := m - m%size
-	s.lines = grow(s.lines, k)
+	s.lines = Grow(s.lines, k)
 	half := size / 2
 
 	for off := 0; off < k; off += size {
@@ -153,7 +153,8 @@ func (s *Spectrum) Close() {
 	s.pow.Close()
 }
 
-func grow[T any](b []T, n int) []T {
+// Grow returns b resized to n items, reallocated when its capacity is short.
+func Grow[T any](b []T, n int) []T {
 	if cap(b) < n {
 		return make([]T, n)
 	}

@@ -249,7 +249,7 @@ func (r *resampler) process(iq []complex64) ([]complex64, error) {
 	}
 
 	n := int(float64(len(iq)+r.i.Pending())*float64(r.outRate)/r.in) + 64
-	r.oi, r.oq = grow(r.oi, n), grow(r.oq, n)
+	r.oi, r.oq = dsp.Grow(r.oi, n), dsp.Grow(r.oq, n)
 
 	ni, err := r.i.Process(r.re, r.oi)
 	if err != nil {
@@ -381,12 +381,4 @@ func failReason(err error) string {
 	}
 
 	return "the decoder channel could not be built"
-}
-
-func grow(b []float32, n int) []float32 {
-	if cap(b) < n {
-		return make([]float32, n)
-	}
-
-	return b[:n]
 }

@@ -74,27 +74,6 @@ func jsonMap(m map[string]string) (sql.NullString, error) {
 	return sql.NullString{String: string(b), Valid: true}, nil
 }
 
-// Recent returns the latest entries, newest first.
-func (r *AuditLog) Recent(ctx context.Context, limit int) ([]domain.AuditEntry, error) {
-	rows, err := sqlc.New(r.db.Reader(ctx)).ListRecentAuditEntries(ctx, int64(limit))
-	if err != nil {
-		return nil, fmt.Errorf("list audit entries: %w", err)
-	}
-
-	out := make([]domain.AuditEntry, 0, len(rows))
-
-	for _, row := range rows {
-		e, err := auditEntry(row)
-		if err != nil {
-			return nil, err
-		}
-
-		out = append(out, e)
-	}
-
-	return out, nil
-}
-
 // DeleteBefore implements domain.AuditPurge.
 func (r *AuditLog) DeleteBefore(ctx context.Context, cutoff time.Time, limit int) (int, error) {
 	n, err := sqlc.New(r.db.Writer(ctx)).DeleteAuditEntriesBefore(ctx, sqlc.DeleteAuditEntriesBeforeParams{Cutoff: ms(cutoff), Batch: int64(limit)})

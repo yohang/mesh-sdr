@@ -152,8 +152,10 @@ func TestIngestImage(t *testing.T) {
 		t.Errorf("metadata = %v", f.Metadata)
 	}
 
-	data, err := e.repo.EntryContent(context.Background(), f)
-	if err != nil || bytes.Contains(data, []byte("GPS 50.63")) || !bytes.HasPrefix(data, []byte("\x89PNG")) {
+	var stored bytes.Buffer
+
+	err := e.repo.WriteContent(context.Background(), f, &stored)
+	if data := stored.Bytes(); err != nil || int64(len(data)) != f.Size || bytes.Contains(data, []byte("GPS 50.63")) || !bytes.HasPrefix(data, []byte("\x89PNG")) {
 		t.Errorf("stored content: %v (metadata must be dropped)", err)
 	}
 

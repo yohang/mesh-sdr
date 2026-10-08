@@ -45,7 +45,6 @@ type NodeOption func(*nodeOptions)
 
 type nodeOptions struct {
 	prober         agent.Prober
-	devices        func() []ctl.Device
 	mediaHeartbeat time.Duration
 	// outbox is told the file outbox (tests send files through it).
 	outbox        func(*agent.Outbox)
@@ -149,10 +148,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 		return nil, errors.New("tls.key: unsupported key type")
 	}
 
-	if o.devices == nil {
-		devices := DevicesOf(cfg)
-		o.devices = func() []ctl.Device { return devices }
-	}
+	devices := DevicesOf(cfg)
 
 	// The capability report probes the drivers and the decoder tools of the
 	// radio built below.
@@ -171,7 +167,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 			return out
 		}
 		decoders := func(ctx context.Context) []ctl.Decoder { return decoderCapabilities(ctx, toolbox) }
-		o.prober = probe.New(version.String(), o.devices, drivers, decoders, time.Now())
+		o.prober = probe.New(version.String(), func() []ctl.Device { return devices }, drivers, decoders, time.Now())
 	} else if o.probeDecoders {
 		o.prober = decoderProber{Prober: o.prober, decoders: func(ctx context.Context) []ctl.Decoder { return decoderCapabilities(ctx, toolbox) }}
 	}
@@ -204,7 +200,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	// The desired state pushed by the hub carries the presets, the WFM
 	// de-emphasis and waterfall defaults the radio applies and the listen
 	// policy the media server enforces.
-	state := agent.NewDesiredState(o.devices())
+	state := agent.NewDesiredState(devices)
 
 	// The device logs (SRC-005): connector lines and lifecycle records,
 	// pushed to the hub over the control channel.

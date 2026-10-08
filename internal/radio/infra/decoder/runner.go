@@ -169,7 +169,7 @@ func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderR
 	// The slot decoders run batch jobs on the node queue (DEC-025).
 	if spec.Mode.Slot > 0 && spec.Mode.Input == domain.InputAudio && len(profiles(spec.Mode.Name, Settings{})) > 0 {
 		if r.o.Supervisor == nil {
-			return nil, errors.New("node.runtime_dir is not set: no tool can run")
+			return nil, process.ErrNoRuntimeDir
 		}
 
 		return r.startSlots(spec, ev)
@@ -185,7 +185,7 @@ func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderR
 	}
 
 	if r.o.Supervisor == nil {
-		return nil, errors.New("node.runtime_dir is not set: no tool can run")
+		return nil, process.ErrNoRuntimeDir
 	}
 
 	path, err := r.o.Tools.Resolve(ad.tool)
@@ -403,16 +403,11 @@ func (s *session) WideIQ(b app.WideIQBlock) {
 			s.raw = binary.LittleEndian.AppendUint32(s.raw, math.Float32bits(real(v)))
 			s.raw = binary.LittleEndian.AppendUint32(s.raw, math.Float32bits(imag(v)))
 		} else {
-			s.raw = binary.LittleEndian.AppendUint16(s.raw, uint16(s16(real(v))))
+			s.raw = binary.LittleEndian.AppendUint16(s.raw, uint16(dsp.ToS16(real(v))))
 		}
 	}
 
 	_, _ = s.buf.Write(s.raw)
-}
-
-// s16 converts a sample in [-1, 1] to int16, clipped.
-func s16(v float32) int16 {
-	return int16(max(-32768, min(32767, math.Round(float64(v)*32767))))
 }
 
 // Close implements app.DecoderRun: nothing is reported to the listener

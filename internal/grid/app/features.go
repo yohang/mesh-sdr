@@ -301,41 +301,6 @@ func effective(d *domain.Device, global string) string {
 	return global
 }
 
-// Device returns the effective listen policy of an enabled device; ok is
-// false for an unknown or disabled device, which nobody listens to.
-func (p *ListenPolicies) Device(ctx context.Context, id string) (policy string, ok bool, err error) {
-	devices, err := p.devices.List(ctx)
-	if err != nil {
-		return "", false, fmt.Errorf("list devices: %w", err)
-	}
-
-	for _, d := range devices {
-		if d.ID().String() == id && d.Flags().Enabled {
-			return effective(d, p.global(ctx)), true, nil
-		}
-	}
-
-	return "", false, nil
-}
-
-// AnyAnonymous reports whether some enabled device is anonymous-listenable.
-func (p *ListenPolicies) AnyAnonymous(ctx context.Context) (bool, error) {
-	devices, err := p.devices.List(ctx)
-	if err != nil {
-		return false, fmt.Errorf("list devices: %w", err)
-	}
-
-	global := p.global(ctx)
-
-	for _, d := range devices {
-		if d.Flags().Enabled && effective(d, global) == ListenAnonymous {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
 // Effective returns the effective listen policy of every enabled device, by
 // device id: one consistent view for many checks.
 func (p *ListenPolicies) Effective(ctx context.Context) (map[string]string, error) {

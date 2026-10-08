@@ -251,45 +251,18 @@ func TestListenPolicies(t *testing.T) {
 	for _, tt := range []struct {
 		name          string
 		global        fixedPolicy
-		any           bool
 		open, closedD string
 	}{
-		{"registered globally", fixedPolicy{v: "registered"}, true, "anonymous", "registered"},
-		{"anonymous globally", fixedPolicy{v: "anonymous"}, true, "anonymous", "anonymous"},
-		{"unreadable global", fixedPolicy{err: errors.New("down")}, true, "anonymous", "registered"},
+		{"registered globally", fixedPolicy{v: "registered"}, "anonymous", "registered"},
+		{"anonymous globally", fixedPolicy{v: "anonymous"}, "anonymous", "anonymous"},
+		{"unreadable global", fixedPolicy{err: errors.New("down")}, "anonymous", "registered"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			p := app.NewListenPolicies(devices, tt.global)
-
-			if got, err := p.AnyAnonymous(ctx); err != nil || got != tt.any {
-				t.Errorf("AnyAnonymous = %v, %v", got, err)
-			}
-
-			if got, ok, err := p.Device(ctx, "open"); err != nil || !ok || got != tt.open {
-				t.Errorf("open = %q %v %v", got, ok, err)
-			}
-
-			if got, ok, err := p.Device(ctx, "closed"); err != nil || !ok || got != tt.closedD {
-				t.Errorf("closed = %q %v %v", got, ok, err)
-			}
-
-			if _, ok, _ := p.Device(ctx, "off"); ok {
-				t.Error("a disabled device is listenable")
-			}
-
-			if _, ok, _ := p.Device(ctx, "nope"); ok {
-				t.Error("an unknown device is listenable")
+			// A disabled or unknown device is absent: nobody listens to it.
+			all, err := app.NewListenPolicies(devices, tt.global).Effective(ctx)
+			if err != nil || len(all) != 2 || all["open"] != tt.open || all["closed"] != tt.closedD {
+				t.Errorf("Effective = %v, %v", all, err)
 			}
 		})
-	}
-
-	all, err := app.NewListenPolicies(devices, fixedPolicy{v: "registered"}).Effective(ctx)
-	if err != nil || len(all) != 2 || all["open"] != "anonymous" || all["closed"] != "registered" {
-		t.Errorf("Effective = %v, %v", all, err)
-	}
-
-	none := app.NewListenPolicies(deviceList{dev("closed", true, "")}, fixedPolicy{v: "registered"})
-	if got, _ := none.AnyAnonymous(ctx); got {
-		t.Error("AnyAnonymous without an anonymous device")
 	}
 }

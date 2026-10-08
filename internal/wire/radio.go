@@ -75,9 +75,10 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 		}
 	}
 
+	tools := process.Tools{Paths: cfg.Tools.Paths(), Dirs: cfg.Tools.Dirs}
 	sources := connector.NewSources(connector.Options{
 		Supervisor: sup, Ports: ports, Logger: component(logger, "radio.infra.connector"),
-		Tools: connector.Tools{Paths: cfg.Tools.Paths(), Dirs: cfg.Tools.Dirs}, DeviceLog: deviceLog.Connector,
+		Tools: tools, DeviceLog: deviceLog.Connector,
 	})
 
 	m, err := radioapp.NewManager(radioapp.Options{
@@ -88,7 +89,6 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 		return nil, nil, nil, nil, err
 	}
 
-	tools := process.Tools{Paths: cfg.Tools.Paths(), Dirs: cfg.Tools.Dirs}
 	toolbox := decoder.NewToolbox(decoder.ToolboxOptions{Supervisor: sup, Tools: tools, Logger: component(logger, "radio.infra.decoder")})
 	lim := cfg.Decoders.ProcessLimits
 	core := uint64(0)

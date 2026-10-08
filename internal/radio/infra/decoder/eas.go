@@ -175,7 +175,7 @@ func sameTime(s string, at time.Time) (time.Time, bool) {
 			continue
 		}
 
-		if !found || absDur(t.Sub(at)) < absDur(best.Sub(at)) {
+		if !found || t.Sub(at).Abs() < best.Sub(at).Abs() {
 			best, found = t, true
 		}
 	}

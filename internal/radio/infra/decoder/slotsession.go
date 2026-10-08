@@ -17,6 +17,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/dsp"
 	"github.com/yohang/mesh-sdr/internal/radio/app"
+	"github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
@@ -129,7 +130,7 @@ func (s *slotSession) Audio(b app.AudioBlock) {
 			s.conv.Close()
 		}
 
-		c, err := dsp.NewS16Converter(b.Rate, slotRate)
+		c, err := dsp.NewS16Converter(b.Rate, domain.SlotRate)
 		if err != nil {
 			s.conv = nil
 			s.mu.Unlock()

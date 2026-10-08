@@ -65,8 +65,8 @@ func TestPresenceFromNodeEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if count, _ := p.Count(ctx); count != 1 {
-		t.Fatalf("open = %d, want 1", count)
+	if open, _ := p.List(ctx); len(open) != 1 {
+		t.Fatalf("open = %d, want 1", len(open))
 	}
 
 	open, _ := p.List(ctx)
@@ -117,8 +117,8 @@ func TestPresenceFromNodeEvents(t *testing.T) {
 	e.clock.advance(40 * time.Second)
 	p.Reap(ctx)
 
-	if count, _ := p.Count(ctx); count != 1 {
-		t.Fatalf("open after a heartbeat = %d, want 1 (the silent stolen row was reaped)", count)
+	if open, _ := p.List(ctx); len(open) != 1 {
+		t.Fatalf("open after a heartbeat = %d, want 1 (the silent stolen row was reaped)", len(open))
 	}
 
 	e.clock.advance(10 * time.Second)
@@ -154,8 +154,8 @@ func TestPresenceCapsOpenRowsPerNode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if count, _ := p.Count(ctx); count != app.MaxOpenConnectionsPerNode {
-		t.Errorf("open = %d, want the cap %d", count, app.MaxOpenConnectionsPerNode)
+	if open, _ := p.List(ctx); len(open) != app.MaxOpenConnectionsPerNode {
+		t.Errorf("open = %d, want the cap %d", len(open), app.MaxOpenConnectionsPerNode)
 	}
 }
 

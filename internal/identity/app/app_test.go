@@ -143,10 +143,22 @@ func (e *env) login(login, pw string) (app.LoginResult, error) {
 	return e.auth.Login(context.Background(), app.LoginInput{Login: login, Password: pw, Meta: app.RequestMeta{IP: ip, UserAgent: "ua"}})
 }
 
+// recent returns the latest audit entries, newest first.
+func (e *env) recent(ctx context.Context, limit int) ([]domain.AuditEntry, error) {
+	recs, err := e.audit.Search(ctx, domain.AuditQuery{Limit: limit})
+
+	out := make([]domain.AuditEntry, len(recs))
+	for i, r := range recs {
+		out[i] = r.Entry
+	}
+
+	return out, err
+}
+
 func (e *env) actions(t *testing.T) []string {
 	t.Helper()
 
-	entries, err := e.audit.Recent(context.Background(), 100)
+	entries, err := e.recent(context.Background(), 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -781,7 +793,7 @@ func TestAuditPurger(t *testing.T) {
 	}
 
 	// The two kept entries, and the record of the purge.
-	left, err := e.audit.Recent(ctx, 10)
+	left, err := e.recent(ctx, 10)
 	if err != nil || len(left) != 3 {
 		t.Fatalf("left %d entries, %v", len(left), err)
 	}
@@ -795,7 +807,7 @@ func TestAuditPurger(t *testing.T) {
 		t.Fatalf("second purge = %d, %v", n, err)
 	}
 
-	if left, _ := e.audit.Recent(ctx, 10); len(left) != 3 {
+	if left, _ := e.recent(ctx, 10); len(left) != 3 {
 		t.Errorf("an empty purge was recorded: %d entries", len(left))
 	}
 }

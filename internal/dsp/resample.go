@@ -45,7 +45,7 @@ func (c *S16Converter) InRate() int { return c.in }
 // until the next call.
 func (c *S16Converter) Convert(audio []float32) ([]byte, error) {
 	if c.rs != nil {
-		c.buf = grow(c.buf, int(float64(len(audio)+c.rs.Pending())*float64(c.out)/float64(c.in))+stepMargin)
+		c.buf = Grow(c.buf, int(float64(len(audio)+c.rs.Pending())*float64(c.out)/float64(c.in))+stepMargin)
 
 		n, err := c.rs.Process(audio, c.buf)
 		if err != nil {
@@ -57,7 +57,7 @@ func (c *S16Converter) Convert(audio []float32) ([]byte, error) {
 
 	c.dst = c.dst[:0]
 	for _, v := range audio {
-		c.dst = binary.LittleEndian.AppendUint16(c.dst, uint16(toS16(v)))
+		c.dst = binary.LittleEndian.AppendUint16(c.dst, uint16(ToS16(v)))
 	}
 
 	return c.dst, nil

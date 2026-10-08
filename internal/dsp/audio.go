@@ -73,7 +73,7 @@ func (f *Framer) Push(audio []float32, t time.Time, squelched bool, emit func(Au
 		}
 
 		f.squelched = f.squelched || squelched
-		f.buf = append(f.buf, toS16(v))
+		f.buf = append(f.buf, ToS16(v))
 
 		if len(f.buf) == f.frameLen {
 			emit(f.encode())
@@ -103,7 +103,8 @@ func (f *Framer) encode() AudioFrame {
 	return fr
 }
 
-func toS16(v float32) int16 {
+// ToS16 converts a sample in [-1, 1] to int16, clipped.
+func ToS16(v float32) int16 {
 	x := math.Round(float64(v) * 32767)
 
 	return int16(min(max(x, -32768), 32767))

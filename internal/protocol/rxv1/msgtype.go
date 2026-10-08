@@ -2,7 +2,8 @@ package rxv1
 
 import (
 	"fmt"
-	"unicode/utf8"
+
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // MessageType is the "type" of an envelope. Valid values match
@@ -233,9 +234,6 @@ func truncate(s string) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	cut := maxLen
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "…"
+
+	return shared.Truncate(s, maxLen) + "…"
 }

@@ -257,6 +257,11 @@ type Snapshot struct {
 	ActivePreset string
 }
 
+// Tuning returns the centre frequency and sample rate of the snapshot.
+func (s Snapshot) Tuning() Tuning {
+	return Tuning{center: Frequency{hz: s.CenterHz}, rate: SampleRate{v: s.RateHz}}
+}
+
 // Snapshot returns the status.
 func (d *Device) Snapshot() Snapshot {
 	return Snapshot{

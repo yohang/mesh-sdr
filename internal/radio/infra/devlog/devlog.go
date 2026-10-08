@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
@@ -117,17 +117,7 @@ func (l *Log) add(id string, rec ctl.LogRecord) {
 
 // capText cuts text to ctl.MaxLogText bytes, on a rune boundary.
 func capText(s string) string {
-	s = strings.ToValidUTF8(s, "�")
-	if len(s) <= ctl.MaxLogText {
-		return s
-	}
-
-	cut := ctl.MaxLogText
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-
-	return s[:cut]
+	return shared.Truncate(strings.ToValidUTF8(s, "�"), ctl.MaxLogText)
 }
 
 // Changed returns a channel closed at the next record.

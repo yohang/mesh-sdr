@@ -363,9 +363,6 @@ func WithState(ctx context.Context, p domain.Principal) context.Context {
 // Principal returns who makes the request.
 func (s *State) Principal() domain.Principal { return s.principal }
 
-// HasSession reports whether the request carries a valid session.
-func (s *State) HasSession() bool { return s.session != nil }
-
 // BackgroundHeader marks a request the page made on its own (a live
 // fragment refreshed by a hub event, ADR 0016): it does not count as
 // activity of the session (ADR 0018).

@@ -254,9 +254,6 @@ func (d *Device) ApplyState(state RuntimeState, reason string, centerFreq *int64
 	d.reportedAt = ms(now)
 }
 
-// SetOffline marks the device offline (its node is offline).
-func (d *Device) SetOffline() { d.online = false }
-
 // ID returns the device id.
 func (d *Device) ID() shared.DeviceID { return d.id }
 

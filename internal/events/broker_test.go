@@ -94,9 +94,10 @@ func TestSubscribeAllOrNothing(t *testing.T) {
 	}
 
 	s.Detach()
+	b.Publish(ctx, events.Event{Topic: events.MustTopic("devices"), Type: "device.status"})
 
-	if b.Subscribers() != 0 {
-		t.Fatal("detached subscriber still attached")
+	if got := rec.types(); len(got) != 1 {
+		t.Fatalf("detached subscriber received %v", got)
 	}
 }
 

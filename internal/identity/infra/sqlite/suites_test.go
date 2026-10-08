@@ -19,7 +19,6 @@ import (
 type AuditReader interface {
 	domain.AuditLog
 	domain.AuditReader
-	Recent(ctx context.Context, limit int) ([]domain.AuditEntry, error)
 }
 
 // Repos are the repositories of one fresh, migrated database.
@@ -516,10 +515,12 @@ func TestAudit(t *testing.T) {
 		}
 	}
 
-	got, err := r.Audit.Recent(ctx, 10)
-	if err != nil || len(got) != 2 {
-		t.Fatalf("recent = %d, %v", len(got), err)
+	recs, err := r.Audit.Search(ctx, domain.AuditQuery{Limit: 10})
+	if err != nil || len(recs) != 2 {
+		t.Fatalf("recent = %d, %v", len(recs), err)
 	}
+
+	got := []domain.AuditEntry{recs[0].Entry, recs[1].Entry}
 
 	if got[0].Action() != domain.ActionUserDisable || got[0].Before()["enabled"] != "true" || got[0].Actor().Kind() != domain.ActorCLI {
 		t.Errorf("newest entry = %+v", got[0])

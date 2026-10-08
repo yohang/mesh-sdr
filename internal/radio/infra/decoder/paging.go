@@ -10,6 +10,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/radio/app"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // The paging decoder (DEC-033): multimon-ng decodes FLEX and POCSAG
@@ -210,7 +211,7 @@ func (p *pagingParser) assemble(capcode, flag, text string) (string, bool) {
 			p.order = append(p.order, capcode)
 		}
 
-		msg := capBytes(prev+text, maxFlexBytes)
+		msg := shared.Truncate(prev+text, maxFlexBytes)
 		if flag == "F" {
 			p.flex[capcode] = msg
 

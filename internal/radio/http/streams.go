@@ -437,7 +437,7 @@ func (ss *session) deviceConfig(rev int, snap domain.Snapshot, info app.Spectrum
 		cfg.Start = media.Start{Mode: p.StartMod}
 
 		// A retune since the switch may leave the start outside the band.
-		if off := p.StartFreq - snap.CenterHz; abs(off) <= int64(snap.RateHz)/2 {
+		if off := p.StartFreq - snap.CenterHz; snap.Tuning().ContainsOffset(off) {
 			cfg.Start.OffsetHz = off
 		}
 		cfg.TuningStepHz = int(p.TuningStep)
@@ -590,13 +590,6 @@ func (ss *session) waterfallChanged(w media.Waterfall) {
 	for _, p := range patches {
 		ss.peer.Send(rxv1.TypeDeviceConfigPatch, p)
 	}
-}
-
-// inBand checks an offset against the capture band (§6.9: ±sample_rate/2).
-func inBand(a *attached, offset int64) bool {
-	half := int64(a.lease.Snapshot().RateHz) / 2
-
-	return offset >= -half && offset <= half
 }
 
 func (ss *session) detach(req rxv1.Envelope) {
@@ -838,7 +831,7 @@ func (ss *session) createDemod(req rxv1.Envelope) {
 	stream := ss.streamID()
 	ss.mu.Unlock()
 
-	if !inBand(a, p.OffsetHz) {
+	if !a.lease.Snapshot().Tuning().ContainsOffset(p.OffsetHz) {
 		ss.peer.Fail(req, rxv1.CodeOutOfRange, "offset_hz: outside the capture band")
 
 		return
@@ -965,7 +958,7 @@ func (ss *session) setDemod(req rxv1.Envelope) {
 		a := ss.devices[d.device]
 		ss.mu.Unlock()
 
-		if a == nil || !inBand(a, *p.OffsetHz) {
+		if a == nil || !a.lease.Snapshot().Tuning().ContainsOffset(*p.OffsetHz) {
 			ss.peer.Fail(req, rxv1.CodeOutOfRange, "offset_hz: outside the capture band")
 
 			return
@@ -1073,8 +1066,8 @@ func (ss *session) retune(req rxv1.Envelope) {
 		return
 	}
 
-	start, half := snap.CenterHz, int64(snap.RateHz)/2
-	if _, preset, _ := s.presets(p.DeviceID, snap.ActivePreset); preset != nil && abs(preset.StartFreq-snap.CenterHz) <= half {
+	start := snap.CenterHz
+	if _, preset, _ := s.presets(p.DeviceID, snap.ActivePreset); preset != nil && snap.Tuning().ContainsOffset(preset.StartFreq-snap.CenterHz) {
 		start = preset.StartFreq
 	}
 
@@ -1102,14 +1095,6 @@ func centre(device string, listeners []*session) int64 {
 	}
 
 	return 0
-}
-
-func abs(v int64) int64 {
-	if v < 0 {
-		return -v
-	}
-
-	return v
 }
 
 // attachedTo returns the attachment of a device (nil: not attached).
@@ -1284,14 +1269,13 @@ func (ss *session) moveDemod(d *demodState, oldCenter, startHz int64, snap domai
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	half := int64(snap.RateHz) / 2
 	start := startHz - snap.CenterHz
 	cur := d.demod.Params()
 	moved := cur
 
 	if mine != nil {
 		moved.OffsetHz = start
-	} else if moved.OffsetHz = oldCenter + cur.OffsetHz - snap.CenterHz; abs(moved.OffsetHz) > half {
+	} else if moved.OffsetHz = oldCenter + cur.OffsetHz - snap.CenterHz; !snap.Tuning().ContainsOffset(moved.OffsetHz) {
 		moved.OffsetHz = start
 	}
 

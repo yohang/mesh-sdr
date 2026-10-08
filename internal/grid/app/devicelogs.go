@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
@@ -141,14 +140,5 @@ func plainText(s string, maxBytes int) string {
 		return -1
 	}, s)
 
-	if len(s) <= maxBytes {
-		return s
-	}
-
-	cut := maxBytes
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-
-	return s[:cut]
+	return shared.Truncate(s, maxBytes)
 }

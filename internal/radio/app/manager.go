@@ -17,7 +17,6 @@ import (
 const (
 	DefaultLinger      = 10 * time.Second
 	DefaultAutoRecover = 15 * time.Minute
-	ProbeTimeout       = 5 * time.Second
 )
 
 // Options configure a Manager.
@@ -431,14 +430,11 @@ func (r *runner) probe(ctx context.Context) {
 		return
 	}
 
-	pctx, cancel := context.WithTimeout(ctx, ProbeTimeout)
-	defer cancel()
-
 	r.mu.Lock()
 	p := r.dev.Params()
 	r.mu.Unlock()
 
-	if err := r.m.o.Sources.Probe(pctx, p); err != nil {
+	if err := r.m.o.Sources.Probe(ctx, p); err != nil {
 		r.log.Warn("device unavailable: its tool cannot run", slog.Any("error", err))
 		r.mu.Lock()
 		_ = r.dev.Transition(domain.StateUnavailable, "tool_missing", 0)

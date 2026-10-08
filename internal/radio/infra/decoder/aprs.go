@@ -307,20 +307,12 @@ func aprsTime(s string, at time.Time) *time.Time {
 	var best *time.Time
 
 	for _, t := range candidates {
-		if best == nil || absDur(t.Sub(at)) < absDur(best.Sub(at)) {
+		if best == nil || t.Sub(at).Abs() < best.Sub(at).Abs() {
 			best = &t
 		}
 	}
 
 	return best
-}
-
-func absDur(d time.Duration) time.Duration {
-	if d < 0 {
-		return -d
-	}
-
-	return d
 }
 
 // position parses a position (plain or compressed) and what follows it.

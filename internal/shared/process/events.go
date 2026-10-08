@@ -50,12 +50,9 @@ const (
 
 // ExitInfo is attached to events that follow a process exit.
 type ExitInfo struct {
-	Class    ExitClass
-	Code     int    // -1 when killed by a signal or never started
-	Signal   string // signal name when killed by a signal
-	Ran      time.Duration
-	LastErr  []string // last stderr lines (admin-only evidence, §8.4: last 20)
-	StartErr string   // exec error text when the process never started
+	Class  ExitClass
+	Code   int    // -1 when killed by a signal or never started
+	Signal string // signal name when killed by a signal
 }
 
 // Event is emitted on every transition and diagnostics-relevant occurrence.
@@ -78,22 +75,6 @@ type Event struct {
 // goroutine and must return quickly.
 type Sink func(Event)
 
-// Metrics is an optional hook for counters. It is kept minimal;
-// the node would back it with its metrics registry (§9.11).
-type Metrics interface {
-	ProcessStarted(kind string)
-	ProcessExited(kind string, class ExitClass)
-	Restarted(kind string)
-	StderrLine(kind string, class Class, dropped bool)
-}
-
-type noopMetrics struct{}
-
-func (noopMetrics) ProcessStarted(string)           {}
-func (noopMetrics) ProcessExited(string, ExitClass) {}
-func (noopMetrics) Restarted(string)                {}
-func (noopMetrics) StderrLine(string, Class, bool)  {}
-
 // Terminal errors returned by Instance.Run.
 var (
 	ErrUnavailable  = errors.New("tool unavailable")
@@ -102,4 +83,6 @@ var (
 	ErrJobTimeout   = errors.New("job deadline exceeded")
 	ErrInvalidSpec  = errors.New("invalid spec")
 	ErrWorkdir      = errors.New("workdir")
+	// ErrNoRuntimeDir: without node.runtime_dir there is no supervisor.
+	ErrNoRuntimeDir = errors.New("node.runtime_dir is not set: no tool can run")
 )

@@ -91,7 +91,7 @@ func (r *Run) Finish(now time.Time, rows int64, err error) {
 
 	if err != nil {
 		r.status = StatusError
-		r.lastError = truncate(err.Error(), maxErrorLength)
+		r.lastError = shared.Truncate(err.Error(), maxErrorLength)
 	}
 }
 
@@ -108,18 +108,6 @@ func (r *Run) Abandon(now time.Time) bool {
 	r.runningSince, r.lastFinished, r.status, r.lastError = time.Time{}, now.UTC(), StatusError, Interrupted
 
 	return true
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-
-	for n > 0 && s[n]&0xC0 == 0x80 { // do not cut a UTF-8 sequence
-		n--
-	}
-
-	return s[:n]
 }
 
 // Name returns the job name.

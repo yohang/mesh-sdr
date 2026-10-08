@@ -317,21 +317,6 @@ func (r *Files) Thumbnail(ctx context.Context, id shared.UUID) ([]byte, error) {
 	return b, nil
 }
 
-// EntryContent returns the content of a complete file, checked against
-// its size.
-func (r *Files) EntryContent(ctx context.Context, e Entry) ([]byte, error) {
-	data, err := r.contentOf(ctx, e.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	if int64(len(data)) != e.Size {
-		return nil, fmt.Errorf("read file %s: %d bytes, want %d", e.ID, len(data), e.Size)
-	}
-
-	return data, nil
-}
-
 // filterParams are the SQL parameters of a filter.
 type filterParams struct {
 	mimeLike, device, mode, from, to, freqMin, freqMax any

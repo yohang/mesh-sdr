@@ -62,7 +62,7 @@ func (c TextConfig) Validate() error {
 	half := float64(TextRate) / 2
 
 	switch {
-	case !finite(c.Baud) || !finite(c.BandwidthHz) || !finite(c.OffsetHz):
+	case !Finite(c.Baud) || !Finite(c.BandwidthHz) || !Finite(c.OffsetHz):
 		return fmt.Errorf("%w: non-finite text decoder parameters", ErrChain)
 	case c.BandwidthHz <= 0 || c.BandwidthHz >= half/2:
 		return fmt.Errorf("%w: text decoder bandwidth %g Hz", ErrChain, c.BandwidthHz)
@@ -209,7 +209,7 @@ func (d *TextDecoder) Config() TextConfig { return d.cfg }
 // SetOffset moves the secondary selector to hz (DEC-005) and resets the CW
 // timing (a dial change, DEC-012).
 func (d *TextDecoder) SetOffset(hz float64) error {
-	if !finite(hz) || math.Abs(hz) > TextRate/2 {
+	if !Finite(hz) || math.Abs(hz) > TextRate/2 {
 		return fmt.Errorf("%w: text decoder offset %g Hz", ErrChain, hz)
 	}
 
@@ -233,7 +233,7 @@ func (d *TextDecoder) Reset() error {
 
 // complexStep runs a complex stage into buf.
 func complexStep(s *csdr.Stage[complex64, complex64], in []complex64, buf *[]complex64) ([]complex64, error) {
-	*buf = grow(*buf, len(in)+s.Pending()+stepMargin)
+	*buf = Grow(*buf, len(in)+s.Pending()+stepMargin)
 
 	n, err := s.Process(in, *buf)
 	if err != nil {
@@ -245,7 +245,7 @@ func complexStep(s *csdr.Stage[complex64, complex64], in []complex64, buf *[]com
 
 // floatStep runs a float stage into buf.
 func floatStep(s *csdr.Stage[float32, float32], in []float32, buf *[]float32) ([]float32, error) {
-	*buf = grow(*buf, len(in)+s.Pending()+stepMargin)
+	*buf = Grow(*buf, len(in)+s.Pending()+stepMargin)
 
 	n, err := s.Process(in, *buf)
 	if err != nil {
@@ -257,7 +257,7 @@ func floatStep(s *csdr.Stage[float32, float32], in []float32, buf *[]float32) ([
 
 // byteStep runs a byte stage into buf.
 func byteStep[T csdr.Symbol](s *csdr.ByteStage[T], in []T, buf *[]byte) ([]byte, error) {
-	*buf = grow(*buf, len(in)+s.Pending()+stepMargin)
+	*buf = Grow(*buf, len(in)+s.Pending()+stepMargin)
 
 	n, err := s.Process(in, *buf)
 	if err != nil {
@@ -300,7 +300,7 @@ func (d *TextDecoder) Process(iq []complex64) ([]byte, error) {
 
 		return byteStep(d.chars, bits, &d.out)
 	default:
-		d.f1 = grow(d.f1, len(sel)+d.fm.Pending()+stepMargin)
+		d.f1 = Grow(d.f1, len(sel)+d.fm.Pending()+stepMargin)
 
 		n, err := d.fm.Process(sel, d.f1)
 		if err != nil {
@@ -386,13 +386,13 @@ func (r *IQResampler) InRate() float64 { return r.in }
 
 // Process returns iq at the output rate, valid until the next call.
 func (r *IQResampler) Process(iq []complex64) ([]complex64, error) {
-	r.ri, r.rq = grow(r.ri, len(iq)), grow(r.rq, len(iq))
+	r.ri, r.rq = Grow(r.ri, len(iq)), Grow(r.rq, len(iq))
 	for k, v := range iq {
 		r.ri[k], r.rq[k] = real(v), imag(v)
 	}
 
 	n := int(float64(len(iq)+r.i.Pending())*float64(r.out)/r.in) + stepMargin
-	r.oi, r.oq = grow(r.oi, n), grow(r.oq, n)
+	r.oi, r.oq = Grow(r.oi, n), Grow(r.oq, n)
 
 	ni, err := r.i.Process(r.ri, r.oi)
 	if err != nil {
@@ -406,7 +406,7 @@ func (r *IQResampler) Process(iq []complex64) ([]complex64, error) {
 
 	// Both resamplers see the same lengths: they release the same count.
 	m := min(ni, nq)
-	r.iq = grow(r.iq, m)
+	r.iq = Grow(r.iq, m)
 
 	for k := range m {
 		r.iq[k] = complex(r.oi[k], r.oq[k])

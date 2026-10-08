@@ -24,17 +24,16 @@ type Configured struct {
 
 // Effective is the effective value of one key, with where it comes from.
 type Effective struct {
-	def      Definition
-	value    Value
-	source   Source
-	origin   string
-	version  int64
-	shadowed *Value
+	def     Definition
+	value   Value
+	source  Source
+	origin  string
+	version int64
 }
 
 // Resolve applies the precedence config (locked) > DB > default. stored is
-// the valid DB row of the key, or nil. A DB value under a config value is
-// kept as the shadowed value ("overridden by config").
+// the valid DB row of the key, or nil. A DB row under a config value only
+// gives its version.
 func Resolve(def Definition, cfg *Configured, stored *Setting) Effective {
 	e := Effective{def: def, value: def.Default(), source: SourceDefault, origin: string(SourceDefault)}
 
@@ -45,11 +44,6 @@ func Resolve(def Definition, cfg *Configured, stored *Setting) Effective {
 	switch {
 	case cfg != nil:
 		e.value, e.source, e.origin = cfg.Value, SourceConfig, cfg.Origin
-
-		if stored != nil {
-			v := stored.Value()
-			e.shadowed = &v
-		}
 	case stored != nil:
 		e.value, e.source, e.origin = stored.Value(), SourceDB, string(SourceDB)
 	}
@@ -93,15 +87,6 @@ func (e Effective) Locked() bool { return e.source == SourceConfig }
 // send it back to detect concurrent changes.
 func (e Effective) Version() int64 { return e.version }
 
-// Shadowed returns the DB value hidden by a config value, if any.
-func (e Effective) Shadowed() (Value, bool) {
-	if e.shadowed == nil {
-		return Value{}, false
-	}
-
-	return *e.shadowed, true
-}
-
 // IsSet reports whether a non-null value is in effect (for secrets: "set").
 func (e Effective) IsSet() bool { return !e.value.IsNull() }
 
@@ -132,9 +117,6 @@ func (c Change) Value() (Value, bool) {
 
 	return *c.value, true
 }
-
-// IsReset reports whether the change resets the key.
-func (c Change) IsReset() bool { return c.value == nil }
 
 // Expected returns the version the writer last saw.
 func (c Change) Expected() int64 { return c.expected }

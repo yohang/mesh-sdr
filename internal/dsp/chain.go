@@ -156,14 +156,15 @@ func validDeemphasis(us int) error {
 	return nil
 }
 
-func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+// Finite reports whether v is neither NaN nor infinite.
+func Finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 // Validate checks the ranges of §8.3 rule 4.
 func (c ChainConfig) Validate() error {
 	switch {
 	case !slices.Contains([]Demodulator{DemodAM, DemodSAM, DemodNFM, DemodSSB, DemodWFM}, c.Demod):
 		return fmt.Errorf("%w: demodulator %q", ErrChain, c.Demod)
-	case !finite(c.ChannelRate) || !finite(c.ResidualHz) || !finite(c.LowHz) || !finite(c.HighHz):
+	case !Finite(c.ChannelRate) || !Finite(c.ResidualHz) || !Finite(c.LowHz) || !Finite(c.HighHz):
 		return fmt.Errorf("%w: non-finite rate, residual or band", ErrChain)
 	case c.ChannelRate < 8000:
 		return fmt.Errorf("%w: channel rate %g", ErrChain, c.ChannelRate)
@@ -208,7 +209,7 @@ type step struct {
 const stepMargin = 2048
 
 func (st *step) run(in []float32) ([]float32, error) {
-	st.buf = grow(st.buf, int(float64(len(in)+st.s.Pending())*st.ratio)+stepMargin)
+	st.buf = Grow(st.buf, int(float64(len(in)+st.s.Pending())*st.ratio)+stepMargin)
 
 	n, err := st.s.Process(in, st.buf)
 	if err != nil {
@@ -450,7 +451,7 @@ type Result struct {
 
 // Process runs a block of channel IQ through the chain.
 func (c *Chain) Process(iq []complex64) (Result, error) {
-	c.shifted = grow(c.shifted, len(iq)+64)
+	c.shifted = Grow(c.shifted, len(iq)+64)
 
 	n, err := c.shift.Process(iq, c.shifted)
 	if err != nil {
@@ -460,7 +461,7 @@ func (c *Chain) Process(iq []complex64) (Result, error) {
 	sel := c.shifted[:n]
 
 	if c.bp != nil {
-		c.filtered = grow(c.filtered, n+c.bp.Pending()+stepMargin)
+		c.filtered = Grow(c.filtered, n+c.bp.Pending()+stepMargin)
 
 		m, err := c.bp.Process(sel, c.filtered)
 		if err != nil {
@@ -476,7 +477,7 @@ func (c *Chain) Process(iq []complex64) (Result, error) {
 		c.open = c.cfg.Squelch == nil || c.level >= *c.cfg.Squelch
 	}
 
-	c.demodOut = grow(c.demodOut, len(sel)+c.demod.Pending()+stepMargin)
+	c.demodOut = Grow(c.demodOut, len(sel)+c.demod.Pending()+stepMargin)
 
 	m, err := c.demod.Process(sel, c.demodOut)
 	if err != nil {

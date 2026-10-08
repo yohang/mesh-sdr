@@ -109,9 +109,8 @@ func sanitize(s string) string {
 	}, s)
 }
 
-// Ring keeps the last N items: the stderr lines of an instance (served to
-// admins on demand; the last 20 are attached to DECODER_ERROR events), and
-// the device logs of the node (SRC-005). Safe for concurrent use.
+// Ring keeps the last N items (the device logs of the node, SRC-005). Safe
+// for concurrent use.
 type Ring[T any] struct {
 	mu    sync.Mutex
 	items []T
@@ -154,41 +153,4 @@ func (r *Ring[T]) Tail(n int) []T {
 		out = append(out, r.items[idx])
 	}
 	return out
-}
-
-// Len returns the number of items held.
-func (r *Ring[T]) Len() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.full {
-		return len(r.items)
-	}
-	return r.next
-}
-
-// bucket is a token bucket (stdlib only; golang.org/x/time/rate would do).
-type bucket struct {
-	mu     sync.Mutex
-	rate   float64 // tokens per second
-	burst  float64
-	tokens float64
-	last   time.Time
-}
-
-func newBucket(perSec, burst int) *bucket {
-	return &bucket{rate: float64(perSec), burst: float64(burst), tokens: float64(burst)}
-}
-
-func (b *bucket) allow(now time.Time) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if !b.last.IsZero() {
-		b.tokens = min(b.burst, b.tokens+now.Sub(b.last).Seconds()*b.rate)
-	}
-	b.last = now
-	if b.tokens >= 1 {
-		b.tokens--
-		return true
-	}
-	return false
 }

@@ -300,9 +300,6 @@ func (s *Presence) ownedDevice(ctx context.Context, node domain.NodeID, id strin
 	return id, nil
 }
 
-// Count returns the number of open connections.
-func (s *Presence) Count(ctx context.Context) (int, error) { return s.repo.CountOpen(ctx) }
-
 // Listeners returns the number of listeners: open media connections
 // (ADR 0018). Events sockets are viewers, not listeners.
 func (s *Presence) Listeners(ctx context.Context) (int, error) {

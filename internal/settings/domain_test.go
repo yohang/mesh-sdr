@@ -132,29 +132,27 @@ func TestResolve(t *testing.T) {
 	cfg := &settings.Configured{Value: settings.MustValue(`"light"`), Origin: "hub.toml"}
 
 	tests := []struct {
-		name     string
-		cfg      *settings.Configured
-		row      *settings.Setting
-		value    string
-		source   settings.Source
-		origin   string
-		version  int64
-		shadowed bool
+		name    string
+		cfg     *settings.Configured
+		row     *settings.Setting
+		value   string
+		source  settings.Source
+		origin  string
+		version int64
 	}{
-		{"default", nil, nil, `"auto"`, settings.SourceDefault, "default", 0, false},
-		{"db", nil, row, `"dark"`, settings.SourceDB, "db", 7, false},
-		{"config", cfg, nil, `"light"`, settings.SourceConfig, "hub.toml", 0, false},
-		{"config over db", cfg, row, `"light"`, settings.SourceConfig, "hub.toml", 7, true},
+		{"default", nil, nil, `"auto"`, settings.SourceDefault, "default", 0},
+		{"db", nil, row, `"dark"`, settings.SourceDB, "db", 7},
+		{"config", cfg, nil, `"light"`, settings.SourceConfig, "hub.toml", 0},
+		{"config over db", cfg, row, `"light"`, settings.SourceConfig, "hub.toml", 7},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := settings.Resolve(d, tt.cfg, tt.row)
-			_, shadowed := e.Shadowed()
 
 			if e.Value().String() != tt.value || e.Source() != tt.source || e.Origin() != tt.origin ||
-				e.Version() != tt.version || shadowed != tt.shadowed || e.Locked() != (tt.cfg != nil) {
-				t.Errorf("effective = %s %s %s v%d shadowed %v", e.Value(), e.Source(), e.Origin(), e.Version(), shadowed)
+				e.Version() != tt.version || e.Locked() != (tt.cfg != nil) {
+				t.Errorf("effective = %s %s %s v%d", e.Value(), e.Source(), e.Origin(), e.Version())
 			}
 		})
 	}
@@ -177,7 +175,11 @@ func TestChangeSet(t *testing.T) {
 	}
 
 	c := s.Changes()
-	if v, ok := c[0].Value(); !ok || v.String() != `"dark"` || c[0].Expected() != 2 || !c[1].IsReset() {
+	if _, ok := c[1].Value(); ok {
+		t.Errorf("reset carries a value: %+v", c[1])
+	}
+
+	if v, ok := c[0].Value(); !ok || v.String() != `"dark"` || c[0].Expected() != 2 {
 		t.Errorf("changes = %+v", c)
 	}
 }

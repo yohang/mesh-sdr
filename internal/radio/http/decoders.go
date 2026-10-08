@@ -9,7 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/media"
@@ -707,7 +706,7 @@ func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, 
 	// frequency of the signal,
 	// a skimmer the offset of its signal.
 	freq := dial + offset + rec.AudioHz
-	text := capText(rec.Text, media.MaxDecodeText)
+	text := shared.Truncate(rec.Text, media.MaxDecodeText)
 
 	ss.peer.Send(rxv1.TypeDecode, media.Decode{
 		DemodID: d.id, DecoderSessionID: id.String(), Mode: m.Name, TS: rec.Time.UnixMilli(), FreqHz: freq,
@@ -786,17 +785,4 @@ func wideReason(err error) string {
 	}
 
 	return "the device cannot serve this decoder"
-}
-
-// capText cuts s to at most n bytes on a rune boundary.
-func capText(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-
-	return s[:n]
 }

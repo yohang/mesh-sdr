@@ -134,7 +134,7 @@ func (r *ImageReceiver) Feed(audio []float32, rate int) ([]ImageEvent, error) {
 	}
 
 	if r.rs != nil {
-		r.buf = grow(r.buf, int(float64(len(audio)+r.rs.Pending())*float64(r.rate)/float64(rate))+stepMargin)
+		r.buf = Grow(r.buf, int(float64(len(audio)+r.rs.Pending())*float64(r.rate)/float64(rate))+stepMargin)
 
 		n, err := r.rs.Process(audio, r.buf)
 		if err != nil {

@@ -7,11 +7,9 @@
 package decoder
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"regexp"
@@ -19,18 +17,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/yohang/mesh-sdr/internal/radio/app"
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
-// Probe limits (§8.4 "Capability probing" rule 2).
-const (
-	ProbeTimeout  = 5 * time.Second
-	ProbeParallel = 4
-)
+// ProbeParallel bounds the concurrent probes (§8.4 "Capability probing"
+// rule 2).
+const ProbeParallel = 4
 
 // toolProbe is how a tool is probed: an argv that exits quickly with stdin
 // closed (any exit code) and prints a line matching match, on stdout or
@@ -133,7 +128,7 @@ func (t *Toolbox) Available(c string) (bool, string) {
 	return reason == "", reason
 }
 
-// Probe runs every decoder tool (argv only, stdin closed, ProbeTimeout,
+// Probe runs every decoder tool (argv only, stdin closed, process.ProbeTimeout,
 // at most ProbeParallel at once, §8.4) and returns the decoder
 // capabilities with their tools and digital modes. It is called for every
 // capability report: at start, on the hub's request, and after a decoder
@@ -299,34 +294,15 @@ func (t *Toolbox) run(ctx context.Context, id, name string, args []string, match
 		return "", false, name + " not found"
 	}
 
-	if t.o.Supervisor == nil {
-		return "", false, "node.runtime_dir is not set: no tool can run"
-	}
-
 	v := &versionLines{re: match}
 
-	in, err := t.o.Supervisor.NewInstance(process.Spec{
-		ID: id, Kind: "probe", Mode: process.Batch, Probe: true, Path: path, Args: args,
-		ToolDirs: t.o.Tools.Dirs, Timeouts: process.Timeouts{Job: ProbeTimeout, Stop: time.Second},
-		Stdout: func(_ context.Context, r io.Reader) error {
-			sc := bufio.NewScanner(r)
-			for sc.Scan() {
-				v.add(sc.Text())
-			}
-
-			return sc.Err()
-		},
-		OnLine: func(l process.Line) { v.add(l.Text) },
-	})
-	if err != nil {
-		return "", false, name + ": " + err.Error()
-	}
-
-	err = in.Run(ctx)
+	err = process.Probe(ctx, t.o.Supervisor, process.Spec{ID: id, Path: path, Args: args, ToolDirs: t.o.Tools.Dirs}, v.add)
 
 	switch {
+	case errors.Is(err, process.ErrNoRuntimeDir):
+		return "", false, err.Error()
 	case errors.Is(err, process.ErrJobTimeout):
-		return "", false, name + " did not answer within " + ProbeTimeout.String()
+		return "", false, name + " did not answer within " + process.ProbeTimeout.String()
 	case errors.Is(err, process.ErrUnavailable) || errors.Is(err, fs.ErrNotExist):
 		return "", false, name + " cannot run"
 	case err != nil:
