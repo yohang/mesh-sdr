@@ -105,7 +105,7 @@ func TestDevicePages(t *testing.T) {
 			t.Errorf("log = %d, want %d", res.StatusCode, want)
 		}
 
-		if want == http.StatusOK && (!strings.Contains(string(body), `data-msdr-topics="device_log:device=hf"`) ||
+		if want == http.StatusOK && (!strings.Contains(string(body), `data-msdr-topics="admin.device_log:device=hf"`) ||
 			!strings.Contains(string(body), "No record yet")) {
 			t.Errorf("log page = %s", body)
 		}

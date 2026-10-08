@@ -1,7 +1,7 @@
 // Device log island (SRC-005): <msdr-device-log data-device="<id>"> wraps
 // the server-rendered records of Admin › Devices › {id} › Log and appends
 // the live ones, received on the hub events socket as "msdr:device.log"
-// body events (topic device_log:device=<id>, declared by the list). Records
+// body events (topic admin.device_log:device=<id>, declared by the list). Records
 // are plain text: they are inserted with textContent only, never as HTML.
 // New records are announced in the polite status region at most once per
 // ANNOUNCE_EVERY, as a count, so a chatty connector does not flood screen

@@ -31,7 +31,7 @@ func TestDeviceLogRender(t *testing.T) {
 	}{
 		{
 			name: "empty",
-			want: []string{"No record yet", `data-msdr-topics="device_log:device=hf"`, `hx-get="/admin/devices/hf/log"`},
+			want: []string{"No record yet", `data-msdr-topics="admin.device_log:device=hf"`, `hx-get="/admin/devices/hf/log"`},
 		},
 		{
 			name: "records",

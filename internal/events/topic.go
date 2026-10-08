@@ -40,8 +40,8 @@ const (
 	KindDecodes          Kind = "decodes"
 	KindDiagnostics      Kind = "diagnostics"
 	// KindDeviceLog carries the device log of a device (SRC-005), for
-	// operators and admins only.
-	KindDeviceLog Kind = "device_log"
+	// admins only (admin.device_log:device=<id>).
+	KindDeviceLog Kind = "admin.device_log"
 )
 
 var (
@@ -50,8 +50,6 @@ var (
 		KindNotifications: true, KindAdminConnections: true,
 	}
 	perDevice = map[Kind]bool{KindDecodes: true, KindDiagnostics: true, KindDeviceLog: true}
-	// staffKinds are the topics reserved to operators and admins.
-	staffKinds = map[Kind]bool{KindDeviceLog: true}
 
 	// identifier is the §6.1 identifier charset.
 	identifier = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -106,10 +104,6 @@ func (t Topic) IsZero() bool { return t.kind == "" }
 // IsAdmin reports whether the topic is reserved to admins (admin.*).
 func (t Topic) IsAdmin() bool { return strings.HasPrefix(string(t.kind), "admin.") }
 
-// IsStaff reports whether the topic is reserved to operators and admins
-// (staff), whatever the listen policy of its device.
-func (t Topic) IsStaff() bool { return staffKinds[t.kind] }
-
 // String returns the wire form.
 func (t Topic) String() string {
 	if t.device == "" {
@@ -128,6 +122,8 @@ type Viewer struct {
 	SessionRef string
 	// Staff is set for operators and admins, who see the whole registry.
 	Staff bool
+	// Admin is set for admins (admin-only events such as device logs).
+	Admin bool
 }
 
 // Anonymous reports whether the viewer is not signed in.

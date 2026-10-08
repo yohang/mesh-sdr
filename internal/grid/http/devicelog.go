@@ -15,7 +15,7 @@ import (
 // Admin › Devices › {id} › Log (SRC-005, ADM-015, admins only): the last
 // records the node of the device pushed over its control channel, rendered
 // as plain text; the page appends the live records it receives on the hub
-// events socket (topic device_log:device=<id>, staff only) with an ES
+// events socket (topic admin.device_log:device=<id>, admins only) with an ES
 // module (static/js/device-log.js).
 
 // LogTimeLayout formats the time of a device log record, on the page and in
@@ -33,7 +33,7 @@ type deviceLogView struct {
 	Records []app.LogRecord
 }
 
-func (v deviceLogView) topic() string { return "device_log:device=" + v.Device.ID().String() }
+func (v deviceLogView) topic() string { return "admin.device_log:device=" + v.Device.ID().String() }
 
 func (v deviceLogView) path() string { return "/admin/devices/" + v.Device.ID().String() + "/log" }
 

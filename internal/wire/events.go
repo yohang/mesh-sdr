@@ -136,8 +136,8 @@ func (c *policyCache) refresh(ctx context.Context) {
 }
 
 // topicAuthz decides topic access (§6.6 "Topic access", ADR 0016 decision
-// 7): admin topics need admin (and admin.allowed_networks); staff topics
-// (the device logs) need operator or admin; per-device
+// 7): admin topics, the device logs among them, need admin (and
+// admin.allowed_networks); per-device
 // topics need listen permission on the device (its effective listen
 // policy); the other topics are open to signed-in users, and to anonymous
 // visitors when some device is anonymous-listenable (public_map does not
@@ -152,14 +152,6 @@ func (a topicAuthz) AuthorizeTopic(ctx context.Context, t events.Topic) error {
 
 	if t.IsAdmin() {
 		if a.id.Authorize(ctx, identitydomain.RoleAdmin) != nil {
-			return events.ErrTopicForbidden
-		}
-
-		return nil
-	}
-
-	if t.IsStaff() {
-		if a.id.Authorize(ctx, identitydomain.RoleOperator) != nil {
 			return events.ErrTopicForbidden
 		}
 
@@ -208,7 +200,9 @@ func (s eventsSession) Identify(ctx context.Context) events.Identity {
 	session, _ := shared.ParseUUID(p.SessionID().String())
 
 	return events.Identity{
-		Viewer: events.Viewer{UserID: p.UserID().String(), SessionRef: s.id.SessionRef(ctx), Staff: p.Has(identitydomain.RoleOperator)},
+		Viewer: events.Viewer{UserID: p.UserID().String(), SessionRef: s.id.SessionRef(ctx), Staff: p.Has(identitydomain.RoleOperator),
+			Admin: p.Has(identitydomain.RoleAdmin),
+		},
 		UserID: user, SessionID: session, Name: name, Roles: roles, RoleRank: int(p.Role().ID()),
 	}
 }
@@ -431,6 +425,9 @@ func (e *gridEvents) publishNode(ctx context.Context, id griddomain.NodeID, stat
 	})
 }
 
+// admins accepts admins only.
+func admins(v events.Viewer) bool { return v.Admin }
+
 // staff accepts operators and admins only.
 func staff(v events.Viewer) bool { return v.Staff }
 
@@ -521,8 +518,8 @@ type deviceLogEntry struct {
 	Text   string `json:"text"`
 }
 
-// deviceLog relays device log records to the operators and admins who
-// subscribed to the log of the device (device_log:device=<id>).
+// deviceLog relays device log records to the admins who subscribed to the
+// log of the device (admin.device_log:device=<id>).
 func (e *gridEvents) deviceLog(ctx context.Context, device shared.DeviceID, reset bool, records []gridapp.LogRecord) {
 	topic, err := events.ParseTopic(string(events.KindDeviceLog) + ":device=" + device.String())
 	if err != nil {
@@ -537,7 +534,7 @@ func (e *gridEvents) deviceLog(ctx context.Context, device shared.DeviceID, rese
 	}
 
 	e.b.Publish(ctx, events.Event{
-		Topic: topic, Type: rxv1.TypeDeviceLog.String(), Audience: staff,
+		Topic: topic, Type: rxv1.TypeDeviceLog.String(), Audience: admins,
 		Payload: deviceLogEvent{DeviceID: device.String(), Reset: reset, Records: entries},
 	})
 }

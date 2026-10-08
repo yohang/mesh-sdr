@@ -110,7 +110,7 @@ const (
 	TypeCtlPong           MessageType = "ctl.pong"
 	TypeNodeEventsDropped MessageType = "node.events_dropped"
 	// TypeDeviceLog carries device log records (SRC-005): node → hub on
-	// the control channel, hub → staff on /api/ws.
+	// the control channel, hub → admins on /api/ws.
 	TypeDeviceLog MessageType = "device.log"
 )
 

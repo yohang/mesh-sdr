@@ -71,8 +71,8 @@ func (i *inbox) take() []events.Event {
 }
 
 // TestDeviceLogRelay: the device log records a node pushes reach the
-// operators and admins subscribed to the log of the device, never the other
-// viewers (SRC-005), and only for the node's own devices.
+// admins subscribed to the log of the device, never the other viewers,
+// operators included (SRC-005), and only for the node's own devices.
 func TestDeviceLogRelay(t *testing.T) {
 	ctx := context.Background()
 	a := dbtest.NewSQLite(t)
@@ -103,49 +103,49 @@ func TestDeviceLogRelay(t *testing.T) {
 	ge := &gridEvents{b: broker, logger: quiet}
 	logs.OnRecords(ge.deviceLog)
 
-	const topic = "device_log:device=hf"
+	const topic = "admin.device_log:device=hf"
 
 	viewers := []struct {
 		name     string
 		viewer   events.Viewer
 		identity roleIdentity
-		staff    bool
+		admin    bool
 	}{
 		{name: "anonymous", viewer: events.Viewer{}},
 		{name: "listener", viewer: events.Viewer{UserID: "l"}},
-		{name: "operator", viewer: events.Viewer{UserID: "o", Staff: true}, identity: roleIdentity{operator: true}, staff: true},
-		{name: "admin", viewer: events.Viewer{UserID: "a", Staff: true}, identity: roleIdentity{admin: true}, staff: true},
+		{name: "operator", viewer: events.Viewer{UserID: "o", Staff: true}, identity: roleIdentity{operator: true}},
+		{name: "admin", viewer: events.Viewer{UserID: "a", Staff: true, Admin: true}, identity: roleIdentity{admin: true}, admin: true},
 	}
 
 	type subscriber struct {
 		name  string
-		staff bool
+		admin bool
 		box   *inbox
 	}
 
 	var subs []subscriber
 
 	for _, v := range viewers {
-		// The topic check: only the staff may subscribe.
+		// The topic check: only admins may subscribe.
 		box := &inbox{}
 		s := broker.Attach(v.viewer, topicAuthz{id: v.identity}, box.sink)
 
 		_, _, err := s.Subscribe(ctx, []string{topic})
-		if v.staff != (err == nil) || (err != nil && !errors.Is(err, events.ErrTopicForbidden)) {
+		if v.admin != (err == nil) || (err != nil && !errors.Is(err, events.ErrTopicForbidden)) {
 			t.Errorf("%s subscribe = %v", v.name, err)
 		}
 
 		if err == nil {
-			subs = append(subs, subscriber{name: v.name, staff: v.staff, box: box})
+			subs = append(subs, subscriber{name: v.name, admin: v.admin, box: box})
 		}
 
-		// The audience: a non-staff subscriber past the check gets nothing.
+		// The audience: a non-admin subscriber past the check gets nothing.
 		bypass := &inbox{}
 		if _, _, err := broker.Attach(v.viewer, allowAll{}, bypass.sink).Subscribe(ctx, []string{topic}); err != nil {
 			t.Fatal(err)
 		}
 
-		subs = append(subs, subscriber{name: v.name + " (unchecked)", staff: v.staff, box: bypass})
+		subs = append(subs, subscriber{name: v.name + " (unchecked)", admin: v.admin, box: bypass})
 	}
 
 	rec := func(text string) ctl.LogRecord {
@@ -179,7 +179,7 @@ func TestDeviceLogRelay(t *testing.T) {
 			for _, s := range subs {
 				got := s.box.take()
 
-				if !s.staff || tt.relayed < 0 {
+				if !s.admin || tt.relayed < 0 {
 					if len(got) != 0 {
 						t.Errorf("%s received %+v", s.name, got)
 					}
