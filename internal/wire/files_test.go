@@ -279,6 +279,8 @@ func TestFilesPages(t *testing.T) {
 
 	if _, body := listener.fetch("/files", nil); !strings.Contains(string(body), hf) || !strings.Contains(string(body), vhf) {
 		t.Error("listener gallery misses a file")
+	} else if !strings.Contains(string(body), `<option value="hf">HF</option>`) || !strings.Contains(string(body), `<option value="vhf">VHF</option>`) {
+		t.Error("device filter shows the device ids, not their names")
 	}
 
 	// Filters: the device, a frequency range outside the files.

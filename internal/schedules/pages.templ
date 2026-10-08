@@ -1,6 +1,10 @@
 package schedules
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+)
 
 // listPage is Admin › Schedules, read-only.
 templ listPage(rows []scheduleRow) {
@@ -9,7 +13,7 @@ templ listPage(rows []scheduleRow) {
 	if len(rows) == 0 {
 		<p>No schedules.</p>
 	} else {
-		<div class="relative overflow-x-auto">
+		@layout.TableScroll("Schedules") {
 			<table class="w-full text-left">
 				<caption class="sr-only">Schedules</caption>
 				<thead>
@@ -46,6 +50,6 @@ templ listPage(rows []scheduleRow) {
 					}
 				</tbody>
 			</table>
-		</div>
+		}
 	}
 }

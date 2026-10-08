@@ -56,6 +56,10 @@ const (
 	FieldURL  = "url"
 )
 
+// MaxSoftwareVersionLen bounds the node software version the hub stores
+// (development builds report long pseudo-versions); longer values are cut.
+const MaxSoftwareVersionLen = 64
+
 // Node is a hub-side node: identity, enrollment and last known runtime
 // state.
 type Node struct {
@@ -416,6 +420,10 @@ func (n *Node) CheckDeletable() error {
 
 // RecordWelcome records the identity reported at connect.
 func (n *Node) RecordWelcome(bootID shared.UUID, softwareVersion, protocolVersion string) {
+	if len(softwareVersion) > MaxSoftwareVersionLen {
+		softwareVersion = softwareVersion[:MaxSoftwareVersionLen]
+	}
+
 	n.runtime.BootID = bootID
 	n.runtime.SoftwareVersion = softwareVersion
 	n.runtime.ProtocolVersion = protocolVersion

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -77,6 +78,24 @@ type filesNewEvent struct {
 	FrequencyHz      int64  `json:"frequency_hz,omitempty"`
 	ReceivedStartUTC string `json:"received_start_utc,omitempty"`
 	TS               int64  `json:"ts"`
+}
+
+// deviceNames returns the names of the devices of the registry by id (the
+// device filter of the Files page).
+func deviceNames(repo griddomain.DeviceRepository) func(ctx context.Context) (map[string]string, error) {
+	return func(ctx context.Context) (map[string]string, error) {
+		list, err := repo.List(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list devices: %w", err)
+		}
+
+		out := make(map[string]string, len(list))
+		for _, d := range list {
+			out[d.ID().String()] = d.Name()
+		}
+
+		return out, nil
+	}
 }
 
 // fileAccess decides who sees the files the nodes sent (ADR 0026: the

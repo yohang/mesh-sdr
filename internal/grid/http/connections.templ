@@ -1,6 +1,10 @@
 package http
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+)
 
 // connectionsPage is Admin › Connections (GRID-017): who is connected now.
 templ connectionsPage(v connectionsView) {
@@ -21,7 +25,7 @@ templ connectionsTable(v connectionsView) {
 	>
 		<p>{ strconv.Itoa(v.Listeners) } receivers, { strconv.Itoa(v.Viewers) } other clients (map, events).</p>
 		if len(v.Rows) > 0 {
-			<div class="relative overflow-x-auto">
+			@layout.TableScroll("Open connections") {
 				<table class="w-full text-left">
 					<caption class="sr-only">Open connections</caption>
 					<thead>
@@ -58,7 +62,7 @@ templ connectionsTable(v connectionsView) {
 						}
 					</tbody>
 				</table>
-			</div>
+			}
 		}
 	</div>
 }

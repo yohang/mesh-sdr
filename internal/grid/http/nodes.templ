@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // nodesPage lists the nodes (GRID-009). Operators read it; admins also add
@@ -34,7 +35,7 @@ templ nodesTable(v nodesView) {
 		if len(v.Rows) == 0 {
 			<p>No node is declared yet.</p>
 		} else {
-			<div class="relative overflow-x-auto">
+			@layout.TableScroll("Nodes") {
 				<table class="w-full text-left">
 					<caption class="sr-only">Nodes</caption>
 					<thead>
@@ -82,7 +83,7 @@ templ nodesTable(v nodesView) {
 						}
 					</tbody>
 				</table>
-			</div>
+			}
 		}
 	</div>
 }
@@ -214,7 +215,7 @@ templ nodeLive(v nodeView) {
 			if len(v.Devices) == 0 {
 				<p>The node has reported no device.</p>
 			} else {
-				<div class="relative overflow-x-auto">
+				@layout.TableScroll("Devices of the node") {
 					<table class="w-full text-left">
 						<caption class="sr-only">Devices of the node</caption>
 						<thead>
@@ -242,7 +243,7 @@ templ nodeLive(v nodeView) {
 							}
 						</tbody>
 					</table>
-				</div>
+				}
 			}
 		</section>
 		@capsSection(v)
@@ -262,7 +263,7 @@ templ loadSection(l loadView) {
 			}
 			<details>
 				<summary class="cursor-pointer">Load figures</summary>
-				<div class="relative overflow-x-auto">
+				@layout.TableScroll("Load figures") {
 					<table class="mt-2 w-full text-left">
 						<caption class="sr-only">Load every 5 minutes, newest first</caption>
 						<thead>
@@ -286,7 +287,7 @@ templ loadSection(l loadView) {
 							}
 						</tbody>
 					</table>
-				</div>
+				}
 			</details>
 		}
 	</section>
@@ -356,7 +357,7 @@ templ capsSection(v nodeView) {
 				<dd>{ platformText(v.Caps.Platform) }</dd>
 			</dl>
 			if len(v.Caps.Capabilities) > 0 {
-				<div class="relative overflow-x-auto">
+				@layout.TableScroll("Capabilities of the node") {
 					<table class="w-full text-left">
 						<caption class="sr-only">Capabilities of the node</caption>
 						<thead>
@@ -378,7 +379,7 @@ templ capsSection(v nodeView) {
 							}
 						</tbody>
 					</table>
-				</div>
+				}
 			}
 		}
 	</section>

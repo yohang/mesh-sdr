@@ -94,7 +94,7 @@ type CapabilityReport struct {
 func NewCapabilityReport(node NodeID, hash, productVersion string, protocols []string, platform, document json.RawMessage,
 	reportedAt time.Time, caps []Capability,
 ) (CapabilityReport, error) {
-	if hash == "" || len(hash) > 64 || len(productVersion) > 32 || !json.Valid(platform) || !json.Valid(document) {
+	if hash == "" || len(hash) > 64 || len(productVersion) > MaxSoftwareVersionLen || !json.Valid(platform) || !json.Valid(document) {
 		return CapabilityReport{}, ErrInvalidCapabilityReport
 	}
 

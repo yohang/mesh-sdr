@@ -3,6 +3,8 @@ package decodes
 import (
 	"strconv"
 	"strings"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // listPage is the Decodes page (FEATURE_SPEC §10.11, ADR 0028): the
@@ -34,7 +36,7 @@ templ filtersForm(v listView) {
 			<select id="filter-mode" name="mode" class="rounded border border-border px-2 py-1">
 				<option value="" selected?={ v.Filter.Mode == "" }>Any</option>
 				for _, m := range v.Modes {
-					<option value={ m } selected?={ v.Filter.Mode == m }>{ m }</option>
+					<option value={ m.ID } selected?={ v.Filter.Mode == m.ID }>{ m.Label }</option>
 				}
 			</select>
 		</div>
@@ -77,7 +79,7 @@ templ results(v listView) {
 	if len(v.Rows) == 0 {
 		<p>No decoded message matches.</p>
 	} else {
-		<div class="relative overflow-x-auto">
+		@layout.TableScroll("Decoded messages") {
 			<table class="w-full text-left">
 				<caption class="sr-only">Decoded messages, newest first</caption>
 				<thead>
@@ -115,7 +117,7 @@ templ results(v listView) {
 					}
 				</tbody>
 			</table>
-		</div>
+		}
 		if v.Next != "" {
 			<a class="self-start underline" href={ templ.SafeURL(Path + "?" + v.Next) }>Older messages</a>
 		}

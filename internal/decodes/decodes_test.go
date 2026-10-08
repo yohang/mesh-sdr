@@ -55,7 +55,7 @@ func newEnv(t *testing.T) *env {
 
 			return node, ok, nil
 		},
-		Modes: []string{"selcall", "zvei"},
+		Modes: []Mode{{ID: "selcall", Label: "SelCall"}, {ID: "zvei", Label: "ZVEI"}},
 		Dedup: func(mode string) (int64, time.Duration) {
 			if mode == "selcall" {
 				return 1000, 10 * time.Second
@@ -247,6 +247,12 @@ func TestListPage(t *testing.T) {
 	_, body = get(t, e, Path+"?until=2026-10-08T12:00&mode=selcall")
 	if !strings.Contains(body, "No decoded message matches.") {
 		t.Errorf("time filter: %s", body)
+	}
+
+	// The mode filter shows the catalogue labels, the ids are the values.
+	if !strings.Contains(body, `<option value="selcall" selected>SelCall</option>`) ||
+		!strings.Contains(body, `<option value="zvei">ZVEI</option>`) {
+		t.Errorf("mode filter: %s", body)
 	}
 
 	if code, _ := get(t, e, Path+"?from=yesterday"); code != http.StatusBadRequest {

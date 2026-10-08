@@ -59,7 +59,10 @@ type GalleryDeps struct {
 	CanDelete, CanBulkDelete func(ctx context.Context) bool
 	// Policy returns the current retention policy (notice of the gallery).
 	Policy func() RetentionPolicy
-	Logger *slog.Logger
+	// DeviceNames returns the names of the devices of the registry by id
+	// (the device filter); a device it does not list shows its id.
+	DeviceNames func(ctx context.Context) (map[string]string, error)
+	Logger      *slog.Logger
 }
 
 // Gallery is the Files section (FIL-001, FIL-003, FIL-007): the gallery of
@@ -321,10 +324,16 @@ func filterValues(f Filter) map[string]string {
 	return out
 }
 
+// deviceOption is a device of the device filter.
+type deviceOption struct {
+	ID   string
+	Name string
+}
+
 // galleryView is the Files page.
 type galleryView struct {
 	Filter        filterForm
-	Devices       []string
+	Devices       []deviceOption
 	Modes         []string
 	Files         []Entry
 	Page          int
@@ -378,11 +387,27 @@ func (g *Gallery) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	visible := devices[:0]
+	names, err := g.d.DeviceNames(ctx)
+	if err != nil {
+		g.d.Logger.ErrorContext(ctx, "file filter device names", slog.Any("error", err))
+		g.d.Render.Error(w, r, http.StatusInternalServerError)
+
+		return
+	}
+
+	visible := []deviceOption{}
+
 	for _, d := range devices {
-		if vis.Allows(d) {
-			visible = append(visible, d)
+		if !vis.Allows(d) {
+			continue
 		}
+
+		name := names[d]
+		if name == "" {
+			name = d
+		}
+
+		visible = append(visible, deviceOption{ID: d, Name: name})
 	}
 
 	v := galleryView{

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 	"strconv"
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
@@ -78,7 +79,7 @@ templ invitationsPage(v invitationsView) {
 			if len(v.List) == 0 {
 				<p>No invitations yet.</p>
 			} else {
-				<div class="relative overflow-x-auto">
+				@layout.TableScroll("Invitations") {
 					<table class="w-full text-left text-sm">
 						<thead>
 							<tr><th scope="col">Role</th><th scope="col">E-mail</th><th scope="col">State</th><th scope="col">Created</th><th scope="col">Expires</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
@@ -102,7 +103,7 @@ templ invitationsPage(v invitationsView) {
 							}
 						</tbody>
 					</table>
-				</div>
+				}
 			}
 		</section>
 	</section>

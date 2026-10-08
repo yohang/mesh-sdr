@@ -41,6 +41,8 @@ class MsdrAudioDock extends HTMLElement {
     text.textContent = "Volume";
     this.volume = document.createElement("input");
     this.volume.type = "range";
+    this.volume.id = "audio-dock-volume";
+    this.volume.name = "volume";
     this.volume.min = "0";
     this.volume.max = "100";
     this.volume.className = "w-24 accent-accent max-md:min-h-11 pointer-coarse:min-h-11";

@@ -95,11 +95,11 @@ func deviceNode(repo griddomain.DeviceRepository) func(ctx context.Context, devi
 
 // catalogueModes are the digital modes of the node catalogue (the mode
 // filter of the Decodes page).
-func catalogueModes() []string {
-	var out []string
+func catalogueModes() []decodes.Mode {
+	var out []decodes.Mode
 
 	for _, m := range radiodomain.DigitalModes() {
-		out = append(out, m.Name)
+		out = append(out, decodes.Mode{ID: m.Name, Label: m.Label})
 	}
 
 	return out
