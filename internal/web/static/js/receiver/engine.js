@@ -23,6 +23,18 @@
 // reconfigures the audio stream around the mode change. The demodulator
 // settings are kept across reconnections to the same device.
 //
+// Shared state (RX-006, RX-010): a caller with the preset right switches the
+// device's preset with preset.select, one with the retune right moves its
+// centre with device.retune (device.config.permissions says which). The node
+// retunes the device for every listener and sends them the new
+// device.config and the moved demodulator (stream.update applied).
+// Refusals (forbidden, rate_limited, preset_incompatible) become a short
+// detail of the state.
+//
+// Tuning step (RX-012): the visitor picks a step; 0 follows the device's
+// tuning_step_hz, which every device.config (attach, preset switch)
+// restores.
+//
 // Changes are announced with a "change" event whose detail names what
 // changed: "state", "config", "tune", "meter" or "audio". FFT lines go to
 // the attached views directly (hot path).
@@ -141,6 +153,8 @@ class Engine extends EventTarget {
     this.detail = "";
     this.cid = "";
     this.tokenExp = 0;
+    // Tuning step picked by the visitor (Hz), 0: the device's step.
+    this.stepHz = 0;
     this.bestRtt = Infinity;
     /** @type {Map<string, {resolve: (v: any) => void, reject: (e: any) => void}>} */
     this.pending = new Map();
@@ -333,7 +347,10 @@ class Engine extends EventTarget {
       }
       case "device.config":
         this.device = p;
+        // A new config (attach, preset switch) restores the device's step.
+        this.stepHz = 0;
         this.emit("config");
+        this.emit("tune");
         break;
       case "device.config.patch":
         if (this.device && p.device_id === this.device.device_id) {
@@ -384,17 +401,21 @@ class Engine extends EventTarget {
       if (p.sample_rate) this.audioStream.rate = p.sample_rate;
       if (p.codec) this.audioStream.codec = p.codec;
     }
-    // A shared preset switch moved the demodulator (applied parameters).
+    // A shared preset switch or retune moved the demodulator (applied
+    // parameters); they are kept for a reconnection.
     const a = p.applied;
-    if (a && this.demod?.streamId === p.stream_id) {
-      Object.assign(this.demod, {
-        mode: a.mode ?? this.demod.mode,
-        offsetHz: a.offset_hz ?? this.demod.offsetHz,
-        lowHz: a.bandpass?.low_hz ?? this.demod.lowHz,
-        highHz: a.bandpass?.high_hz ?? this.demod.highHz,
-      });
-      this.sentOffset = this.keptOffset = this.demod.offsetHz;
-      this.emit("tune");
+    const d = this.demod;
+    if (a && d?.streamId === p.stream_id) {
+      if (typeof a.offset_hz === "number" && !("offset_hz" in this.queued)) d.offsetHz = a.offset_hz;
+      this.applied(a);
+      const k = this.kept;
+      k.offset_hz = d.offsetHz;
+      if (a.mode && a.mode !== k.mode) {
+        k.mode = a.mode;
+        delete k.bandpass;
+      }
+      if (typeof a.squelch_db === "number" && !("squelch_db" in this.queued)) k.squelch_db = a.squelch_db;
+      if (a.nr && !("nr" in this.queued)) k.nr = { ...d.nr };
     }
     this.emit("config");
   }
@@ -578,9 +599,20 @@ class Engine extends EventTarget {
     return [this.centerHz - half, this.centerHz + half];
   }
 
+  /** @returns {number} the tuning step in use (Hz, RX-012) */
+  tuningStep() {
+    return this.stepHz || this.device?.tuning_step_hz || 1;
+  }
+
+  /** @param {number} hz the tuning step, 0: the device's (RX-012) */
+  setStep(hz) {
+    this.stepHz = Math.max(0, Math.round(hz));
+    this.emit("tune");
+  }
+
   /**
    * tune moves the demodulator to hz (RX-008 click/drag, RX-009 steps),
-   * snapped to the device tuning step and kept inside the capture band.
+   * snapped to the tuning step and kept inside the capture band.
    * Sent at most every TUNE_INTERVAL_MS; the last position wins.
    * @param {number} hz
    * @param {boolean} [snap] false: direct entry (RX-011), not snapped, and
@@ -589,7 +621,7 @@ class Engine extends EventTarget {
    */
   tune(hz, snap = true) {
     if (!this.demod || !this.device) return false;
-    const step = this.device.tuning_step_hz || 1;
+    const step = this.tuningStep();
     const half = Math.floor((this.device.sample_rate || 0) / 2);
     const wanted = Math.round(snap ? Math.round(hz / step) * step : hz) - this.centerHz;
     if (!snap && Math.abs(wanted) > half) return false;
@@ -605,8 +637,7 @@ class Engine extends EventTarget {
   /** @param {number} steps tune by this many tuning steps (RX-009) */
   step(steps) {
     if (!this.demod || !this.device) return;
-    const step = this.device.tuning_step_hz || 1;
-    this.tune(this.tunedHz + steps * step);
+    this.tune(this.tunedHz + steps * this.tuningStep());
   }
 
   /**
@@ -666,6 +697,48 @@ class Engine extends EventTarget {
     this.kept.nr = nr;
     this.emit("tune");
     this.queue({ nr });
+  }
+
+  /**
+   * selectPreset switches the device's shared preset (RX-006); the node
+   * sends every listener the new device.config.
+   * @param {string} id
+   * @returns {Promise<boolean>} false when refused
+   */
+  async selectPreset(id) {
+    return this.shared("preset.select", { preset_id: id }, "switch the preset");
+  }
+
+  /**
+   * retune moves the device's shared centre to hz (RX-010); every listener
+   * keeps its frequency while it stays in the band.
+   * @param {number} hz
+   * @returns {Promise<boolean>} false when refused
+   */
+  async retune(hz) {
+    return this.shared("device.retune", { center_hz: Math.round(hz) }, "move the centre");
+  }
+
+  /**
+   * shared sends a change of the device's shared state; a refusal becomes
+   * the state detail.
+   * @param {string} type @param {object} payload @param {string} action
+   * @returns {Promise<boolean>}
+   */
+  async shared(type, payload, action) {
+    const t = this.target;
+    if (!t || !this.device) return false;
+    const gen = this.gen;
+    try {
+      await this.request(type, { device_id: t.device_id, ...payload });
+      if (gen === this.gen && this.detail && this.state === "listening") this.setState("listening");
+      return true;
+    } catch (err) {
+      if (gen !== this.gen) return false;
+      this.detail = refusal(err, action);
+      this.emit("state");
+      return false;
+    }
   }
 
   /** @returns {string} the codec of the audio stream */
@@ -777,6 +850,23 @@ class Engine extends EventTarget {
   /** @param {View} v */
   detachView(v) {
     this.views.delete(v);
+  }
+}
+
+/**
+ * refusal is the short text of a refused shared change.
+ * @param {any} err error payload @param {string} action
+ */
+function refusal(err, action) {
+  switch (err?.code) {
+    case "forbidden":
+      return `not allowed to ${action} now`;
+    case "rate_limited":
+      return `${action} again in ${Math.max(1, Math.ceil((err.retry_after_ms ?? 1000) / 1000))} s`;
+    case "preset_incompatible":
+      return "this preset does not fit the device";
+    default:
+      return err?.message || `could not ${action}`;
   }
 }
 
