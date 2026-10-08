@@ -2,7 +2,9 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
@@ -57,6 +59,8 @@ type DecoderSpec struct {
 	// Session is the decoder session id (decoder_session_id).
 	Session shared.UUID
 	Mode    domain.DigitalMode
+	// Variant is the decoder variant of the mode ("" for none).
+	Variant string
 }
 
 // DecoderRun is a running decoder session.
@@ -135,11 +139,16 @@ type Decoders struct {
 	runner DecoderRunner
 	ids    *shared.UUIDv7Generator
 	now    func() time.Time
+	max    int
+
+	mu      sync.Mutex
+	running int
 }
 
-// NewDecoders returns the service.
-func NewDecoders(tools DecoderTools, runner DecoderRunner, now func() time.Time) *Decoders {
-	return &Decoders{tools: tools, runner: runner, ids: shared.NewUUIDv7Generator(), now: now}
+// NewDecoders returns the service; maxSessions caps the decoder sessions
+// of the node (decoders.max_sessions, 0: no cap).
+func NewDecoders(tools DecoderTools, runner DecoderRunner, maxSessions int, now func() time.Time) *Decoders {
+	return &Decoders{tools: tools, runner: runner, ids: shared.NewUUIDv7Generator(), now: now, max: maxSessions}
 }
 
 // Catalogue returns the digital modes a listener may start, with their
@@ -174,18 +183,58 @@ func (d *Decoders) Check(name string) (domain.DigitalMode, error) {
 	return m, nil
 }
 
-// Start starts a new session of m; events builds the receivers of its
-// output for its session id.
-func (d *Decoders) Start(m domain.DigitalMode, events func(id shared.UUID) DecoderEvents) (shared.UUID, DecoderRun, error) {
+// ErrNodeBusy refuses a decoder session beyond decoders.max_sessions.
+var ErrNodeBusy = errors.New("node busy")
+
+// Start starts a new session of m with a variant of the mode (already
+// checked); events builds the receivers of its output for its session id.
+// Beyond the node's session cap it returns ErrNodeBusy.
+func (d *Decoders) Start(m domain.DigitalMode, variant string, events func(id shared.UUID) DecoderEvents) (shared.UUID, DecoderRun, error) {
+	d.mu.Lock()
+	busy := d.max > 0 && d.running >= d.max
+	if !busy {
+		d.running++
+	}
+	d.mu.Unlock()
+
+	if busy {
+		return shared.UUID{}, nil, ErrNodeBusy
+	}
+
 	id, err := d.ids.New(d.now())
 	if err != nil {
+		d.release()
+
 		return shared.UUID{}, nil, fmt.Errorf("decoder session id: %w", err)
 	}
 
-	run, err := d.runner.Start(DecoderSpec{Session: id, Mode: m}, events(id))
+	run, err := d.runner.Start(DecoderSpec{Session: id, Mode: m, Variant: variant}, events(id))
 	if err != nil {
+		d.release()
+
 		return shared.UUID{}, nil, fmt.Errorf("start %s decoder: %w", m.Name, err)
 	}
 
-	return id, run, nil
+	return id, &countedRun{DecoderRun: run, release: d.release}, nil
+}
+
+func (d *Decoders) release() {
+	d.mu.Lock()
+	d.running--
+	d.mu.Unlock()
+}
+
+// countedRun gives its session slot back once, on Close.
+type countedRun struct {
+	DecoderRun
+
+	once    sync.Once
+	release func()
+}
+
+func (r *countedRun) Close() {
+	r.once.Do(func() {
+		r.DecoderRun.Close()
+		r.release()
+	})
 }

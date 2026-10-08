@@ -367,6 +367,10 @@ func (n *Node) validate(o Origins) []Problem {
 		c.fail("decoders.batch_workers", CodeInvalidValue, "want 0..256")
 	}
 
+	if v := n.Decoders.MaxSessions; v < 0 || v > 10000 {
+		c.fail("decoders.max_sessions", CodeInvalidValue, "want 0..10000")
+	}
+
 	if v := n.Decoders.QueueLength; v < 1 || v > 1000 {
 		c.fail("decoders.queue_length", CodeInvalidValue, "want 1..1000")
 	}

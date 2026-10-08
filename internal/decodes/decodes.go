@@ -64,9 +64,17 @@ type Deps struct {
 	// Published, when set, is told every stored message after its commit
 	// (decode.new).
 	Published func(ctx context.Context, m Message)
-	Render    Renderer
-	Now       func() time.Time
-	Logger    *slog.Logger
+	// DeviceNode returns the node of a device of the registry (ok false:
+	// unknown device). A node stores messages of its own devices only.
+	DeviceNode func(ctx context.Context, device string) (node string, ok bool, err error)
+	// Modes are the digital modes of the catalogue (the mode filter).
+	Modes []string
+	// Dedup returns the duplicate key rounding of a mode: its frequency
+	// step (Hz) and time bucket (ADR 0028).
+	Dedup  func(mode string) (step int64, bucket time.Duration)
+	Render Renderer
+	Now    func() time.Time
+	Logger *slog.Logger
 }
 
 // Module is the decodes module (an internal/http.Module).

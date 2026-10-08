@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
@@ -183,7 +184,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 
 			return 0
 		},
-		reprobe: func() { go ag.EmitCapabilities(context.Background()) },
+		reprobe: (&coalesced{run: func() { ag.EmitCapabilities(context.Background()) }}).trigger,
 	}
 
 	manager, streams, sources, toolbox, err := newRadio(cfg, logger, deviceReporter{ag: ag, log: deviceLog}, state, deviceLog, dec)
@@ -280,6 +281,47 @@ func decoderCapabilities(ctx context.Context, toolbox *decoder.Toolbox) []ctl.De
 	}
 
 	return out
+}
+
+// coalesced runs run in the background, at most once at a time: the
+// triggers that come while it runs make one more run (several decoder
+// sessions losing their tool re-probe the node once).
+type coalesced struct {
+	run func()
+
+	mu      sync.Mutex
+	running bool
+	dirty   bool
+}
+
+func (c *coalesced) trigger() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.running {
+		c.dirty = true
+
+		return
+	}
+
+	c.running = true
+
+	go func() {
+		for {
+			c.run()
+
+			c.mu.Lock()
+			if !c.dirty {
+				c.running = false
+				c.mu.Unlock()
+
+				return
+			}
+
+			c.dirty = false
+			c.mu.Unlock()
+		}
+	}()
 }
 
 // decodePublisher sends decoded messages to the hub (decode.batch, one

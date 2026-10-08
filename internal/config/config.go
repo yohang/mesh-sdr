@@ -295,6 +295,7 @@ type NodeSection struct {
 type NodeDecoders struct {
 	BatchWorkers  int           `toml:"batch_workers" env:"BATCH_WORKERS" jsonschema:"minimum=0,maximum=256,description=Workers of the batch decoders (WSJT family and JS8)\\, shared by every session; 0: half the CPU cores (at least 1)."`
 	QueueLength   int           `toml:"queue_length" env:"QUEUE_LENGTH" jsonschema:"minimum=1,maximum=1000,description=Batch decoder jobs waiting for a worker; on overflow the oldest job is dropped."`
+	MaxSessions   int           `toml:"max_sessions" env:"MAX_SESSIONS" jsonschema:"minimum=0,maximum=10000,description=Decoder sessions the node runs at once\\, all listeners together; beyond it a decoder is unavailable (node busy). 0: twice the CPU cores."`
 	ProcessLimits ProcessLimits `toml:"process_limits" envPrefix:"PROCESS_LIMITS__" jsonschema:"description=Limits of every external decoder process (DEC-048)\\, applied between fork and exec."`
 }
 
@@ -306,6 +307,16 @@ func (d NodeDecoders) BatchWorkerCount(cores int) int {
 	}
 
 	return max(1, cores/2)
+}
+
+// SessionCap returns the decoder session cap: MaxSessions, or twice cores
+// when it is 0.
+func (d NodeDecoders) SessionCap(cores int) int {
+	if d.MaxSessions > 0 {
+		return d.MaxSessions
+	}
+
+	return max(1, 2*cores)
 }
 
 // ProcessLimits is the [decoders.process_limits] table (DEC-048, ADR 0017

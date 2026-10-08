@@ -271,7 +271,10 @@ type DigitalMode struct {
 	// Underlying are the allowed underlying modes, the default first
 	// (DEC-003).
 	Underlying []string `json:"underlying"`
-	Available  bool     `json:"available"`
+	// Variants are the decoder variants (options.variant of decoder.set),
+	// the default first; empty for a mode without variants.
+	Variants  []string `json:"variants"`
+	Available bool     `json:"available"`
 	// Reason says why an unavailable mode cannot run: the missing tool for
 	// admins, a generic text for the others.
 	Reason string `json:"reason,omitempty"`
@@ -369,8 +372,9 @@ type Applied struct {
 // DecoderSet is decoder.set (client → node, §6.4): start the decoder of a
 // digital mode on a demodulator (decoder null: stop it). A demodulator
 // whose mode the digital mode does not allow switches to the mode's
-// default underlying mode (DEC-003). Offset and options belong to later
-// decoders and are ignored.
+// default underlying mode (DEC-003). options.variant picks the decoder
+// variant (default: the mode's first); the offset belongs to later
+// decoders and is ignored.
 type DecoderSet struct {
 	DemodID  string         `json:"demod_id"`
 	Decoder  *string        `json:"decoder"`
@@ -382,6 +386,7 @@ type DecoderSet struct {
 type DecoderStarted struct {
 	// DecoderSessionID is empty when the decoder was stopped.
 	DecoderSessionID string  `json:"decoder_session_id,omitempty"`
+	Variant          string  `json:"variant,omitempty"`
 	Applied          Applied `json:"applied"`
 }
 
@@ -418,6 +423,7 @@ type DiagState struct {
 	DemodID          string `json:"demod_id"`
 	DecoderSessionID string `json:"decoder_session_id"`
 	Decoder          string `json:"decoder"`
+	Variant          string `json:"variant,omitempty"`
 	State            string `json:"state"`
 	Reason           string `json:"reason,omitempty"`
 	// Since is the time of the change in Unix milliseconds.

@@ -1,8 +1,9 @@
 // The Decoders tab of the receiver's side panel (RX-044, DEC-002): the
 // status of the listener's decoder (running, unavailable or error, with its
-// reason), one card per digital mode with its messages, newest first, and
-// a Clear button, and the digital modes this receiver cannot run (DIAG-004:
-// admins see the missing tool). Decoded text is untrusted RF text: it goes
+// reason), the variant of each digital mode that has some (SelCall: DTMF,
+// EEA, EIA or CCIR; ZVEI: ZVEI1/2/3, DZVEI or PZVEI), one card per digital
+// mode with its messages, newest first, and a Clear button, and the digital
+// modes this receiver cannot run (DIAG-004: admins see the missing tool). Decoded text is untrusted RF text: it goes
 // through textContent only, cut to 4 KiB.
 
 /** Messages kept per card. */
@@ -24,6 +25,9 @@ const REASONS = /** @type {Record<string, string>} */ ({
   resource: "the decoder ran out of resources; it restarts",
   crash_loop: "the decoder keeps failing; it retries every 10 minutes",
   start_timeout: "the decoder did not start; it restarts",
+  workdir: "the node could not prepare the decoder",
+  start_failed: "the decoder could not be started",
+  "node busy": "the node runs as many decoders as it can; try again later",
 });
 
 /**
@@ -68,10 +72,13 @@ export class DecodersTab {
     this.el = el("div", { class: "flex flex-col gap-3" });
     this.status = el("p", { class: "text-sm", role: "status", "aria-live": "polite" });
     this.hint = el("p", { class: "text-sm text-fg-muted" }, "Choose a digital mode next to the analog modes to start its decoder.");
+    /** @type {Map<string, HTMLSelectElement>} the variant pickers */
+    this.variants = new Map();
+    this.variantsEl = el("div", { class: "flex flex-wrap gap-3" });
     this.cardsEl = el("div", { class: "flex flex-col gap-3" });
     this.unavailableHead = el("h3", { class: "text-sm font-semibold" }, "Not available on this receiver");
     this.unavailable = el("ul", { class: "list-disc pl-5 text-sm text-fg-muted" });
-    this.el.append(this.status, this.hint, this.cardsEl, this.unavailableHead, this.unavailable);
+    this.el.append(this.status, this.hint, this.variantsEl, this.cardsEl, this.unavailableHead, this.unavailable);
 
     /** @type {[string, (ev: Event) => void][]} */
     this.listeners = [
@@ -105,8 +112,43 @@ export class DecodersTab {
     return this.modes().find((m) => m.mode === mode)?.label ?? mode;
   }
 
+  /**
+   * variant returns the variant chosen for a mode ("" for the default).
+   * @param {string} mode
+   */
+  variant(mode) {
+    return this.variants.get(mode)?.value ?? "";
+  }
+
+  // syncVariants shows a variant picker for each available mode that has
+  // variants; a change restarts the running decoder of that mode.
+  syncVariants() {
+    const modes = this.modes().filter((m) => m.available && (m.variants ?? []).length > 0);
+    const shown = [...this.variants.keys()].join();
+    if (shown === modes.map((m) => m.mode).join()) return;
+    const kept = new Map([...this.variants].map(([k, s]) => [k, s.value]));
+    this.variants.clear();
+    this.variantsEl.replaceChildren(
+      ...modes.map((m) => {
+        const id = `rx-variant-${m.mode.replace(/[^a-z0-9-]/gi, "")}`;
+        const wrap = el("div", { class: "flex items-center gap-2 text-sm" });
+        const select = /** @type {HTMLSelectElement} */ (el("select", { id, class: "rounded border border-border px-2 py-1" }));
+        for (const v of m.variants) select.append(el("option", { value: v }, v));
+        select.value = kept.get(m.mode) ?? m.variants[0];
+        select.addEventListener("change", () => {
+          const e = /** @type {any} */ (this.engine);
+          if (e.demod?.decoder === m.mode) e.setDecoder(m.mode, select.value);
+        });
+        this.variants.set(m.mode, select);
+        wrap.append(el("label", { for: id, class: "font-medium" }, `${m.label} variant`), select);
+        return wrap;
+      }),
+    );
+  }
+
   // syncModes lists the digital modes the receiver cannot run.
   syncModes() {
+    this.syncVariants();
     const off = this.modes().filter((m) => !m.available);
     this.unavailable.replaceChildren(...off.map((m) => el("li", {}, `${m.label}: ${m.reason || "not available"}`)));
     this.unavailableHead.hidden = off.length === 0;
@@ -149,7 +191,10 @@ export class DecodersTab {
 
   /** @param {any} p diag.state */
   onStatus(p) {
-    const label = this.label(String(p?.decoder ?? ""));
+    const variant = typeof p?.variant === "string" ? p.variant : "";
+    const select = this.variants.get(String(p?.decoder ?? ""));
+    if (select && variant && p.state === "running") select.value = variant;
+    const label = this.label(String(p?.decoder ?? "")) + (variant ? ` ${variant}` : "");
     const reason = REASONS[p?.reason] ?? p?.reason ?? "";
     let text = "";
     switch (p?.state) {

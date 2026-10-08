@@ -1541,7 +1541,9 @@ class MsdrReceiver extends HTMLElement {
       this.digital.replaceChildren(
         ...digital.map((x) => {
           const b = el("button", { type: "button", class: SMALL_BUTTON, "data-decoder": x.mode, "aria-pressed": "false" }, x.label);
-          b.addEventListener("click", () => this.engine.setDecoder(this.engine.demod?.decoder === x.mode ? null : x.mode));
+          b.addEventListener("click", () =>
+            this.engine.setDecoder(this.engine.demod?.decoder === x.mode ? null : x.mode, this.decodersTab.variant(x.mode)),
+          );
           return b;
         }),
       );

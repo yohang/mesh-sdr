@@ -9,23 +9,13 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
-// SelCall decoders of multimon-ng (DEC-034, DEC-035).
-var (
-	selcallDecoders = []string{"DTMF", "EEA", "EIA", "CCIR"}
-	zveiDecoders    = []string{"ZVEI1", "ZVEI2", "ZVEI3", "DZVEI", "PZVEI"}
-)
-
-// multimonArgv runs one multimon-ng per decoder, each reading raw 16-bit
-// signed samples at 22 050 Hz from stdin (-c removes the default set):
-// decoders of one process write their digits in pieces as they come, so
-// two decoders hearing the same tones would mix them on one line.
-func multimonArgv(decoders []string) [][]string {
-	out := make([][]string, 0, len(decoders))
-	for _, d := range decoders {
-		out = append(out, []string{"-c", "-v", "0", "-t", "raw", "-a", d, "-"})
-	}
-
-	return out
+// multimonArgs runs multimon-ng with one decoder, the variant of the
+// mode (DEC-034, DEC-035: DTMF, EEA, EIA, CCIR, ZVEI1/2/3, DZVEI, PZVEI),
+// reading raw 16-bit signed samples at 22 050 Hz from stdin (-c removes
+// the default set). One decoder per process: decoders of one process write
+// their digits in pieces and would mix them on one line.
+func multimonArgs(decoder string) []string {
+	return []string{"-c", "-v", "0", "-t", "raw", "-a", decoder, "-"}
 }
 
 // multimonRules classify the stderr of multimon-ng.

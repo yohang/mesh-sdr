@@ -225,7 +225,7 @@ func TestZVEIDecodesFixture(t *testing.T) {
 
 	var ev events
 
-	run, err := r.Start(app.DecoderSpec{Session: shared.MustParseUUID("0190c8a4-0000-7000-8000-000000000001"), Mode: mode}, ev.sink())
+	run, err := r.Start(app.DecoderSpec{Session: shared.MustParseUUID("0190c8a4-0000-7000-8000-000000000001"), Mode: mode, Variant: "ZVEI1"}, ev.sink())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,13 +240,13 @@ func TestZVEIDecodesFixture(t *testing.T) {
 	// Trailing silence flushes the decoder.
 	run.Audio(app.AudioBlock{Samples: make([]float32, rate), Rate: rate})
 
-	// One multimon-ng per ZVEI variant: each reports what it hears.
+	// One multimon-ng with the chosen variant: one decode per burst.
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) && !slices.Contains(ev.texts(), "[ZVEI1] 12345") {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	if got := ev.texts(); !slices.Contains(got, "[ZVEI1] 12345") || !slices.Contains(got, "[ZVEI2] 12345") {
+	if got := ev.texts(); len(got) != 1 || got[0] != "[ZVEI1] 12345" {
 		t.Errorf("decodes = %q", got)
 	}
 
@@ -278,7 +278,7 @@ func TestMissingToolUnavailable(t *testing.T) {
 
 	var ev events
 
-	run, err := r.Start(app.DecoderSpec{Session: shared.MustParseUUID("0190c8a4-0000-7000-8000-000000000002"), Mode: mode}, ev.sink())
+	run, err := r.Start(app.DecoderSpec{Session: shared.MustParseUUID("0190c8a4-0000-7000-8000-000000000002"), Mode: mode, Variant: "DTMF"}, ev.sink())
 	if err != nil {
 		t.Fatal(err)
 	}

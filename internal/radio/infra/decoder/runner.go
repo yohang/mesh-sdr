@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
 	"sync"
 	"time"
 
@@ -25,23 +24,20 @@ const (
 	StopGrace = 3 * time.Second
 )
 
-// adapter is the descriptor of a decoder tool (§8.4): its program, the
-// argv of each of its processes, stderr rules and stdout parser. Later
+// adapter is the descriptor of a decoder tool (§8.4): its program, its
+// argv for a variant of the mode, stderr rules and stdout parser. Later
 // decoders add theirs to adapters.
 type adapter struct {
-	tool string
-	// argv holds the arguments of every process of a session: one process
-	// per decoder when several decoders of one tool would mix their output
-	// on one stdout (multimon-ng writes a line in pieces).
-	argv  [][]string
+	tool  string
+	args  func(variant string) []string
 	rules []process.Rule
 	parse func(line string, at time.Time) (app.DecodeRecord, bool)
 }
 
 // adapters are the adapters of the digital modes, by mode name.
 var adapters = map[string]adapter{
-	"selcall": {tool: "multimon-ng", argv: multimonArgv(selcallDecoders), rules: multimonRules, parse: parseSelCall},
-	"zvei":    {tool: "multimon-ng", argv: multimonArgv(zveiDecoders), rules: multimonRules, parse: parseSelCall},
+	"selcall": {tool: "multimon-ng", args: multimonArgs, rules: multimonRules, parse: parseSelCall},
+	"zvei":    {tool: "multimon-ng", args: multimonArgs, rules: multimonRules, parse: parseSelCall},
 }
 
 // Options configure the runner.
@@ -82,8 +78,8 @@ func NewRunner(o Options) *Runner {
 // ErrNoAdapter is a digital mode without an adapter on this node.
 var ErrNoAdapter = errors.New("no decoder adapter")
 
-// Start implements app.DecoderRunner: the processes of the session run in
-// private workdirs (DEC-048) under the decoder restart policy until Close.
+// Start implements app.DecoderRunner: the tool of the session runs in a
+// private workdir (DEC-048) under the decoder restart policy until Close.
 func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderRun, error) {
 	ad, ok := adapters[spec.Mode.Name]
 	if !ok || spec.Mode.Input != domain.InputAudio {
@@ -109,57 +105,49 @@ func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderR
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &session{
 		r: r, ev: ev, cancel: cancel, rate: spec.Mode.InputRate,
-		log:    r.o.Logger.With(slog.String("session_id", spec.Session.String()), slog.String("mode", spec.Mode.Name)),
-		states: make([]app.DecoderStatus, len(ad.argv)),
+		buf: process.NewDropOldest(int(InputBuffer.Seconds() * float64(spec.Mode.InputRate) * 2)),
+		log: r.o.Logger.With(slog.String("session_id", spec.Session.String()), slog.String("mode", spec.Mode.Name)),
 	}
 
-	instances := make([]*process.Instance, len(ad.argv))
+	var in *process.Instance
 
-	for i, args := range ad.argv {
-		buf := process.NewDropOldest(int(InputBuffer.Seconds() * float64(s.rate) * 2))
-		s.bufs = append(s.bufs, buf)
+	in, err = r.o.Supervisor.NewInstance(process.Spec{
+		ID: "dec-" + spec.Session.String(), Kind: "decoder", Mode: process.Streaming, Path: path, Args: ad.args(spec.Variant),
+		ToolDirs: r.o.Tools.Dirs,
+		// The first data written is the tool's readiness: most decoders
+		// print nothing until they decode something.
+		Stdin: func(ctx context.Context, w io.Writer) error {
+			return s.buf.Feed(ctx, &touchWriter{w: w, touch: func() { in.Touch() }})
+		},
+		Stdout: func(_ context.Context, rd io.Reader) error {
+			process.ScanLines(rd, func(text string, _ bool) {
+				if rec, ok := ad.parse(text, r.o.Now()); ok {
+					s.decode(rec)
+				}
+			})
 
-		id := "dec-" + spec.Session.String()
-		if len(ad.argv) > 1 {
-			id += "-" + strconv.Itoa(i)
+			return nil
+		},
+		StderrRules: ad.rules,
+		Sink:        s.event,
+		Timeouts:    process.Timeouts{Stop: StopGrace},
+		Restart:     policy,
+		Limits:      r.o.Limits,
+	})
+	if err != nil {
+		cancel()
+
+		return nil, err
+	}
+
+	go func() {
+		// Terminal states were reported and logged by the supervisor; a
+		// workdir that cannot be created stops the session before any.
+		if err := in.Run(ctx); errors.Is(err, process.ErrWorkdir) {
+			s.log.Error("decoder workdir not created", slog.Any("error", err))
+			s.status(app.DecoderStatus{State: app.DecoderError, Reason: "workdir"})
 		}
-
-		in, err := r.o.Supervisor.NewInstance(process.Spec{
-			ID: id, Kind: "decoder", Mode: process.Streaming, Path: path, Args: args, ToolDirs: r.o.Tools.Dirs,
-			// The first data written is the tool's readiness: most
-			// decoders print nothing until they decode something.
-			Stdin: func(ctx context.Context, w io.Writer) error {
-				return buf.Feed(ctx, &touchWriter{w: w, touch: func() { instances[i].Touch() }})
-			},
-			Stdout: func(_ context.Context, rd io.Reader) error {
-				process.ScanLines(rd, func(text string, _ bool) {
-					if rec, ok := ad.parse(text, r.o.Now()); ok {
-						ev.Decode(rec)
-					}
-				})
-
-				return nil
-			},
-			StderrRules: ad.rules,
-			Sink:        func(e process.Event) { s.event(i, e) },
-			Timeouts:    process.Timeouts{Stop: StopGrace},
-			Restart:     policy,
-			Limits:      r.o.Limits,
-		})
-		if err != nil {
-			cancel()
-
-			return nil, err
-		}
-
-		instances[i] = in
-	}
-
-	for _, in := range instances {
-		// Terminal errors were reported (status) and logged by the
-		// supervisor.
-		go func() { _ = in.Run(ctx) }()
-	}
+	}()
 
 	return s, nil
 }
@@ -181,26 +169,23 @@ func (t *touchWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// session is one running decoder session: one or more processes fed with
-// the same input.
+// session is one running decoder session.
 type session struct {
 	r      *Runner
 	ev     app.DecoderEvents
 	cancel context.CancelFunc
-	bufs   []*process.DropOldest
+	buf    *process.DropOldest
 	rate   int
 	log    *slog.Logger
 
 	mu     sync.Mutex
 	conv   *dsp.S16Converter
 	closed bool
-	states []app.DecoderStatus
 	last   app.DecoderStatus
 }
 
 // Audio implements app.DecoderRun: the audio is converted to s16le at the
-// tool's input rate and buffered for the stdin of each process (never
-// blocking).
+// tool's input rate and buffered for its stdin (never blocking).
 func (s *session) Audio(b app.AudioBlock) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -232,16 +217,12 @@ func (s *session) Audio(b app.AudioBlock) {
 		return
 	}
 
-	if len(out) == 0 {
-		return
-	}
-
-	for _, buf := range s.bufs {
-		_, _ = buf.Write(out)
+	if len(out) > 0 {
+		_, _ = s.buf.Write(out)
 	}
 }
 
-// Close implements app.DecoderRun.
+// Close implements app.DecoderRun: nothing is reported after it.
 func (s *session) Close() {
 	s.mu.Lock()
 	if s.closed {
@@ -258,22 +239,39 @@ func (s *session) Close() {
 	}
 	s.mu.Unlock()
 
-	for _, buf := range s.bufs {
-		buf.Close()
-	}
-
+	s.buf.Close()
 	s.cancel()
 }
 
-// statusRank orders the states of the processes of a session: the session
-// shows the worst one.
-var statusRank = map[string]int{"": 0, app.DecoderRunning: 1, app.DecoderError: 2, app.DecoderUnavailable: 3}
+// decode reports a record unless the session is closed.
+func (s *session) decode(rec app.DecodeRecord) {
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
 
-// event maps a supervisor transition of process i to the session status
-// (DEC-002): running once every tool reads its input, unavailable when a
-// tool is missing or refuses its configuration, error on any other
-// failure.
-func (s *session) event(i int, e process.Event) {
+	if !closed {
+		s.ev.Decode(rec)
+	}
+}
+
+// status reports a status change unless the session is closed.
+func (s *session) status(st app.DecoderStatus) {
+	s.mu.Lock()
+	changed := !s.closed && st != s.last
+	if changed {
+		s.last = st
+	}
+	s.mu.Unlock()
+
+	if changed {
+		s.ev.Status(st)
+	}
+}
+
+// event maps a supervisor transition to the session status (DEC-002):
+// running once the tool reads its input, unavailable when the tool is
+// missing or refuses its configuration, error on any other failure.
+func (s *session) event(e process.Event) {
 	var st app.DecoderStatus
 
 	switch e.State {
@@ -295,36 +293,5 @@ func (s *session) event(i int, e process.Event) {
 		s.r.o.Reprobe()
 	}
 
-	s.mu.Lock()
-	s.states[i] = st
-
-	// A failed process makes the session fail; it runs once every process
-	// runs.
-	var worst app.DecoderStatus
-
-	running := 0
-
-	for _, x := range s.states {
-		if x.State == app.DecoderRunning {
-			running++
-		}
-
-		if statusRank[x.State] > statusRank[worst.State] {
-			worst = x
-		}
-	}
-
-	if worst.State == app.DecoderRunning && running < len(s.states) {
-		worst = app.DecoderStatus{}
-	}
-
-	changed := worst.State != "" && worst != s.last && !s.closed
-	if changed {
-		s.last = worst
-	}
-	s.mu.Unlock()
-
-	if changed {
-		s.ev.Status(worst)
-	}
+	s.status(st)
 }

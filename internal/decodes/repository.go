@@ -13,6 +13,10 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db/sqlite/sqlc"
 )
 
+// ErrRejected is a message the database refuses (a constraint): the
+// message is skipped, the batch goes on.
+var ErrRejected = errors.New("decoded message rejected")
+
 // Repository stores the decoded messages (decoded_messages).
 type Repository struct{ db *db.DB }
 
@@ -47,6 +51,8 @@ func (r *Repository) Insert(ctx context.Context, m row) (id int64, inserted bool
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return 0, false, nil
+	case db.IsConstraint(err):
+		return 0, false, fmt.Errorf("%w: %w", ErrRejected, err)
 	case err != nil:
 		return 0, false, fmt.Errorf("insert decoded message: %w", err)
 	}
@@ -110,16 +116,6 @@ func (r *Repository) List(ctx context.Context, f Filter) ([]Message, error) {
 	}
 
 	return out, nil
-}
-
-// Modes returns the modes of the stored messages.
-func (r *Repository) Modes(ctx context.Context) ([]string, error) {
-	modes, err := sqlc.New(r.db.Reader(ctx)).ListDecodedModes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list decoded modes: %w", err)
-	}
-
-	return modes, nil
 }
 
 // purgeBatch bounds each delete of the retention job.

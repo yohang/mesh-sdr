@@ -87,6 +87,10 @@ batch_workers = 0
 # Batch decoder jobs waiting for a worker; on overflow the oldest is
 # dropped.
 queue_length = 10
+# Decoder sessions the node runs at once, all listeners together; beyond
+# it a listener's decoder is unavailable ("node busy"). 0: twice the CPU
+# cores.
+max_sessions = 0
 
 # Limits of every external decoder process (DEC-048), applied between fork
 # and exec. Each decoder runs in its own workdir under node.runtime_dir,

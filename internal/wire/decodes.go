@@ -2,6 +2,7 @@ package wire
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"time"
@@ -11,9 +12,12 @@ import (
 	"github.com/yohang/mesh-sdr/internal/events"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
+	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/settings"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // decodesDeps are the hub parts the decodes module uses.
@@ -41,13 +45,16 @@ func newDecodes(d decodesDeps) *decodes.Module {
 	logger := component(d.logger, "decodes.app")
 
 	m := decodes.New(decodes.Deps{
-		DB:        d.adapter,
-		Visible:   visibleDevices(d),
-		SignedIn:  func(ctx context.Context) bool { return d.identity.Authorize(ctx, identitydomain.RoleListener) == nil },
-		Retention: func() time.Duration { return d.store.Duration("retention.decoded_messages.max_age") },
-		MaxRows:   func() int { return d.store.Int("retention.decoded_messages.max_rows") },
-		Published: decodeNew(d.broker, logger),
-		Render:    d.render, Now: d.now, Logger: logger,
+		DB:         d.adapter,
+		Visible:    visibleDevices(d),
+		SignedIn:   func(ctx context.Context) bool { return d.identity.Authorize(ctx, identitydomain.RoleListener) == nil },
+		Retention:  func() time.Duration { return d.store.Duration("retention.decoded_messages.max_age") },
+		MaxRows:    func() int { return d.store.Int("retention.decoded_messages.max_rows") },
+		Published:  decodeNew(d.broker, logger),
+		DeviceNode: deviceNode(gridsqlite.NewDeviceRepository(d.adapter)),
+		Modes:      catalogueModes(),
+		Dedup:      dedupOf,
+		Render:     d.render, Now: d.now, Logger: logger,
 	})
 
 	if c := d.grid.control; c != nil {
@@ -63,6 +70,51 @@ func newDecodes(d decodesDeps) *decodes.Module {
 	}
 
 	return m
+}
+
+// deviceNode returns the node of a device of the registry.
+func deviceNode(repo griddomain.DeviceRepository) func(ctx context.Context, device string) (string, bool, error) {
+	return func(ctx context.Context, device string) (string, bool, error) {
+		id, err := shared.NewDeviceID(device)
+		if err != nil {
+			return "", false, nil
+		}
+
+		dev, err := repo.Get(ctx, id)
+
+		switch {
+		case errors.Is(err, griddomain.ErrDeviceNotFound):
+			return "", false, nil
+		case err != nil:
+			return "", false, err
+		}
+
+		return dev.Node().String(), true, nil
+	}
+}
+
+// catalogueModes are the digital modes of the node catalogue (the mode
+// filter of the Decodes page).
+func catalogueModes() []string {
+	var out []string
+
+	for _, m := range radiodomain.DigitalModes() {
+		out = append(out, m.Name)
+	}
+
+	return out
+}
+
+// dedupOf is the duplicate key rounding of a mode of the catalogue (0 for
+// an unknown mode: the module's default).
+func dedupOf(mode string) (int64, time.Duration) {
+	for _, m := range radiodomain.DigitalModes() {
+		if m.Name == mode {
+			return m.DedupStep, m.DedupBucket()
+		}
+	}
+
+	return 0, 0
 }
 
 // visibleDevices returns the enabled devices the visitor may listen to

@@ -127,15 +127,7 @@ func (m *Module) listPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	modes, err := m.repo.Modes(ctx)
-	if err != nil {
-		m.d.Logger.ErrorContext(ctx, "decodes: modes", slog.Any("error", err))
-		m.d.Render.Error(w, r, http.StatusInternalServerError)
-
-		return
-	}
-
-	v := listView{Filter: f, Devices: devices, Modes: modes, SignedIn: m.d.SignedIn(ctx), Rows: []Message{}}
+	v := listView{Filter: f, Devices: devices, Modes: m.d.Modes, SignedIn: m.d.SignedIn(ctx), Rows: []Message{}}
 
 	if d := m.d.Retention(); d > 0 {
 		v.Retention = "Decoded messages are kept for " + strconv.Itoa(int(d.Hours()/24)) + " days."

@@ -647,10 +647,11 @@ class Engine extends EventTarget {
       // The decoder of the previous connection, or of the link (m2): the
       // new demodulator has none yet.
       const decoder = k.decoder;
+      const variant = k.variant;
       this.applied(d.applied ?? {});
       this.setState("listening");
       this.emit("tune");
-      if (decoder) this.setDecoder(decoder);
+      if (decoder) this.setDecoder(decoder, variant);
     } catch (err) {
       if (gen !== this.gen) return;
       this.setState("error", err?.message ?? String(err));
@@ -977,16 +978,20 @@ class Engine extends EventTarget {
    * setDecoder starts the decoder of a digital mode on the demodulator, or
    * stops it (null) (DEC-002). The node switches the demodulator to the
    * mode's default underlying mode when the current one is not allowed
-   * (DEC-003).
-   * @param {string | null} mode
+   * (DEC-003). variant picks the decoder variant (default: the mode's).
+   * @param {string | null} mode @param {string} [variant]
    */
-  async setDecoder(mode) {
+  async setDecoder(mode, variant) {
     const d = this.demod;
     if (!d) return;
     const gen = this.gen;
     try {
-      const res = await this.request("decoder.set", { demod_id: d.id, decoder: mode });
+      /** @type {Record<string, any>} */
+      const req = { demod_id: d.id, decoder: mode };
+      if (mode && variant) req.options = { variant };
+      const res = await this.request("decoder.set", req);
       if (gen !== this.gen || this.demod !== d) return;
+      if (res?.variant) this.kept.variant = res.variant;
       const a = res?.applied ?? {};
       if (a.mode && a.mode !== this.kept.mode) {
         this.kept.mode = a.mode;
@@ -1062,7 +1067,10 @@ class Engine extends EventTarget {
     if ("decoder" in a) {
       d.decoder = a.decoder ?? null;
       if (d.decoder) this.kept.decoder = d.decoder;
-      else delete this.kept.decoder;
+      else {
+        delete this.kept.decoder;
+        delete this.kept.variant;
+      }
     }
     this.emit("tune");
     if (this.detail && this.state === "listening") this.setState("listening");

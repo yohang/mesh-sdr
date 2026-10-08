@@ -86,7 +86,9 @@ type Streams struct {
 	waterfall media.Waterfall
 	// retunes limits the device.retune of each device (§5.11).
 	retunes *ratelimit.Limiter[string]
-	now     func() time.Time
+	// decoderSets limits the decoder.set of each connection.
+	decoderSets *ratelimit.Limiter[string]
+	now         func() time.Time
 
 	mu       sync.Mutex
 	sessions map[*session]struct{}
@@ -106,7 +108,8 @@ func NewStreams(d Devices, state DesiredState, dec Decoding, log *slog.Logger) *
 	s := &Streams{
 		devices: d, state: state, dec: dec, log: log, sessions: map[*session]struct{}{},
 		lastSwitch: map[string]time.Time{}, applied: map[string]activePreset{},
-		retunes: ratelimit.New[string](RetuneEvery, RetuneBurst, ratelimit.DefaultCapacity), now: time.Now,
+		retunes:     ratelimit.New[string](RetuneEvery, RetuneBurst, ratelimit.DefaultCapacity),
+		decoderSets: ratelimit.New[string](DecoderSetEvery, DecoderSetBurst, ratelimit.DefaultCapacity), now: time.Now,
 	}
 	s.waterfall = s.waterfallDefaults()
 

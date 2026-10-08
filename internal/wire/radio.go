@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"runtime"
 	"slices"
 	"time"
 
@@ -97,7 +98,8 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 			Nice: lim.Nice, OpenFiles: uint64(lim.OpenFiles), AddressSpace: uint64(lim.Memory.Bytes()), Core: &core, NoNewPrivs: true,
 		},
 	})
-	decoding := radiohttp.Decoding{Decoders: radioapp.NewDecoders(toolbox, runner, time.Now), Publisher: dec.publisher}
+	sessions := cfg.Decoders.SessionCap(runtime.NumCPU())
+	decoding := radiohttp.Decoding{Decoders: radioapp.NewDecoders(toolbox, runner, sessions, time.Now), Publisher: dec.publisher}
 
 	return m, radiohttp.NewStreams(m, state, decoding, component(logger, "radio.http.streams")), sources, toolbox, nil
 }

@@ -22,9 +22,6 @@ WHERE device_id IN (SELECT value FROM json_each(sqlc.arg(devices_json)))
 ORDER BY id DESC
 LIMIT sqlc.arg(max_rows);
 
--- name: ListDecodedModes :many
-SELECT DISTINCT mode FROM decoded_messages ORDER BY mode;
-
 -- name: DeleteDecodedBefore :execrows
 -- DeleteDecodedBefore deletes up to max_rows messages decoded before
 -- before_ms (one batch of the retention job).

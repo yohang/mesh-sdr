@@ -63,6 +63,40 @@ type DigitalMode struct {
 	// ServiceOnly modes run only as background services: a listener may
 	// not start them (§8.3 rule 5).
 	ServiceOnly bool
+	// Variants are the decoder variants a listener chooses from (the
+	// default first); none for a mode without variants.
+	Variants []string
+	// DedupStep is the frequency rounding (Hz) of the hub's duplicate
+	// key: two listeners a few hertz apart decode the same message (ADR
+	// 0028).
+	DedupStep int64
+}
+
+// DedupWindow is the time bucket of the duplicate key of streaming modes;
+// slot modes use their slot.
+const DedupWindow = 10 * time.Second
+
+// DedupBucket returns the time bucket of the duplicate key of the mode.
+func (m DigitalMode) DedupBucket() time.Duration {
+	if m.Slot > 0 {
+		return m.Slot
+	}
+
+	return DedupWindow
+}
+
+// Variant returns the variant a listener asks for ("" for the default):
+// ok is false for a variant the mode does not have.
+func (m DigitalMode) Variant(v string) (string, bool) {
+	if len(m.Variants) == 0 {
+		return "", v == ""
+	}
+
+	if v == "" {
+		return m.Variants[0], true
+	}
+
+	return v, slices.Contains(m.Variants, v)
 }
 
 // Allows reports whether underlying is an allowed underlying mode.
@@ -75,17 +109,23 @@ func (m DigitalMode) DefaultUnderlying() string { return m.Underlying[0] }
 // digitalModes is the catalogue. Later decoders add their entries here
 // (and their adapter on the node).
 var digitalModes = []DigitalMode{
-	// DEC-034: multimon-ng DTMF, EEA, EIA and CCIR at 22 050 Hz.
-	{Name: "selcall", Label: "SelCall", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050},
-	// DEC-035: multimon-ng ZVEI1/2/3, DZVEI and PZVEI.
-	{Name: "zvei", Label: "ZVEI", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050},
+	// DEC-034: multimon-ng with one of DTMF, EEA, EIA and CCIR at 22 050 Hz.
+	{
+		Name: "selcall", Label: "SelCall", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050,
+		Variants: []string{"DTMF", "EEA", "EIA", "CCIR"}, DedupStep: 1000,
+	},
+	// DEC-035: multimon-ng with one of ZVEI1/2/3, DZVEI and PZVEI.
+	{
+		Name: "zvei", Label: "ZVEI", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050,
+		Variants: []string{"ZVEI1", "ZVEI2", "ZVEI3", "DZVEI", "PZVEI"}, DedupStep: 1000,
+	},
 }
 
 // DigitalModes returns the catalogue, in display order.
 func DigitalModes() []DigitalMode {
 	out := make([]DigitalMode, len(digitalModes))
 	for i, m := range digitalModes {
-		m.Underlying = slices.Clone(m.Underlying)
+		m.Underlying, m.Variants = slices.Clone(m.Underlying), slices.Clone(m.Variants)
 		out[i] = m
 	}
 
@@ -114,7 +154,7 @@ func DigitalModeOf(name string) (DigitalMode, error) {
 		return DigitalMode{}, ErrDecoderServiceOnly
 	}
 
-	m.Underlying = slices.Clone(m.Underlying)
+	m.Underlying, m.Variants = slices.Clone(m.Underlying), slices.Clone(m.Variants)
 
 	return m, nil
 }

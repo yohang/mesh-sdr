@@ -3,6 +3,8 @@ package decodes
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,7 +50,20 @@ func newEnv(t *testing.T) *env {
 		Retention: func() time.Duration { return 30 * 24 * time.Hour },
 		MaxRows:   func() int { return 1000 },
 		Published: func(_ context.Context, m Message) { e.published = append(e.published, m) },
-		Render:    renderer{}, Now: func() time.Time { return e.now },
+		DeviceNode: func(_ context.Context, device string) (string, bool, error) {
+			node, ok := map[string]string{"vhf": "n1", "hf": "n1", "hidden": "n1", "other": "n2"}[device]
+
+			return node, ok, nil
+		},
+		Modes: []string{"selcall", "zvei"},
+		Dedup: func(mode string) (int64, time.Duration) {
+			if mode == "selcall" {
+				return 1000, 10 * time.Second
+			}
+
+			return 0, 0
+		},
+		Render: renderer{}, Now: func() time.Time { return e.now },
 	})
 
 	return e
@@ -82,8 +97,15 @@ func (e *env) ingest(t *testing.T, node string, decodes ...ctl.Decode) {
 func TestIngestDedup(t *testing.T) {
 	e := newEnv(t)
 
-	e.ingest(t, "n1", decode("vhf", t0.Add(100*time.Millisecond), "[DTMF] 1"), decode("vhf", t0.Add(400*time.Millisecond), "[DTMF] 1"))
-	e.ingest(t, "n1", decode("vhf", t0.Add(2*time.Second), "[DTMF] 1"))
+	// Two listeners a few hertz apart, across a second boundary: one row.
+	other := decode("vhf", t0.Add(1100*time.Millisecond), "[DTMF] 1")
+	other.Freq += 4
+
+	e.ingest(t, "n1", decode("vhf", t0.Add(900*time.Millisecond), "[DTMF] 1"), other)
+	e.ingest(t, "n1", decode("vhf", t0.Add(12*time.Second), "[DTMF] 1"))
+
+	// Another node's device, and an unknown one, are skipped.
+	e.ingest(t, "n1", decode("other", t0, "[DTMF] 7"), decode("ghost", t0, "[DTMF] 8"))
 
 	bad := decode("vhf", t0, "x")
 	bad.Mode = "Bad Mode"
@@ -104,6 +126,43 @@ func TestIngestDedup(t *testing.T) {
 		t.Errorf("rows %+v", rows)
 	}
 
+	// A decode time far ahead of the hub clock is clamped.
+	e.ingest(t, "n1", decode("vhf", t0.Add(48*time.Hour), "[DTMF] 3"))
+
+	if last := e.published[len(e.published)-1]; !last.DecodedAt.Equal(t0.Add(MaxAhead)) {
+		t.Errorf("clamped time %v", last.DecodedAt)
+	}
+
+	// A payload deeper than SQLite takes is skipped, the batch goes on.
+	deep := decode("vhf", t0, "[DTMF] 4")
+	deep.Payload = json.RawMessage(strings.Repeat("[", MaxDepth+1) + strings.Repeat("]", MaxDepth+1))
+	e.ingest(t, "n1", deep, decode("vhf", t0, "[DTMF] 5"))
+
+	if last := e.published[len(e.published)-1]; last.Text != "[DTMF] 5" || len(e.published) != 5 {
+		t.Errorf("published after a deep payload %+v", e.published)
+	}
+
+	// A row the database refuses fails alone, inside the transaction.
+	err = e.db.WithinTx(context.Background(), func(ctx context.Context) error {
+		bad, _ := e.m.validRow("n1", decode("vhf", t0, "bad"), e.now)
+		bad.Payload = json.RawMessage(`{`)
+
+		if _, _, err := e.m.repo.Insert(ctx, bad); !errors.Is(err, ErrRejected) {
+			t.Errorf("constraint: %v", err)
+		}
+
+		good, _ := e.m.validRow("n1", decode("vhf", t0, "good"), e.now)
+		_, ok, err := e.m.repo.Insert(ctx, good)
+		if err != nil || !ok {
+			t.Errorf("after a constraint: %v %v", ok, err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// A rolled-back batch publishes nothing.
 	raw, _ := json.Marshal(ctl.DecodeBatch{Decodes: []ctl.Decode{decode("vhf", t0.Add(time.Minute), "[DTMF] 9")}})
 	_ = e.db.WithinTx(context.Background(), func(ctx context.Context) error {
@@ -114,7 +173,7 @@ func TestIngestDedup(t *testing.T) {
 	e.m.Discard("n1")
 	e.m.Flush(context.Background(), "n1")
 
-	if len(e.published) != 3 {
+	if len(e.published) != 5 {
 		t.Errorf("published after rollback %+v", e.published)
 	}
 }
@@ -122,13 +181,18 @@ func TestIngestDedup(t *testing.T) {
 func TestPurge(t *testing.T) {
 	e := newEnv(t)
 
-	var batch []ctl.Decode
+	// Five old messages, received when they were decoded.
 	for i := range 5 {
-		batch = append(batch, decode("vhf", t0.Add(-time.Duration(40-i)*24*time.Hour), "old"))
+		at := t0.Add(-time.Duration(40-i) * 24 * time.Hour)
+		e.now = at
+		e.ingest(t, "n1", decode("vhf", at, "old"))
 	}
 
+	e.now = t0
+
+	var batch []ctl.Decode
 	for i := range 1005 {
-		batch = append(batch, decode("vhf", t0.Add(time.Duration(i)*time.Second), "new"))
+		batch = append(batch, decode("vhf", t0.Add(time.Duration(i)*time.Second), fmt.Sprintf("new %d", i)))
 	}
 
 	e.ingest(t, "n1", batch...)
@@ -164,7 +228,7 @@ func TestListPage(t *testing.T) {
 
 	var batch []ctl.Decode
 	for i := range PageSize + 2 {
-		batch = append(batch, decode("vhf", t0.Add(time.Duration(i)*time.Second), "[DTMF] 1"))
+		batch = append(batch, decode("vhf", t0.Add(time.Duration(i)*time.Second), fmt.Sprintf("[DTMF] %d", i)))
 	}
 
 	batch = append(batch, decode("hidden", t0, "[DTMF] secret"), decode("vhf", t0.Add(time.Hour), "<b>x</b>"))

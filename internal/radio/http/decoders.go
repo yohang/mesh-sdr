@@ -23,19 +23,29 @@ type Decoding struct {
 	Publisher app.DecodePublisher
 }
 
+// decoder.set limit per connection: a decoder start spawns a process.
+const (
+	DecoderSetEvery = time.Second
+	DecoderSetBurst = 3
+)
+
 // unavailableText is the reason non-admins see for a digital mode the node
 // cannot run (DIAG-004: admins see the missing tool).
 const unavailableText = "not available on this receiver"
+
+// nodeBusy is the reason of a decoder refused beyond decoders.max_sessions.
+const nodeBusy = "node busy"
 
 // adminRole is the admin role name in access tokens.
 const adminRole = "admin"
 
 // decoderSession is the decoder running on a demodulator (one at most).
 type decoderSession struct {
-	id    shared.UUID
-	mode  domain.DigitalMode
-	run   app.DecoderRun
-	untap func()
+	id      shared.UUID
+	mode    domain.DigitalMode
+	variant string
+	run     app.DecoderRun
+	untap   func()
 }
 
 // digitalModes lists the catalogue for device.config.
@@ -50,7 +60,13 @@ func (ss *session) digitalModes() []media.DigitalMode {
 	admin := slices.Contains(ss.peer.Claims().Roles, adminRole)
 
 	for _, st := range dec.Catalogue() {
-		dm := media.DigitalMode{Mode: st.Mode.Name, Label: st.Mode.Label, Underlying: st.Mode.Underlying, Available: st.Available}
+		dm := media.DigitalMode{
+			Mode: st.Mode.Name, Label: st.Mode.Label, Underlying: st.Mode.Underlying, Variants: st.Mode.Variants, Available: st.Available,
+		}
+
+		if dm.Variants == nil {
+			dm.Variants = []string{}
+		}
 
 		if !st.Available {
 			dm.Reason = unavailableText
@@ -100,11 +116,24 @@ func (ss *session) decoderError(req rxv1.Envelope, err error) {
 	}
 }
 
+// variantOf reads options.variant of decoder.set.
+func variantOf(p media.DecoderSet) (string, bool) {
+	v, ok := p.Options["variant"]
+	if !ok || v == nil {
+		return "", true
+	}
+
+	s, ok := v.(string)
+
+	return s, ok
+}
+
 // setDecoder handles decoder.set (§6.4, DEC-002): the owner of a
 // demodulator starts or stops its decoder. The mode is checked against the
 // catalogue, the node capabilities and the service-only flag; a
 // demodulator whose mode the digital mode does not allow switches to its
-// default underlying mode first (DEC-003).
+// default underlying mode first (DEC-003). Beyond decoders.max_sessions the
+// decoder is unavailable (node busy).
 func (ss *session) setDecoder(req rxv1.Envelope) {
 	p, err := decode[media.DecoderSet](req)
 	if err != nil {
@@ -120,6 +149,12 @@ func (ss *session) setDecoder(req rxv1.Envelope) {
 
 	if !ss.peer.Claims().Allows(d.device, token.PermDemod) {
 		ss.peer.Fail(req, rxv1.CodeForbidden, "the access token does not grant demod on this device")
+
+		return
+	}
+
+	if ok, retry := ss.s.decoderSets.Allow(ss.peer.Claims().ConnectionID, ss.s.now()); !ok {
+		ss.peer.RateLimited(req, retry)
 
 		return
 	}
@@ -148,6 +183,15 @@ func (ss *session) setDecoder(req rxv1.Envelope) {
 		return
 	}
 
+	asked, ok := variantOf(p)
+	variant, known := m.Variant(asked)
+
+	if !ok || !known {
+		ss.peer.Fail(req, rxv1.CodeOutOfRange, "options.variant: not a variant of "+m.Label)
+
+		return
+	}
+
 	params := d.demod.Params()
 	switched := !m.Allows(params.Mode)
 
@@ -161,15 +205,25 @@ func (ss *session) setDecoder(req rxv1.Envelope) {
 		}
 	}
 
-	ss.stopDecoder(d, false)
+	ss.stopDecoder(d, true)
 
-	if err := ss.startDecoder(d, m); err != nil {
+	err = ss.startDecoder(d, m, variant)
+
+	switch {
+	case errors.Is(err, app.ErrNodeBusy):
+		ss.peer.Ack(req, media.DecoderStarted{Applied: appliedFor(d)})
+		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, nodeBusy)
+	case err != nil:
+		// The listener learns the underlying mode it was switched to.
+		if switched {
+			res := appliedFor(d)
+			ss.peer.Send(rxv1.TypeStreamUpdate, media.StreamUpdate{StreamID: d.stream, Applied: &res})
+		}
+
 		ss.decoderError(req, err)
-
-		return
+	default:
+		ss.peer.Ack(req, media.DecoderStarted{DecoderSessionID: d.dec.id.String(), Variant: variant, Applied: appliedFor(d)})
 	}
-
-	ss.peer.Ack(req, media.DecoderStarted{DecoderSessionID: d.dec.id.String(), Applied: appliedFor(d)})
 
 	if switched {
 		ss.report()
@@ -184,38 +238,44 @@ func (ss *session) underlyingChanged(d *demodState) {
 		return
 	}
 
-	m := d.dec.mode
+	m, variant := d.dec.mode, d.dec.variant
 	ss.stopDecoder(d, true)
 
 	if !m.Allows(d.demod.Params().Mode) {
 		return
 	}
 
-	if err := ss.startDecoder(d, m); err != nil {
+	err := ss.startDecoder(d, m, variant)
+
+	switch {
+	case errors.Is(err, app.ErrNodeBusy):
+		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, nodeBusy)
+	case err != nil:
 		ss.s.log.Warn("decoder not re-created after an underlying mode change", slog.String("demod_id", d.id),
 			slog.String("decoder", m.Name), slog.Any("error", err))
+		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderError, "start_failed")
 	}
 }
 
 // startDecoder starts a session of m on d and taps its audio (d.mu held).
-func (ss *session) startDecoder(d *demodState, m domain.DigitalMode) error {
-	id, run, err := ss.s.dec.Decoders.Start(m, func(id shared.UUID) app.DecoderEvents {
+func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant string) error {
+	id, run, err := ss.s.dec.Decoders.Start(m, variant, func(id shared.UUID) app.DecoderEvents {
 		return app.DecoderEvents{
 			Decode: func(rec app.DecodeRecord) { ss.decoded(d, id, m, rec) },
-			Status: func(st app.DecoderStatus) { ss.decoderStatus(d, id, m.Name, st.State, st.Reason) },
+			Status: func(st app.DecoderStatus) { ss.sessionStatus(d, id, m.Name, variant, st) },
 		}
 	})
 	if err != nil {
 		return err
 	}
 
-	d.dec = &decoderSession{id: id, mode: m, run: run, untap: d.demod.Tap(run.Audio)}
+	d.dec = &decoderSession{id: id, mode: m, variant: variant, run: run, untap: d.demod.Tap(run.Audio)}
 
 	return nil
 }
 
 // stopDecoder ends the decoder of d, if any; notify sends its stopped
-// status (d.mu held).
+// status (d.mu held). Nothing of that session reaches the listener after.
 func (ss *session) stopDecoder(d *demodState, notify bool) {
 	dec := d.dec
 	if dec == nil {
@@ -227,19 +287,42 @@ func (ss *session) stopDecoder(d *demodState, notify bool) {
 	dec.run.Close()
 
 	if notify {
-		ss.decoderStatus(d, dec.id, dec.mode.Name, media.DecoderStopped, "")
+		ss.decoderStatus(d, dec.id, dec.mode.Name, dec.variant, media.DecoderStopped, "")
 	}
 }
 
-func (ss *session) decoderStatus(d *demodState, id shared.UUID, mode, state, reason string) {
-	ss.peer.Send(rxv1.TypeDiagState, media.DiagState{
-		DemodID: d.id, DecoderSessionID: id.String(), Decoder: mode, State: state, Reason: reason, Since: time.Now().UnixMilli(),
-	})
+// live reports whether id is the current decoder session of d.
+func live(d *demodState, id shared.UUID) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return d.dec != nil && d.dec.id == id
 }
 
-// decoded sends a decoded message to the listener (decode) and to the hub
-// (decode.batch). Its frequency is the demodulator's dial frequency.
+// sessionStatus forwards a status of session id while it is current.
+func (ss *session) sessionStatus(d *demodState, id shared.UUID, mode, variant string, st app.DecoderStatus) {
+	if live(d, id) {
+		ss.decoderStatus(d, id, mode, variant, st.State, st.Reason)
+	}
+}
+
+func (ss *session) decoderStatus(d *demodState, id shared.UUID, mode, variant, state, reason string) {
+	p := media.DiagState{DemodID: d.id, Decoder: mode, Variant: variant, State: state, Reason: reason, Since: ss.s.now().UnixMilli()}
+	if !id.IsZero() {
+		p.DecoderSessionID = id.String()
+	}
+
+	ss.peer.Send(rxv1.TypeDiagState, p)
+}
+
+// decoded sends a decoded message of the current session to the listener
+// (decode) and to the hub (decode.batch). Its frequency is the
+// demodulator's dial frequency.
 func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, rec app.DecodeRecord) {
+	if !live(d, id) {
+		return
+	}
+
 	a := ss.attachedTo(d.device)
 	if a == nil {
 		return
