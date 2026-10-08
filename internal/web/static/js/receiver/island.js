@@ -54,7 +54,7 @@
 // tunes when swapped, and Shift + wheel does the other. Every range slider
 // steps with the wheel (RX-033). Record (REC-001, recorder.js) keeps the
 // played PCM and downloads it as WAV; shown per receiverConfig.recorder.
-// "[" and "]" seek the next signal (RX-025, seek.js); pass bands are saved
+// "[" and "]" seek the next signal over the squelch (RX-025, seek.js); pass bands are saved
 // per mode (RX-021, bandpasses.js) and "|" forgets them.
 //
 // Device picker (RX-040, UI-021): a native <select> with one <optgroup> per
@@ -97,7 +97,7 @@ import { receiverShortcuts } from "./keys.js";
 import { SidePanel } from "./panel.js";
 import { recordingName, saveFile, wavBlob } from "./recorder.js";
 import { FreqScale } from "./scale.js";
-import { SEEK_MARGIN_DB, seekBin } from "./seek.js";
+import { seekBin } from "./seek.js";
 import { getState, setState } from "./session.js";
 import { shortcutsHelp } from "./shortcuts-help.js";
 import { Spectrum } from "./spectrum.js";
@@ -163,6 +163,8 @@ const SHEET_MEDIA = "(width < 48rem)";
 const DESKTOP_MEDIA = "(width >= 75rem)";
 // Waterfall level step of the keyboard (dB).
 const LEVEL_STEP_DB = 5;
+// Why seek does nothing with the squelch off (RX-025).
+const SEEK_NEEDS_SQUELCH = "Set the squelch to seek.";
 // Pointer label offset from the pointer (CSS px).
 const POINTER_LABEL_PX = 12;
 
@@ -683,14 +685,18 @@ class MsdrReceiver extends HTMLElement {
       e.setSquelch(this.squelchLevel);
     });
     this.sqAuto.addEventListener("click", () => this.autoSquelch());
-    this.seekDown = el("button", { type: "button", class: SMALL_BUTTON, "aria-label": "Seek the previous signal", "aria-keyshortcuts": "[" }, "◀ Seek");
-    this.seekUp = el("button", { type: "button", class: SMALL_BUTTON, "aria-label": "Seek the next signal", "aria-keyshortcuts": "]" }, "Seek ▶");
+    // Seek needs the squelch on (its level is the threshold); disabled
+    // otherwise, with the reason as their description.
+    const seekAttrs = { type: "button", class: SMALL_BUTTON, "aria-describedby": "rx-seek-hint" };
+    this.seekDown = el("button", { ...seekAttrs, "aria-label": "Seek the previous signal", "aria-keyshortcuts": "[" }, "◀ Seek");
+    this.seekUp = el("button", { ...seekAttrs, "aria-label": "Seek the next signal", "aria-keyshortcuts": "]" }, "Seek ▶");
+    this.seekHint = el("span", { id: "rx-seek-hint", class: "text-sm text-fg-muted" });
     this.seekDown.addEventListener("click", () => this.seek(-1));
     this.seekUp.addEventListener("click", () => this.seek(1));
     const sqLabel = el("label", { class: `flex items-center gap-1 font-semibold ${TOUCH}` });
     sqLabel.append(this.sqOn, document.createTextNode("Squelch"));
     const squelch = el("div", { class: GROUP });
-    squelch.append(sqLabel, this.sqLevel, this.sqText, this.sqAuto, this.seekDown, this.seekUp);
+    squelch.append(sqLabel, this.sqLevel, this.sqText, this.sqAuto, this.seekDown, this.seekUp, this.seekHint);
 
     // Noise reduction: on/off and threshold (RX-027).
     this.nrOn = /** @type {HTMLInputElement} */ (el("input", { id: "rx-nr-on", type: "checkbox", class: "accent-accent", "aria-keyshortcuts": "N" }));
@@ -1475,7 +1481,7 @@ class MsdrReceiver extends HTMLElement {
   syncControls() {
     const e = this.engine;
     const d = e.demod;
-    for (const c of [this.stepDown, this.stepUp, this.freqInput, this.narrower, this.wider, this.sqOn, this.sqAuto, this.nrOn, this.seekDown, this.seekUp]) {
+    for (const c of [this.stepDown, this.stepUp, this.freqInput, this.narrower, this.wider, this.sqOn, this.sqAuto, this.nrOn]) {
       c.toggleAttribute("disabled", !d);
     }
     if (document.activeElement !== this.freqInput) {
@@ -1511,6 +1517,13 @@ class MsdrReceiver extends HTMLElement {
     this.sqOn.checked = sq !== null;
     this.sqLevel.value = String(this.squelchLevel);
     this.sqLevel.toggleAttribute("disabled", !d || sq === null);
+    // Seek (RX-025) needs the squelch: its level is the threshold.
+    for (const b of [this.seekDown, this.seekUp]) {
+      b.toggleAttribute("disabled", !d || sq === null);
+      b.title = d && sq === null ? SEEK_NEEDS_SQUELCH : "";
+    }
+    const seekHint = d && sq === null ? SEEK_NEEDS_SQUELCH : "";
+    if (this.seekHint.textContent !== seekHint) this.seekHint.textContent = seekHint;
     this.sqText.textContent = `${formatDb(this.squelchLevel)} dBFS`;
     this.sqLevel.setAttribute("aria-valuetext", this.sqText.textContent);
 
@@ -1885,22 +1898,30 @@ class MsdrReceiver extends HTMLElement {
   }
 
   /**
-   * seek tunes to the next signal above the squelch level minus 13 dB in
-   * the peak-hold spectrum (RX-025, keys [ ]).
+   * seek tunes to the next signal above the squelch level in the
+   * peak-hold spectrum (RX-025, keys [ ]; the bookmark scanner's rule: a
+   * hit is a level over the squelch level). With the squelch off it only
+   * says how to use it.
    * @param {1 | -1} dir
    */
   seek(dir) {
     const e = this.engine;
     const fft = e.fft;
     const peak = this.spectrum?.peak;
-    if (!e.demod || !fft || !peak || peak.length !== fft.size) return;
-    const threshold = (this.squelchLevel - SEEK_MARGIN_DB - fft.dbMin) / fft.dbStep;
+    if (!e.demod) return;
+    const level = e.demod.squelchDb;
+    if (level === null) {
+      this.say(SEEK_NEEDS_SQUELCH);
+      return;
+    }
+    if (!fft || !peak || peak.length !== fft.size) return;
+    const threshold = (level - fft.dbMin) / fft.dbStep;
     // From the pass band's edge: the signal heard now is not a new one.
     const edge = e.tunedHz + (dir > 0 ? e.demod.highHz : e.demod.lowHz);
     const from = ((edge - fft.startHz) / fft.spanHz) * fft.size;
     const bin = seekBin(peak, from, dir, threshold);
     if (bin < 0) {
-      this.say(`No signal above ${formatDb(this.squelchLevel - SEEK_MARGIN_DB)} dBFS ${dir > 0 ? "above" : "below"} the tuned frequency.`);
+      this.say(`No signal above the squelch (${formatDb(level)} dBFS) ${dir > 0 ? "above" : "below"} the tuned frequency.`);
       return;
     }
     e.tune(fft.startHz + ((bin + 0.5) / fft.size) * fft.spanHz);

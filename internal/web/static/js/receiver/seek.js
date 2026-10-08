@@ -1,8 +1,7 @@
 // Tune-by-squelch (RX-025): "[" and "]" walk the peak-hold FFT from the
-// tuned frequency to the next signal above the squelch level minus
-// SEEK_MARGIN_DB, and tune to its strongest bin.
-
-export const SEEK_MARGIN_DB = 13;
+// tuned frequency to the next signal above the squelch level (the owner's
+// rule, shared with the bookmark scanner: a hit is a level over the
+// squelch level), and tune to its strongest bin.
 
 /**
  * seekBin returns the strongest bin of the next run of bins above

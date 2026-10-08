@@ -53,8 +53,8 @@ export function receiverShortcuts(rx) {
     { keys: ["Ctrl+ArrowLeft", "Alt+Shift+ArrowLeft"], label: "Smaller tuning step", group: "Tuning", enabled: tuned, run: () => rx.changeStep(-1) },
     { keys: ["Ctrl+ArrowRight", "Alt+Shift+ArrowRight"], label: "Larger tuning step", group: "Tuning", enabled: tuned, run: () => rx.changeStep(1) },
     { keys: ["t"], label: "Type a frequency", group: "Tuning", run: () => rx.focusFrequency() },
-    { keys: ["["], label: "Seek the previous signal above the squelch − 13 dB", group: "Tuning", enabled: tuned, run: () => rx.seek(-1) },
-    { keys: ["]"], label: "Seek the next signal above the squelch − 13 dB", group: "Tuning", enabled: tuned, run: () => rx.seek(1) },
+    { keys: ["["], label: "Seek the previous signal above the squelch", group: "Tuning", enabled: tuned, run: () => rx.seek(-1) },
+    { keys: ["]"], label: "Seek the next signal above the squelch", group: "Tuning", enabled: tuned, run: () => rx.seek(1) },
     {
       keys: ["PageUp"],
       label: "Move the shared centre up a quarter of the bandwidth",
