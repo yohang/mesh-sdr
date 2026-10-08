@@ -368,3 +368,50 @@ func TestDeemphasisLive(t *testing.T) {
 		t.Fatalf("10 kHz level %.0f at 50 µs, %.0f at 75 µs", at50, at75)
 	}
 }
+
+// TestSetDuringRateChange: between Retuned with a new sample rate and the
+// restart (Start), a demodulator is checked against the new rate, not the
+// running one, and the restart binds it in the new run.
+func TestSetDuringRateChange(t *testing.T) {
+	e := Factory{Logger: slog.New(slog.DiscardHandler)}.New(shared.MustDeviceID("vhf")).(*Engine)
+	defer e.Close()
+
+	e.Start(tuning())
+
+	d, err := e.NewDemod(app.DemodParams{Mode: "nfm", OutputRate: 48000, Codec: app.CodecPCM}, func(app.AudioOut) {}, func(app.Meter) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	wide := domain.NewTuning(domain.MustFrequency(145_000_000), domain.MustSampleRate(1_024_000))
+	e.Retuned(wide)
+
+	// 400 kHz is outside the running 250 kS/s band, inside the new one.
+	p := d.Params()
+	p.OffsetHz = 400_000
+
+	if err := d.Set(p); err != nil {
+		t.Fatalf("set at the new rate: %v", err)
+	}
+
+	p.OffsetHz = 600_000
+	if err := d.Set(p); err == nil {
+		t.Fatal("an offset outside the new band was accepted")
+	}
+
+	e.Start(wide)
+
+	dm := d.(*demod)
+	dm.mu.Lock()
+	b := dm.b
+	dm.mu.Unlock()
+
+	e.mu.Lock()
+	ep := e.ep
+	e.mu.Unlock()
+
+	if b == nil || b.ep != ep || d.Params().OffsetHz != 400_000 {
+		t.Fatalf("not bound in the new run: binding %v, params %+v", b, d.Params())
+	}
+}

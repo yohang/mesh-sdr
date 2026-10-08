@@ -27,6 +27,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
+	radiohttp "github.com/yohang/mesh-sdr/internal/radio/http"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
@@ -111,11 +112,12 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	holder := pki.NewCertHolder(cert)
 	revoked := pki.NewRevokedSet()
 
-	// The desired state pushed by the hub carries the WFM de-emphasis the
-	// engines apply and the listen policy the media server enforces.
+	// The desired state pushed by the hub carries the presets, the WFM
+	// de-emphasis and waterfall defaults the radio applies and the listen
+	// policy the media server enforces.
 	state := agent.NewDesiredState(o.devices())
 
-	manager, streams, err := newRadio(cfg, logger, deviceReporter{ag}, func() int { return state.Policy().WFMDeemphasis })
+	manager, streams, err := newRadio(cfg, logger, deviceReporter{ag}, state)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +129,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	})
 
 	ctlServer := control.NewNodeServer(control.NodeOptions{
-		Agent: ag, State: state, Media: mediaServer, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
+		Agent: ag, State: appliedState{state, streams}, Media: mediaServer, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
 		Renewer: &control.FileRenewer{NodeID: id.String(), CertFile: cfg.TLS.Cert, Roots: roots, Key: key, Holder: holder, Now: time.Now},
 		Now:     time.Now, Logger: component(logger, "grid.infra.control"),
 	})
@@ -142,6 +144,21 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 		addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server"),
 		workers: []func(context.Context){ag.Run, ctlServer.Run, mediaServer.Run, manager.Run},
 	}, nil
+}
+
+// appliedState tells the stream handler about every applied desired state:
+// an edited or unassigned preset is no longer active on its device.
+type appliedState struct {
+	*agent.DesiredState
+
+	streams *radiohttp.Streams
+}
+
+func (s appliedState) Apply(st ctl.StateApply) ctl.StateApplied {
+	out := s.DesiredState.Apply(st)
+	s.streams.StateApplied()
+
+	return out
 }
 
 // deviceReporter sends device states to the hub (device.state, coalesced
@@ -159,7 +176,7 @@ func (r deviceReporter) DeviceState(s radiodomain.Snapshot) {
 
 	r.ag.Emit(rxv1.TypeDeviceState, "device:"+s.ID, agent.ClassState, func(seq int64) any {
 		return ctl.DeviceState{
-			Seq: seq, DeviceID: s.ID, State: string(s.State), Reason: s.Reason,
+			Seq: seq, DeviceID: s.ID, State: string(s.State), Reason: s.Reason, ActivePresetID: s.ActivePreset,
 			CenterFreq: center, SampleRate: rate, Listeners: s.Listeners,
 		}
 	})

@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"time"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/sendq"
@@ -22,6 +23,8 @@ type Peer interface {
 	Ack(req rxv1.Envelope, result any)
 	// Fail answers a request with an error frame.
 	Fail(req rxv1.Envelope, code rxv1.ErrorCode, reason string)
+	// RateLimited answers a request with rate_limited and its retry delay.
+	RateLimited(req rxv1.Envelope, retry time.Duration)
 	// Queue is the connection's send queue for binary frames and meters.
 	Queue() *sendq.Queue
 }
@@ -32,8 +35,9 @@ type Streams interface {
 }
 
 // StreamSession handles the device messages of one connection: device.*,
-// stream.configure, audio.configure and demod.* (§6.4). Handle runs on the
-// connection's read loop; Close releases everything at the end.
+// stream.configure, audio.configure, demod.* and preset.select (§6.4).
+// Handle runs on the connection's read loop; Close releases everything at
+// the end.
 type StreamSession interface {
 	Handle(ctx context.Context, req rxv1.Envelope)
 	// Reauthorize applies the claims of a refreshed token: what they no

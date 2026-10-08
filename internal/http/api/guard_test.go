@@ -42,7 +42,7 @@ func TestGuardRefusesBeforeReadingTheBody(t *testing.T) {
 	h := NewHandler(Server{}, deny, slog.New(slog.DiscardHandler))
 
 	body := &countingBody{}
-	req := httptest.NewRequest(http.MethodPost, "/presets", nil)
+	req := httptest.NewRequest(http.MethodGet, "/config/effective", nil)
 	req.Body = body
 	req.ContentLength = 64 << 20
 	req.Header.Set("Content-Type", "application/json")
@@ -51,7 +51,7 @@ func TestGuardRefusesBeforeReadingTheBody(t *testing.T) {
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized || body.n != 0 {
-		t.Errorf("anonymous oversize POST = %d, %d bytes read", rec.Code, body.n)
+		t.Errorf("anonymous oversize request = %d, %d bytes read", rec.Code, body.n)
 	}
 }
 
@@ -60,8 +60,8 @@ func TestGuardBoundsJSONBodies(t *testing.T) {
 	h := NewHandler(Server{}, allow, slog.New(slog.DiscardHandler))
 
 	body := &countingBody{}
-	req := httptest.NewRequest(http.MethodPost, "/presets", nil)
-	req.Body = io.NopCloser(io.MultiReader(strings.NewReader(`{"name":"`), body))
+	req := httptest.NewRequest(http.MethodPost, "/auth/token", nil)
+	req.Body = io.NopCloser(io.MultiReader(strings.NewReader(`{"node_id":"`), body))
 	req.Header.Set("Content-Type", "application/json")
 
 	rec := httptest.NewRecorder()

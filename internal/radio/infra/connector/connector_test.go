@@ -280,11 +280,11 @@ func TestDemandStartsAndLingerStops(t *testing.T) {
 	}
 
 	// Live retune: the carrier stays at its absolute frequency.
-	if _, err := h.m.Retune("rtl", 24_000_000+testRate/2+1000); err != nil {
+	if _, err := h.m.Retune("rtl", 24_000_000+testRate/2+1000, 0); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := h.m.Retune("rtl", 10); err == nil {
+	if _, err := h.m.Retune("rtl", 10, 0); err == nil {
 		t.Fatal("retune out of range accepted")
 	}
 

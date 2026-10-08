@@ -51,6 +51,8 @@ var formPages = []formPage{
 		Forms: []sectionSpec{
 			{ID: "theme", Title: "Theme", Description: "A change applies on the next full page load.", Keys: []string{"ui.theme_mode"}},
 			{ID: "display", Title: "Display defaults", Keys: []string{"ui.shortcut_set"}},
+			{ID: "waterfall", Title: "Waterfall", Description: "Levels and palette every receiver starts with; listeners can still set automatic levels.",
+				Keys: []string{"waterfall.min_db", "waterfall.max_db", "waterfall.palette"}},
 		},
 	},
 	{

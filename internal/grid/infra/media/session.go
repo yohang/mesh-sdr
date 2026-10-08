@@ -409,12 +409,6 @@ func (ss *session) scoped(ctx context.Context, env rxv1.Envelope, perm string) {
 		return
 	}
 
-	if env.Type() == rxv1.TypePresetSelect {
-		ss.reply(env, rxv1.CodeUnsupportedType, "presets are not implemented by this node yet")
-
-		return
-	}
-
 	ss.stream(ctx, env)
 }
 
@@ -504,6 +498,9 @@ func (ss *session) Ack(req rxv1.Envelope, result any) {
 func (ss *session) Fail(req rxv1.Envelope, code rxv1.ErrorCode, reason string) {
 	ss.reply(req, code, reason)
 }
+
+// RateLimited implements media.Peer.
+func (ss *session) RateLimited(req rxv1.Envelope, retry time.Duration) { ss.rateLimited(req, retry) }
 
 // Queue implements media.Peer.
 func (ss *session) Queue() *sendq.Queue { return ss.queue }

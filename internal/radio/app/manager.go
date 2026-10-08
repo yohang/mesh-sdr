@@ -233,9 +233,11 @@ func (l *Lease) Release() {
 	})
 }
 
-// Retune moves the centre frequency of a device: live on a running source,
-// at the next start otherwise.
-func (m *Manager) Retune(id string, hz int64) (domain.Snapshot, error) {
+// Retune moves the centre frequency of a device and, when rate is not
+// zero, its sample rate. A centre change is live on a running source; a
+// new sample rate restarts it (the connectors take the rate at start
+// only). Both apply at the next start of a stopped device.
+func (m *Manager) Retune(id string, hz, rate int64) (domain.Snapshot, error) {
 	r, err := m.runner(id)
 	if err != nil {
 		return domain.Snapshot{}, err
@@ -244,6 +246,14 @@ func (m *Manager) Retune(id string, hz int64) (domain.Snapshot, error) {
 	f, err := domain.NewFrequency(hz)
 	if err != nil {
 		return domain.Snapshot{}, err
+	}
+
+	var sr domain.SampleRate
+
+	if rate != 0 {
+		if sr, err = domain.NewSampleRate(rate); err != nil {
+			return domain.Snapshot{}, err
+		}
 	}
 
 	r.mu.Lock()
@@ -261,10 +271,21 @@ func (m *Manager) Retune(id string, hz int64) (domain.Snapshot, error) {
 		return domain.Snapshot{}, err
 	}
 
+	if rate != 0 {
+		if err := r.dev.SetRate(sr); err != nil {
+			_ = r.dev.Retune(old.Center())
+			r.mu.Unlock()
+
+			return domain.Snapshot{}, err
+		}
+	}
+
 	tuning, active := r.dev.Tuning(), r.active
+	restart := active && tuning.Rate() != old.Rate()
+	r.restart = r.restart || restart
 	r.mu.Unlock()
 
-	if active {
+	if active && !restart {
 		if err := r.source.SetCenter(hz); err != nil {
 			r.mu.Lock()
 			_ = r.dev.Retune(old.Center())
@@ -275,10 +296,32 @@ func (m *Manager) Retune(id string, hz int64) (domain.Snapshot, error) {
 	}
 
 	r.engine.Retuned(tuning)
-	r.log.Info("device retuned", slog.Int64("center_hz", hz))
+	r.log.Info("device retuned", slog.Int64("center_hz", hz), slog.Int("sample_rate", tuning.Rate().PerSecond()),
+		slog.Bool("restart", restart))
 	r.publish()
 
+	if restart {
+		r.poke()
+	}
+
 	return r.snapshot(), nil
+}
+
+// SetActivePreset records the shared preset of a device and reports it
+// (device.state active_preset_id).
+func (m *Manager) SetActivePreset(id, preset string) error {
+	r, err := m.runner(id)
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	r.dev.SetActivePreset(preset)
+	r.mu.Unlock()
+
+	r.publish()
+
+	return nil
 }
 
 // Watch calls fn with every status of a device until cancel. fn must not
@@ -310,10 +353,13 @@ type runner struct {
 	log    *slog.Logger
 	wake   chan struct{}
 
-	mu        sync.Mutex
-	dev       *domain.Device
-	active    bool
-	stopping  bool
+	mu       sync.Mutex
+	dev      *domain.Device
+	active   bool
+	stopping bool
+	// restart: the running source must restart at the current tuning (a
+	// new sample rate).
+	restart   bool
 	demods    int
 	watchers  map[int]func(domain.Snapshot)
 	nextWatch int
@@ -440,7 +486,17 @@ func (r *runner) loop(ctx context.Context) {
 		state, _ := r.dev.State()
 		tuning := r.dev.Tuning()
 		stopping := r.stopping
+		restart := r.restart && runDone != nil && !stopping
+
+		if restart {
+			r.stopping = true
+		}
 		r.mu.Unlock()
+
+		if restart {
+			r.log.Info("restarting device at a new sample rate")
+			runCancel()
+		}
 
 		switch {
 		case runDone != nil && wanted:
@@ -485,7 +541,7 @@ func (r *runner) loop(ctx context.Context) {
 			r.engine.Stop()
 
 			r.mu.Lock()
-			r.active, r.stopping = false, false
+			r.active, r.stopping, r.restart = false, false, false
 			autoRecover := r.dev.Params().AutoRecover
 			r.mu.Unlock()
 

@@ -638,3 +638,36 @@ func TestListenPolicyRefusalsAreStrikes(t *testing.T) {
 	send(t, ws, rxv1.TypeDeviceAttach, "f-last", map[string]any{"device_id": "hf"})
 	expectClose(t, ws, websocket.StatusCode(rxv1.CloseForbidden))
 }
+
+// TestPresetSelectScope: preset.select needs the preset permission on the
+// device; with it, the message reaches the device stream handler.
+func TestPresetSelectScope(t *testing.T) {
+	e := newEnv(t)
+	e.installKeys(t, e.key)
+
+	exp := time.Now().Add(5 * time.Minute)
+
+	for _, tt := range []struct {
+		perms []string
+		want  string
+	}{
+		{[]string{token.PermListen, token.PermDemod}, `"forbidden"`},
+		{[]string{token.PermListen, token.PermPreset}, "device streaming is not available"},
+	} {
+		cid := "c-" + strings.Join(tt.perms, "-")
+
+		ws, st := e.dial(t, e.client, e.token(t, cid, exp, func(c *token.Claims) {
+			c.Scopes = []token.Scope{{Device: "hf", Perms: tt.perms}}
+		}), cid, origin)
+		if st != http.StatusSwitchingProtocols {
+			t.Fatalf("status %d", st)
+		}
+
+		hello(t, ws)
+		send(t, ws, rxv1.TypePresetSelect, "p0", map[string]any{"device_id": "hf", "preset_id": "p"})
+
+		if p := string(expectType(t, ws, rxv1.TypeError).Payload()); !strings.Contains(p, tt.want) {
+			t.Errorf("preset.select with %v: %s", tt.perms, p)
+		}
+	}
+}

@@ -234,6 +234,13 @@ func (d *demod) Set(p app.DemodParams) error {
 	ep, tuning := e.ep, e.tuning
 	e.mu.Unlock()
 
+	// A new sample rate waits for the restart of the source (Retuned before
+	// Start): the parameters are checked against the new rate, and Start
+	// binds the channel in the new run.
+	if ep != nil && ep.rate != tuning.Rate().PerSecond() {
+		ep = nil
+	}
+
 	old := d.Params()
 	oldMode, _ := modeOf(old.Mode)
 	channel := p.OffsetHz != old.OffsetHz || p.LowHz != old.LowHz || p.HighHz != old.HighHz || m.ChannelRate != oldMode.ChannelRate
@@ -260,6 +267,11 @@ func (d *demod) Set(p app.DemodParams) error {
 	// old one is dropped and bind builds the new one.
 	e.mu.Lock()
 	current := e.ep
+
+	if current != nil && current.rate != e.tuning.Rate().PerSecond() {
+		current = nil
+	}
+
 	_, live := e.demods[d]
 	install := channel && live && b != nil && b.ep == current
 

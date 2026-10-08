@@ -157,6 +157,18 @@ type DemodRef struct {
 	DemodID string `json:"demod_id"`
 }
 
+// PresetSelect is preset.select (client → node): switch the shared preset
+// of a device.
+type PresetSelect struct {
+	DeviceID string `json:"device_id"`
+	PresetID string `json:"preset_id"`
+}
+
+// PresetSelected is the ack result of preset.select.
+type PresetSelected struct {
+	ActivePresetID string `json:"active_preset_id"`
+}
+
 // DeviceRetune is device.retune (client → node) and its ack result.
 type DeviceRetune struct {
 	DeviceID string `json:"device_id,omitempty"`
@@ -290,6 +302,9 @@ type StreamUpdate struct {
 	Codec      string     `json:"codec,omitempty"`
 	SampleRate int        `json:"sample_rate,omitempty"`
 	FFT        *StreamFFT `json:"fft,omitempty"`
+	// Applied are the parameters of an audio stream's demodulator after a
+	// shared change moved it (preset.select; additive field).
+	Applied *Applied `json:"applied,omitempty"`
 }
 
 // StreamClose is stream.close (node → client).

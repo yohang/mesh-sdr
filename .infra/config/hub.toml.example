@@ -166,6 +166,13 @@ trusted_proxies = []
 # theme_mode = "auto"
 # shortcut_set = "default"               # default | off
 
+[settings.waterfall]
+# Waterfall levels (dB, -200 to 50, min below max) and palette every
+# receiver starts with (ADR 0026); listeners keep the Auto levels button.
+# min_db = -88
+# max_db = -20
+# palette = "turbo"                      # default | turbo
+
 [settings.session]
 # idle_timeout = "24h"
 # absolute_timeout = "24h"

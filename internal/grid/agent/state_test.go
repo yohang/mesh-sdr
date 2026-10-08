@@ -89,6 +89,21 @@ func TestDesiredState(t *testing.T) {
 	if len(ok.Errors) != 0 || s.Revision() != 4 {
 		t.Errorf("ok = %+v, revision %d", ok, s.Revision())
 	}
+
+	// The waterfall defaults travel with the policy and are checked like
+	// the hub settings; a refused one keeps the previous defaults.
+	wf := &ctl.StateWaterfall{MinDB: -100, MaxDB: -30, Palette: "default"}
+	if res := s.Apply(ctl.StateApply{Revision: 5, Policy: ctl.StatePolicy{ListenPolicy: "anonymous", Waterfall: wf}}); len(res.Errors) != 0 ||
+		*s.Policy().Waterfall != *wf {
+		t.Errorf("waterfall = %+v, policy %+v", res, s.Policy())
+	}
+
+	for _, bad := range []ctl.StateWaterfall{{MinDB: -20, MaxDB: -88, Palette: "turbo"}, {MinDB: -90, MaxDB: -20, Palette: "rainbow"}} {
+		res := s.Apply(ctl.StateApply{Revision: 6, Policy: ctl.StatePolicy{ListenPolicy: "anonymous", Waterfall: &bad}})
+		if len(res.Errors) != 1 || s.Revision() != 5 || *s.Policy().Waterfall != *wf {
+			t.Errorf("waterfall %+v = %+v, policy %+v", bad, res, s.Policy())
+		}
+	}
 }
 
 func TestDesiredStateListenPolicy(t *testing.T) {

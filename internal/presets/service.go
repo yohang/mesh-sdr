@@ -224,9 +224,10 @@ func (s *Service) Replace(ctx context.Context, id string, expectedVersion int, d
 	return out, nil
 }
 
-// Delete deletes a preset no schedule references (ADM-020). Devices on
-// which it is active keep their tuning.
-func (s *Service) Delete(ctx context.Context, id string) error {
+// Delete deletes a preset no schedule references (ADM-020) when
+// expectedVersion is current. Devices on which it is active keep their
+// tuning.
+func (s *Service) Delete(ctx context.Context, id string, expectedVersion int) error {
 	pid, err := ParseID(id)
 	if err != nil {
 		return err
@@ -236,6 +237,10 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		p, err := s.d.Repo.Get(ctx, pid)
 		if err != nil {
 			return err
+		}
+
+		if p.Version() != expectedVersion {
+			return ErrVersionConflict
 		}
 
 		if s.d.Usage != nil {

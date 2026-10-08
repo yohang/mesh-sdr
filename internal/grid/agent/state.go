@@ -157,6 +157,14 @@ func (s *DesiredState) Apply(st ctl.StateApply) ctl.StateApplied {
 		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: "invalid listen_policy"})
 	}
 
+	// The waterfall defaults: none from a hub that predates them (the node
+	// defaults apply).
+	if reason := checkWaterfall(st.Policy.Waterfall); reason != "" {
+		out.Errors = append(out.Errors, ctl.StateError{Code: CodeInvalidState, Reason: reason})
+	} else {
+		s.policy.Waterfall = st.Policy.Waterfall
+	}
+
 	// A hub that predates wfm_deemphasis sends none: the default applies.
 	switch st.Policy.WFMDeemphasis {
 	case 0:
@@ -185,6 +193,27 @@ const (
 	maxFrequency = 300_000_000_000
 	maxRate      = 2147483647
 )
+
+// Bounds of the waterfall levels (hub settings waterfall.*).
+const (
+	minWaterfallDB = -200
+	maxWaterfallDB = 50
+)
+
+// checkWaterfall validates the waterfall defaults like the hub settings
+// do; it returns the reason of a refusal.
+func checkWaterfall(w *ctl.StateWaterfall) string {
+	switch {
+	case w == nil:
+		return ""
+	case w.MinDB < minWaterfallDB || w.MaxDB > maxWaterfallDB || w.MinDB >= w.MaxDB:
+		return "invalid waterfall levels"
+	case w.Palette != "default" && w.Palette != "turbo":
+		return "invalid waterfall palette"
+	}
+
+	return ""
+}
 
 // checkPreset validates the data of a preset like the hub does.
 func checkPreset(p ctl.Preset) bool {

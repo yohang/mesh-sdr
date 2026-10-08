@@ -1,0 +1,189 @@
+package presets
+
+import "strconv"
+
+// listPage is Admin › Presets: every preset by sort order, with its band.
+templ listPage(list []*Preset, notice string) {
+	<h1 class="text-2xl font-semibold">Presets</h1>
+	<p class="text-fg-muted">A preset tunes a device for every listener: centre frequency, sample rate and the demodulator listeners start with. A device offers only the presets that fit its frequency range and sample rates.</p>
+	if notice != "" {
+		<p class="font-semibold text-success" role="status">{ notice }</p>
+	}
+	<p><a class="font-semibold" href="/admin/presets/new">New preset</a></p>
+	if len(list) == 0 {
+		<p>No presets yet.</p>
+	} else {
+		<div class="overflow-x-auto">
+			<table class="w-full text-left">
+				<caption class="sr-only">Presets</caption>
+				<thead>
+					<tr class="border-b border-border">
+						<th scope="col" class="py-1 pr-4">Preset</th>
+						<th scope="col" class="py-1 pr-4">Centre</th>
+						<th scope="col" class="py-1 pr-4">Sample rate</th>
+						<th scope="col" class="py-1 pr-4">Start</th>
+						<th scope="col" class="py-1">Actions</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, p := range list {
+						<tr class="border-b border-border">
+							<th scope="row" class="py-1 pr-4 font-medium">
+								<a href={ templ.URL("/admin/presets/" + p.ID().String()) }>{ p.Name() }</a>
+							</th>
+							<td class="py-1 pr-4">{ formatHz(p.CenterFreq()) }</td>
+							<td class="py-1 pr-4">{ strconv.FormatInt(p.SampRate(), 10) } S/s</td>
+							<td class="py-1 pr-4">{ formatHz(p.StartFreq()) } { p.StartMod() }</td>
+							<td class="py-1">
+								<a href={ templ.URL("/admin/presets/" + p.ID().String() + "/delete") }>Delete<span class="sr-only"> { p.Name() }</span></a>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+// problem is one entry of the error summary of the form.
+type problem struct{ ID, Text string }
+
+// problems lists the field errors in form order, then the others.
+func (f presetForm) problems() []problem {
+	var out []problem
+
+	seen := map[string]bool{}
+
+	for _, ff := range formFields {
+		if msg, ok := f.Errors[ff.Name]; ok {
+			out = append(out, problem{ID: "preset-" + ff.Name, Text: ff.Label + ": " + msg})
+			seen[ff.Name] = true
+		}
+	}
+
+	for name, msg := range f.Errors {
+		if !seen[name] {
+			out = append(out, problem{Text: msg})
+		}
+	}
+
+	return out
+}
+
+func (f presetForm) action() string {
+	if f.ID == "" {
+		return "/admin/presets"
+	}
+
+	return "/admin/presets/" + f.ID
+}
+
+func describedBy(f presetForm, ff formField) string {
+	if _, ok := f.Errors[ff.Name]; ok {
+		return "help-" + ff.Name + " err-" + ff.Name
+	}
+
+	return "help-" + ff.Name
+}
+
+func invalid(f presetForm, ff formField) templ.Attributes {
+	if _, ok := f.Errors[ff.Name]; ok {
+		return templ.Attributes{"aria-invalid": "true"}
+	}
+
+	return nil
+}
+
+// formPage is the preset form: a new preset, or the edit of one.
+templ formPage(f presetForm) {
+	if f.ID == "" {
+		<h1 class="text-2xl font-semibold">New preset</h1>
+	} else {
+		<h1 class="text-2xl font-semibold">{ f.Name }</h1>
+	}
+	<p><a href="/admin/presets">All presets</a></p>
+	if f.Notice != "" {
+		<p class="font-semibold text-success" role="status">{ f.Notice }</p>
+	}
+	if f.Failure != "" {
+		<p class="rounded border border-danger p-3 font-semibold text-danger" role="alert">{ f.Failure }</p>
+	}
+	if ps := f.problems(); len(ps) > 0 {
+		<div class="rounded border border-danger p-3" role="alert" tabindex="-1">
+			<p class="font-semibold text-danger">The preset was not saved:</p>
+			<ul class="mt-1 list-disc pl-5">
+				for _, p := range ps {
+					<li>
+						if p.ID != "" {
+							<a href={ templ.SafeURL("#" + p.ID) }>{ p.Text }</a>
+						} else {
+							{ p.Text }
+						}
+					</li>
+				}
+			</ul>
+		</div>
+	}
+	<form class="flex max-w-xl flex-col gap-4" method="post" action={ templ.SafeURL(f.action()) } novalidate>
+		if f.ID != "" {
+			<input type="hidden" name="version" value={ strconv.Itoa(f.Version) }/>
+		}
+		for _, ff := range formFields {
+			<div class="flex flex-col gap-1">
+				<label for={ "preset-" + ff.Name } class="font-medium">
+					{ ff.Label }
+					if !ff.Required {
+						<span class="text-sm text-fg-muted">(optional)</span>
+					}
+				</label>
+				<input
+					id={ "preset-" + ff.Name }
+					name={ ff.Name }
+					value={ f.Values[ff.Name] }
+					class="rounded border border-border px-2 py-1"
+					if ff.Numeric {
+						type="number"
+						step="1"
+						inputmode="numeric"
+					} else {
+						type="text"
+					}
+					required?={ ff.Required }
+					aria-describedby={ describedBy(f, ff) }
+					{ invalid(f, ff)... }
+				/>
+				<p id={ "help-" + ff.Name } class="text-sm text-fg-muted">{ ff.Help }</p>
+				if msg, ok := f.Errors[ff.Name]; ok {
+					<p id={ "err-" + ff.Name } class="text-sm font-semibold text-danger">{ msg }</p>
+				}
+			</div>
+		}
+		<div class="flex flex-wrap items-center gap-4">
+			<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">
+				if f.ID == "" {
+					Create the preset
+				} else {
+					Save the preset
+				}
+			</button>
+			if f.ID != "" {
+				<a href={ templ.URL("/admin/presets/" + f.ID + "/delete") }>Delete this preset</a>
+			}
+		</div>
+	</form>
+}
+
+// deletePage asks to confirm the deletion of a preset (ADM-020). Deleting
+// never retunes a device; a preset that schedules use is refused.
+templ deletePage(p *Preset, failure string) {
+	<h1 class="text-2xl font-semibold">Delete { p.Name() }</h1>
+	if failure != "" {
+		<p class="rounded border border-danger p-3 font-semibold text-danger" role="alert">{ failure }</p>
+	}
+	<p>Devices tuned to this preset keep their tuning. A preset that schedules use cannot be deleted.</p>
+	<form class="flex flex-wrap items-center gap-4" method="post" action={ templ.SafeURL("/admin/presets/" + p.ID().String() + "/delete") }>
+		<input type="hidden" name="version" value={ strconv.Itoa(p.Version()) }/>
+		<button type="submit" class="rounded border border-danger px-3 py-1 font-semibold text-danger">Delete the preset</button>
+		<a href={ templ.URL("/admin/presets/" + p.ID().String()) }>Cancel</a>
+	</form>
+}

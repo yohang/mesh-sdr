@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
@@ -15,7 +14,6 @@ import (
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
-	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/schedules"
@@ -196,13 +194,6 @@ func (a scheduleDevices) All(ctx context.Context) ([]schedules.Device, error) {
 	return out, nil
 }
 
-// Limits implements api.DeviceLimits.
-func (a scheduleDevices) Limits(ctx context.Context, id string) (presets.DeviceLimits, bool, error) {
-	d, ok, err := a.Device(ctx, id)
-
-	return limitsOf(d), ok, err
-}
-
 func limitsOf(d schedules.Device) presets.DeviceLimits {
 	return presets.DeviceLimits{FreqMin: d.FreqMin, FreqMax: d.FreqMax, SampleRates: d.SampleRates}
 }
@@ -292,7 +283,12 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 
 	st := ctl.StateApply{
 		Presets: map[string]ctl.Preset{}, Devices: map[string]ctl.DesiredDevice{},
-		Policy: ctl.StatePolicy{ListenPolicy: policy, WFMDeemphasis: s.settings.Int("wfm_deemphasis")},
+		Policy: ctl.StatePolicy{
+			ListenPolicy: policy, WFMDeemphasis: s.settings.Int("wfm_deemphasis"),
+			Waterfall: &ctl.StateWaterfall{
+				MinDB: s.settings.Int("waterfall.min_db"), MaxDB: s.settings.Int("waterfall.max_db"), Palette: s.settings.String("waterfall.palette"),
+			},
+		},
 	}
 
 	for _, plan := range plans {
@@ -355,19 +351,6 @@ func ctlPreset(p *presets.Preset) ctl.Preset {
 	return out
 }
 
-// deviceScope implements api.DeviceScope: the operator role on the device
-// (global roles included).
-type deviceScope struct{}
-
-func (deviceScope) CanOperate(ctx context.Context, device string) bool {
-	id, err := shared.NewDeviceID(device)
-	if err != nil {
-		return false
-	}
-
-	return identityhttp.FromContext(ctx).Principal().HasOnDevice(identitydomain.RoleOperator, id)
-}
-
 // deviceSchedules adapts the schedules to the device page (grid/http).
 type deviceSchedules struct {
 	schedules *schedules.Service
@@ -384,7 +367,7 @@ func (a deviceSchedules) ForDevice(ctx context.Context, device string) ([]gridht
 
 	for _, s := range list {
 		row := gridhttp.ScheduleRow{
-			ID: s.ID().String(), Preset: s.Preset().String(), Window: s.Window().String(), Days: days(s.Days()),
+			ID: s.ID().String(), Preset: s.Preset().String(), Window: s.Window().String(), Days: s.Days().String(),
 			Priority: s.Priority().Int(), Enabled: s.Enabled(),
 		}
 
@@ -402,23 +385,14 @@ func (a deviceSchedules) ForDevice(ctx context.Context, device string) ([]gridht
 	return out, nil
 }
 
-// days formats a week-day mask for people.
-func days(d schedules.DaysOfWeek) string {
-	if d.Mask() == schedules.EveryDay {
-		return "Every day"
+// presetName names a preset for the schedules page ("" when unknown).
+func (s *scheduling) presetName(ctx context.Context, id shared.UUID) string {
+	p, err := s.presets.Get(ctx, id.String())
+	if err != nil {
+		return ""
 	}
 
-	names := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
-
-	var out []string
-
-	for i, n := range names {
-		if d.Mask()&(1<<i) != 0 {
-			out = append(out, n)
-		}
-	}
-
-	return strings.Join(out, ", ")
+	return p.Name()
 }
 
 // NeedingAttention counts the schedules the hub disabled (Admin › Overview).

@@ -22,6 +22,7 @@ type Settings struct {
 
 	Receiver  SettingsReceiver  `toml:"receiver" envPrefix:"RECEIVER__" jsonschema:"description=Receiver identity and policies."`
 	UI        SettingsUI        `toml:"ui" envPrefix:"UI__" jsonschema:"description=Look and feel."`
+	Waterfall SettingsWaterfall `toml:"waterfall" envPrefix:"WATERFALL__" jsonschema:"description=Waterfall defaults of the receiver (ADR 0026)."`
 	Session   SettingsSession   `toml:"session" envPrefix:"SESSION__" jsonschema:"description=Session lifetimes."`
 	Auth      SettingsAuth      `toml:"auth" envPrefix:"AUTH__" jsonschema:"description=Sign-in throttling."`
 	Retention SettingsRetention `toml:"retention" envPrefix:"RETENTION__" jsonschema:"description=Retention of DB-backed stores."`
@@ -47,6 +48,15 @@ type SettingsReceiver struct {
 type SettingsUI struct {
 	ThemeMode   string `toml:"theme_mode" env:"THEME_MODE" jsonschema:"enum=light,enum=dark,enum=auto" jsonschema_extras:"x-public=true,x-label=Theme" jsonschema_description:"Theme mode (UI-001): light or dark, or auto to follow the visitor's prefers-color-scheme. A change applies on the next full page load."`
 	ShortcutSet string `toml:"shortcut_set" env:"SHORTCUT_SET" jsonschema:"enum=default,enum=off" jsonschema_extras:"x-public=true,x-label=Keyboard shortcuts" jsonschema_description:"Keyboard shortcut set: default, or off to disable single-key shortcuts."`
+}
+
+// SettingsWaterfall is the [settings.waterfall] table: the one source of
+// the receiver waterfall levels and palette (ADR 0026), pushed to the nodes
+// in the desired state. Listeners still have the Auto levels button.
+type SettingsWaterfall struct {
+	MinDB   int    `toml:"min_db" env:"MIN_DB" jsonschema:"minimum=-200,maximum=50" jsonschema_extras:"x-public=true,x-label=Lowest level (dB)" jsonschema_description:"Waterfall level shown with the darkest colour, in dB (-200 to 50). Must be below the highest level."`
+	MaxDB   int    `toml:"max_db" env:"MAX_DB" jsonschema:"minimum=-200,maximum=50" jsonschema_extras:"x-public=true,x-label=Highest level (dB)" jsonschema_description:"Waterfall level shown with the brightest colour, in dB (-200 to 50)."`
+	Palette string `toml:"palette" env:"PALETTE" jsonschema:"enum=default,enum=turbo" jsonschema_extras:"x-public=true,x-label=Palette" jsonschema_description:"Waterfall colour palette: default or turbo."`
 }
 
 // SettingsSession is the [settings.session] table (AUTH-003, ADR 0009).
@@ -109,6 +119,7 @@ func DefaultSettings() Settings {
 		UI: SettingsUI{
 			ThemeMode: "auto", ShortcutSet: "default",
 		},
+		Waterfall: SettingsWaterfall{MinDB: -88, MaxDB: -20, Palette: "turbo"},
 		Session: SettingsSession{
 			IdleTimeout: MustDuration("24h"), AbsoluteTimeout: MustDuration("24h"), RememberMeTimeout: MustDuration("30d"),
 		},

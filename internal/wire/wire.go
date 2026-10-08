@@ -38,6 +38,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/mail"
+	"github.com/yohang/mesh-sdr/internal/presets"
+	"github.com/yohang/mesh-sdr/internal/schedules"
 	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shell"
@@ -407,8 +409,6 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		TokenHandlers:    api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
 		FeatureHandlers: api.NewFeatureHandlers(idm.HTTP, gridapp.NewFeatures(gridsqlite.NewDeviceRepository(adapter),
 			gridsqlite.NewCapabilityRepository(adapter), storeListenPolicy{store: settingsStore}, g.links())),
-		PresetHandlers:   api.NewPresetHandlers(sch.presets, scheduleDevices{repo: g.deviceRepo}),
-		ScheduleHandlers: api.NewScheduleHandlers(sch.schedules, deviceScope{}),
 	}
 
 	router := httpserver.NewRouter(
@@ -426,11 +426,19 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 			Logger: component(logger, "settings.http"),
 		}),
 		imagesHTTP,
+		presets.NewPages(presets.PagesDeps{
+			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin), Service: sch.presets,
+			Logger: component(logger, "presets.http"),
+		}),
+		schedules.NewPages(schedules.PagesDeps{
+			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin), Service: sch.schedules,
+			PresetName: sch.presetName, Logger: component(logger, "schedules.http"),
+		}),
 		gridhttp.NewAdminModule(gridhttp.AdminDeps{
 			Render: shellModule.Renderer, Devices: g.devices, Nodes: g.nodes, History: g.history, Capabilities: g.caps,
 			Connections: g.presence, Users: userNames{users: identitysqlite.NewUsers(adapter, shared.NewUUIDv7Generator())},
-			Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets},
-			Operator:  idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
+			Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets}, PresetName: sch.presetName,
+			Operator: idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
 			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Now: now,
 			Logger: component(logger, "grid.http.admin"),
 		}),
