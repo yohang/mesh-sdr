@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -51,6 +52,8 @@ type peer struct {
 	q       *sendq.Queue
 	claims  token.Claims
 	hello   media.Hello
+	// attached are the presence reports, "<device>/<demod mode>".
+	attached []string
 }
 
 func (p *peer) Claims() token.Claims {
@@ -107,6 +110,13 @@ func (p *peer) RateLimited(rxv1.Envelope, time.Duration) {
 }
 
 func (p *peer) Queue() *sendq.Queue { return p.q }
+
+func (p *peer) Attached(device, demod string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.attached = append(p.attached, device+"/"+demod)
+}
 
 func (p *peer) last() reply {
 	p.mu.Lock()
@@ -240,6 +250,13 @@ func TestStreamSessionErrors(t *testing.T) {
 
 	if len(p.sent) == 0 || p.sent[0] != rxv1.TypeDeviceConfig {
 		t.Fatalf("sent %v", p.sent)
+	}
+
+	// The hub presence learns the device listened to and the mode, on
+	// changes only (listener counts, UI-021).
+	want := []string{"vhf/", "vhf/nfm", "vhf/usb", "vhf/wfm", "vhf/", "/"}
+	if !slices.Equal(p.attached, want) {
+		t.Errorf("attached reports %v, want %v", p.attached, want)
 	}
 }
 

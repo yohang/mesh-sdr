@@ -182,6 +182,23 @@ func (r *ConnectionRepository) CountOpenNode(ctx context.Context, node domain.No
 	return int(n), nil
 }
 
+// CountOpenMediaByDevice implements domain.ConnectionRepository.
+func (r *ConnectionRepository) CountOpenMediaByDevice(ctx context.Context) (map[string]int, error) {
+	rows, err := sqlc.New(r.db.Reader(ctx)).CountOpenMediaByDevice(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count listeners by device: %w", err)
+	}
+
+	out := make(map[string]int, len(rows))
+	for _, row := range rows {
+		if row.DeviceID.Valid {
+			out[row.DeviceID.String] = int(row.Listeners)
+		}
+	}
+
+	return out, nil
+}
+
 // OpenNodes implements domain.ConnectionRepository.
 func (r *ConnectionRepository) OpenNodes(ctx context.Context) ([]domain.NodeID, error) {
 	rows, err := sqlc.New(r.db.Reader(ctx)).OpenMediaNodes(ctx)

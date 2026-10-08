@@ -27,6 +27,11 @@ type Peer interface {
 	RateLimited(req rxv1.Envelope, retry time.Duration)
 	// Queue is the connection's send queue for binary frames and meters.
 	Queue() *sendq.Queue
+	// Attached reports the device the connection listens to and its first
+	// demodulator's mode ("" for none), for the hub presence registry
+	// (connection.heartbeat device_id and demod, §7.3): the listener count
+	// of a device comes from it (UI-021, RX-035).
+	Attached(deviceID, demod string)
 }
 
 // Streams opens the stream handler of a media connection.

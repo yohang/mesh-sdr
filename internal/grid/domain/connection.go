@@ -219,6 +219,9 @@ type ConnectionRepository interface {
 	CountOpenKind(ctx context.Context, kind ConnectionKind) (int, error)
 	// CountOpenNode counts the open rows of a node.
 	CountOpenNode(ctx context.Context, node NodeID) (int, error)
+	// CountOpenMediaByDevice counts the open media rows attached to a
+	// device, by device id (devices without listeners are absent).
+	CountOpenMediaByDevice(ctx context.Context) (map[string]int, error)
 	// OpenNodes lists the nodes with open media rows.
 	OpenNodes(ctx context.Context) ([]NodeID, error)
 	// DeleteClosedBefore applies the retention.

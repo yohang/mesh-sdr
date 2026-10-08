@@ -62,3 +62,8 @@ DELETE FROM connections WHERE user_id = sqlc.arg(user_id) AND closed_at IS NOT N
 -- name: AnonymizeOpenUserConnections :execrows
 UPDATE connections SET user_id = NULL, session_id = NULL, ip = '', user_agent = NULL
 WHERE user_id = sqlc.arg(user_id) AND closed_at IS NULL;
+
+-- name: CountOpenMediaByDevice :many
+SELECT device_id, count(*) AS listeners FROM connections
+WHERE closed_at IS NULL AND kind = 'media' AND device_id IS NOT NULL
+GROUP BY device_id;
