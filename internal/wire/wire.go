@@ -302,8 +302,16 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	adminGate := &roleGate{role: identitydomain.RoleAdmin}
 	operatorGate := &roleGate{role: identitydomain.RoleOperator}
+
+	// Who sees the files the nodes sent follows the listen policies, known
+	// once the events module is built below.
+	var filesAccess *fileAccess
+
+	filesGate := shell.GateFunc(func(ctx context.Context) bool {
+		return filesAccess != nil && !filesAccess.visibility(ctx).Denied
+	})
 	shellModule := shell.New(shell.Deps{
-		Settings: settingsStore, AdminGate: adminGate, User: operatorLinks(userOf, operatorGate.Allows), Logger: logger,
+		Settings: settingsStore, AdminGate: adminGate, FilesGate: filesGate, User: operatorLinks(userOf, operatorGate.Allows), Logger: logger,
 		Bookmarks: &shell.BookmarksLink{Gate: operatorGate, Path: bookmarks.ManagePath},
 		Images:    stationImages{b: images, logger: component(logger, "shell.infra.station_images")},
 	})
@@ -391,7 +399,38 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	ge := g.publishEvents(broker, policies, now, logger)
 	workers = append(workers, events.Run, ge.runPresence)
 
-	scheduler, retention, err := newJobs(adapter, idm, sch, settingsStore, auditLog, logger)
+	filesAccess = &fileAccess{
+		signedIn: func(ctx context.Context) bool { return idm.HTTP.Authorize(ctx, identitydomain.RoleListener) == nil },
+		global:   func() string { return settingsStore.String("listen_policy") }, policies: policies,
+		logger: component(logger, "files.wire.access"),
+	}
+	filesRepo := files.NewFiles(adapter)
+	filesPolicy := func() files.RetentionPolicy {
+		return files.RetentionPolicy{
+			Count: settingsStore.Int("files.retention_count"), MaxAge: time.Duration(settingsStore.Int("files.retention_days")) * 24 * time.Hour,
+			MaxBytes: int64(settingsStore.Int("files.max_total_bytes")),
+		}
+	}
+	filesRetention := files.NewRetention(adapter, filesPolicy, now)
+
+	if g.control != nil {
+		fileEvents{
+			ingest: files.NewIngest(files.IngestDeps{
+				Repo: filesRepo, Tx: adapter, Processor: files.NewProcessor(), Retention: filesRetention,
+				Published: filesAccess.published(broker), Logger: component(logger, "files.app.ingest"),
+			}),
+			devices: g.devices, logger: component(logger, "files.wire.ingest"),
+		}.register(g.control)
+	}
+
+	gallery := files.NewGallery(files.GalleryDeps{
+		Repo: filesRepo, Tx: adapter, Audit: auditLog, Render: shellModule.Renderer, Visibility: filesAccess.visibility,
+		Listener: idm.HTTP.Require(identitydomain.RoleListener), Operator: idm.HTTP.Require(identitydomain.RoleOperator),
+		Admin: idm.HTTP.Require(identitydomain.RoleAdmin), CanDelete: operatorGate.Allows, CanBulkDelete: adminGate.Allows,
+		Policy: filesPolicy, Logger: component(logger, "files.http.gallery"),
+	})
+
+	scheduler, retention, err := newJobs(adapter, idm, sch, settingsStore, auditLog, filesRetention, filesPolicy, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jobs: %w", err)
 	}
@@ -434,6 +473,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		TokenHandlers:    api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
 		FeatureHandlers:  api.NewFeatureHandlers(idm.HTTP, features),
 		BookmarkHandlers: bm,
+		FileHandlers:     api.NewFileHandlers(gallery),
 	}
 
 	router := httpserver.NewRouter(
@@ -456,6 +496,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 			Logger: component(logger, "presets.http"),
 		}),
 		bm,
+		gallery,
 		schedules.NewPages(schedules.PagesDeps{
 			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin), Service: sch.schedules,
 			PresetName: sch.presetName, Logger: component(logger, "schedules.http"),

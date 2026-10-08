@@ -85,6 +85,16 @@ func (a *Agent) Emit(typ rxv1.MessageType, key string, class Class, build func(s
 	a.o.Buffer.Push(Event{Seq: seq, Type: typ, Payload: json.RawMessage(raw), Key: key, Class: class, Size: len(raw)})
 }
 
+// emitRef numbers and buffers an event whose payload is encoded when it is
+// sent (a file chunk is read from the outbox then); size is the RAM the
+// event holds. It returns the seq.
+func (a *Agent) emitRef(typ rxv1.MessageType, class Class, size int, build func(seq int64) any) int64 {
+	seq := a.seq.Add(1)
+	a.o.Buffer.Push(Event{Seq: seq, Type: typ, Payload: build(seq), Class: class, Size: size})
+
+	return seq
+}
+
 // Welcome answers a hub hello received at receivedAt and adopts its
 // heartbeat interval. rtt, when known, corrects the clock offset (§4.5).
 func (a *Agent) Welcome(h ctl.Hello, receivedAt time.Time) ctl.Welcome {

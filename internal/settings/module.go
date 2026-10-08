@@ -25,14 +25,17 @@ const FormBodyLimit = 256 << 10
 type RetentionRow struct {
 	Store, Label, SettingKey string
 	Retention                time.Duration
-	Rows                     int64
-	Bytes                    int64
-	Sized                    bool
-	Running                  bool
-	LastFinished             time.Time
-	LastFailed               bool
-	LastError                string
-	LastRows                 int64
+	// Policy describes a retention that is not one duration (files);
+	// "" shows Retention.
+	Policy       string
+	Rows         int64
+	Bytes        int64
+	Sized        bool
+	Running      bool
+	LastFinished time.Time
+	LastFailed   bool
+	LastError    string
+	LastRows     int64
 }
 
 // Retention is the retention view and "purge now".

@@ -304,8 +304,94 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /files/{id}/content:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+    get:
+      operationId: getFileContent
+      x-meshsdr-access: anonymous
+      summary: The content of a file the nodes sent (FIL-002)
+      description: |
+        The stored content of a complete file (an SSTV or FAX image, a text
+        log), with its stored, validated type, as an attachment named by the
+        hub. Who may read it follows the listen policy (ADR 0026): signed-in
+        users read every file, visitors those of the devices they may
+        listen to, none under the registered policy. A file the caller may
+        not read is not found.
+      tags: [files]
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The content
+          headers:
+            ETag:
+              schema:
+                type: string
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            text/plain:
+              schema:
+                type: string
+        "304":
+          description: Not modified (If-None-Match)
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /files/{id}/thumbnail:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+    get:
+      operationId: getFileThumbnail
+      x-meshsdr-access: anonymous
+      summary: The thumbnail of an image file (FIL-001)
+      description: |
+        A JPEG of at most 320 pixels per side, made by the hub when the
+        image arrived. Same rights as the content.
+      tags: [files]
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The thumbnail
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "304":
+          description: Not modified (If-None-Match)
+        "404":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
+    FileID:
+      name: id
+      in: path
+      required: true
+      description: File id (UUID).
+      schema:
+        type: string
+        maxLength: 36
     FromHz:
       name: from
       in: query

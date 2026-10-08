@@ -71,7 +71,7 @@ Modules (bounded contexts):
 - `shell`: app shell UI (layout data, navigation, theming, static and error pages)
 - `events`: hub events bus, socket admission, `/api/ws`
 - `jobs`: periodic jobs scheduler, retention view
-- `files`: receiver images (upload, re-encoding, blobs)
+- `files`: receiver images (upload, re-encoding, blobs) and the files the nodes send (ingest over the control channel, gallery, detail, download, deletion, retention)
 - `presets`, `schedules`: presets, schedules, the guard and the planner of the desired state (ADR 0020)
 
 ## Architecture (pragmatic DDD, ADR 0025)

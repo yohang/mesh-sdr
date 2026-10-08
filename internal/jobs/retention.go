@@ -28,6 +28,9 @@ type Store struct {
 	SettingKey string // "retention.sessions"
 	Job        string // "sessions.reap"
 	Stats      Stats
+	// Policy, when set, describes a retention that is not one duration
+	// (files: count, age and size); SettingKey is then not read.
+	Policy func() string
 }
 
 // RetentionValues reads the current retention settings.
@@ -56,10 +59,12 @@ func NewRetention(stores []Store, scheduler *Scheduler, values RetentionValues, 
 type StoreView struct {
 	Store     Store
 	Retention time.Duration
-	Rows      int64
-	Bytes     int64
-	Sized     bool
-	LastRun   *Run
+	// Policy describes a retention that is not one duration ("" otherwise).
+	Policy  string
+	Rows    int64
+	Bytes   int64
+	Sized   bool
+	LastRun *Run
 }
 
 // List returns every store in registration order.
@@ -77,9 +82,14 @@ func (r *Retention) List(ctx context.Context) ([]StoreView, error) {
 			return nil, fmt.Errorf("last run of %s: %w", s.Job, err)
 		}
 
-		out = append(out, StoreView{
-			Store: s, Retention: r.values.Duration(s.SettingKey), Rows: rows, Bytes: bytes, Sized: sized, LastRun: run,
-		})
+		v := StoreView{Store: s, Rows: rows, Bytes: bytes, Sized: sized, LastRun: run}
+		if s.Policy != nil {
+			v.Policy = s.Policy()
+		} else {
+			v.Retention = r.values.Duration(s.SettingKey)
+		}
+
+		out = append(out, v)
 	}
 
 	return out, nil

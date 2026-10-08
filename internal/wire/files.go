@@ -2,14 +2,23 @@ package wire
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
+	"strconv"
 	"time"
 
-	"github.com/yohang/mesh-sdr/internal/shared/audit"
-
 	"github.com/yohang/mesh-sdr/internal/db"
+	"github.com/yohang/mesh-sdr/internal/events"
 	"github.com/yohang/mesh-sdr/internal/files"
+	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
+	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
+	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
+	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -50,4 +59,221 @@ func (s stationImages) HasImage(ctx context.Context, slot string) bool {
 	}
 
 	return f != nil
+}
+
+// The files the nodes send (FIL-005): the control channel events go to the
+// files ingest, which the composition root wires to the grid (the node's
+// devices and clock offset), the listen policies (who sees a file) and the
+// hub events (files.new).
+
+var topicNotifications = events.MustTopic("notifications")
+
+// filesNewEvent is the files.new payload (§6.6).
+type filesNewEvent struct {
+	FileID           string `json:"file_id"`
+	Kind             string `json:"kind"`
+	DeviceID         string `json:"device_id,omitempty"`
+	Mode             string `json:"mode,omitempty"`
+	FrequencyHz      int64  `json:"frequency_hz,omitempty"`
+	ReceivedStartUTC string `json:"received_start_utc,omitempty"`
+	TS               int64  `json:"ts"`
+}
+
+// fileAccess decides who sees the files the nodes sent (ADR 0026: the
+// listen policy, no files policy): signed-in users see every file; under
+// the anonymous global policy, visitors see the files of the devices they
+// may listen to (a device the registry no longer lists follows the global
+// policy); under the registered policy, visitors see none.
+type fileAccess struct {
+	signedIn func(ctx context.Context) bool
+	global   func() string
+	policies *policyCache
+	logger   *slog.Logger
+}
+
+// visibility returns the files the caller of ctx may see.
+func (a fileAccess) visibility(ctx context.Context) files.Access {
+	if a.signedIn(ctx) {
+		return files.Access{}
+	}
+
+	return a.anonymous(ctx)
+}
+
+// anonymous returns the files a visitor may see; it fails closed.
+func (a fileAccess) anonymous(ctx context.Context) files.Access {
+	if a.global() != gridapp.ListenAnonymous {
+		return files.Access{Denied: true}
+	}
+
+	snap, err := a.policies.get(ctx)
+	if err != nil {
+		a.logger.ErrorContext(ctx, "listen policies for the files", slog.Any("error", err))
+
+		return files.Access{Denied: true}
+	}
+
+	var hidden []string
+
+	for d, lp := range snap.devices {
+		if lp != gridapp.ListenAnonymous {
+			hidden = append(hidden, d)
+		}
+	}
+
+	slices.Sort(hidden)
+
+	return files.Access{HiddenDevices: hidden}
+}
+
+// published announces a new file on /api/ws (files.new) to the viewers who
+// may see it.
+func (a fileAccess) published(b events.Publisher) func(ctx context.Context, e files.Entry) {
+	return func(ctx context.Context, e files.Entry) {
+		vis := a.anonymous(ctx)
+		visitors := vis.Allows(e.DeviceID)
+
+		b.Publish(ctx, events.Event{
+			Topic: topicNotifications, Type: rxv1.TypeFilesNew.String(),
+			Payload: filesNewEvent{
+				FileID: e.ID.String(), Kind: string(e.Kind), DeviceID: e.DeviceID, Mode: e.Mode, FrequencyHz: e.FrequencyHz,
+				ReceivedStartUTC: e.ReceivedStart.UTC().Format(time.RFC3339Nano), TS: e.CreatedAt.UnixMilli(),
+			},
+			Audience: func(v events.Viewer) bool { return !v.Anonymous() || visitors },
+		})
+	}
+}
+
+// fileEvents adapts the control channel events file.begin, file.chunk and
+// file.end to the files ingest. A payload that cannot be read is logged and
+// acknowledged like any refused file.
+type fileEvents struct {
+	ingest  *files.Ingest
+	devices interface {
+		ListByNode(ctx context.Context, id griddomain.NodeID) ([]*griddomain.Device, error)
+	}
+	logger *slog.Logger
+}
+
+// register adds the handlers to the control channel.
+func (f fileEvents) register(c *gridapp.Control) {
+	c.Handle(rxv1.TypeFileBegin, f.begin)
+	c.Handle(rxv1.TypeFileChunk, f.chunk)
+	c.Handle(rxv1.TypeFileEnd, f.end)
+	c.OnApplied(func(ctx context.Context, id griddomain.NodeID, types []rxv1.MessageType) {
+		if slices.Contains(types, rxv1.TypeFileEnd) {
+			// The batch is committed: a closing channel must not cut the
+			// completion short.
+			f.ingest.Finalize(context.WithoutCancel(ctx), id.String())
+		}
+	})
+}
+
+func (f fileEvents) refused(ctx context.Context, n *griddomain.Node, ev gridapp.Event, reason string) error {
+	f.logger.WarnContext(ctx, "file event from a node refused", slog.String("node_id", n.ID().String()),
+		slog.String("type", string(ev.Type)), slog.String("reason", reason))
+
+	return nil
+}
+
+func (f fileEvents) begin(ctx context.Context, n *griddomain.Node, ev gridapp.Event, now time.Time) error {
+	var p ctl.FileBegin
+	if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		return f.refused(ctx, n, ev, "invalid payload")
+	}
+
+	in := files.Incoming{
+		Node: n.ID().String(), Kind: files.Kind(p.Kind), MIME: files.MIMEType(p.MIME), Size: p.Size, Mode: p.Mode,
+		FrequencyHz: p.FrequencyHz, Metadata: p.Metadata,
+	}
+
+	var errs []error
+
+	parse := func(err error) {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	var err error
+
+	in.ID, err = shared.ParseUUID(p.FileID)
+	parse(err)
+
+	in.SHA256, err = hex.DecodeString(p.SHA256)
+	parse(err)
+
+	in.DeviceID, err = shared.NewDeviceID(p.DeviceID)
+	parse(err)
+
+	in.ReceivedStart, err = time.Parse(time.RFC3339Nano, p.ReceivedStartUTC)
+	parse(err)
+
+	if p.ReceivedEndUTC != "" {
+		in.ReceivedEnd, err = time.Parse(time.RFC3339Nano, p.ReceivedEndUTC)
+		parse(err)
+	}
+
+	for _, u := range []struct {
+		s  string
+		to *shared.UUID
+	}{{p.PresetID, &in.PresetID}, {p.DecoderSessionID, &in.DecoderSessionID}} {
+		if u.s != "" {
+			*u.to, err = shared.ParseUUID(u.s)
+			parse(err)
+		}
+	}
+
+	if len(errs) > 0 {
+		return f.refused(ctx, n, ev, errors.Join(errs...).Error())
+	}
+
+	devices, err := f.devices.ListByNode(ctx, n.ID())
+	if err != nil {
+		return err
+	}
+
+	if !slices.ContainsFunc(devices, func(d *griddomain.Device) bool { return d.ID() == in.DeviceID }) {
+		return f.refused(ctx, n, ev, "device "+strconv.Quote(p.DeviceID)+" is not a device of the node")
+	}
+
+	return f.ingest.Begin(ctx, in, n.Runtime().ClockOffsetMS, now)
+}
+
+func (f fileEvents) chunk(ctx context.Context, n *griddomain.Node, ev gridapp.Event, now time.Time) error {
+	var p ctl.FileChunk
+	if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		return f.refused(ctx, n, ev, "invalid payload")
+	}
+
+	id, err := shared.ParseUUID(p.FileID)
+	if err != nil {
+		return f.refused(ctx, n, ev, "invalid file id")
+	}
+
+	var data []byte
+
+	// An undecodable or oversized chunk reaches the ingest empty, which
+	// refuses the file.
+	if len(p.DataB64) <= base64.StdEncoding.EncodedLen(files.MaxWireChunk) {
+		if d, err := base64.StdEncoding.DecodeString(p.DataB64); err == nil {
+			data = d
+		}
+	}
+
+	return f.ingest.Chunk(ctx, n.ID().String(), id, p.Offset, data, now)
+}
+
+func (f fileEvents) end(ctx context.Context, n *griddomain.Node, ev gridapp.Event, _ time.Time) error {
+	var p ctl.FileEnd
+	if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		return f.refused(ctx, n, ev, "invalid payload")
+	}
+
+	id, err := shared.ParseUUID(p.FileID)
+	if err != nil {
+		return f.refused(ctx, n, ev, "invalid file id")
+	}
+
+	return f.ingest.End(ctx, n.ID().String(), id)
 }

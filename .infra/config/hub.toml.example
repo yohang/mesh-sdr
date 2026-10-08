@@ -213,6 +213,11 @@ trusted_proxies = []
 # audit_log = "365d"                     # audit log (at least 30d)
 # connections = "30d"                    # closed presence rows (at least 1d)
 
+[settings.files]
+# retention_count = 20                   # newest files kept per kind (1..100000)
+# retention_days = 0                     # maximum age in days (0: no age limit)
+# max_total_bytes = 0                    # total size cap in bytes (0: no cap)
+
 [settings.grid]
 # heartbeat_interval_s = 10              # node heartbeat period (1..300 s)
 # offline_after_s = 60                   # offline without heartbeat (5..3600 s, > 2 heartbeats)

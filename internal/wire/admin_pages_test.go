@@ -191,7 +191,7 @@ func TestAdminPurgeNow(t *testing.T) {
 		t.Errorf("purge = %d %s", res.StatusCode, body)
 	}
 
-	if res, _ := b.form("/admin/retention/purge", url.Values{"store": {"files"}}, true); res.StatusCode != http.StatusNotFound {
+	if res, _ := b.form("/admin/retention/purge", url.Values{"store": {"no_such_store"}}, true); res.StatusCode != http.StatusNotFound {
 		t.Errorf("unknown store = %d", res.StatusCode)
 	}
 

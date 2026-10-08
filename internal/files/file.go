@@ -26,10 +26,14 @@ var (
 // Kind is the kind of a file (`files.kind`).
 type Kind string
 
-// Kinds. Only the receiver kinds are produced in this part.
+// Kinds: the receiver images uploaded by admins, and the files the nodes
+// send (FIL-005).
 const (
 	KindReceiverAvatar Kind = "receiver_avatar"
 	KindReceiverPhoto  Kind = "receiver_photo"
+	KindSSTV           Kind = "sstv"
+	KindFAX            Kind = "fax"
+	KindTextLog        Kind = "text_log"
 )
 
 // MIMEType is an allowed media type (`files.mime_type` allow-list).
@@ -40,6 +44,8 @@ const (
 	MIMEPNG  MIMEType = "image/png"
 	MIMEJPEG MIMEType = "image/jpeg"
 	MIMEWebP MIMEType = "image/webp"
+	// MIMEText is plain UTF-8 text (skimmer logs).
+	MIMEText MIMEType = "text/plain"
 )
 
 // Extension returns the file name extension of the type.
@@ -51,6 +57,8 @@ func (m MIMEType) Extension() string {
 		return "jpg"
 	case MIMEWebP:
 		return "webp"
+	case MIMEText:
+		return "txt"
 	default:
 		return "bin"
 	}

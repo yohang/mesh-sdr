@@ -306,7 +306,7 @@ templ storesView(rows []RetentionRow, notice, failure string) {
 					for _, r := range rows {
 						<tr class="border-b border-border">
 							<th scope="row" class="py-1 pr-4 font-medium">{ r.Label }</th>
-							<td class="py-1 pr-4">{ formatDuration(r.Retention) }</td>
+							<td class="py-1 pr-4">{ retentionText(r) }</td>
 							<td class="py-1 pr-4">{ strconv.FormatInt(r.Rows, 10) }</td>
 							<td class="py-1 pr-4">
 								if r.Sized {
@@ -317,7 +317,7 @@ templ storesView(rows []RetentionRow, notice, failure string) {
 							</td>
 							<td class="py-1 pr-4">{ lastRun(r) }</td>
 							<td class="py-1">
-								<form method="post" action="/admin/retention/purge" hx-post="/admin/retention/purge" hx-target="#retention-stores" hx-swap="outerHTML" hx-confirm={ "Delete the " + r.Label + " rows older than " + formatDuration(r.Retention) + " now?" } data-confirm-action="Delete now">
+								<form method="post" action="/admin/retention/purge" hx-post="/admin/retention/purge" hx-target="#retention-stores" hx-swap="outerHTML" hx-confirm={ purgeQuestion(r) } data-confirm-action="Delete now">
 									<input type="hidden" name="store" value={ r.Store }/>
 									<button type="submit" class="rounded border border-border px-2 py-1">Purge now<span class="sr-only">: { r.Label }</span></button>
 								</form>

@@ -17,6 +17,7 @@ import (
 	"image/jpeg"
 	"image/png"
 
+	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/webp"
 )
 
@@ -76,41 +77,83 @@ func supportedModel(m color.Model) bool {
 
 // Reencode implements ImageProcessor.
 func (p *Processor) Reencode(ctx context.Context, data []byte, out MIMEType, maxPixels int) (Image, error) {
-	t, err := Sniff(data)
+	img, err := p.decode(ctx, data, MaxImageSide, maxPixels)
 	if err != nil {
 		return Image{}, err
+	}
+
+	return encode(img, out)
+}
+
+// ReencodeWithThumbnail re-encodes an image of at most maxSide pixels per
+// side like Reencode, and also returns a JPEG thumbnail whose longest side
+// is at most side pixels.
+func (p *Processor) ReencodeWithThumbnail(ctx context.Context, data []byte, out MIMEType, maxSide, maxPixels, side int) (Image, Image, error) {
+	img, err := p.decode(ctx, data, maxSide, maxPixels)
+	if err != nil {
+		return Image{}, Image{}, err
+	}
+
+	full, err := encode(img, out)
+	if err != nil {
+		return Image{}, Image{}, err
+	}
+
+	thumb, err := encode(scaleDown(img, side), MIMEJPEG)
+	if err != nil {
+		return Image{}, Image{}, err
+	}
+
+	return full, thumb, nil
+}
+
+// decode checks an image's type, dimensions and colour model before
+// decoding it, one image at a time.
+func (p *Processor) decode(ctx context.Context, data []byte, maxSide, maxPixels int) (image.Image, error) {
+	t, err := Sniff(data)
+	if err != nil {
+		return nil, err
 	}
 
 	c := codecOf(t)
 
 	cfg, err := c.config(bytes.NewReader(data))
 	if err != nil {
-		return Image{}, ErrUnsupportedImage.WithDetail("the image cannot be read")
+		return nil, ErrUnsupportedImage.WithDetail("the image cannot be read")
 	}
 
 	switch {
-	case cfg.Width < 1 || cfg.Height < 1 || cfg.Width > MaxImageSide || cfg.Height > MaxImageSide:
-		return Image{}, ErrImageDimensions
+	case cfg.Width < 1 || cfg.Height < 1 || cfg.Width > maxSide || cfg.Height > maxSide:
+		return nil, ErrImageDimensions.WithDetail(fmt.Sprintf("the image has %d × %d pixels; at most %d per side are accepted",
+			cfg.Width, cfg.Height, maxSide))
 	case cfg.Width*cfg.Height > maxPixels:
-		return Image{}, ErrImageDimensions.WithDetail(fmt.Sprintf("the image has %d × %d pixels; at most %d pixels are accepted",
+		return nil, ErrImageDimensions.WithDetail(fmt.Sprintf("the image has %d × %d pixels; at most %d pixels are accepted",
 			cfg.Width, cfg.Height, maxPixels))
 	case !supportedModel(cfg.ColorModel):
-		return Image{}, ErrImageColorModel
+		return nil, ErrImageColorModel
 	}
 
 	select {
 	case p.slot <- struct{}{}:
 		defer func() { <-p.slot }()
 	case <-ctx.Done():
-		return Image{}, ctx.Err()
+		return nil, ctx.Err()
 	}
 
 	img, err := c.decode(bytes.NewReader(data))
 	if err != nil {
-		return Image{}, ErrUnsupportedImage.WithDetail("the image cannot be read")
+		return nil, ErrUnsupportedImage.WithDetail("the image cannot be read")
 	}
 
-	var buf bytes.Buffer
+	return img, nil
+}
+
+// encode writes img as out, without any metadata.
+func encode(img image.Image, out MIMEType) (Image, error) {
+	var (
+		buf bytes.Buffer
+		err error
+	)
 
 	switch out {
 	case MIMEPNG:
@@ -128,6 +171,28 @@ func (p *Processor) Reencode(ctx context.Context, data []byte, out MIMEType, max
 	b := img.Bounds()
 
 	return Image{Data: buf.Bytes(), MIME: out, Width: b.Dx(), Height: b.Dy()}, nil
+}
+
+// scaleDown returns img scaled so that its longest side is at most side
+// pixels (img itself when it is small enough).
+func scaleDown(img image.Image, side int) image.Image {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+
+	if w <= side && h <= side {
+		return img
+	}
+
+	if w >= h {
+		w, h = side, max(1, h*side/w)
+	} else {
+		w, h = max(1, w*side/h), side
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	xdraw.BiLinear.Scale(dst, dst.Bounds(), img, b, xdraw.Over, nil)
+
+	return dst
 }
 
 // flatten draws an image on white: JPEG has no transparency.
