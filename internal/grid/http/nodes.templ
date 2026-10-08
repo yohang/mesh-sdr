@@ -34,7 +34,7 @@ templ nodesTable(v nodesView) {
 		if len(v.Rows) == 0 {
 			<p>No node is declared yet.</p>
 		} else {
-			<div class="overflow-x-auto">
+			<div class="relative overflow-x-auto">
 				<table class="w-full text-left">
 					<caption class="sr-only">Nodes</caption>
 					<thead>
@@ -214,7 +214,7 @@ templ nodeLive(v nodeView) {
 			if len(v.Devices) == 0 {
 				<p>The node has reported no device.</p>
 			} else {
-				<div class="overflow-x-auto">
+				<div class="relative overflow-x-auto">
 					<table class="w-full text-left">
 						<caption class="sr-only">Devices of the node</caption>
 						<thead>
@@ -262,7 +262,7 @@ templ loadSection(l loadView) {
 			}
 			<details>
 				<summary class="cursor-pointer">Load figures</summary>
-				<div class="overflow-x-auto">
+				<div class="relative overflow-x-auto">
 					<table class="mt-2 w-full text-left">
 						<caption class="sr-only">Load every 5 minutes, newest first</caption>
 						<thead>
@@ -356,7 +356,7 @@ templ capsSection(v nodeView) {
 				<dd>{ platformText(v.Caps.Platform) }</dd>
 			</dl>
 			if len(v.Caps.Capabilities) > 0 {
-				<div class="overflow-x-auto">
+				<div class="relative overflow-x-auto">
 					<table class="w-full text-left">
 						<caption class="sr-only">Capabilities of the node</caption>
 						<thead>
