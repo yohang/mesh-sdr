@@ -160,6 +160,9 @@ func (m *AdminModule) connectionsView(ctx context.Context, revealed string) (con
 		}
 
 		row.Preset, row.Band = m.presetOf(ctx, i.DeviceID, devices)
+		if row.Band == "—" {
+			row.Band = m.bandOf(ctx, c, devices)
+		}
 
 		if i.Kind == domain.ConnectionMedia {
 			v.Listeners++
@@ -180,16 +183,7 @@ func (m *AdminModule) presetOf(ctx context.Context, deviceID string, cache map[s
 		return "—", "—"
 	}
 
-	d, ok := cache[deviceID]
-	if !ok {
-		var err error
-		if d, err = m.d.Devices.Get(ctx, deviceID); err != nil {
-			d = nil
-		}
-
-		cache[deviceID] = d
-	}
-
+	d := m.deviceOf(ctx, deviceID, cache)
 	if d == nil || d.ActivePreset().IsZero() {
 		return "—", "—"
 	}
@@ -200,6 +194,51 @@ func (m *AdminModule) presetOf(ctx context.Context, deviceID string, cache map[s
 	}
 
 	return p.Name, frequency(p.CenterFreq) + " (" + frequency(p.SampRate) + " wide)"
+}
+
+// bandOf names the band plan band (bandplan.region) of a connection without
+// a preset band: the band of its tuned frequency when the node reported
+// one, else of its device's centre frequency; "—" outside every band.
+func (m *AdminModule) bandOf(ctx context.Context, c *domain.Connection, cache map[string]*domain.Device) string {
+	if m.d.BandAt == nil {
+		return "—"
+	}
+
+	hz := c.Snapshot().TunedFreq
+	if hz == nil {
+		if d := m.deviceOf(ctx, c.Info().DeviceID, cache); d != nil {
+			hz = d.CenterFreq()
+		}
+	}
+
+	if hz == nil {
+		return "—"
+	}
+
+	if name := m.d.BandAt(ctx, *hz); name != "" {
+		return name
+	}
+
+	return "—"
+}
+
+// deviceOf reads a device once per page; nil when unknown.
+func (m *AdminModule) deviceOf(ctx context.Context, deviceID string, cache map[string]*domain.Device) *domain.Device {
+	if deviceID == "" {
+		return nil
+	}
+
+	d, ok := cache[deviceID]
+	if !ok {
+		var err error
+		if d, err = m.d.Devices.Get(ctx, deviceID); err != nil {
+			d = nil
+		}
+
+		cache[deviceID] = d
+	}
+
+	return d
 }
 
 // connectionsPage lists the open connections of the presence registry

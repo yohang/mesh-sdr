@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -464,6 +465,15 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 			Connections: g.presence, Users: userNames{users: identitysqlite.NewUsers(adapter, shared.NewUUIDv7Generator())},
 			Schedules: deviceSchedules{schedules: sch.schedules, presets: sch.presets}, PresetName: sch.presetName,
 			PresetBand: sch.presetBand, Audit: auditLog, Logs: g.deviceLogs,
+			BandAt: func(_ context.Context, hz int64) string {
+				// Like the receiver's Info tab: every band holding hz.
+				var names []string
+				for _, b := range bm.Bandplan().Bands(hz, hz) {
+					names = append(names, b.Name)
+				}
+
+				return strings.Join(names, ", ")
+			},
 			MaskIPs:  func(context.Context) bool { return settingsStore.Bool("privacy.mask_ips") },
 			Operator: idm.HTTP.Require(identitydomain.RoleOperator), Admin: idm.HTTP.Require(identitydomain.RoleAdmin),
 			IsAdmin: func(r *http.Request) bool { return adminGate.Allows(r.Context()) }, Now: now,
