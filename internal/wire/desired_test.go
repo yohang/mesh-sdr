@@ -19,9 +19,9 @@ type fixedSettings map[string]any
 
 func (s fixedSettings) String(key string) string { v, _ := s[key].(string); return v }
 
-func (s fixedSettings) Int(key string) int { v, _ := s[key].(int); return v }
-
 func (s fixedSettings) Bool(key string) bool { v, _ := s[key].(bool); return v }
+
+func (s fixedSettings) Int(key string) int { v, _ := s[key].(int); return v }
 
 func (fixedSettings) Duration(string) time.Duration { return 0 }
 

@@ -21,7 +21,10 @@ const (
 	CapMultimonNG = "cap:multimon-ng"
 	CapRTL433     = "cap:rtl_433"
 	CapSkimmer    = "cap:skimmer"
-	CapNativeDSP  = "cap:native-dsp"
+	// CapRTTYSkimmer is the RTTY skimmer (csdr-rttyskimmer); cap:skimmer
+	// is the CW one.
+	CapRTTYSkimmer = "cap:skimmer-rtty"
+	CapNativeDSP   = "cap:native-dsp"
 )
 
 // DecoderInput is what a decoder reads (§8.3 "Secondary decoder").
@@ -35,8 +38,9 @@ const (
 	// InputNarrowIQ is the IQ of the decoder's own narrow secondary
 	// selector, at the mode's input rate.
 	InputNarrowIQ DecoderInput = "narrow_iq"
-	// InputWideIQ is the channel IQ of the demodulator at the mode's input
-	// rate.
+	// InputWideIQ is the IQ of a second channel at the demodulator's
+	// offset, at the mode's input rate (the listener keeps hearing the
+	// narrow demodulator).
 	InputWideIQ DecoderInput = "wide_iq"
 )
 
@@ -80,6 +84,9 @@ type DigitalMode struct {
 	// decoder (DEC-005): it keeps ±BandwidthHz around the secondary
 	// offset. 0 for modes without a secondary selector.
 	BandwidthHz float64
+	// BandLow and BandHigh are the pass band (Hz from the dial) of a wide
+	// IQ input; it is cut to the input rate.
+	BandLow, BandHigh float64
 }
 
 // TextRate is the input rate of the native text decoders and of their
@@ -198,6 +205,36 @@ var digitalModes = []DigitalMode{
 	{
 		Name: "js8", Label: "JS8Call", Cap: CapJS8, Family: "js8", Underlying: []string{"usb", "usbd"}, Input: InputAudio, InputRate: SlotRate,
 		Slot: 6 * time.Second, HighHz: 3000,
+	},
+	// DEC-031, DEC-032: direwolf (AX.25 1200 Bd) on FM audio at 48 kHz,
+	// APRS parsed on the node.
+	{Name: "packet", Label: "Packet", Cap: CapDirewolf, Family: "packet", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 48000, DedupStep: 1000},
+	// DEC-033: multimon-ng with FLEX and POCSAG 512/1200/2400 at 22 050 Hz.
+	{Name: "page", Label: "Page", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050, DedupStep: 1000},
+	// DEC-036: multimon-ng EAS (SAME headers) at 22 050 Hz.
+	{Name: "eas", Label: "EAS", Cap: CapMultimonNG, Family: "paging", Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050, DedupStep: 1000},
+	// DEC-013, DEC-014: the skimmers decode every signal of the 48 kHz of
+	// band above the dial: the real part of a 96 kHz wide IQ tap
+	// (OpenWebRX+ chain). A signal's frequency is the dial plus its offset,
+	// rounded to the skimmer's bins.
+	{
+		Name: "cwskimmer", Label: "CW Skimmer", Cap: CapSkimmer, Family: "skimmer", Underlying: []string{"usb", "cw", "lsb"}, Input: InputWideIQ,
+		InputRate: 96000, BandHigh: 48000, DedupStep: 100,
+	},
+	{
+		Name: "rttyskimmer", Label: "RTTY Skimmer", Cap: CapRTTYSkimmer, Family: "skimmer", Underlying: []string{"usb", "lsb"}, Input: InputWideIQ,
+		InputRate: 96000, BandHigh: 48000, DedupStep: 100,
+	},
+	// DEC-039: rtl_433 on 250 kHz of IQ around the dial.
+	{
+		Name: "ism", Label: "ISM", Cap: CapRTL433, Family: "ism", Underlying: []string{"am", "nfm"}, Input: InputWideIQ, InputRate: 250_000,
+		BandLow: -125_000, BandHigh: 125_000, DedupStep: 1000,
+	},
+	// DEC-040: rtl_433 with its Wireless M-Bus decoders on 1.2 MS/s of IQ
+	// (their rate), 250 kHz of band around the dial.
+	{
+		Name: "wmbus", Label: "WMBus", Cap: CapRTL433, Family: "ism", Underlying: []string{"nfm", "am"}, Input: InputWideIQ, InputRate: 1_200_000,
+		BandLow: -125_000, BandHigh: 125_000, DedupStep: 1000,
 	},
 }
 

@@ -158,6 +158,13 @@ type SettingsDecoders struct {
 	// (DEC-029).
 	JS8Profiles      []string `toml:"js8_enabled_profiles" env:"JS8_ENABLED_PROFILES" jsonschema:"minItems=1,maxItems=4,enum=normal,enum=slow,enum=fast,enum=turbo" jsonschema_extras:"x-label=JS8Call speeds" jsonschema_description:"JS8Call speeds the decoder decodes\\, one per line: normal (15 s)\\, slow (30 s)\\, fast (10 s) or turbo (6 s)."`
 	JS8DecodingDepth int      `toml:"js8_decoding_depth" env:"JS8_DECODING_DEPTH" jsonschema:"minimum=1,maximum=3" jsonschema_extras:"x-label=JS8Call decoding depth" jsonschema_description:"Decoding depth of the JS8Call decoder: 1 fast\\, 2 normal\\, 3 deep."`
+	// PagingFilter and PagingCharset configure the paging decoder
+	// (DEC-033, ADM-027).
+	PagingFilter  bool   `toml:"paging_filter" env:"PAGING_FILTER" jsonschema_extras:"x-label=Readable pages only" jsonschema_description:"The paging decoder keeps only readable messages: POCSAG alphanumeric pages with text and FLEX alphanumeric pages that look like words. Off: every page, numeric and tone-only ones included. Applies to sessions started from now on."`
+	PagingCharset string `toml:"paging_charset" env:"PAGING_CHARSET" jsonschema:"enum=US,enum=FR,enum=DE,enum=DK,enum=SE,enum=SI" jsonschema_extras:"x-label=POCSAG charset" jsonschema_description:"Character set of POCSAG alphanumeric pages: US (ASCII), or the national variant FR, DE, DK, SE or SI. Applies to sessions started from now on."`
+	// ISMReportLevels keeps the rtl_433 signal levels in the ISM decodes
+	// (DEC-039, ADM-026).
+	ISMReportLevels bool `toml:"ism_report_levels" env:"ISM_REPORT_LEVELS" jsonschema_extras:"x-label=ISM signal levels" jsonschema_description:"The ISM and Wireless M-Bus decoders keep the signal level, SNR and noise of each message (rtl_433 -M level). Applies to sessions started from now on."`
 }
 
 // SettingsWSJTDepths is the [settings.decoders.wsjt_decoding_depths]
@@ -235,7 +242,7 @@ func DefaultSettings() Settings {
 		Decoders: SettingsDecoders{
 			MaxRestarts: 5, DigimodesFFTSize: 2048, WSJTDecodingDepth: 3, WSJTDecodingDepths: SettingsWSJTDepths{JT65: 1},
 			FST4Intervals: []string{"15", "30"}, FST4WIntervals: []string{"120", "300"}, Q65Combinations: []string{"A30", "E120", "C60"},
-			JS8Profiles: []string{"normal", "slow"}, JS8DecodingDepth: 3,
+			JS8Profiles: []string{"normal", "slow"}, JS8DecodingDepth: 3, PagingCharset: "US",
 		},
 		Invitations:   SettingsInvitations{TTLHours: 168},
 		PasswordReset: SettingsPasswordReset{TTLMinutes: 30},

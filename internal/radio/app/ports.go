@@ -137,6 +137,13 @@ type Demod interface {
 	// TapIQ delivers every block of selector IQ, at the channel rate, to fn
 	// until cancel (a text decoder session, §8.3). fn must not block.
 	TapIQ(fn func(IQBlock)) (cancel func())
+	// TapWideIQ delivers the IQ of a second channel at the demodulator's
+	// offset, pass band [low, high] Hz from it, resampled to rate, to fn
+	// until cancel (a wide IQ decoder). It fails when the device sample
+	// rate is below rate or the band leaves the device span. fail reports
+	// a channel that cannot be built later (a new offset or run). fn and
+	// fail must not block.
+	TapWideIQ(rate int, low, high float64, fn func(WideIQBlock), fail func(reason string)) (cancel func(), err error)
 	Close()
 }
 

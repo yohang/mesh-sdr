@@ -14,13 +14,13 @@ import (
 // reading raw 16-bit signed samples at 22 050 Hz from stdin (-c removes
 // the default set). One decoder per process: decoders of one process write
 // their digits in pieces and would mix them on one line.
-func multimonArgs(decoder string) []string {
-	return []string{"-c", "-v", "0", "-t", "raw", "-a", decoder, "-"}
+func multimonArgs(c sessionConfig) []string {
+	return []string{"-c", "-v", "0", "-t", "raw", "-a", c.variant, "-"}
 }
 
 // multimonRules classify the stderr of multimon-ng.
 var multimonRules = []process.Rule{
-	{Pattern: regexp.MustCompile(`(?i)(invalid option|unknown (demodulator|option)|usage:)`), Class: process.ClassFatalConfig},
+	{Pattern: regexp.MustCompile(`(?i)(invalid option|invalid pocsag charset|unknown (demodulator|option)|usage:)`), Class: process.ClassFatalConfig},
 	{Pattern: regexp.MustCompile(`(?i)(cannot|can't|unable to) (open|read)`), Class: process.ClassInputError},
 	{Pattern: regexp.MustCompile(`(?i)^(multimon-ng|\(c\)|available demodulators|enabled demodulators)`), Class: process.ClassInfo},
 	{Pattern: regexp.MustCompile(`.`), Class: process.ClassInfo},

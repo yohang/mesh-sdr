@@ -55,13 +55,14 @@ var wsjtxVersion = &versionProbe{name: "wsjtx_app_version", args: []string{"-v"}
 // toolProbes are the decoder tools of the node, by program name, with the
 // output of the pinned versions (Debian trixie, csdr-skimmer 1.12).
 var toolProbes = map[string]toolProbe{
-	"jt9":            {args: []string{"-h"}, match: regexp.MustCompile(`Usage: jt9`), version: wsjtxVersion},
-	"wsprd":          {args: []string{}, match: regexp.MustCompile(`Usage: wsprd`), version: wsjtxVersion},
-	"js8":            {args: []string{"-h"}, match: regexp.MustCompile(`Usage: js8`)},
-	"direwolf":       {args: []string{"-h"}, match: regexp.MustCompile(`Dire Wolf version (\d+\.\d+(?:\.\d+)?)`)},
-	"multimon-ng":    {args: []string{"-h"}, match: regexp.MustCompile(`multimon-ng (\d+\.\d+(?:\.\d+)?)`)},
-	"rtl_433":        {args: []string{"-V"}, match: regexp.MustCompile(`rtl_433 version (\d+\.\d+(?:\.\d+)?)`)},
-	"csdr-cwskimmer": {args: []string{"-h"}, match: regexp.MustCompile(`CW Skimmer`)},
+	"jt9":              {args: []string{"-h"}, match: regexp.MustCompile(`Usage: jt9`), version: wsjtxVersion},
+	"wsprd":            {args: []string{}, match: regexp.MustCompile(`Usage: wsprd`), version: wsjtxVersion},
+	"js8":              {args: []string{"-h"}, match: regexp.MustCompile(`Usage: js8`)},
+	"direwolf":         {args: []string{"-h"}, match: regexp.MustCompile(`Dire Wolf version (\d+\.\d+(?:\.\d+)?)`)},
+	"multimon-ng":      {args: []string{"-h"}, match: regexp.MustCompile(`multimon-ng (\d+\.\d+(?:\.\d+)?)`)},
+	"rtl_433":          {args: []string{"-V"}, match: regexp.MustCompile(`rtl_433 version (\d+\.\d+(?:\.\d+)?)`)},
+	"csdr-cwskimmer":   {args: []string{"-h"}, match: regexp.MustCompile(`CW Skimmer`)},
+	"csdr-rttyskimmer": {args: []string{"-h"}, match: regexp.MustCompile(`RTTY Skimmer`)},
 }
 
 // capProbe is a decoder capability: the tools it needs and the lowest
@@ -84,6 +85,7 @@ var capProbes = []capProbe{
 	{cap: domain.CapMultimonNG, tools: []string{"multimon-ng"}},
 	{cap: domain.CapRTL433, tools: []string{"rtl_433"}},
 	{cap: domain.CapSkimmer, tools: []string{"csdr-cwskimmer"}},
+	{cap: domain.CapRTTYSkimmer, tools: []string{"csdr-rttyskimmer"}},
 	{cap: domain.CapNativeDSP},
 }
 

@@ -205,6 +205,9 @@ type demod struct {
 	gen    int
 	b      *binding
 
+	// wide is the wide IQ tap of a decoder (wide.go), under mu.
+	wide *wideTap
+
 	tapMu   sync.Mutex
 	taps    map[int]func(app.AudioBlock)
 	iqTaps  map[int]func(app.IQBlock)
@@ -311,8 +314,12 @@ func (d *demod) setBinding(b *binding) {
 // extract runs in the channelizer goroutine.
 func (d *demod) extract(ep *epoch, bins []complex128, first uint64, at time.Time, buf []complex64) []complex64 {
 	d.mu.Lock()
-	b := d.b
+	b, w, offset := d.b, d.wide, d.params.OffsetHz
 	d.mu.Unlock()
+
+	if w != nil {
+		w.push(ep, offset, bins, first, at)
+	}
 
 	if b == nil || b.ep != ep {
 		return buf
@@ -453,6 +460,15 @@ func (d *demod) Close() {
 		close(d.done)
 		d.e.removeDemod(d)
 		d.setBinding(nil)
+
+		d.mu.Lock()
+		w := d.wide
+		d.wide = nil
+		d.mu.Unlock()
+
+		if w != nil {
+			w.close()
+		}
 	})
 }
 

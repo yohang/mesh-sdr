@@ -175,6 +175,9 @@ func (s *slotSession) Audio(b app.AudioBlock) {
 // IQ implements app.DecoderRun: slot decoders read audio only.
 func (s *slotSession) IQ(app.IQBlock) {}
 
+// WideIQ implements app.DecoderRun: slot decoders read audio.
+func (s *slotSession) WideIQ(app.WideIQBlock) {}
+
 // Retune implements app.DecoderRun: slot decoders have no secondary
 // selector; each slot keeps the dial of its start.
 func (s *slotSession) Retune(float64) {}

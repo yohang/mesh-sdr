@@ -2,10 +2,12 @@ package decoder
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"sync"
 	"time"
 
@@ -24,20 +26,82 @@ const (
 	StopGrace = 3 * time.Second
 )
 
+// iqFormat is how a wide IQ decoder reads its input on stdin.
+type iqFormat int
+
+const (
+	// iqNone: the decoder reads audio (s16le at its input rate).
+	iqNone iqFormat = iota
+	// iqCF32: complex float32 little-endian (rtl_433 -r cf32:-).
+	iqCF32
+	// iqRealS16: the real part, as s16le (the skimmers, OpenWebRX+'s
+	// RealPart on a band above the dial).
+	iqRealS16
+)
+
 // adapter is the descriptor of a decoder tool (§8.4): its program, its
-// argv for a variant of the mode, stderr rules and stdout parser. Later
+// argv for a session, its input, stderr rules and output parser: stdout
+// lines, or the AX.25 frames of direwolf's KISS pseudo-terminal. Later
 // decoders add theirs to adapters.
 type adapter struct {
 	tool  string
-	args  func(variant string) []string
+	args  func(c sessionConfig) []string
 	rules []process.Rule
-	parse func(line string, at time.Time) (app.DecodeRecord, bool)
+	// iq is the input of a wide IQ mode.
+	iq iqFormat
+	// lines returns the parser of the stdout lines of a session.
+	lines func(c sessionConfig) lineParser
+	// frames, when set, returns the parser of the AX.25 frames of a
+	// session: the tool is direwolf, its frames come from its KISS
+	// pseudo-terminal (direwolf.go) named on its stdout.
+	frames func(c sessionConfig) frameParser
+	// textLog: the live records of a session are kept as text logs and
+	// sent to Files (FIL-005: the skimmers).
+	textLog bool
+}
+
+// lineParser parses one output line of a tool into zero or more records.
+type lineParser func(line string, at time.Time) []app.DecodeRecord
+
+// frameParser parses one AX.25 frame into zero or one record.
+type frameParser func(frame []byte, at time.Time) []app.DecodeRecord
+
+// sessionConfig is what an adapter builds a session from.
+type sessionConfig struct {
+	variant  string
+	settings Settings
+	// dial returns the dial frequency (nil in tests).
+	dial func() int64
+}
+
+// lineOf adapts a stateless parser of one record per line.
+func lineOf(fn func(line string, at time.Time) (app.DecodeRecord, bool)) func(sessionConfig) lineParser {
+	return func(sessionConfig) lineParser {
+		return func(line string, at time.Time) []app.DecodeRecord {
+			if rec, ok := fn(line, at); ok {
+				return []app.DecodeRecord{rec}
+			}
+
+			return nil
+		}
+	}
 }
 
 // adapters are the adapters of the digital modes, by mode name.
 var adapters = map[string]adapter{
-	"selcall": {tool: "multimon-ng", args: multimonArgs, rules: multimonRules, parse: parseSelCall},
-	"zvei":    {tool: "multimon-ng", args: multimonArgs, rules: multimonRules, parse: parseSelCall},
+	"selcall": {tool: "multimon-ng", args: multimonArgs, rules: multimonRules, lines: lineOf(parseSelCall)},
+	"zvei":    {tool: "multimon-ng", args: multimonArgs, rules: multimonRules, lines: lineOf(parseSelCall)},
+	"page":    {tool: "multimon-ng", args: pagingArgs, rules: multimonRules, lines: newPagingParser},
+	"eas":     {tool: "multimon-ng", args: easArgs, rules: multimonRules, lines: lineOf(parseEAS)},
+	"packet":  {tool: "direwolf", args: direwolfArgs, rules: direwolfRules, frames: newPacketParser},
+	"cwskimmer": {
+		tool: "csdr-cwskimmer", args: skimmerArgs, rules: skimmerRules, iq: iqRealS16, lines: newSkimmerParser("CW"), textLog: true,
+	},
+	"rttyskimmer": {
+		tool: "csdr-rttyskimmer", args: skimmerArgs, rules: skimmerRules, iq: iqRealS16, lines: newSkimmerParser("RTTY"), textLog: true,
+	},
+	"ism":   {tool: "rtl_433", args: ismArgs, rules: rtl433Rules, iq: iqCF32, lines: newISMParser("ISM")},
+	"wmbus": {tool: "rtl_433", args: wmbusArgs, rules: rtl433Rules, iq: iqCF32, lines: newISMParser("WMBUS")},
 }
 
 // Options configure the runner.
@@ -61,7 +125,8 @@ type Options struct {
 	Logger *slog.Logger
 	// Queue runs the jobs of the slot decoders (DEC-025).
 	Queue *Queue
-	// Settings returns the decoding settings pushed by the hub (DEC-024).
+	// Settings returns the decoding settings pushed by the hub (slot
+	// decoders, paging, ISM); nil: the defaults.
 	Settings func() Settings
 	// ClockSynced reports whether the node clock is synchronised (NTP and
 	// within 1 s of the hub's): slot decoders warn when it is not
@@ -115,7 +180,7 @@ func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderR
 	}
 
 	ad, ok := adapters[spec.Mode.Name]
-	if !ok || spec.Mode.Input != domain.InputAudio {
+	if !ok || (ad.iq == iqNone) != (spec.Mode.Input == domain.InputAudio) {
 		return nil, fmt.Errorf("%w for %s", ErrNoAdapter, spec.Mode.Name)
 	}
 
@@ -135,42 +200,80 @@ func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderR
 		}
 	}
 
+	cfg := sessionConfig{variant: spec.Variant, dial: spec.DialHz}
+	if r.o.Settings != nil {
+		cfg.settings = r.o.Settings()
+	}
+
+	// 2 s of input: s16 audio or real part, or cf32.
+	sampleBytes := 2
+	if ad.iq == iqCF32 {
+		sampleBytes = 8
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &session{
-		r: r, ev: ev, cancel: cancel, rate: spec.Mode.InputRate,
-		buf: process.NewDropOldest(int(InputBuffer.Seconds() * float64(spec.Mode.InputRate) * 2)),
+		r: r, ev: ev, cancel: cancel, rate: spec.Mode.InputRate, iq: ad.iq, dial: spec.DialHz,
+		buf: process.NewDropOldest(int(InputBuffer.Seconds() * float64(spec.Mode.InputRate) * float64(sampleBytes))),
 		log: r.o.Logger.With(slog.String("session_id", spec.Session.String()), slog.String("mode", spec.Mode.Name)),
+	}
+
+	if ad.textLog {
+		s.text = &textLog{}
 	}
 
 	var in *process.Instance
 
-	in, err = r.o.Supervisor.NewInstance(process.Spec{
-		ID: "dec-" + spec.Session.String(), Kind: "decoder", Mode: process.Streaming, Path: path, Args: ad.args(spec.Variant),
+	ps := process.Spec{
+		ID: "dec-" + spec.Session.String(), Kind: "decoder", Mode: process.Streaming, Path: path, Args: ad.args(cfg),
 		ToolDirs: r.o.Tools.Dirs,
 		// The first data written is the tool's readiness: most decoders
-		// print nothing until they decode something.
+		// print nothing until they decode something. direwolf gets its
+		// audio once the session reads its KISS pseudo-terminal: the frames
+		// it decodes before are lost.
 		Stdin: func(ctx context.Context, w io.Writer) error {
-			return s.buf.Feed(ctx, &touchWriter{w: w, touch: func() { in.Touch() }})
-		},
-		Stdout: func(_ context.Context, rd io.Reader) error {
-			process.ScanLines(rd, func(text string, _ bool) {
-				if rec, ok := ad.parse(text, r.o.Now()); ok {
-					s.decode(rec)
+			if ad.frames != nil {
+				if err := s.waitKISS(ctx, s.currentKISS()); err != nil {
+					return err
 				}
-			})
+			}
 
-			return nil
+			return s.buf.Feed(ctx, &touchWriter{w: w, touch: func() { in.Touch() }})
 		},
 		StderrRules: ad.rules,
 		Sink:        s.event,
 		Timeouts:    process.Timeouts{Stop: StopGrace},
 		Restart:     policy,
 		Limits:      r.o.Limits,
-	})
+	}
+
+	if ad.frames != nil {
+		parse := ad.frames(cfg)
+		ps.Prepare = writeDirewolfConfig
+		ps.PerRun = s.kissRun(ps.Args)
+		ps.Stdout = func(ctx context.Context, rd io.Reader) error { return s.direwolfStdout(ctx, rd, parse) }
+	} else {
+		parse := ad.lines(cfg)
+		ps.Stdout = func(_ context.Context, rd io.Reader) error {
+			process.ScanLines(rd, func(text string, _ bool) {
+				for _, rec := range parse(text, r.o.Now()) {
+					s.decode(rec)
+				}
+			})
+
+			return nil
+		}
+	}
+
+	in, err = r.o.Supervisor.NewInstance(ps)
 	if err != nil {
 		cancel()
 
 		return nil, err
+	}
+
+	if s.text != nil {
+		go s.logTicks(ctx)
 	}
 
 	go func() {
@@ -179,6 +282,11 @@ func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderR
 		if err := in.Run(ctx); errors.Is(err, process.ErrWorkdir) {
 			s.log.Error("decoder workdir not created", slog.Any("error", err))
 			s.status(app.DecoderStatus{State: app.DecoderError, Reason: "workdir"})
+		}
+
+		// The tool has exited: its last lines are in the text log.
+		if s.text != nil {
+			s.sendLog(s.text.flush(s.r.o.Now()))
 		}
 	}()
 
@@ -209,12 +317,22 @@ type session struct {
 	cancel context.CancelFunc
 	buf    *process.DropOldest
 	rate   int
+	iq     iqFormat
 	log    *slog.Logger
+	// text is the text log of a skimmer session (nil for other modes).
+	text *textLog
+	// dial returns the dial frequency (nil in tests).
+	dial func() int64
 
 	mu     sync.Mutex
 	conv   *dsp.S16Converter
+	raw    []byte
 	closed bool
 	last   app.DecoderStatus
+	// kiss is the KISS link of direwolf's current run.
+	kiss *kissRun
+	// lastDial is the last known dial frequency.
+	lastDial int64
 }
 
 // Audio implements app.DecoderRun: the audio is converted to s16le at the
@@ -223,7 +341,7 @@ func (s *session) Audio(b app.AudioBlock) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.closed || b.Rate <= 0 {
+	if s.closed || b.Rate <= 0 || s.iq != iqNone {
 		return
 	}
 
@@ -255,7 +373,7 @@ func (s *session) Audio(b app.AudioBlock) {
 	}
 }
 
-// IQ implements app.DecoderRun: the tools read audio.
+// IQ implements app.DecoderRun: the tools read no selector IQ.
 func (s *session) IQ(app.IQBlock) {}
 
 // Retune implements app.DecoderRun: the tools have no secondary selector.
@@ -267,7 +385,38 @@ func (s *session) SpectrumSize() int { return 0 }
 // Spectrum implements app.DecoderRun: no secondary FFT.
 func (s *session) Spectrum(int) {}
 
-// Close implements app.DecoderRun: nothing is reported after it.
+// WideIQ implements app.DecoderRun: the wide IQ (at the tool's input rate)
+// is written as cf32 or as the s16le real part to the stdin buffer (never
+// blocking).
+func (s *session) WideIQ(b app.WideIQBlock) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed || b.Rate != s.rate || s.iq == iqNone || len(b.Samples) == 0 {
+		return
+	}
+
+	s.raw = s.raw[:0]
+
+	for _, v := range b.Samples {
+		if s.iq == iqCF32 {
+			s.raw = binary.LittleEndian.AppendUint32(s.raw, math.Float32bits(real(v)))
+			s.raw = binary.LittleEndian.AppendUint32(s.raw, math.Float32bits(imag(v)))
+		} else {
+			s.raw = binary.LittleEndian.AppendUint16(s.raw, uint16(s16(real(v))))
+		}
+	}
+
+	_, _ = s.buf.Write(s.raw)
+}
+
+// s16 converts a sample in [-1, 1] to int16, clipped.
+func s16(v float32) int16 {
+	return int16(max(-32768, min(32767, math.Round(float64(v)*32767))))
+}
+
+// Close implements app.DecoderRun: nothing is reported to the listener
+// after it. The text log of a skimmer is saved once the tool has exited.
 func (s *session) Close() {
 	s.mu.Lock()
 	if s.closed {
@@ -288,14 +437,61 @@ func (s *session) Close() {
 	s.cancel()
 }
 
-// decode reports a record unless the session is closed.
+// decode reports a record unless the session is closed; a skimmer's live
+// record also goes to its text log, until the tool has exited (its last
+// lines are kept; the log is saved then).
 func (s *session) decode(rec app.DecodeRecord) {
 	s.mu.Lock()
 	closed := s.closed
 	s.mu.Unlock()
 
+	if s.text != nil && rec.Live {
+		s.sendLog(s.text.add(rec, s.dialHz(), s.r.o.Now()))
+	}
+
 	if !closed {
 		s.ev.Decode(rec)
+	}
+}
+
+// dialHz returns the dial frequency, the last known one once the
+// demodulator is gone (0 before any).
+func (s *session) dialHz() int64 {
+	var hz int64
+	if s.dial != nil {
+		hz = s.dial()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if hz > 0 {
+		s.lastDial = hz
+	}
+
+	return s.lastDial
+}
+
+// logTicks ends the idle lines of the text log and saves it when it covers
+// an hour, until ctx ends.
+func (s *session) logTicks(ctx context.Context) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.sendLog(s.text.tick(s.r.o.Now()))
+		}
+	}
+}
+
+// sendLog hands a full text log to Files.
+func (s *session) sendLog(f *app.ProducedFile) {
+	if f != nil && s.ev.File != nil {
+		s.ev.File(*f)
 	}
 }
 

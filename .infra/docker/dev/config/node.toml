@@ -58,3 +58,14 @@ freq_range = { min = "144MHz", max = "146MHz" }
 sample_rates = [250_000]
 listen_policy = "anonymous"
 driver = { device = "ft8" }
+
+# A fifth synthetic device whose carrier (centre + 128 kHz) is keyed by a
+# Nexus-TH temperature sensor message every 5 s: the ISM digital mode
+# decodes it with rtl_433 (DEC-039).
+[devices.dev-ism]
+name = "Synthetic ISM"
+type = "rtl_sdr"
+freq_range = { min = "433MHz", max = "435MHz" }
+sample_rates = [1_024_000]
+listen_policy = "anonymous"
+driver = { device = "ism" }

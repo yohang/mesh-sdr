@@ -109,7 +109,7 @@ func TestToolboxMissingTool(t *testing.T) {
 		}
 	}
 
-	if len(mm.Tools) != 1 || mm.Tools[0].OK || mm.Tools[0].Reason != "multimon-ng not found" || strings.Join(mm.Modes, ",") != "selcall,zvei" {
+	if len(mm.Tools) != 1 || mm.Tools[0].OK || mm.Tools[0].Reason != "multimon-ng not found" || strings.Join(mm.Modes, ",") != "selcall,zvei,page,eas" {
 		t.Errorf("cap:multimon-ng = %+v", mm)
 	}
 
@@ -177,10 +177,16 @@ type events struct {
 	mu       sync.Mutex
 	decodes  []app.DecodeRecord
 	statuses []app.DecoderStatus
+	files    []app.ProducedFile
 }
 
 func (e *events) sink() app.DecoderEvents {
 	return app.DecoderEvents{
+		File: func(f app.ProducedFile) {
+			e.mu.Lock()
+			e.files = append(e.files, f)
+			e.mu.Unlock()
+		},
 		Decode: func(r app.DecodeRecord) {
 			e.mu.Lock()
 			e.decodes = append(e.decodes, r)

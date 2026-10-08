@@ -12,9 +12,10 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
-// Settings are the decoding settings of the slot decoders, pushed by the
-// hub in the desired state (Admin › Decoding, DEC-024, DEC-021…023,
-// DEC-029). A zero field takes the default of the hub settings.
+// Settings are the decoding settings of the slot decoders (DEC-024,
+// DEC-021…023, DEC-029) and of the streaming tool decoders (paging, ISM),
+// pushed by the hub in the desired state (Admin › Decoding). A zero field
+// takes the default of the hub settings.
 type Settings struct {
 	// WSJTDepth is wsjt_decoding_depth (1 to 3, default 3).
 	WSJTDepth int
@@ -31,6 +32,14 @@ type Settings struct {
 	JS8Profiles []string
 	// JS8Depth is js8_decoding_depth (1 to 3, default 3).
 	JS8Depth int
+	// PagingFilter keeps only the readable pages (DEC-033).
+	PagingFilter bool
+	// PagingCharset is the POCSAG charset of multimon-ng (US, FR, DE, DK,
+	// SE or SI); "" is US.
+	PagingCharset string
+	// ISMReportLevels keeps the signal levels of rtl_433 in the ISM
+	// decodes (DEC-039).
+	ISMReportLevels bool
 }
 
 // Default decoding settings (the hub defaults, ADR 0028).

@@ -70,6 +70,10 @@ type StatePolicy struct {
 	Decoders *StateDecoders `json:"decoders,omitempty"`
 }
 
+// PagingCharsets are the POCSAG charsets of the paging decoder
+// (multimon-ng -C).
+var PagingCharsets = []string{"US", "FR", "DE", "DK", "SE", "SI"}
+
 // StateDecoders are the decoding settings a node applies.
 type StateDecoders struct {
 	// MaxRestarts is the crash-loop threshold of decoder processes: that
@@ -102,6 +106,14 @@ type StateDecoders struct {
 	// FAX are the HF FAX decoder settings (fax_*, DEC-038); nil: the node
 	// defaults.
 	FAX *StateFAX `json:"fax,omitempty"`
+	// PagingFilter keeps only the readable pages (DEC-033).
+	PagingFilter bool `json:"paging_filter,omitempty"`
+	// PagingCharset is the POCSAG charset: US, FR, DE, DK, SE or SI; ""
+	// for US.
+	PagingCharset string `json:"paging_charset,omitempty"`
+	// ISMReportLevels adds the signal levels to the ISM decodes (rtl_433
+	// -M level, DEC-039).
+	ISMReportLevels bool `json:"ism_report_levels,omitempty"`
 }
 
 // StateFAX are the settings of the FAX decoders a node starts.

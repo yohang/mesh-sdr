@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -292,6 +293,9 @@ func (ss *session) setDecoder(req rxv1.Envelope) {
 	case errors.Is(err, app.ErrNodeBusy):
 		ss.peer.Ack(req, startedFor(d))
 		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, nodeBusy)
+	case errors.As(err, new(errWideTap)):
+		ss.peer.Ack(req, startedFor(d))
+		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, wideReason(err))
 	case err != nil:
 		// The listener learns the underlying mode it was switched to.
 		if switched {
@@ -371,6 +375,8 @@ func (ss *session) underlyingChanged(d *demodState) {
 	switch {
 	case errors.Is(err, app.ErrNodeBusy):
 		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, nodeBusy)
+	case errors.As(err, new(errWideTap)):
+		ss.decoderStatus(d, shared.UUID{}, m.Name, variant, media.DecoderUnavailable, wideReason(err))
 	case err != nil:
 		ss.s.log.Warn("decoder not re-created after an underlying mode change", slog.String("demod_id", d.id),
 			slog.String("decoder", m.Name), slog.Any("error", err))
@@ -405,11 +411,36 @@ func (r *reception) get() (int64, string) {
 // stream, paused (d.mu held).
 func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant string, offset int64) error {
 	// fft is set before the session can send a line (Spectrum).
-	var fft uint16
+	var (
+		fft      uint16
+		wideRun  atomic.Pointer[app.DecoderRun]
+		wideStop func()
+		wideID   atomic.Pointer[shared.UUID]
+	)
+
+	// A wide IQ decoder gets its channel first: a device rate below the
+	// mode's, or a band outside the device span, makes it unavailable.
+	if m.Input == domain.InputWideIQ {
+		cancel, err := d.demod.TapWideIQ(m.InputRate, m.BandLow, m.BandHigh, func(b app.WideIQBlock) {
+			if r := wideRun.Load(); r != nil {
+				(*r).WideIQ(b)
+			}
+		}, func(reason string) {
+			if id := wideID.Load(); id != nil {
+				ss.sessionStatus(d, *id, m.Name, variant, app.DecoderStatus{State: app.DecoderUnavailable, Reason: reason})
+			}
+		})
+		if err != nil {
+			return errWideTap{err}
+		}
+
+		wideStop = cancel
+	}
 
 	rx := &reception{}
+	spec := app.DecoderSpec{Mode: m, Variant: variant, OffsetHz: float64(offset), DialHz: func() int64 { return ss.tuning(d).dial }}
 
-	id, run, err := ss.s.dec.Decoders.Start(m, variant, float64(offset), func(id shared.UUID) app.DecoderEvents {
+	id, run, err := ss.s.dec.Decoders.Start(spec, func(id shared.UUID) app.DecoderEvents {
 		return app.DecoderEvents{
 			Decode:   func(rec app.DecodeRecord) { ss.decoded(d, id, m, rec, rx) },
 			Status:   func(st app.DecoderStatus) { ss.sessionStatus(d, id, m.Name, variant, st) },
@@ -419,14 +450,23 @@ func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant str
 		}
 	})
 	if err != nil {
+		if wideStop != nil {
+			wideStop()
+		}
+
 		return err
 	}
 
 	dec := &decoderSession{id: id, mode: m, variant: variant, run: run, offset: offset}
 
-	if m.Input == domain.InputNarrowIQ {
+	switch m.Input {
+	case domain.InputNarrowIQ:
 		dec.untap = d.demod.TapIQ(run.IQ)
-	} else {
+	case domain.InputWideIQ:
+		wideID.Store(&id)
+		wideRun.Store(&run)
+		dec.untap = wideStop
+	default:
 		dec.untap = d.demod.Tap(run.Audio)
 	}
 
@@ -664,7 +704,8 @@ func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, 
 	}
 
 	// A text decoder adds its secondary offset, a slot decoder the audio
-	// frequency of the signal.
+	// frequency of the signal,
+	// a skimmer the offset of its signal.
 	freq := dial + offset + rec.AudioHz
 	text := capText(rec.Text, media.MaxDecodeText)
 
@@ -690,11 +731,15 @@ func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, 
 }
 
 // produced sends a file of a decoder session to the hub (FIL-005), even
-// once the session is over (its image in progress). It is stamped with the
-// reception of the session's last kept message: an image without its
-// start is dropped.
+// once the session is over (its image in progress). An image is stamped
+// with the reception of the session's last kept message (an image without
+// its start is dropped); a file that carries its frequency (a skimmer text
+// log) keeps it, with the device's active preset.
 func (ss *session) produced(d *demodState, id shared.UUID, m domain.DigitalMode, rx *reception, f app.ProducedFile) {
 	freq, preset := rx.get()
+	if f.FreqHz > 0 {
+		freq, preset = f.FreqHz, ss.tuning(d).preset
+	}
 
 	pub := ss.s.dec.Files
 	if pub == nil || freq <= 0 {
@@ -703,6 +748,44 @@ func (ss *session) produced(d *demodState, id shared.UUID, m domain.DigitalMode,
 
 	f.DeviceID, f.PresetID, f.SessionID, f.Mode, f.FreqHz = d.device, preset, id.String(), m.Name, freq
 	pub.Produced(f)
+}
+
+// decoderTuning is where a demodulator receives.
+type decoderTuning struct {
+	device, preset string
+	dial           int64
+}
+
+// tuning returns the device, active preset and dial frequency of d (no
+// device when d's device is no longer attached). It does not take d.mu.
+func (ss *session) tuning(d *demodState) decoderTuning {
+	a := ss.attachedTo(d.device)
+	if a == nil {
+		return decoderTuning{}
+	}
+
+	snap := a.lease.Snapshot()
+
+	return decoderTuning{device: d.device, preset: snap.ActivePreset, dial: snap.CenterHz + d.demod.Params().OffsetHz}
+}
+
+// errWideTap refuses a wide IQ decoder whose channel cannot be built (the
+// device sample rate is below its input rate, or its band leaves the
+// device span): the decoder is unavailable.
+type errWideTap struct{ err error }
+
+func (e errWideTap) Error() string { return e.err.Error() }
+
+func (e errWideTap) Unwrap() error { return e.err }
+
+// wideReason is the reason of an errWideTap shown to the listener.
+func wideReason(err error) string {
+	var de *shared.Error
+	if errors.As(err, &de) {
+		return de.Message()
+	}
+
+	return "the device cannot serve this decoder"
 }
 
 // capText cuts s to at most n bytes on a rune boundary.

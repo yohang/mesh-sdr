@@ -326,6 +326,106 @@ func TestTap(t *testing.T) {
 	}
 }
 
+// The wide IQ tap (DEC-039): a second channel at the demodulator's offset,
+// resampled to the decoder rate, that follows the offset; a rate above the
+// device's, or a band leaving the device span, is refused.
+func TestTapWideIQ(t *testing.T) {
+	e := New(slog.New(slog.DiscardHandler))
+	defer e.Close()
+
+	e.Start(tuning())
+
+	d, err := e.NewDemod(params(), func(app.AudioOut) {}, func(app.Meter) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	if _, err := d.TapWideIQ(1_200_000, -125_000, 125_000, func(app.WideIQBlock) {}, nil); !errors.Is(err, domain.ErrOutOfRange) ||
+		!strings.Contains(err.Error(), "below the 1200000 Hz") {
+		t.Errorf("1.2 MS/s tap on a 250 kHz device: %v", err)
+	}
+
+	// ±123.5 kHz around the demodulator at +30 kHz leaves ±125 kHz.
+	if _, err := d.TapWideIQ(250_000, -125_000, 125_000, func(app.WideIQBlock) {}, nil); !errors.Is(err, domain.ErrOutOfRange) ||
+		!strings.Contains(err.Error(), "leaves the device span") {
+		t.Errorf("250 kHz tap at +30 kHz: %v", err)
+	}
+
+	var (
+		mu    sync.Mutex
+		iq    []complex64
+		rates []int
+	)
+
+	cancel, err := d.TapWideIQ(96_000, 0, 48_000, func(b app.WideIQBlock) {
+		mu.Lock()
+		iq = append(iq, b.Samples...)
+		rates = append(rates, b.Rate)
+		mu.Unlock()
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// tone returns the frequency of the tap's signal (mean phase step).
+	tone := func() float64 {
+		mu.Lock()
+		defer mu.Unlock()
+
+		var acc complex128
+		for i := len(iq) / 2; i+1 < len(iq); i++ {
+			acc += complex128(iq[i+1]) * cmplx.Conj(complex128(iq[i]))
+		}
+
+		return cmplx.Phase(acc) / (2 * math.Pi) * 96_000
+	}
+
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+
+		return len(iq)
+	}
+
+	// A carrier 10 kHz above the demodulator.
+	next := feed(e, 0, 400*time.Millisecond, 40_000)
+	eventually(t, func() bool { return count() > 20_000 })
+
+	if f := tone(); math.Abs(f-10_000) > 200 || slices.ContainsFunc(rates, func(r int) bool { return r != 96_000 }) {
+		t.Errorf("tone at %.0f Hz, rates %v", f, rates[:min(3, len(rates))])
+	}
+
+	// A new offset moves the wide channel too.
+	p := params()
+	p.OffsetHz = 20_000
+
+	if err := d.Set(p); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	iq = nil
+	mu.Unlock()
+
+	next = feed(e, next, 400*time.Millisecond, 40_000)
+	eventually(t, func() bool { return count() > 20_000 })
+
+	if f := tone(); math.Abs(f-20_000) > 200 {
+		t.Errorf("after the offset change, tone at %.0f Hz", f)
+	}
+
+	cancel()
+
+	n := count()
+	feed(e, next, 100*time.Millisecond, 40_000)
+	time.Sleep(50 * time.Millisecond)
+
+	if count() != n {
+		t.Error("IQ after cancel")
+	}
+}
+
 // feedFM pushes d of a broadcast FM carrier at offset Hz modulated by a
 // toneHz tone (deviation dev), paced at about real time.
 func feedFM(e *Engine, from uint64, d time.Duration, offset, toneHz, dev float64) uint64 {

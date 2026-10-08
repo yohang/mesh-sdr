@@ -80,6 +80,7 @@ func slotSettings(d *ctl.StateDecoders) decoder.Settings {
 	return decoder.Settings{
 		WSJTDepth: d.WSJTDepth, WSJTDepths: d.WSJTDepths, FST4Intervals: d.FST4Intervals, FST4WIntervals: d.FST4WIntervals,
 		Q65Combinations: d.Q65Combinations, JS8Profiles: d.JS8Profiles, JS8Depth: d.JS8Depth,
+		PagingFilter: d.PagingFilter, PagingCharset: d.PagingCharset, ISMReportLevels: d.ISMReportLevels,
 	}
 }
 

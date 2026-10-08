@@ -51,7 +51,9 @@ func stateDecoders(s settingsReader) *ctl.StateDecoders {
 		MaxRestarts: s.Int("decoders.max_restarts"), DigimodesFFTSize: s.Int("decoders.digimodes_fft_size"), ShowCW: s.Bool("decoders.cw_showcw"),
 		WSJTDepth: s.Int("decoders.wsjt_decoding_depth"), WSJTDepths: map[string]int{},
 		Q65Combinations: s.Strings("decoders.q65_enabled_combinations"), JS8Profiles: s.Strings("decoders.js8_enabled_profiles"),
-		JS8Depth: s.Int("decoders.js8_decoding_depth"),
+		JS8Depth:     s.Int("decoders.js8_decoding_depth"),
+		PagingFilter: s.Bool("decoders.paging_filter"), PagingCharset: s.String("decoders.paging_charset"),
+		ISMReportLevels: s.Bool("decoders.ism_report_levels"),
 		FAX: &ctl.StateFAX{
 			LPM: s.Int("fax_lpm"), MinLength: s.Int("fax_min_length"), MaxLength: s.Int("fax_max_length"),
 			PostProcess: s.Bool("fax_postprocess"), Color: s.Bool("fax_color"), AM: s.Bool("fax_am"),
