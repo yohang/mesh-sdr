@@ -1,5 +1,10 @@
 package decodes
 
+import (
+	"strconv"
+	"strings"
+)
+
 // listPage is the Decodes page (FEATURE_SPEC §10.11, ADR 0028): the
 // filters and one page of decoded messages, newest first. Decoded text is
 // untrusted RF text: templ escapes it.
@@ -91,7 +96,21 @@ templ results(v listView) {
 							<td class="py-1 pr-4">{ v.deviceName(m.DeviceID) }</td>
 							<td class="py-1 pr-4 font-mono tabular-nums">{ freqText(m.FreqHz) }</td>
 							<td class="py-1 pr-4">{ m.Mode }</td>
-							<td class="break-all py-1 font-mono whitespace-pre-wrap">{ m.Text }</td>
+							<td class="break-all py-1 font-mono whitespace-pre-wrap">
+								{ m.Text }
+								if m.Open {
+									<span aria-hidden="true">…</span>
+									<span class="sr-only">(continues)</span>
+								}
+								if len(m.Calls) > 0 {
+									<span class="block font-sans text-sm text-fg-muted">
+										if m.Frames > 1 {
+											{ strconv.Itoa(m.Frames) } frames.
+										}
+										Calls: { strings.Join(m.Calls, ", ") }
+									</span>
+								}
+							</td>
 						</tr>
 					}
 				</tbody>

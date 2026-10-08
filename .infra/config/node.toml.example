@@ -86,6 +86,13 @@ dirs = ["/usr/local/bin", "/usr/bin"]
 batch_workers = 0
 # Batch decoder jobs waiting for a worker; on overflow the oldest is
 # dropped.
+#
+# Disk: a batch session records each slot period as a 12 kHz 16-bit WAV
+# in its workdir under node.runtime_dir (24 kB per second of slot): 360 kB
+# for an FT8 slot, 2.9 MB for WSPR, up to 43 MB for a 1800 s FST4 slot,
+# plus the slots waiting in the queue (removed once decoded). A
+# runtime_dir on tmpfs (/run) keeps them in RAM: size it for the sessions
+# and periods you allow.
 queue_length = 10
 # Decoder sessions the node runs at once, all listeners together; beyond
 # it a listener's decoder is unavailable ("node busy"). 0: twice the CPU

@@ -145,6 +145,33 @@ type SettingsDecoders struct {
 	DigimodesFFTSize int `toml:"digimodes_fft_size" env:"DIGIMODES_FFT_SIZE" jsonschema:"enum=512,enum=1024,enum=2048,enum=4096" jsonschema_extras:"x-label=Decoder waterfall FFT size" jsonschema_description:"Size of the FFT of the decoder waterfall of PSK, RTTY, SITOR-B and CW (Receiver › Decoders): 512, 1024, 2048 or 4096 bins over 12 kHz. Applies to decoders started from now on."`
 	// ShowCW: the CW decoder also prints dots and dashes (DEC-012).
 	ShowCW bool `toml:"cw_showcw" env:"CW_SHOWCW" jsonschema_extras:"x-label=Show CW symbols" jsonschema_description:"The CW decoder also prints the dots and dashes it receives. Applies to decoders started from now on."`
+	// WSJTDecodingDepth and WSJTDecodingDepths are the depths of the WSJT
+	// decoders (DEC-024).
+	WSJTDecodingDepth  int                `toml:"wsjt_decoding_depth" env:"WSJT_DECODING_DEPTH" jsonschema:"minimum=1,maximum=3" jsonschema_extras:"x-label=WSJT decoding depth" jsonschema_description:"Decoding depth of the WSJT-X decoders (FT8\\, FT4\\, JT65\\, JT9\\, WSPR\\, FST4\\, FST4W\\, Q65) without a depth of their own: 1 fast\\, 2 normal\\, 3 deep (more decodes\\, more CPU)."`
+	WSJTDecodingDepths SettingsWSJTDepths `toml:"wsjt_decoding_depths" envPrefix:"WSJT_DECODING_DEPTHS__" jsonschema:"description=Decoding depth per WSJT mode (0: the WSJT decoding depth)."`
+	// FST4Intervals, FST4WIntervals and Q65Combinations are the slots the
+	// FST4, FST4W and Q65 decoders decode (DEC-021, DEC-022, DEC-023).
+	FST4Intervals   []string `toml:"fst4_enabled_intervals" env:"FST4_ENABLED_INTERVALS" jsonschema:"minItems=1,maxItems=7,enum=15,enum=30,enum=60,enum=120,enum=300,enum=900,enum=1800" jsonschema_extras:"x-label=FST4 periods (seconds)" jsonschema_description:"T/R periods the FST4 decoder decodes\\, one per line: 15\\, 30\\, 60\\, 120\\, 300\\, 900 or 1800 seconds. Each period decodes its own slots."`
+	FST4WIntervals  []string `toml:"fst4w_enabled_intervals" env:"FST4W_ENABLED_INTERVALS" jsonschema:"minItems=1,maxItems=4,enum=120,enum=300,enum=900,enum=1800" jsonschema_extras:"x-label=FST4W periods (seconds)" jsonschema_description:"T/R periods the FST4W decoder decodes\\, one per line: 120\\, 300\\, 900 or 1800 seconds."`
+	Q65Combinations []string `toml:"q65_enabled_combinations" env:"Q65_ENABLED_COMBINATIONS" jsonschema:"minItems=1,maxItems=22,enum=A15,enum=B15,enum=C15,enum=A30,enum=B30,enum=C30,enum=D30,enum=A60,enum=B60,enum=C60,enum=D60,enum=E60,enum=A120,enum=B120,enum=C120,enum=D120,enum=E120,enum=A300,enum=B300,enum=C300,enum=D300,enum=E300" jsonschema_extras:"x-label=Q65 submodes and periods" jsonschema_description:"Q65 submode (A to E) and T/R period (seconds) combinations the Q65 decoder decodes\\, one per line\\, such as A30 or E120. Only the combinations narrower than 2700 Hz are valid."`
+	// JS8Profiles and JS8DecodingDepth configure the JS8Call decoder
+	// (DEC-029).
+	JS8Profiles      []string `toml:"js8_enabled_profiles" env:"JS8_ENABLED_PROFILES" jsonschema:"minItems=1,maxItems=4,enum=normal,enum=slow,enum=fast,enum=turbo" jsonschema_extras:"x-label=JS8Call speeds" jsonschema_description:"JS8Call speeds the decoder decodes\\, one per line: normal (15 s)\\, slow (30 s)\\, fast (10 s) or turbo (6 s)."`
+	JS8DecodingDepth int      `toml:"js8_decoding_depth" env:"JS8_DECODING_DEPTH" jsonschema:"minimum=1,maximum=3" jsonschema_extras:"x-label=JS8Call decoding depth" jsonschema_description:"Decoding depth of the JS8Call decoder: 1 fast\\, 2 normal\\, 3 deep."`
+}
+
+// SettingsWSJTDepths is the [settings.decoders.wsjt_decoding_depths]
+// table: the decoding depth of each WSJT mode, 0 for the global one
+// (DEC-024).
+type SettingsWSJTDepths struct {
+	FT8   int `toml:"ft8" env:"FT8" jsonschema:"minimum=0,maximum=3" jsonschema_extras:"x-label=FT8 depth" jsonschema_description:"0 to 3; 0: the WSJT decoding depth."`
+	FT4   int `toml:"ft4" env:"FT4" jsonschema:"minimum=0,maximum=3" jsonschema_extras:"x-label=FT4 depth" jsonschema_description:"0 to 3; 0: the WSJT decoding depth."`
+	JT65  int `toml:"jt65" env:"JT65" jsonschema:"minimum=0,maximum=3" jsonschema_extras:"x-label=JT65 depth" jsonschema_description:"0 to 3; 0: the WSJT decoding depth."`
+	JT9   int `toml:"jt9" env:"JT9" jsonschema:"minimum=0,maximum=3" jsonschema_extras:"x-label=JT9 depth" jsonschema_description:"0 to 3; 0: the WSJT decoding depth."`
+	WSPR  int `toml:"wspr" env:"WSPR" jsonschema:"minimum=0,maximum=3" jsonschema_extras:"x-label=WSPR depth" jsonschema_description:"0 to 3; 0: the WSJT decoding depth. Above 1\\, wsprd searches deeper."`
+	FST4  int `toml:"fst4" env:"FST4" jsonschema:"minimum=0,maximum=3" jsonschema_extras:"x-label=FST4 depth" jsonschema_description:"0 to 3; 0: the WSJT decoding depth."`
+	FST4W int `toml:"fst4w" env:"FST4W" jsonschema:"minimum=0,maximum=3" jsonschema_extras:"x-label=FST4W depth" jsonschema_description:"0 to 3; 0: the WSJT decoding depth."`
+	Q65   int `toml:"q65" env:"Q65" jsonschema:"minimum=0,maximum=3" jsonschema_extras:"x-label=Q65 depth" jsonschema_description:"0 to 3; 0: the WSJT decoding depth."`
 }
 
 // SettingsFiles is the [settings.files] table: retention of the files the
@@ -203,9 +230,13 @@ func DefaultSettings() Settings {
 			Sessions: MustDuration("30d"), AuditLog: MustDuration("365d"), Connections: MustDuration("30d"),
 			DecodedMessages: SettingsDecodedRetention{MaxAge: MustDuration("30d"), MaxRows: 1_000_000},
 		},
-		Files:         SettingsFiles{RetentionCount: 20},
-		Grid:          SettingsGrid{HeartbeatIntervalS: 10, OfflineAfterS: 60},
-		Decoders:      SettingsDecoders{MaxRestarts: 5, DigimodesFFTSize: 2048},
+		Files: SettingsFiles{RetentionCount: 20},
+		Grid:  SettingsGrid{HeartbeatIntervalS: 10, OfflineAfterS: 60},
+		Decoders: SettingsDecoders{
+			MaxRestarts: 5, DigimodesFFTSize: 2048, WSJTDecodingDepth: 3, WSJTDecodingDepths: SettingsWSJTDepths{JT65: 1},
+			FST4Intervals: []string{"15", "30"}, FST4WIntervals: []string{"120", "300"}, Q65Combinations: []string{"A30", "E120", "C60"},
+			JS8Profiles: []string{"normal", "slow"}, JS8DecodingDepth: 3,
+		},
 		Invitations:   SettingsInvitations{TTLHours: 168},
 		PasswordReset: SettingsPasswordReset{TTLMinutes: 30},
 	}

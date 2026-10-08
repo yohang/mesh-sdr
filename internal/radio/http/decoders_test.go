@@ -22,7 +22,7 @@ import (
 type tools struct{ ok bool }
 
 func (t tools) Available(c string) (bool, string) {
-	if (c == domain.CapMultimonNG || c == domain.CapNativeDSP) && t.ok {
+	if (c == domain.CapMultimonNG || c == domain.CapNativeDSP || c == domain.CapWSPRD) && t.ok {
 		return true, ""
 	}
 
@@ -237,7 +237,7 @@ func TestDecoderSet(t *testing.T) {
 	id := created.DemodID
 
 	e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": "d9", "decoder": "selcall"}, rxv1.CodeNotFound)
-	e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "ft8"}, rxv1.CodeNotFound)
+	e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "msk144"}, rxv1.CodeNotFound)
 	e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "zvei", "options": map[string]any{"variant": "DTMF"}}, rxv1.CodeOutOfRange)
 
 	// USB is not an underlying mode of SelCall: the demodulator switches
@@ -358,6 +358,45 @@ func TestDecoderNodeBusy(t *testing.T) {
 
 	other.Close()
 	e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "selcall"}, "")
+}
+
+// A WSJT decoder sets its pass band on USB (WSPR: 1350 to 1650 Hz), its
+// decodes are at the dial plus their audio frequency, and the clock
+// warning reaches the listener (DEC-020, DEC-026, DEC-027).
+func TestDecoderSetWSJT(t *testing.T) {
+	e := newDecoderEnv(t, true, 0, time.Minute)
+	e.check(rxv1.TypeDeviceAttach, map[string]any{"device_id": "vhf"}, "")
+
+	id := e.check(rxv1.TypeDemodCreate, map[string]any{"device_id": "vhf", "mode": "nfm", "offset_hz": 12_500}, "").result.(media.DemodCreated).DemodID
+
+	started := e.check(rxv1.TypeDecoderSet, map[string]any{"demod_id": id, "decoder": "wspr"}, "").result.(media.DecoderStarted)
+	if a := started.Applied; a.Mode != "usb" || a.Bandpass.LowHz != 1350 || a.Bandpass.HighHz != 1650 {
+		t.Fatalf("applied %+v", a)
+	}
+
+	r := e.run.last()
+	r.ev.Status(app.DecoderStatus{State: app.DecoderRunning, Warning: app.WarningClock})
+	r.ev.Decode(app.DecodeRecord{Time: time.UnixMilli(1_800_000_040_000), Schema: "wsjt.v1", Text: "K1ABC FN42 33", Payload: json.RawMessage(`{}`), AudioHz: 1500})
+
+	if d := sentOf[media.Decode](e.p, rxv1.TypeDecode); len(d) != 1 || d[0].FreqHz != 144_000_000+125_000+12_500+1500 {
+		t.Errorf("decode %+v", d)
+	}
+
+	// A slot decode carries the dial of its slot start; the events give
+	// the current dial.
+	if dial := r.ev.Dial(); dial != 144_000_000+125_000+12_500 {
+		t.Errorf("dial %d", dial)
+	}
+
+	r.ev.Decode(app.DecodeRecord{Time: time.UnixMilli(1_800_000_160_000), Schema: "wsjt.v1", Text: "K1ABC FN42 30", Payload: json.RawMessage(`{}`), AudioHz: 1500, DialHz: 10_138_700})
+
+	if d := sentOf[media.Decode](e.p, rxv1.TypeDecode); len(d) != 2 || d[1].FreqHz != 10_140_200 {
+		t.Errorf("slot decode %+v", d)
+	}
+
+	if st := sentOf[media.DiagState](e.p, rxv1.TypeDiagState); len(st) != 1 || st[0].Warning != "clock_unsynced" {
+		t.Errorf("diag.state %+v", st)
+	}
 }
 
 // A digital mode whose tool is missing is refused; admins see why.

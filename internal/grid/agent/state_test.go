@@ -203,3 +203,30 @@ func TestDesiredStateDecoders(t *testing.T) {
 		t.Fatalf("text settings: %+v %+v", out, s.Policy())
 	}
 }
+
+// The slot decoder settings are bounded (DEC-024).
+func TestDesiredStateSlotSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		d    ctl.StateDecoders
+		ok   bool
+	}{
+		{"full", ctl.StateDecoders{
+			MaxRestarts: 5, WSJTDepth: 3, WSJTDepths: map[string]int{"jt65": 1}, FST4Intervals: []int{15, 1800},
+			FST4WIntervals: []int{120}, Q65Combinations: []string{"A30"}, JS8Profiles: []string{"normal"}, JS8Depth: 2,
+		}, true},
+		{"defaults", ctl.StateDecoders{MaxRestarts: 5}, true},
+		{"depth", ctl.StateDecoders{MaxRestarts: 5, WSJTDepth: 4}, false},
+		{"mode depth", ctl.StateDecoders{MaxRestarts: 5, WSJTDepths: map[string]int{"ft8": -1}}, false},
+		{"interval", ctl.StateDecoders{MaxRestarts: 5, FST4Intervals: []int{0}}, false},
+		{"profile", ctl.StateDecoders{MaxRestarts: 5, JS8Profiles: []string{""}}, false},
+	} {
+		s := agent.NewDesiredState(nil)
+		p := ctl.StatePolicy{ListenPolicy: "anonymous", Decoders: &tc.d}
+
+		out := s.Apply(ctl.StateApply{Revision: 1, Policy: p})
+		if (len(out.Errors) == 0) != tc.ok || tc.ok && s.Policy().Decoders == nil {
+			t.Errorf("%s: %+v", tc.name, out)
+		}
+	}
+}

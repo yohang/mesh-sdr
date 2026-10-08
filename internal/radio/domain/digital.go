@@ -59,9 +59,13 @@ type DigitalMode struct {
 	// SecondaryFFT: the mode shows a secondary FFT in the Decoders tab
 	// (DEC-004).
 	SecondaryFFT bool
-	// Slot is the slot interval of batch (slot) decoders; 0 for streaming
-	// decoders.
+	// Slot is the slot interval of batch (slot) decoders, the shortest one
+	// of a mode with several (FST4, Q65, JS8); 0 for streaming decoders.
 	Slot time.Duration
+	// LowHz and HighHz are the pass band the decoder sets on its
+	// demodulator when it starts (WSJT: 0 to 3000 Hz, WSPR: 1350 to 1650
+	// Hz); both zero keep the demodulator's.
+	LowHz, HighHz float64
 	// ServiceOnly modes run only as background services: a listener may
 	// not start them (§8.3 rule 5).
 	ServiceOnly bool
@@ -180,6 +184,32 @@ var digitalModes = []DigitalMode{
 		Name: "cwdecoder", Label: "CW Decoder", Cap: CapNativeDSP, Family: textmodes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
 		InputRate: TextRate, SecondaryFFT: true, BandwidthHz: 75, DedupStep: textDedupStep,
 	},
+	// DEC-016…023: the WSJT-X family, 12 kHz WAV slots decoded by jt9 or
+	// wsprd (DEC-025, DEC-026) on USB audio.
+	wsjtMode("ft8", "FT8", CapWSJT, 15*time.Second, 0, 3000),
+	wsjtMode("ft4", "FT4", CapWSJT, 7500*time.Millisecond, 0, 3000),
+	wsjtMode("jt65", "JT65", CapWSJT, time.Minute, 0, 3000),
+	wsjtMode("jt9", "JT9", CapWSJT, time.Minute, 0, 3000),
+	wsjtMode("wspr", "WSPR", CapWSPRD, 2*time.Minute, 1350, 1650),
+	wsjtMode("fst4", "FST4", CapWSJT23, 15*time.Second, 0, 3000),
+	wsjtMode("fst4w", "FST4W", CapWSJT23, 2*time.Minute, 1350, 1650),
+	wsjtMode("q65", "Q65", CapWSJT24, 15*time.Second, 0, 3000),
+	// DEC-029: JS8Call, slots of 6 to 30 s decoded by js8.
+	{
+		Name: "js8", Label: "JS8Call", Cap: CapJS8, Family: "js8", Underlying: []string{"usb", "usbd"}, Input: InputAudio, InputRate: SlotRate,
+		Slot: 6 * time.Second, HighHz: 3000,
+	},
+}
+
+// SlotRate is the input rate of the slot decoders: 12 kHz mono WAV
+// (DEC-026).
+const SlotRate = 12000
+
+func wsjtMode(name, label, capability string, slot time.Duration, low, high float64) DigitalMode {
+	return DigitalMode{
+		Name: name, Label: label, Cap: capability, Family: "wsjt", Underlying: []string{"usb", "usbd"}, Input: InputAudio, InputRate: SlotRate,
+		Slot: slot, LowHz: low, HighHz: high,
+	}
 }
 
 // textmodes is the family of the native text decoders (§9.4).

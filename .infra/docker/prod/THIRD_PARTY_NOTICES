@@ -45,6 +45,12 @@ csdr-skimmer 1.12 (https://github.com/luarvique/csdr-skimmer, tag 1.12)
   GPL-3.0-or-later. Text: /usr/share/doc/csdr-skimmer/.
   Copyright (c) Marat Fayzullin.
 
+JS8 frame parser (internal/radio/infra/decoder/js8.go)
+  A Go port of js8py (https://github.com/jketterl/js8py, Jakob Ketterl,
+  GPL-3.0) and of the JS8Call 2.2.0 varicode, with the JS8Call JSC word
+  list (jsc_map.cpp, embedded in meshsdr). GPL-3.0-or-later.
+  Copyright (c) 2018 Jordan Sherer, KN4CRD; Copyright (c) Jakob Ketterl.
+
 Debian packages (copyright files under /usr/share/doc/<package>/copyright)
 -------------------------------------------------------------------------
 

@@ -253,7 +253,16 @@ func (ss *session) setDecoder(req rxv1.Envelope) {
 
 	if switched {
 		params.Mode, params.LowHz, params.HighHz = m.DefaultUnderlying(), 0, 0
+	}
 
+	// A mode with a pass band sets it (WSJT 0 to 3000 Hz, WSPR 1350 to
+	// 1650 Hz, DEC-020).
+	if (m.LowHz != 0 || m.HighHz != 0) && (params.LowHz != m.LowHz || params.HighHz != m.HighHz) {
+		params.LowHz, params.HighHz = m.LowHz, m.HighHz
+		switched = true
+	}
+
+	if switched {
 		if err := d.demod.Set(params); err != nil {
 			ss.fail(req, err)
 
@@ -406,6 +415,7 @@ func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant str
 			Status:   func(st app.DecoderStatus) { ss.sessionStatus(d, id, m.Name, variant, st) },
 			File:     func(f app.ProducedFile) { ss.produced(d, id, m, rx, f) },
 			Spectrum: func(f app.SpectrumFrame) { ss.secondaryFrame(d, id, fft, f) },
+			Dial:     func() int64 { return ss.dial(d) },
 		}
 	})
 	if err != nil {
@@ -600,12 +610,18 @@ func liveOffset(d *demodState, id shared.UUID) (int64, bool) {
 // sessionStatus forwards a status of session id while it is current.
 func (ss *session) sessionStatus(d *demodState, id shared.UUID, mode, variant string, st app.DecoderStatus) {
 	if live(d, id) {
-		ss.decoderStatus(d, id, mode, variant, st.State, st.Reason)
+		ss.sendStatus(d, id, mode, variant, st)
 	}
 }
 
 func (ss *session) decoderStatus(d *demodState, id shared.UUID, mode, variant, state, reason string) {
-	p := media.DiagState{DemodID: d.id, Decoder: mode, Variant: variant, State: state, Reason: reason, Since: ss.s.now().UnixMilli()}
+	ss.sendStatus(d, id, mode, variant, app.DecoderStatus{State: state, Reason: reason})
+}
+
+func (ss *session) sendStatus(d *demodState, id shared.UUID, mode, variant string, st app.DecoderStatus) {
+	p := media.DiagState{
+		DemodID: d.id, Decoder: mode, Variant: variant, State: st.State, Reason: st.Reason, Warning: st.Warning, Since: ss.s.now().UnixMilli(),
+	}
 	if !id.IsZero() {
 		p.DecoderSessionID = id.String()
 	}
@@ -613,10 +629,22 @@ func (ss *session) decoderStatus(d *demodState, id shared.UUID, mode, variant, s
 	ss.peer.Send(rxv1.TypeDiagState, p)
 }
 
+// dial returns the dial frequency of d (0 when its device is detached).
+func (ss *session) dial(d *demodState) int64 {
+	a := ss.attachedTo(d.device)
+	if a == nil {
+		return 0
+	}
+
+	return a.lease.Snapshot().CenterHz + d.demod.Params().OffsetHz
+}
+
 // decoded sends a decoded message of the current session to the listener
 // (decode) and, unless live or partial, to the hub (decode.batch). Its
-// frequency is the demodulator's dial frequency plus the secondary offset
-// of a text decoder (DEC-005).
+// frequency is the dial frequency it was received on (a slot's at its
+// start, else the demodulator's), plus the secondary offset of a text
+// decoder (DEC-005) or the audio frequency of the signal a slot decoder
+// reports (WSJT, JS8).
 func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, rec app.DecodeRecord, rx *reception) {
 	offset, ok := liveOffset(d, id)
 	if !ok {
@@ -629,7 +657,15 @@ func (ss *session) decoded(d *demodState, id shared.UUID, m domain.DigitalMode, 
 	}
 
 	snap := a.lease.Snapshot()
-	freq := snap.CenterHz + d.demod.Params().OffsetHz + offset
+
+	dial := rec.DialHz
+	if dial == 0 {
+		dial = snap.CenterHz + d.demod.Params().OffsetHz
+	}
+
+	// A text decoder adds its secondary offset, a slot decoder the audio
+	// frequency of the signal.
+	freq := dial + offset + rec.AudioHz
 	text := capText(rec.Text, media.MaxDecodeText)
 
 	ss.peer.Send(rxv1.TypeDecode, media.Decode{

@@ -80,6 +80,25 @@ type StateDecoders struct {
 	DigimodesFFTSize int `json:"digimodes_fft_size,omitempty"`
 	// ShowCW: the CW decoder also prints dots and dashes.
 	ShowCW bool `json:"cw_showcw,omitempty"`
+	// The settings of the slot decoders (additive fields, DEC-024,
+	// DEC-021…023, DEC-029); zero values take the node defaults.
+	//
+	// WSJTDepth is the WSJT decoding depth (1 to 3), WSJTDepths the
+	// per-mode depths (ft8, ft4, jt65, jt9, wspr, fst4, fst4w, q65; 0 or
+	// missing: WSJTDepth).
+	WSJTDepth  int            `json:"wsjt_decoding_depth,omitempty"`
+	WSJTDepths map[string]int `json:"wsjt_decoding_depths,omitempty"`
+	// FST4Intervals and FST4WIntervals are the enabled T/R periods in
+	// seconds.
+	FST4Intervals  []int `json:"fst4_enabled_intervals,omitempty"`
+	FST4WIntervals []int `json:"fst4w_enabled_intervals,omitempty"`
+	// Q65Combinations are the enabled Q65 submode and period combinations
+	// ("A30").
+	Q65Combinations []string `json:"q65_enabled_combinations,omitempty"`
+	// JS8Profiles are the enabled JS8 speeds (normal, slow, fast, turbo),
+	// JS8Depth the JS8 decoding depth (1 to 3).
+	JS8Profiles []string `json:"js8_enabled_profiles,omitempty"`
+	JS8Depth    int      `json:"js8_decoding_depth,omitempty"`
 	// FAX are the HF FAX decoder settings (fax_*, DEC-038); nil: the node
 	// defaults.
 	FAX *StateFAX `json:"fax,omitempty"`
