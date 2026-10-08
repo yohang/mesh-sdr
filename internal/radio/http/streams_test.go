@@ -481,6 +481,10 @@ func TestPresetSelect(t *testing.T) {
 		t.Errorf("active preset after a retune: %q", got)
 	}
 
+	if cfg := lis.lastSent(rxv1.TypeDeviceConfig).(media.DeviceConfig); cfg.ActivePreset != nil || cfg.CenterHz != 145_050_000 {
+		t.Errorf("listener device.config after a retune: %+v", cfg)
+	}
+
 	do(opSS, op, rxv1.TypeDeviceRetune, map[string]any{"device_id": "vhf", "center_hz": 145_500_000}, "")
 
 	if a := applied(lis); a.OffsetHz != 0 {

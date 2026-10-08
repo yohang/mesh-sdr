@@ -1000,13 +1000,15 @@ func (ss *session) retune(req rxv1.Envelope) {
 		start = preset.StartFreq
 	}
 
-	// The device no longer runs its preset as switched.
-	if snap.ActivePreset != "" {
+	// The device no longer runs its preset as switched: every listener gets
+	// a device.config without it.
+	cleared := snap.ActivePreset != ""
+	if cleared {
 		s.clearPreset(p.DeviceID)
 	}
 
 	for _, l := range listeners {
-		l.centreMoved(p.DeviceID, old, start, nil, false)
+		l.centreMoved(p.DeviceID, old, start, nil, cleared)
 	}
 
 	ss.peer.Ack(req, media.DeviceRetune{CenterHz: snap.CenterHz})
@@ -1170,7 +1172,8 @@ func outside(listeners []*session, caller *session, device string, center int64,
 // the new band moves to startHz. mine is the switched preset when this
 // session selected it: its demodulators take the preset's start mode,
 // frequency, squelch and noise reduction. config sends the new
-// device.config (a preset switch; a retune sends device.config.patch).
+// device.config (a preset switch, or a retune that cleared the active
+// preset; any other retune sends device.config.patch only).
 func (ss *session) centreMoved(device string, oldCenter, startHz int64, mine *ctl.Preset, config bool) {
 	a := ss.attachedTo(device)
 	if a == nil {

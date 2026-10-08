@@ -9,13 +9,17 @@
 // setting, Default or Turbo; no visitor choice). The view detaches when htmx swaps #main away; the engine, and so
 // the audio, keeps running.
 //
-// The control bar under the waterfall (UI-018) holds the frequency entry and
-// tune steps (RX-009, RX-011; shortcuts ← and →), the analog mode picker
+// The control bar under the waterfall (UI-018) holds the frequency entry,
+// tune steps and step picker (RX-009, RX-011, RX-012; shortcuts ← and →),
+// the shared preset picker and "Recentre here" (RX-006, RX-010: shown only
+// with the preset or retune right of device.config.permissions; refusals
+// go to the status region), the analog mode picker
 // (RX-007), the pass band (RX-020; its edges are also dragged on the scale),
 // the squelch with a one-shot auto (RX-023, RX-024), the noise reduction
 // (RX-027) and the S-meter (RX-022). Volume and mute are in the shell audio
 // dock (RX-026). The side panel (UI-019) has the Info tab only: the device
-// and its node, and the station described by the hub (RX-036), whose
+// and its node, its active preset, and the station described by the hub
+// (RX-036), whose
 // server-rendered markup ([data-rx-station]) the island moves into it.
 //
 // Default device (RX-041): the device the engine already listens to, else
@@ -69,6 +73,9 @@ const EDGE_GRAB_PX = 6;
 const EDGE_GRAB_TOUCH_PX = 16;
 // The device this browser used last (RX-041), "<node_id>/<device_id>".
 const LAST_DEVICE_KEY = "msdr.receiver.device";
+// Tuning steps offered (RX-012, Hz); the device's step is added when it is
+// not one of them.
+const STEPS = [100, 1000, 5000, 6250, 9000, 10000, 12500, 25000, 100000];
 
 /**
  * el creates an element with attributes and optional text content.
@@ -90,6 +97,11 @@ function formatMHz(hz) {
 function formatKHz(hz) {
   const s = (Math.abs(hz) / 1000).toFixed(1);
   return hz < 0 ? `−${s}` : `+${s}`;
+}
+
+/** @param {number} hz a tuning step */
+function formatStep(hz) {
+  return hz < 1000 ? `${hz} Hz` : `${Number((hz / 1000).toFixed(3))} kHz`;
 }
 
 /** @param {number} db */
@@ -341,6 +353,33 @@ class MsdrReceiver extends HTMLElement {
     const freq = el("div", { class: GROUP });
     freq.append(el("label", { for: "rx-freq", class: "font-semibold" }, "Frequency (MHz)"), this.stepDown, this.freqInput, this.stepUp, this.freqHint);
 
+    // Tuning step (RX-012): drives ‹ › and the arrow keys.
+    this.stepSelect = /** @type {HTMLSelectElement} */ (el("select", { id: "rx-step", class: "rounded border px-2 py-1" }));
+    this.stepSelect.addEventListener("change", () => e.setStep(Number(this.stepSelect.value)));
+    const step = el("div", { class: GROUP });
+    step.append(el("label", { for: "rx-step", class: "font-semibold" }, "Step"), this.stepSelect);
+
+    // Shared preset (RX-006) and centre (RX-010), for callers with the
+    // right only; a switch moves the device for every listener.
+    this.presetSelect = /** @type {HTMLSelectElement} */ (el("select", { id: "rx-preset", class: "max-w-48 rounded border px-2 py-1" }));
+    this.presetSelect.addEventListener("change", async () => {
+      const id = this.presetSelect.value;
+      if (id && !(await e.selectPreset(id))) this.syncControls();
+    });
+    this.presetGroup = el("div", { class: GROUP });
+    this.presetGroup.append(el("label", { for: "rx-preset", class: "font-semibold" }, "Preset"), this.presetSelect);
+    this.recentre = el(
+      "button",
+      { type: "button", class: SMALL_BUTTON, "aria-describedby": "rx-recentre-hint" },
+      "Recentre here",
+    );
+    this.recentre.addEventListener("click", () => e.retune(e.tunedHz));
+    this.recentreGroup = el("div", { class: GROUP });
+    this.recentreGroup.append(
+      this.recentre,
+      el("span", { id: "rx-recentre-hint", class: "sr-only" }, "Moves the device centre to the tuned frequency for every listener."),
+    );
+
     // Mode picker: one button per analog mode (RX-007).
     this.modes = el("div", { class: "flex flex-wrap gap-1", role: "group", "aria-labelledby": "rx-mode-label" });
     const mode = el("div", { class: GROUP });
@@ -421,7 +460,7 @@ class MsdrReceiver extends HTMLElement {
       role: "group",
       "aria-label": "Receiver controls",
     });
-    bar.append(freq, mode, band, squelch, noise, smeter);
+    bar.append(freq, step, this.presetGroup, this.recentreGroup, mode, band, squelch, noise, smeter);
     return bar;
   }
 
@@ -589,6 +628,8 @@ class MsdrReceiver extends HTMLElement {
 
     this.bandText.textContent = d ? `${formatKHz(d.lowHz)} … ${formatKHz(d.highHz)} kHz` : "—";
 
+    this.syncShared();
+
     const sq = d?.squelchDb ?? null;
     if (sq !== null) this.squelchLevel = sq;
     this.sqOn.checked = sq !== null;
@@ -605,6 +646,39 @@ class MsdrReceiver extends HTMLElement {
     this.nrLevel.setAttribute("aria-valuetext", this.nrText.textContent);
   }
 
+  // syncShared shows the step picker, and the preset picker and "Recentre
+  // here" to callers with the right (device.config.permissions).
+  syncShared() {
+    const e = this.engine;
+    const d = e.demod;
+    const dev = e.device;
+
+    const current = e.tuningStep();
+    const steps = [...new Set([...STEPS, dev?.tuning_step_hz || 0, current])].filter((v) => v > 1).sort((a, b) => a - b);
+    if (steps.join() !== [...this.stepSelect.options].map((o) => o.value).join()) {
+      this.stepSelect.replaceChildren(...steps.map((v) => el("option", { value: String(v) }, formatStep(v))));
+    }
+    this.stepSelect.value = String(current);
+    this.stepSelect.toggleAttribute("disabled", !d);
+
+    const perms = dev?.permissions ?? {};
+    const presets = Array.isArray(dev?.presets_available) ? dev.presets_available : [];
+    const active = dev?.active_preset?.id ?? "";
+    this.presetGroup.hidden = !perms.preset || presets.length === 0;
+    const key = JSON.stringify([active === "", presets]);
+    if (key !== this.presetKey) {
+      this.presetKey = key;
+      const opts = presets.map((/** @type {any} */ p) => el("option", { value: p.id }, p.name));
+      if (active === "") opts.unshift(el("option", { value: "", disabled: "" }, "No preset"));
+      this.presetSelect.replaceChildren(...opts);
+    }
+    this.presetSelect.value = active;
+    this.presetSelect.toggleAttribute("disabled", !d);
+
+    this.recentreGroup.hidden = !perms.retune;
+    this.recentre.toggleAttribute("disabled", !d);
+  }
+
   // renderInfo fills the Info tab: the device and its node (features list),
   // and what the node says of the device (device.config).
   renderInfo() {
@@ -618,6 +692,7 @@ class MsdrReceiver extends HTMLElement {
       if (modes.length) rows.push(["Modes", modes.map((m) => m.toUpperCase()).join(", ")]);
     }
     if (e.device && e.target && c && e.target.device_id === c.id && e.target.node_id === c.node_id) {
+      rows.push(["Preset", e.device.active_preset?.name ?? "None"]);
       if (e.centerHz) rows.push(["Centre", formatMHz(e.centerHz)]);
       if (e.device.sample_rate) rows.push(["Bandwidth", `${(e.device.sample_rate / 1e6).toFixed(3)} MHz`]);
       if (e.device.tuning_step_hz) rows.push(["Tuning step", `${(e.device.tuning_step_hz / 1e3).toFixed(1)} kHz`]);
