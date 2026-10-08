@@ -191,7 +191,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 				f := d.FAX
 
 				return decoder.FAXSettings{
-					LPM: f.LPM, MinLength: f.MinLength, MaxLength: f.MaxLength, PostProcess: f.PostProcess, Color: f.Color, AM: f.AM,
+					LPM: f.LPM, MinLength: f.MinLength, MaxLength: f.MaxLength, PostProcess: f.PostProcess, AM: f.AM,
 				}
 			}
 

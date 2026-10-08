@@ -44,7 +44,7 @@ func TestDesiredStateCarriesSettings(t *testing.T) {
 		presets: presets.NewService(presets.Deps{Repo: presets.NewPresets(a), Tx: a, Logger: logger}),
 		settings: fixedSettings{
 			"listen_policy": "registered", "waterfall.min_db": -110, "waterfall.max_db": -40, "waterfall.palette": "default",
-			"fax_lpm": 60, "fax_min_length": 100, "fax_max_length": 900, "fax_color": true,
+			"fax_lpm": 60, "fax_min_length": 100, "fax_max_length": 900, "fax_am": true,
 		},
 		now: time.Now,
 	}
@@ -59,7 +59,7 @@ func TestDesiredStateCarriesSettings(t *testing.T) {
 		t.Errorf("policy = %+v", st.Policy)
 	}
 
-	fax := ctl.StateFAX{LPM: 60, MinLength: 100, MaxLength: 900, Color: true}
+	fax := ctl.StateFAX{LPM: 60, MinLength: 100, MaxLength: 900, AM: true}
 	if d := st.Policy.Decoders; d == nil || d.FAX == nil || *d.FAX != fax {
 		t.Errorf("decoders = %+v", st.Policy.Decoders)
 	}

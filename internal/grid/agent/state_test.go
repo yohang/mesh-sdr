@@ -177,7 +177,7 @@ func TestDesiredStateDecoders(t *testing.T) {
 
 	// The FAX settings (DEC-038).
 	fax := ok
-	fax.Decoders = &ctl.StateDecoders{MaxRestarts: 5, FAX: &ctl.StateFAX{LPM: 60, MinLength: 100, MaxLength: 800, Color: true}}
+	fax.Decoders = &ctl.StateDecoders{MaxRestarts: 5, FAX: &ctl.StateFAX{LPM: 60, MinLength: 100, MaxLength: 800, AM: true}}
 
 	if out := s.Apply(ctl.StateApply{Revision: 3, Policy: fax}); len(out.Errors) != 0 || s.Policy().Decoders.FAX.LPM != 60 {
 		t.Fatalf("fax: %+v %+v", out, s.Policy())

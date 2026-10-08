@@ -293,7 +293,7 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 				MaxRestarts: s.settings.Int("decoders.max_restarts"),
 				FAX: &ctl.StateFAX{
 					LPM: s.settings.Int("fax_lpm"), MinLength: s.settings.Int("fax_min_length"), MaxLength: s.settings.Int("fax_max_length"),
-					PostProcess: s.settings.Bool("fax_postprocess"), Color: s.settings.Bool("fax_color"), AM: s.settings.Bool("fax_am"),
+					PostProcess: s.settings.Bool("fax_postprocess"), AM: s.settings.Bool("fax_am"),
 				},
 			},
 		},

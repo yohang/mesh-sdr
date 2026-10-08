@@ -49,15 +49,13 @@ type FAXOptions struct {
 	AM bool
 	// PostProcess filters the noise of each row with its neighbours.
 	PostProcess bool
-	// Color decodes colour pages (three channels per row).
-	Color bool
 }
 
-// NewFAXDecoder returns Csdr::FaxDecoder at rate Hz: on a start tone it
-// writes a BMP header (8-bit greyscale with its palette, or 24-bit for
-// colour) with IOC/4 in byte 6, then one row per line. A page that ends
-// before MaxLines (stop tone) is padded with rows that start with
-// "END-PAGE!".
+// NewFAXDecoder returns Csdr::FaxDecoder at rate Hz, greyscale: on a
+// start tone it writes an 8-bit BMP header with its palette and IOC/4 in
+// byte 6, then one row per line. A page that ends before MaxLines (stop
+// tone) is padded with rows that start with "END-PAGE!". Colour pages
+// await a libcsdr++ fix (shim_image.h).
 func NewFAXDecoder(rate int, o FAXOptions) (*ImageDecoder, error) {
 	if rate < 8000 || rate > 192000 || o.LPM < MinFAXLPM || o.LPM > MaxFAXLPM || o.MaxLines < 1 || o.MaxLines > 100000 {
 		return nil, fmt.Errorf("%w: fax rate %d %+v", ErrBuild, rate, o)
@@ -70,10 +68,6 @@ func NewFAXDecoder(rate int, o FAXOptions) (*ImageDecoder, error) {
 
 	if o.PostProcess {
 		opt |= C.MSDR_FAX_POST
-	}
-
-	if o.Color {
-		opt |= C.MSDR_FAX_COLOR
 	}
 
 	return newImage(C.msdr_fax_new(C.uint(rate), C.uint(o.LPM), C.uint(o.MaxLines), opt), "fax")

@@ -140,42 +140,22 @@ func TestFAXReceiverMaxLines(t *testing.T) {
 	}
 }
 
-// A colour FAX page is decoded in RGB; a page beyond the cap ends there,
-// incomplete, and its rows left are dropped.
-func TestFAXReceiverColor(t *testing.T) {
-	for _, limit := range []int{0, 10 * 1812 * 3} {
-		r, err := dsp.NewFAXReceiver(csdr.FAXOptions{LPM: 120, MaxLines: 300, Color: true}, limit)
-		if err != nil {
-			t.Fatal(err)
-		}
+// A FAX page beyond the pixel cap ends there, incomplete, and its rows
+// left are dropped.
+func TestFAXReceiverCap(t *testing.T) {
+	r, err := dsp.NewFAXReceiver(csdr.FAXOptions{LPM: 120, MaxLines: 300}, 10*1812)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
 
-		starts, rows, ends := feed(t, r, dsptest.ColorFAX(csdr.FAXRate, 120, 20, func(x, _ int) (uint8, uint8, uint8) {
-			if x < 900 {
-				return 220, 30, 30
-			}
+	starts, rows, ends := feed(t, r, dsptest.FAX(csdr.FAXRate, 120, 20, bands), csdr.FAXRate)
 
-			return 30, 30, 220
-		}), csdr.FAXRate)
-		r.Close()
+	if starts != 1 || rows != 10 || len(ends) != 1 {
+		t.Fatalf("%d starts, %d rows, %d ends", starts, rows, len(ends))
+	}
 
-		want := 20
-		if limit > 0 {
-			want = 10
-		}
-
-		if starts != 1 || rows != want || len(ends) != 1 {
-			t.Fatalf("cap %d: %d starts, %d rows, %d ends", limit, starts, rows, len(ends))
-		}
-
-		m := ends[0]
-		if m.Channels != 3 || m.Lines != want || m.Complete != (limit == 0) || cap(m.Pix) > max(limit, 300*1812*3) {
-			t.Fatalf("cap %d: page %+v", limit, *m)
-		}
-
-		// Red on the left, blue on the right.
-		row := m.Row(5)
-		if l, rr := row[400*3:400*3+3], row[1400*3:1400*3+3]; l[0] < 150 || l[2] > 100 || rr[2] < 150 || rr[0] > 100 {
-			t.Errorf("cap %d: row 5 left RGB %v, right RGB %v", limit, l, rr)
-		}
+	if m := ends[0]; m.Lines != 10 || m.Complete || cap(m.Pix) != 10*1812 {
+		t.Fatalf("page %+v", *m)
 	}
 }

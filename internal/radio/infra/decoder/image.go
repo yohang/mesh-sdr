@@ -54,14 +54,14 @@ type ImageRecord struct {
 // FAXSettings are the fax_* settings the hub pushes (DEC-038).
 type FAXSettings struct {
 	LPM, MinLength, MaxLength int
-	PostProcess, Color, AM    bool
+	PostProcess, AM           bool
 }
 
 // DefaultFAX are the FAX settings of a node the hub has not configured.
 var DefaultFAX = FAXSettings{LPM: 120, MinLength: 200, MaxLength: 1500, PostProcess: true}
 
 // File caps of FIL-005: 8 MiB, 16 MiB for FAX. A FAX page whose pixels
-// would exceed its cap ends there (colour pages).
+// would exceed its cap ends there.
 const (
 	maxImageFile = 8 << 20
 	maxFAXFile   = 16 << 20
@@ -143,7 +143,7 @@ func (r *Runner) startImage(spec app.DecoderSpec, ev app.DecoderEvents) (app.Dec
 		}
 
 		s.lpm, s.maxFile = f.LPM, maxFAXFile
-		s.rx, err = dsp.NewFAXReceiver(csdr.FAXOptions{LPM: f.LPM, MaxLines: f.MaxLength, AM: f.AM, PostProcess: f.PostProcess, Color: f.Color}, maxFAXFile)
+		s.rx, err = dsp.NewFAXReceiver(csdr.FAXOptions{LPM: f.LPM, MaxLines: f.MaxLength, AM: f.AM, PostProcess: f.PostProcess}, maxFAXFile)
 		s.minLines = func(*dsp.Image) int { return f.MinLength }
 	default:
 		return nil, fmt.Errorf("%w for %s", ErrNoAdapter, spec.Mode.Name)

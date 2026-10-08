@@ -24,12 +24,13 @@ type Settings struct {
 	WFMDeemphasis    int    `toml:"wfm_deemphasis" env:"WFM_DEEMPHASIS" jsonschema:"enum=50,enum=75" jsonschema_extras:"x-label=WFM de-emphasis (µs)" jsonschema_description:"Broadcast FM de-emphasis time constant, in microseconds: 50 (Europe and most of the world) or 75 (Americas, South Korea). Nodes apply it to their WFM demodulators."`
 
 	// The fax_* keys are the HF FAX decoder settings (DEC-038, ADM-028):
-	// Admin › Decoding, pushed to the nodes in the desired state.
+	// Admin › Decoding, pushed to the nodes in the desired state. Greyscale
+	// only: there is no fax_color until libcsdr++ detects the start and
+	// stop tones of colour pages (0.18.41 does not).
 	FAXLPM         int  `toml:"fax_lpm" env:"FAX_LPM" jsonschema:"minimum=30,maximum=480" jsonschema_extras:"x-label=FAX transmission speed (lines per minute)" jsonschema_description:"Line rate of the FAX transmissions, in lines per minute (30 to 480; weather FAX uses 120). Applies to FAX decoders started from now on."`
 	FAXMinLength   int  `toml:"fax_min_length" env:"FAX_MIN_LENGTH" jsonschema:"minimum=50,maximum=450" jsonschema_extras:"x-label=Shortest FAX page kept (lines)" jsonschema_description:"A FAX page shorter than this many lines is not saved to Files (50 to 450)."`
 	FAXMaxLength   int  `toml:"fax_max_length" env:"FAX_MAX_LENGTH" jsonschema:"minimum=500,maximum=8000" jsonschema_extras:"x-label=Longest FAX page (lines)" jsonschema_description:"A FAX page ends after this many lines (500 to 8000: the hub keeps images of at most 16 megapixels). Applies to FAX decoders started from now on."`
 	FAXPostprocess bool `toml:"fax_postprocess" env:"FAX_POSTPROCESS" jsonschema_extras:"x-label=Reduce FAX noise" jsonschema_description:"Post-process the received FAX lines to reduce noise. Applies to FAX decoders started from now on."`
-	FAXColor       bool `toml:"fax_color" env:"FAX_COLOR" jsonschema_extras:"x-label=Colour FAX" jsonschema_description:"Receive colour FAX pages (three channels per line) instead of greyscale. Applies to FAX decoders started from now on."`
 	FAXAM          bool `toml:"fax_am" env:"FAX_AM" jsonschema_extras:"x-label=FAX amplitude modulation" jsonschema_description:"Decode the FAX lines from the amplitude instead of the frequency of the audio. Applies to FAX decoders started from now on."`
 
 	Receiver  SettingsReceiver  `toml:"receiver" envPrefix:"RECEIVER__" jsonschema:"description=Receiver identity and policies."`

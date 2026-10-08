@@ -128,7 +128,6 @@ msdr_image* msdr_fax_new(unsigned sample_rate, unsigned lpm, unsigned max_lines,
         unsigned opt = 0;
         if (options & MSDR_FAX_AM) opt |= Csdr::FaxDecoder<float>::OPT_AM;
         if (options & MSDR_FAX_POST) opt |= Csdr::FaxDecoder<float>::OPT_POST;
-        if (options & MSDR_FAX_COLOR) opt |= Csdr::FaxDecoder<float>::OPT_COLOR;
         auto* s = new msdr_image();
         s->module = new Csdr::FaxDecoder<float>(sample_rate, lpm, max_lines, opt, 0);
         s->attach();

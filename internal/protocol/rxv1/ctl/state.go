@@ -89,7 +89,6 @@ type StateFAX struct {
 	// MaxLength ends a page, in lines (500 to 8000).
 	MaxLength   int  `json:"max_length"`
 	PostProcess bool `json:"postprocess"`
-	Color       bool `json:"color"`
 	AM          bool `json:"am"`
 }
 

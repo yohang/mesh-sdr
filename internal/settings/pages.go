@@ -89,7 +89,7 @@ var formPages = []formPage{
 		Forms: []sectionSpec{
 			{ID: "supervision", Title: "Decoder processes", Keys: []string{"decoders.max_restarts"}},
 			{ID: "fax", Title: "FAX", Description: "HF FAX decoder (DEC-038): nodes apply these settings to the FAX decoders started from now on. Pages shorter than the shortest length are not saved to Files.",
-				Keys: []string{"fax_lpm", "fax_min_length", "fax_max_length", "fax_postprocess", "fax_color", "fax_am"}},
+				Keys: []string{"fax_lpm", "fax_min_length", "fax_max_length", "fax_postprocess", "fax_am"}},
 		},
 	},
 }

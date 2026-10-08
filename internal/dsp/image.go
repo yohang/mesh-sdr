@@ -259,7 +259,8 @@ func (r *ImageReceiver) parse() {
 var sstvWidths = map[int]bool{160: true, 256: true, 320: true, 512: true, 640: true, 800: true}
 
 // isHeader reports whether b starts with a BMP header of the receiver's
-// decoder: 24-bit with 's' in byte 7 for SSTV, IOC/4 in byte 6 for FAX.
+// decoder: 24-bit with 's' in byte 7 for SSTV, 8-bit with IOC/4 in byte 6
+// for FAX.
 func (r *ImageReceiver) isHeader(b []byte) bool {
 	if len(b) < 54 || b[0] != 'B' || b[1] != 'M' || binary.LittleEndian.Uint32(b[14:]) != 40 || binary.LittleEndian.Uint16(b[26:]) != 1 {
 		return false
@@ -278,7 +279,7 @@ func (r *ImageReceiver) isHeader(b []byte) bool {
 		return b[7] == 0x73 && bpp == 24 && off == 54 && sstvWidths[w]
 	}
 
-	return (b[6] == 144 && w == 1812 || b[6] == 72 && w == 908) && (bpp == 8 && off == 54+1024 || bpp == 24 && off == 54)
+	return (b[6] == 144 && w == 1812 || b[6] == 72 && w == 908) && bpp == 8 && off == 54+1024
 }
 
 // header parses the BMP header at the start of the pending stream, if

@@ -13,7 +13,10 @@ extern "C" {
 typedef struct msdr_image msdr_image;
 
 // Options of msdr_fax_new (Csdr::FaxDecoder OPT_*).
-enum { MSDR_FAX_AM = 0x1, MSDR_FAX_POST = 0x2, MSDR_FAX_COLOR = 0x4 };
+// Colour pages (OPT_COLOR) are not offered: libcsdr++ 0.18.41 looks for
+// their start and stop tones over three scans and never finds standard
+// ones; colour FAX awaits an upstream fix.
+enum { MSDR_FAX_AM = 0x1, MSDR_FAX_POST = 0x2 };
 
 // Constructors return NULL when the module cannot be built.
 msdr_image* msdr_sstv_new(unsigned sample_rate);
