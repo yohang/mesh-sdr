@@ -25,9 +25,9 @@ templ imagesSection(slots []slotView, notice, failure string) {
 				}
 				<form method="post" action="/admin/site/images" enctype="multipart/form-data" hx-post="/admin/site/images" hx-encoding="multipart/form-data" hx-target="#receiver-images" hx-swap="outerHTML" class="flex flex-wrap items-end gap-2">
 					<input type="hidden" name="slot" value={ s.Slot.Name() }/>
-					<label class="flex flex-col gap-1">
+					<label class="flex max-w-full flex-col gap-1">
 						<span>New { s.Label } (at most { s.Limit })</span>
-						<input type="file" name="file" accept="image/png,image/jpeg,image/webp" required/>
+						<input type="file" name="file" accept="image/png,image/jpeg,image/webp" required class="max-w-full"/>
 					</label>
 					<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">Upload<span class="sr-only"> { s.Label }</span></button>
 				</form>

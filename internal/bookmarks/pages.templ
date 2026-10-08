@@ -90,9 +90,9 @@ templ filtersForm(v listView) {
 				<option value="builtin" selected?={ v.Filter.Origin == "builtin" }>Pack</option>
 			</select>
 		</div>
-		<div class="flex flex-col gap-1">
+		<div class="flex max-w-full flex-col gap-1">
 			<label for="filter-device" class="font-medium">Shown on device</label>
-			<select id="filter-device" name="device" class="rounded border border-border px-2 py-1">
+			<select id="filter-device" name="device" class="max-w-full rounded border border-border px-2 py-1">
 				<option value="" selected?={ v.Filter.Device == "" }>Any</option>
 				for _, d := range v.Names.Devices {
 					<option value={ d.ID.String() } selected?={ v.Filter.Device == d.ID.String() }>{ d.Name }</option>
@@ -108,9 +108,9 @@ templ filtersForm(v listView) {
 				<option value="preset" selected?={ v.Filter.Scope == "preset" }>One preset</option>
 			</select>
 		</div>
-		<div class="flex flex-col gap-1">
+		<div class="flex max-w-full flex-col gap-1">
 			<label for="filter-band" class="font-medium">Band</label>
-			<select id="filter-band" name="band" class="rounded border border-border px-2 py-1" aria-describedby="filter-band-help">
+			<select id="filter-band" name="band" class="max-w-full rounded border border-border px-2 py-1" aria-describedby="filter-band-help">
 				<option value="" selected?={ v.Filter.Band == "" }>Any</option>
 				for _, b := range v.Bands {
 					<option value={ b.Name } selected?={ v.Filter.Band == b.Name }>{ b.Name } ({ FormatHz(b.Low) } to { FormatHz(b.High) })</option>
@@ -162,7 +162,7 @@ templ bookmarksTable(v listView) {
 			}
 		</p>
 		if len(v.Rows) > 0 {
-			<div class="overflow-x-auto">
+			<div class="relative overflow-x-auto">
 				<table class="w-full text-left">
 					<caption class="sr-only">Bookmarks, by frequency</caption>
 					<thead>

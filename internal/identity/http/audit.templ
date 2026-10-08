@@ -40,7 +40,7 @@ templ auditPage(v auditView) {
 		if len(v.Rows) == 0 {
 			<p>No entry matches.</p>
 		} else {
-			<div class="overflow-x-auto">
+			<div class="relative overflow-x-auto">
 				<table class="w-full text-left text-sm">
 					<thead>
 						<tr><th scope="col">When (UTC)</th><th scope="col">Actor</th><th scope="col">From</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Result</th><th scope="col">Details</th></tr>

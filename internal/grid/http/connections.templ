@@ -21,7 +21,7 @@ templ connectionsTable(v connectionsView) {
 	>
 		<p>{ strconv.Itoa(v.Listeners) } receivers, { strconv.Itoa(v.Viewers) } other clients (map, events).</p>
 		if len(v.Rows) > 0 {
-			<div class="overflow-x-auto">
+			<div class="relative overflow-x-auto">
 				<table class="w-full text-left">
 					<caption class="sr-only">Open connections</caption>
 					<thead>
