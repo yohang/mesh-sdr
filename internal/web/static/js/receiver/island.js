@@ -445,6 +445,8 @@ class MsdrReceiver extends HTMLElement {
   }
 
   build() {
+    // The tab of this session (navigation keeps it), Info at first.
+    const tab = this.engine.display.tab ?? "info";
     this.bookmarks = new ReceiverBookmarks({
       engine: this.engine,
       grid: this.grid,
@@ -576,8 +578,7 @@ class MsdrReceiver extends HTMLElement {
     root.append(this.toolbar, this.body);
     this.replaceChildren(root);
     this.layout();
-    // The tab of this session (navigation keeps it), Info at first.
-    this.panel.select(this.engine.display.tab ?? "info");
+    this.panel.select(tab);
   }
 
   // buildBar returns the control bar docked under the waterfall (UI-018),

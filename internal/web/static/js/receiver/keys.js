@@ -1,6 +1,7 @@
 // The receiver's default keyboard shortcuts (UI-014, FEATURE_SPEC §10.17),
 // registered while the receiver island is on the page. Each entry is also
-// its row in the shortcuts help (UI-015). The audio dock registers mute and
+// its row in the shortcuts help (UI-015), the bookmark keys (S, Y, B) too.
+// The audio dock registers mute and
 // volume on every page; shortcuts.js registers "?" and "/".
 //
 // Shared-state keys (PageUp, PageDown: the centre) are for callers with
@@ -31,6 +32,8 @@
  * @property {(dir: 1 | -1) => Promise<void>} centreJump
  * @property {() => boolean} escape
  * @property {HTMLInputElement} nrOn
+ * @property {{scanBtn: HTMLElement, findBtn: HTMLElement, ribbonBtn: HTMLElement}} bookmarks
+ *   the bookmark controls (bookmarks.js): S, Y and B press them
  */
 
 // Pass band shift of Shift + ← → (Hz) and width factor of Shift + ↑ ↓.
@@ -113,6 +116,11 @@ export function receiverShortcuts(rx) {
     { keys: ["<"], label: "Waterfall upper level down", group: "View", repeat: true, run: () => rx.nudgeLevels("max", -1) },
     { keys: [">"], label: "Waterfall upper level up", group: "View", repeat: true, run: () => rx.nudgeLevels("max", 1) },
     { keys: ["v"], label: "Spectrum on or off", group: "View", run: () => rx.toggleSpectrum() },
+
+    // Bookmarks (bookmarks.js): the keys press the visible controls.
+    { keys: ["s"], label: "Start or stop the bookmark scanner", group: "Bookmarks", enabled: tuned, run: () => rx.bookmarks.scanBtn.click() },
+    { keys: ["y"], label: "Find a bookmark", group: "Bookmarks", run: () => rx.bookmarks.findBtn.click() },
+    { keys: ["b"], label: "Band plan ribbon on or off", group: "View", run: () => rx.bookmarks.ribbonBtn.click() },
 
     // Capture.
     // Only when the recorder is offered (ui.recorder_enabled, admins).
