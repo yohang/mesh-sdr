@@ -309,6 +309,18 @@ func (s *Presence) Listeners(ctx context.Context) (int, error) {
 	return s.repo.CountOpenKind(ctx, domain.ConnectionMedia)
 }
 
+// ListenersByDevice returns the listeners of each device: open media
+// connections attached to it (devices without listeners are absent).
+func (s *Presence) ListenersByDevice(ctx context.Context) (map[string]int, error) {
+	return s.repo.CountOpenMediaByDevice(ctx)
+}
+
+// NodeListeners returns the listeners of a node: its open media
+// connections (events sockets have no node).
+func (s *Presence) NodeListeners(ctx context.Context, id domain.NodeID) (int, error) {
+	return s.repo.CountOpenNode(ctx, id)
+}
+
 // List returns the open connections.
 func (s *Presence) List(ctx context.Context) ([]*domain.Connection, error) {
 	return s.repo.ListOpen(ctx)

@@ -19,6 +19,9 @@ class RxPlayer extends AudioWorkletProcessor {
     this.priming = true;
     this.underruns = 0;
     this.droppedMs = 0;
+    // Overruns: audio arrived faster than played, the excess was dropped
+    // (shrink or full ring); reported for the audio chip (UI-022).
+    this.overruns = 0;
     this.concealedMs = 0;
     this.lastUnderrun = currentTime;
     this.lastStats = 0;
@@ -95,6 +98,7 @@ class RxPlayer extends AudioWorkletProcessor {
       this.r = (this.r + drop) % this.cap;
       this.n -= drop;
       this.droppedMs += (drop * 1000) / sampleRate;
+      this.overruns++;
     }
     // Decay the target towards 60 ms after 5 s without underrun.
     if (currentTime - this.lastUnderrun > 5 && this.targetMs > MIN_TARGET_MS) {
@@ -127,6 +131,7 @@ class RxPlayer extends AudioWorkletProcessor {
         targetMs: this.targetMs,
         underruns: this.underruns,
         droppedMs: this.droppedMs,
+        overruns: this.overruns,
         concealedMs: this.concealedMs,
         priming: this.priming,
         t: currentTime,

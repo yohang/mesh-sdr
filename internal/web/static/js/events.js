@@ -49,7 +49,26 @@ let timer = null;
 let stopped = false;
 let seq = 0;
 
+// state is the last "events.state" fired ("idle" before the first
+// connection), for the receiver's hub chip (UI-022).
+let state = "idle";
+
+// eventsState returns the connection state: idle, connecting, open,
+// closed (reconnecting) or stopped.
+export function eventsState() {
+  return state;
+}
+
+// syncTopics (un)subscribes after a shell element outside #main changed
+// its data-msdr-topics (the audio dock while listening).
+export function syncTopics() {
+  sync();
+}
+
 function fire(name, detail) {
+  if (name === "events.state") {
+    state = detail.state;
+  }
   const type = PREFIX + name;
   if (window.htmx?.trigger) {
     window.htmx.trigger(document.body, type, detail);

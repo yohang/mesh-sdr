@@ -35,6 +35,10 @@ type session struct {
 	hello   media.Hello
 	queue   *sendq.Queue
 	streams media.StreamSession
+
+	// device and demod are what the connection listens to (Attached),
+	// carried by its presence events.
+	device, demod string
 }
 
 // strikes is a sliding one-minute window of violations.
@@ -505,6 +509,17 @@ func (ss *session) RateLimited(req rxv1.Envelope, retry time.Duration) { ss.rate
 // Queue implements media.Peer.
 func (ss *session) Queue() *sendq.Queue { return ss.queue }
 
+// Attached implements media.Peer: the hub learns at once which device the
+// connection listens to (a connection.heartbeat), then with every
+// heartbeat.
+func (ss *session) Attached(deviceID, demod string) {
+	ss.mu.Lock()
+	ss.device, ss.demod = deviceID, demod
+	ss.mu.Unlock()
+
+	ss.emit(rxv1.TypeConnectionHeart, ss.claims(), "")
+}
+
 // emit reports the connection to the hub over the control channel
 // (presence, §7.3).
 func (ss *session) emit(typ rxv1.MessageType, c token.Claims, reason string) {
@@ -523,8 +538,15 @@ func (ss *session) emit(typ rxv1.MessageType, c token.Claims, reason string) {
 		key = string(typ) + ":" + c.ConnectionID
 	}
 
+	ss.mu.Lock()
+	device, demod := ss.device, ss.demod
+	ss.mu.Unlock()
+
 	a.Emit(typ, key, agent.ClassState, func(seq int64) any {
-		return ctl.Connection{Seq: seq, CID: c.ConnectionID, SID: "", UserID: user, Reason: reason, Since: c.IssuedAt.UnixMilli()}
+		return ctl.Connection{
+			Seq: seq, CID: c.ConnectionID, SID: "", UserID: user, DeviceID: device, Demod: demod, Reason: reason,
+			Since: c.IssuedAt.UnixMilli(),
+		}
 	})
 }
 

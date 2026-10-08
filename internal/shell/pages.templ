@@ -22,7 +22,9 @@ templ receiverPage(siteName string, st StationView, descHTML string, rx receiver
 			}
 		</div>
 	</div>
-	<msdr-receiver class="block">
+	// The island follows node and device availability, listeners and node
+	// telemetry live (hub events, UI-021, GRID-021, RX-035).
+	<msdr-receiver class="block" data-msdr-topics="nodes devices">
 		@templ.JSONScript("msdr-receiver-config", rx)
 		<p class="mt-4 text-fg-muted">The receiver needs JavaScript to play audio and draw the waterfall.</p>
 		<div data-rx-station class="mt-4 flex min-w-0 flex-col gap-2 text-sm">
@@ -69,11 +71,21 @@ templ policyPage(policyHTML string) {
 	</article>
 }
 
-// aboutPage shows the running software and where its source code is.
-templ aboutPage(p layout.Product) {
+// aboutPage shows the running software, where its source code is and the
+// station's help link when the hub sets one (RX-038: author, documentation
+// and support links live here).
+templ aboutPage(p layout.Product, helpURL string) {
 	<article class="prose-text">
 		<h1>About</h1>
 		<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+			if helpURL != "" {
+				<dt class="font-semibold">Help</dt>
+				<dd>
+					<a href={ templ.URL(helpURL) } target="_blank" rel="noopener noreferrer" hx-boost="false">
+						{ helpURL }<span class="sr-only">{ " (opens in a new tab)" }</span>
+					</a>
+				</dd>
+			}
 			<dt class="font-semibold">Software</dt>
 			<dd>{ p.Name }</dd>
 			<dt class="font-semibold">Version</dt>

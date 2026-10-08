@@ -50,6 +50,19 @@ func (h *History) Samples(id domain.NodeID) []LoadSample {
 	return append([]LoadSample(nil), h.nodes[id]...)
 }
 
+// Latest returns the last sample of id.
+func (h *History) Latest(id domain.NodeID) (LoadSample, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	ring := h.nodes[id]
+	if len(ring) == 0 {
+		return LoadSample{}, false
+	}
+
+	return ring[len(ring)-1], true
+}
+
 // Forget drops the samples of id.
 func (h *History) Forget(id domain.NodeID) {
 	h.mu.Lock()

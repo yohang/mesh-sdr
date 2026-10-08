@@ -400,8 +400,11 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, err
 	}
 
-	features := gridapp.NewFeatures(gridsqlite.NewDeviceRepository(adapter), gridsqlite.NewCapabilityRepository(adapter),
-		storeListenPolicy{store: settingsStore}, g.links())
+	features := gridapp.NewFeatures(gridapp.FeaturesDeps{
+		Devices: gridsqlite.NewDeviceRepository(adapter), Caps: gridsqlite.NewCapabilityRepository(adapter),
+		Policy: storeListenPolicy{store: settingsStore}, Links: g.links(), Nodes: g.nodeRepo, Listeners: g.presence,
+		Telemetry: g.history, PresetName: sch.presetName,
+	})
 
 	bm, err := newBookmarks(bookmarksDeps{
 		adapter: adapter, features: features, registry: gridsqlite.NewDeviceRepository(adapter), presets: sch.presets,

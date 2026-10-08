@@ -319,6 +319,8 @@ type session struct {
 	demods  map[string]*demodState
 	audio   audioConfig
 	closed  bool
+	// reported is the device and mode last reported to the peer (report).
+	reported [2]string
 }
 
 func (ss *session) streamID() uint16 {
@@ -505,6 +507,7 @@ func (ss *session) attach(req rxv1.Envelope) {
 	ss.peer.Send(rxv1.TypeDeviceConfig, cfg)
 	ss.peer.Send(rxv1.TypeDeviceState, media.DeviceState{DeviceID: snap.ID, State: string(snap.State), Reason: snap.Reason})
 	ss.peer.Send(rxv1.TypeStreamOpen, open)
+	ss.report()
 
 	ss.q.ConfigureFFT(a.stream, fps, false)
 
@@ -621,6 +624,7 @@ func (ss *session) detach(req rxv1.Envelope) {
 
 	ss.release(a)
 	ss.peer.Ack(req, struct{}{})
+	ss.report()
 }
 
 func (ss *session) release(a *attached) {
@@ -883,6 +887,7 @@ func (ss *session) createDemod(req rxv1.Envelope) {
 		StreamID: stream, Kind: media.KindAudio, Codec: string(audio.codec), SampleRate: audio.rate, Channels: 1, DemodID: id,
 	})
 	ss.peer.Ack(req, media.DemodCreated{DemodID: id, AudioStreamID: stream, Applied: applied(d.Params())})
+	ss.report()
 }
 
 func meterJSON(id string, m app.Meter) []byte {
@@ -974,6 +979,10 @@ func (ss *session) setDemod(req rxv1.Envelope) {
 	}
 
 	ss.peer.Ack(req, media.AppliedResult{Applied: applied(d.demod.Params())})
+
+	if p.Mode != nil {
+		ss.report()
+	}
 }
 
 func (ss *session) removeDemod(req rxv1.Envelope) {
@@ -995,6 +1004,7 @@ func (ss *session) removeDemod(req rxv1.Envelope) {
 
 	ss.closeDemod(d)
 	ss.peer.Ack(req, struct{}{})
+	ss.report()
 }
 
 func (ss *session) closeDemod(d *demodState) {
@@ -1347,6 +1357,34 @@ func (ss *session) Reauthorize() {
 
 	for _, a := range lost {
 		ss.release(a)
+	}
+
+	ss.report()
+}
+
+// report tells the peer which device the connection listens to, for the hub
+// presence (listener counts): the device of its first demodulator, else
+// its first attached device, with that demodulator's mode. Only changes
+// are reported.
+func (ss *session) report() {
+	ss.mu.Lock()
+
+	device, mode := "", ""
+
+	if ids := slices.Sorted(maps.Keys(ss.demods)); len(ids) > 0 {
+		slices.SortFunc(ids, func(a, b string) int { return demodSeq(a) - demodSeq(b) })
+		d := ss.demods[ids[0]]
+		device, mode = d.device, d.demod.Params().Mode
+	} else if ids := slices.Sorted(maps.Keys(ss.devices)); len(ids) > 0 {
+		device = ids[0]
+	}
+
+	changed := device != ss.reported[0] || mode != ss.reported[1]
+	ss.reported = [2]string{device, mode}
+	ss.mu.Unlock()
+
+	if changed {
+		ss.peer.Attached(device, mode)
 	}
 }
 

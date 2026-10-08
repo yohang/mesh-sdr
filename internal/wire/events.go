@@ -309,16 +309,27 @@ func listenPolicyWatch(c *policyCache, initial string) func(*settings.Snapshot) 
 
 // nodeStatusEvent is the node.status payload: thin (ADR 0016 decision 2),
 // the client refetches the fragment that renders what the viewer may see.
+// Listeners and the telemetry are the public subset of §6.6 (listeners,
+// cpu, temp_c), set for an up node only: a listener's receiver shows
+// them in its Info tab, and learns from status whether its node is up
+// (GRID-021).
 type nodeStatusEvent struct {
-	NodeID string `json:"node_id"`
-	Status string `json:"status"`
+	NodeID    string   `json:"node_id"`
+	Status    string   `json:"status"`
+	Listeners *int     `json:"listeners,omitempty"`
+	CPU       *float64 `json:"cpu,omitempty"`
+	TempC     *float64 `json:"temp_c,omitempty"`
 }
 
-// deviceStatusEvent is the device.status payload (thin).
+// deviceStatusEvent is the device.status payload (§6.6): the device state,
+// its listeners and its active preset and centre (UI-021 live picker).
 type deviceStatusEvent struct {
-	DeviceID string `json:"device_id"`
-	NodeID   string `json:"node_id"`
-	State    string `json:"state"`
+	DeviceID       string `json:"device_id"`
+	NodeID         string `json:"node_id"`
+	State          string `json:"state"`
+	Listeners      int    `json:"listeners"`
+	ActivePresetID string `json:"active_preset_id,omitempty"`
+	CenterHz       int64  `json:"center_hz,omitempty"`
 }
 
 // presenceCountEvent is the presence.count payload: the listeners, open
@@ -346,34 +357,43 @@ type gridEvents struct {
 	lastBeat  map[griddomain.NodeID]time.Time
 	presence  chan struct{}
 	policies  *policyCache
-	listeners interface {
-		Listeners(ctx context.Context) (int, error)
+	listeners listenerCounter
+	history   interface {
+		Latest(id griddomain.NodeID) (gridapp.LoadSample, bool)
 	}
+}
+
+// listenerCounter counts the listeners (grid Presence).
+type listenerCounter interface {
+	Listeners(ctx context.Context) (int, error)
+	ListenersByDevice(ctx context.Context) (map[string]int, error)
+	NodeListeners(ctx context.Context, id griddomain.NodeID) (int, error)
 }
 
 func newGridEvents(b events.Publisher, g *hubGrid, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
 	return &gridEvents{
 		b: b, nodes: g.nodeRepo, devices: g.devices, policies: policies, now: now, logger: component(logger, "events.wire.grid"),
-		lastBeat: map[griddomain.NodeID]time.Time{}, presence: make(chan struct{}, 1), listeners: g.presence,
+		lastBeat: map[griddomain.NodeID]time.Time{}, presence: make(chan struct{}, 1), listeners: g.presence, history: g.history,
 	}
 }
 
 // node publishes the current health of a node; a deleted node is "removed".
 func (e *gridEvents) node(ctx context.Context, id griddomain.NodeID) {
 	status := "removed"
+	up := false
 
 	n, err := e.nodes.Get(ctx, id)
 
 	switch {
 	case err == nil:
-		status = n.Health()
+		status, up = n.Health(), n.Up()
 	case !errors.Is(err, griddomain.ErrNodeNotFound):
 		e.logger.ErrorContext(ctx, "read node for node.status", slog.String("node_id", id.String()), slog.Any("error", err))
 
 		return
 	}
 
-	e.publishNode(ctx, id, status)
+	e.publishNode(ctx, id, status, up)
 }
 
 // staffOnly are the node states only operators and admins see: they tell
@@ -383,8 +403,9 @@ var staffOnly = []string{"enrolling", "revoked", "removed"}
 // publishNode publishes node.status to the viewers who may know the node:
 // operators and admins, and the viewers who may listen to one of its
 // devices (ADR 0018).
-func (e *gridEvents) publishNode(ctx context.Context, id griddomain.NodeID, status string) {
+func (e *gridEvents) publishNode(ctx context.Context, id griddomain.NodeID, status string, up bool) {
 	audience := staff
+	payload := nodeStatusEvent{NodeID: id.String(), Status: status}
 
 	if !slices.Contains(staffOnly, status) {
 		snap, err := e.policies.get(ctx)
@@ -419,10 +440,30 @@ func (e *gridEvents) publishNode(ctx context.Context, id griddomain.NodeID, stat
 		}
 	}
 
-	e.b.Publish(ctx, events.Event{
-		Topic: topicNodes, Type: rxv1.TypeNodeStatus.String(), Audience: audience,
-		Payload: nodeStatusEvent{NodeID: id.String(), Status: status},
-	})
+	if up {
+		e.telemetry(ctx, id, &payload)
+	}
+
+	e.b.Publish(ctx, events.Event{Topic: topicNodes, Type: rxv1.TypeNodeStatus.String(), Audience: audience, Payload: payload})
+}
+
+// telemetry adds the node's listeners and last heartbeat values to p.
+func (e *gridEvents) telemetry(ctx context.Context, id griddomain.NodeID, p *nodeStatusEvent) {
+	if e.listeners != nil {
+		n, err := e.listeners.NodeListeners(ctx, id)
+		if err != nil {
+			e.logger.ErrorContext(ctx, "count node listeners for node.status", slog.String("node_id", id.String()), slog.Any("error", err))
+		} else {
+			p.Listeners = &n
+		}
+	}
+
+	if e.history != nil {
+		if s, ok := e.history.Latest(id); ok {
+			cpu := s.CPU
+			p.CPU, p.TempC = &cpu, s.TempC
+		}
+	}
 }
 
 // admins accepts admins only.
@@ -438,7 +479,7 @@ func (e *gridEvents) statusChanged(ctx context.Context, id griddomain.NodeID, st
 	e.lastBeat[id] = e.now()
 	e.mu.Unlock()
 
-	e.publishNode(ctx, id, string(status))
+	e.publishNode(ctx, id, string(status), status == griddomain.StatusOnline || status == griddomain.StatusDegraded)
 	e.nodeDevices(ctx, id)
 }
 
@@ -466,7 +507,10 @@ func (e *gridEvents) applied(ctx context.Context, id griddomain.NodeID, types []
 		e.nodeDevices(ctx, id)
 	}
 
-	if slices.Contains(types, rxv1.TypeConnectionOpened) || slices.Contains(types, rxv1.TypeConnectionClosed) {
+	// A heartbeat may attach a connection to another device: the listener
+	// counts by device are read again (published only when they changed).
+	if slices.Contains(types, rxv1.TypeConnectionOpened) || slices.Contains(types, rxv1.TypeConnectionClosed) ||
+		slices.Contains(types, rxv1.TypeConnectionHeart) {
 		e.presenceChanged(ctx)
 	}
 }
@@ -480,6 +524,12 @@ func (e *gridEvents) nodeDevices(ctx context.Context, id griddomain.NodeID) {
 		return
 	}
 
+	e.publishDevices(ctx, devices, nil)
+}
+
+// publishDevices publishes device.status for devices; counts are the
+// listeners by device, read when nil.
+func (e *gridEvents) publishDevices(ctx context.Context, devices []*griddomain.Device, counts map[string]int) {
 	snap, err := e.policies.get(ctx)
 	if err != nil {
 		e.logger.ErrorContext(ctx, "listen policies for device.status", slog.Any("error", err))
@@ -487,16 +537,31 @@ func (e *gridEvents) nodeDevices(ctx context.Context, id griddomain.NodeID) {
 		return
 	}
 
+	if counts == nil && e.listeners != nil {
+		if counts, err = e.listeners.ListenersByDevice(ctx); err != nil {
+			e.logger.ErrorContext(ctx, "count listeners for device.status", slog.Any("error", err))
+		}
+	}
+
 	for _, d := range devices {
 		st, _, _ := d.State()
 		device := d.ID().String()
+		payload := deviceStatusEvent{DeviceID: device, NodeID: d.Node().String(), State: string(st), Listeners: counts[device]}
+
+		if p := d.ActivePreset(); !p.IsZero() {
+			payload.ActivePresetID = p.String()
+		}
+
+		if c := d.CenterFreq(); c != nil {
+			payload.CenterHz = *c
+		}
 
 		// Operators and admins see every device, the others the devices
 		// they may listen to (ADR 0018).
 		e.b.Publish(ctx, events.Event{
 			Topic: topicDevices, Type: rxv1.TypeDeviceStatus.String(),
 			Audience: func(v events.Viewer) bool { return v.Staff || snap.viewerCanListen(v, device) },
-			Payload:  deviceStatusEvent{DeviceID: device, NodeID: id.String(), State: string(st)},
+			Payload:  payload,
 		})
 	}
 }
@@ -555,10 +620,12 @@ func (e *gridEvents) presenceChanged(context.Context) {
 	}
 }
 
-// runPresence publishes presence.count when the listener count changed, at
+// runPresence publishes presence.count when the listener count changed,
+// and device.status for the devices whose listeners changed (UI-021), at
 // most once per presenceDebounce (a process worker).
 func (e *gridEvents) runPresence(ctx context.Context) {
 	last := -1
+	lastBy := map[string]int{}
 
 	for {
 		select {
@@ -584,7 +651,57 @@ func (e *gridEvents) runPresence(ctx context.Context) {
 			last = n
 			e.b.Publish(ctx, events.Event{Topic: topicPresence, Type: rxv1.TypePresenceCount.String(), Payload: presenceCountEvent{Total: n}})
 		}
+
+		lastBy = e.deviceListeners(ctx, lastBy)
 	}
+}
+
+// deviceListeners publishes device.status for the devices whose listener
+// count changed since last; it returns the new counts (last on error).
+func (e *gridEvents) deviceListeners(ctx context.Context, last map[string]int) map[string]int {
+	by, err := e.listeners.ListenersByDevice(ctx)
+	if err != nil {
+		e.logger.ErrorContext(ctx, "count listeners by device", slog.Any("error", err))
+
+		return last
+	}
+
+	changed := map[string]bool{}
+
+	for id, n := range by {
+		if last[id] != n {
+			changed[id] = true
+		}
+	}
+
+	for id := range last {
+		if _, ok := by[id]; !ok {
+			changed[id] = true
+		}
+	}
+
+	if len(changed) == 0 {
+		return by
+	}
+
+	all, err := e.devices.List(ctx)
+	if err != nil {
+		e.logger.ErrorContext(ctx, "list devices for device.status", slog.Any("error", err))
+
+		return last
+	}
+
+	devices := make([]*griddomain.Device, 0, len(changed))
+
+	for _, d := range all {
+		if changed[d.ID().String()] {
+			devices = append(devices, d)
+		}
+	}
+
+	e.publishDevices(ctx, devices, by)
+
+	return by
 }
 
 // refreshOnDevices reloads the listen policies when a node reports its

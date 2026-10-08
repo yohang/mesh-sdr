@@ -20,7 +20,10 @@ export class AudioPlayer {
     this.mode = "";
     this.volume = 0.8;
     this.muted = false;
-    this.stats = { bufferedMs: 0, targetMs: 0, underruns: 0, droppedMs: 0, concealedMs: 0 };
+    // Jitter buffer stats (rx-worklet.js posts them every 250 ms): the
+    // receiver shows them (RX-035) and raises its audio chip on under- and
+    // overruns (UI-022).
+    this.stats = { bufferedMs: 0, targetMs: 0, underruns: 0, overruns: 0, droppedMs: 0, concealedMs: 0 };
     this.nextTime = 0;
   }
 
