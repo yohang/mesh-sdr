@@ -469,6 +469,10 @@ func happyPaths(t *testing.T, h *contractHub) {
 		t.Errorf("features = %v", features)
 	}
 
+	// Bookmarks of the device and the band plan (BMK-001, RX-029).
+	expect(anon, http.MethodGet, "/bookmarks?device_id=hf&from=100000&to=30000000", nil, http.StatusOK)
+	expect(anon, http.MethodGet, "/bandplan?from=100000&to=30000000", nil, http.StatusOK)
+
 	// POST /auth/token refreshes a media connection the gateway authz
 	// issued to the caller (ADR 0012): here an anonymous one, so another
 	// caller is refused.

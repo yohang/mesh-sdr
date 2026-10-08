@@ -147,9 +147,32 @@ func input(t reflect.Type, s map[string]any) settings.Input {
 				in.Options = append(in.Options, fmt.Sprint(e))
 			}
 		}
+
+		in.OptionLabels = enumLabels(s["x-enum-labels"], len(in.Options))
 	}
 
 	return in
+}
+
+// enumLabels reads x-enum-labels, the labels shown for the enum options in
+// order (one per option, or none).
+func enumLabels(v any, n int) []string {
+	var out []string
+
+	switch l := v.(type) {
+	case []string:
+		out = l
+	case []any:
+		for _, e := range l {
+			out = append(out, fmt.Sprint(e))
+		}
+	}
+
+	if len(out) != n {
+		return nil
+	}
+
+	return out
 }
 
 func stringInput(s map[string]any, maxLength int) settings.InputKind {

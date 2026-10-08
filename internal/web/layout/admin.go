@@ -21,6 +21,7 @@ var AdminSections = []AdminSection{
 	{ID: "devices", Label: "Devices", Href: "/admin/devices"},
 	{ID: "presets", Label: "Presets", Href: "/admin/presets"},
 	{ID: "schedules", Label: "Schedules", Href: "/admin/schedules"},
+	{ID: "bookmarks", Label: "Bookmarks", Href: "/bookmarks/manage"},
 	{ID: "connections", Label: "Connections", Href: "/admin/connections"},
 	{ID: "retention", Label: "Data & retention", Href: "/admin/retention"},
 	{ID: "audit", Label: "Audit log", Href: "/admin/audit"},
@@ -29,8 +30,9 @@ var AdminSections = []AdminSection{
 
 // OperatorAdminSections are the admin sections an operator may open
 // (FEATURE_SPEC §7.4 and GRID-009: device and node views are readable by
-// operators).
+// operators; BMK-005: operators manage the hub bookmarks).
 var OperatorAdminSections = []AdminSection{
 	{ID: "nodes", Label: "Nodes", Href: "/admin/nodes"},
 	{ID: "devices", Label: "Devices", Href: "/admin/devices"},
+	{ID: "bookmarks", Label: "Bookmarks", Href: "/bookmarks/manage"},
 }

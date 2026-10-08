@@ -238,8 +238,200 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /bookmarks:
+    get:
+      operationId: getBookmarks
+      x-meshsdr-access: anonymous
+      summary: Bookmarks of a device in a frequency range (BMK-001, ADM-022)
+      description: |
+        The bookmarks shown on a device: the general pack, the pack of the
+        current `bandplan.region`, and the hub bookmarks whose scope is all
+        devices, this device, or the preset the device runs (BMK-008).
+        Sorted by frequency; on the same frequency hub bookmarks (origin
+        `db`) come before pack bookmarks (origin `builtin`, read-only),
+        then by name (BMK-007). A device that does not exist, is disabled
+        or that the caller may not listen to (its effective listen policy)
+        answers 404 `device_not_found`. Hub bookmarks are created, edited
+        and deleted on the Bookmarks › Manage pages (ADR 0023).
+      tags: [bookmarks]
+      parameters:
+        - name: device_id
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - $ref: "#/components/parameters/FromHz"
+        - $ref: "#/components/parameters/ToHz"
+      responses:
+        "200":
+          description: Bookmarks in the range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bookmarks"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /bandplan:
+    get:
+      operationId: getBandplan
+      x-meshsdr-access: anonymous
+      summary: Bands and dial frequencies of the current region (RX-029, RX-030)
+      description: |
+        The bands of the band plan of `bandplan.region` that overlap the
+        range, by lower bound, and the dial frequencies in the range, by
+        frequency. A band's `tags` are its colour key (hamradio, broadcast,
+        public, service).
+      tags: [bookmarks]
+      parameters:
+        - $ref: "#/components/parameters/FromHz"
+        - $ref: "#/components/parameters/ToHz"
+      responses:
+        "200":
+          description: Band plan in the range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bandplan"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
+  parameters:
+    FromHz:
+      name: from
+      in: query
+      description: Lowest frequency, in Hz (default 0).
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+    ToHz:
+      name: to
+      in: query
+      description: Highest frequency, in Hz (default no limit).
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
   schemas:
+    Bookmarks:
+      type: object
+      additionalProperties: false
+      required: [region, bookmarks]
+      properties:
+        region:
+          type: string
+          enum: [r1, r2, r3]
+          description: Region of the pack bookmarks (bandplan.region).
+        bookmarks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Bookmark"
+    Bookmark:
+      type: object
+      additionalProperties: false
+      required: [id, name, frequency, modulation, scannable, origin, tags, scope]
+      properties:
+        id:
+          type: string
+          description: Stable UUID.
+        name:
+          type: string
+          description: Plain text.
+        frequency:
+          type: integer
+          format: int64
+          description: Hz.
+        modulation:
+          type: string
+          description: Mode id (am, nfm, usb…; digital modes of the packs are kept as is).
+        underlying:
+          type: string
+          description: Underlying analog mode of a digital mode.
+        description:
+          type: string
+          description: Plain text.
+        scannable:
+          type: boolean
+        origin:
+          type: string
+          enum: [config, db, import, builtin]
+          description: builtin = pack bookmark (read-only), db = hub bookmark.
+        tags:
+          type: array
+          description: pack:<name> and region:<r> tags of the pack bookmarks.
+          items:
+            type: string
+        scope:
+          $ref: "#/components/schemas/BookmarkScope"
+    BookmarkScope:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [all, device, preset]
+        device_id:
+          type: string
+        preset_id:
+          type: string
+    Bandplan:
+      type: object
+      additionalProperties: false
+      required: [region, bands, dials]
+      properties:
+        region:
+          type: string
+          enum: [r1, r2, r3]
+        bands:
+          type: array
+          items:
+            $ref: "#/components/schemas/Band"
+        dials:
+          type: array
+          items:
+            $ref: "#/components/schemas/Dial"
+    Band:
+      type: object
+      additionalProperties: false
+      required: [name, low, high, tags]
+      properties:
+        name:
+          type: string
+        low:
+          type: integer
+          format: int64
+          description: Lower bound, Hz.
+        high:
+          type: integer
+          format: int64
+          description: Upper bound, Hz.
+        tags:
+          type: array
+          items:
+            type: string
+    Dial:
+      type: object
+      additionalProperties: false
+      required: [mode, frequency, band]
+      properties:
+        mode:
+          type: string
+        frequency:
+          type: integer
+          format: int64
+        underlying:
+          type: string
+        band:
+          type: string
+          description: Name of the band the dial belongs to.
     TokenRequest:
       type: object
       additionalProperties: false

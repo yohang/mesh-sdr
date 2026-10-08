@@ -97,7 +97,8 @@ func TestHubLifecycle(t *testing.T) {
 	}
 
 	r = run(t, ctx, env, "hub", "migrate")
-	if r.code != ExitOK || !strings.Contains(r.stdout, "applied 00001_init.sql") {
+	if r.code != ExitOK || !strings.Contains(r.stdout, "applied 00001_init.sql") ||
+		!strings.Contains(r.stdout, "bookmark packs: ") || strings.Contains(r.stdout, "packs: 0 added") {
 		t.Fatalf("migrate = %+v", r)
 	}
 

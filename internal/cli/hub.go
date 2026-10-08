@@ -137,7 +137,7 @@ func (a *app) newMigrateCmd() *cobra.Command {
 }
 
 // withMigrator opens the hub database and calls fn with its migrator.
-func (a *app) withMigrator(ctx context.Context, fn func(*db.Migrator, *slog.Logger) error) error {
+func (a *app) withMigrator(ctx context.Context, fn func(*db.DB, *slog.Logger) error) error {
 	cfg, _, logger, err := a.loadHub(ctx, true)
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (a *app) withMigrator(ctx context.Context, fn func(*db.Migrator, *slog.Logg
 
 	defer func() { _ = adapter.Close() }()
 
-	return fn(adapter.Migrator(), logger)
+	return fn(adapter, logger)
 }
 
 type migrationJSON struct {
@@ -162,8 +162,8 @@ type migrationJSON struct {
 }
 
 func (a *app) migrateUp(ctx context.Context) error {
-	return a.withMigrator(ctx, func(m *db.Migrator, logger *slog.Logger) error {
-		results, err := m.Up(ctx)
+	return a.withMigrator(ctx, func(adapter *db.DB, logger *slog.Logger) error {
+		results, err := adapter.Migrator().Up(ctx)
 
 		out := make([]migrationJSON, 0, len(results))
 		for _, r := range results {
@@ -179,6 +179,13 @@ func (a *app) migrateUp(ctx context.Context) error {
 			return err
 		}
 
+		// The shipped bookmark packs follow the binary: every migrate
+		// stores them (BMK-002), idempotently.
+		synced, err := wire.SyncBookmarks(ctx, adapter, logger)
+		if err != nil {
+			return err
+		}
+
 		if a.json {
 			return a.printJSON(out)
 		}
@@ -187,13 +194,16 @@ func (a *app) migrateUp(ctx context.Context) error {
 			a.print("no pending migrations")
 		}
 
+		a.print("bookmark packs: %d added, %d updated, %d unchanged, %d removed, %d skipped",
+			synced.Inserted, synced.Updated, synced.Unchanged, synced.Deleted, synced.Skipped)
+
 		return nil
 	})
 }
 
 func (a *app) migrateDown(ctx context.Context) error {
-	return a.withMigrator(ctx, func(m *db.Migrator, logger *slog.Logger) error {
-		r, err := m.Down(ctx)
+	return a.withMigrator(ctx, func(adapter *db.DB, logger *slog.Logger) error {
+		r, err := adapter.Migrator().Down(ctx)
 		if errors.Is(err, db.ErrNoMigration) {
 			a.print("no migration to roll back")
 
@@ -217,7 +227,9 @@ func (a *app) migrateDown(ctx context.Context) error {
 }
 
 func (a *app) migrateStatus(ctx context.Context) error {
-	return a.withMigrator(ctx, func(m *db.Migrator, _ *slog.Logger) error {
+	return a.withMigrator(ctx, func(adapter *db.DB, _ *slog.Logger) error {
+		m := adapter.Migrator()
+
 		statuses, err := m.Status(ctx)
 		if err != nil {
 			return err

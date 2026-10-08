@@ -37,6 +37,29 @@ func TestSettingsDefaultsAreValid(t *testing.T) {
 	}
 }
 
+// TestEnumLabels: x-enum-labels names the options of an enum setting.
+func TestEnumLabels(t *testing.T) {
+	cat, err := NewSettingsCatalog(DefaultHub(), Origins{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, d := range cat.Definitions() {
+		in := d.Input()
+
+		switch d.Key() {
+		case "bandplan.region":
+			if strings.Join(in.Options, ",") != "r1,r2,r3" || strings.Join(in.OptionLabels, ",") != "R1,R2,R3" || d.Default().String() != `"r1"` {
+				t.Errorf("bandplan.region = %v %v, default %s", in.Options, in.OptionLabels, d.Default())
+			}
+		case "ui.theme_mode":
+			if in.OptionLabels != nil {
+				t.Errorf("theme_mode labels = %v", in.OptionLabels)
+			}
+		}
+	}
+}
+
 func violationCode(t *testing.T, err error) string {
 	t.Helper()
 
@@ -98,6 +121,8 @@ func TestValidateSetting(t *testing.T) {
 		{"audio_compression", `"pcm"`, ""},
 		{"audio_compression", `"opus"`, CodeInvalidValue},
 		{"wfm_deemphasis", `60`, CodeInvalidValue},
+		{"bandplan.region", `"r3"`, ""},
+		{"bandplan.region", `"r4"`, CodeInvalidValue},
 		{"no.such_key", `1`, "unknown_setting"},
 	}
 

@@ -1,0 +1,498 @@
+package bookmarks
+
+import (
+	"slices"
+	"strconv"
+	"strings"
+)
+
+// regionLabel is a region as shown to people (R1, R2, R3).
+func regionLabel(r string) string { return strings.ToUpper(r) }
+
+// originLabel names the origin of a bookmark (BMK-007: a text cue next to
+// any colour).
+func originLabel(b *Bookmark) string {
+	if !b.ReadOnly() {
+		return "Hub"
+	}
+
+	var packs []string
+	for _, t := range b.Tags() {
+		if p, ok := strings.CutPrefix(t, "pack:"); ok {
+			packs = append(packs, p)
+		}
+	}
+
+	if len(packs) == 0 {
+		return "Pack"
+	}
+
+	return "Pack (" + strings.Join(packs, ", ") + ")"
+}
+
+// scopeLabel describes where a bookmark shows.
+func scopeLabel(b *Bookmark, n names) string {
+	switch s := b.Scope(); s.Kind() {
+	case ScopeDevice:
+		return "Device: " + n.device(s.Device())
+	case ScopePreset:
+		return "Preset: " + n.preset(s.Preset())
+	default:
+		return "All devices"
+	}
+}
+
+func modeLabel(b *Bookmark) string {
+	if b.Underlying() != "" {
+		return b.Modulation() + " (" + b.Underlying() + ")"
+	}
+
+	return b.Modulation()
+}
+
+// modeOptions are the modes suggested in the forms: the analog catalogue
+// and the modes the nodes report.
+func modeOptions(n names) []string {
+	out := slices.Clone(AnalogModes)
+	for _, d := range n.Devices {
+		out = append(out, d.Modes...)
+	}
+
+	slices.Sort(out)
+
+	return slices.Compact(out)
+}
+
+func rowID(id string) string { return "bookmark-" + id }
+
+// listPage is Bookmarks › Manage (BMK-005): the filters, the table of hub
+// and pack bookmarks, and the add form.
+templ listPage(v listView) {
+	<h1 class="text-2xl font-semibold">Bookmarks</h1>
+	<p class="text-fg-muted">
+		Hub bookmarks show to every listener of the devices their scope names. Pack bookmarks are shipped with the hub (the general pack and the { regionLabel(v.Region) } region pack, from the band plan region) and are read-only.
+	</p>
+	if v.Notice != "" {
+		<p class="font-semibold text-success" role="status">{ v.Notice }</p>
+	}
+	@filtersForm(v)
+	@bookmarksTable(v)
+	@addForm(v.Add, v.Names)
+}
+
+templ filtersForm(v listView) {
+	<form class="flex flex-wrap items-end gap-4" method="get" action={ templ.SafeURL(ManagePath) } aria-label="Filter the bookmarks">
+		<div class="flex flex-col gap-1">
+			<label for="filter-origin" class="font-medium">Origin</label>
+			<select id="filter-origin" name="origin" class="rounded border border-border px-2 py-1">
+				<option value="" selected?={ v.Filter.Origin == "" }>Any</option>
+				<option value="db" selected?={ v.Filter.Origin == "db" }>Hub</option>
+				<option value="builtin" selected?={ v.Filter.Origin == "builtin" }>Pack</option>
+			</select>
+		</div>
+		<div class="flex flex-col gap-1">
+			<label for="filter-device" class="font-medium">Shown on device</label>
+			<select id="filter-device" name="device" class="rounded border border-border px-2 py-1">
+				<option value="" selected?={ v.Filter.Device == "" }>Any</option>
+				for _, d := range v.Names.Devices {
+					<option value={ d.ID.String() } selected?={ v.Filter.Device == d.ID.String() }>{ d.Name }</option>
+				}
+			</select>
+		</div>
+		<div class="flex flex-col gap-1">
+			<label for="filter-scope" class="font-medium">Scope</label>
+			<select id="filter-scope" name="scope" class="rounded border border-border px-2 py-1">
+				<option value="" selected?={ v.Filter.Scope == "" }>Any</option>
+				<option value="all" selected?={ v.Filter.Scope == "all" }>All devices</option>
+				<option value="device" selected?={ v.Filter.Scope == "device" }>One device</option>
+				<option value="preset" selected?={ v.Filter.Scope == "preset" }>One preset</option>
+			</select>
+		</div>
+		<div class="flex flex-col gap-1">
+			<label for="filter-band" class="font-medium">Band</label>
+			<select id="filter-band" name="band" class="rounded border border-border px-2 py-1" aria-describedby="filter-band-help">
+				<option value="" selected?={ v.Filter.Band == "" }>Any</option>
+				for _, b := range v.Bands {
+					<option value={ b.Name } selected?={ v.Filter.Band == b.Name }>{ b.Name } ({ FormatHz(b.Low) } to { FormatHz(b.High) })</option>
+				}
+			</select>
+			<p id="filter-band-help" class="text-sm text-fg-muted">A band replaces the frequencies below.</p>
+		</div>
+		@rangeInput("from", "Lowest frequency (Hz)", v.Filter.From, v.Filter.Errors["from"])
+		@rangeInput("to", "Highest frequency (Hz)", v.Filter.To, v.Filter.Errors["to"])
+		<div class="flex items-center gap-4">
+			<button type="submit" class="rounded border border-border px-3 py-1 font-semibold">Filter</button>
+			if v.Filter.active() {
+				<a href={ templ.SafeURL(ManagePath) }>Clear the filters</a>
+			}
+		</div>
+	</form>
+}
+
+templ rangeInput(name, label, value, failure string) {
+	<div class="flex flex-col gap-1">
+		<label for={ "filter-" + name } class="font-medium">{ label }</label>
+		<input
+			id={ "filter-" + name }
+			name={ name }
+			value={ value }
+			type="number"
+			min="0"
+			step="1"
+			inputmode="numeric"
+			class="rounded border border-border px-2 py-1"
+			if failure != "" {
+				aria-invalid="true"
+				aria-describedby={ "filter-" + name + "-error" }
+			}
+		/>
+		if failure != "" {
+			<p id={ "filter-" + name + "-error" } class="text-sm font-semibold text-danger">{ failure }</p>
+		}
+	</div>
+}
+
+templ bookmarksTable(v listView) {
+	<section aria-labelledby="bookmarks-table-title" class="flex flex-col gap-2">
+		<h2 id="bookmarks-table-title" class="text-xl font-semibold">Bookmarks by frequency</h2>
+		<p class="text-fg-muted" role="status">
+			{ strconv.Itoa(len(v.Rows)) } bookmarks
+			if v.Truncated {
+				(the first { strconv.Itoa(maxRows) }: filter to see the others)
+			}
+		</p>
+		if len(v.Rows) > 0 {
+			<div class="overflow-x-auto">
+				<table class="w-full text-left">
+					<caption class="sr-only">Bookmarks, by frequency</caption>
+					<thead>
+						<tr class="border-b border-border">
+							<th scope="col" class="py-1 pr-4">Frequency</th>
+							<th scope="col" class="py-1 pr-4">Name</th>
+							<th scope="col" class="py-1 pr-4">Mode</th>
+							<th scope="col" class="py-1 pr-4">Origin</th>
+							<th scope="col" class="py-1 pr-4">Scope</th>
+							<th scope="col" class="py-1">Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, b := range v.Rows {
+							@viewRow(b, v.Names)
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</section>
+}
+
+// viewRow is one bookmark of the table. Hub rows can be edited inline
+// (htmx) or on their own page; pack rows are read-only.
+templ viewRow(b *Bookmark, n names) {
+	<tr id={ rowID(b.ID().String()) } class="border-b border-border align-top">
+		<td class="py-1 pr-4 whitespace-nowrap">{ FormatHz(b.Frequency()) }</td>
+		<th scope="row" class="py-1 pr-4 font-medium">
+			{ b.Name() }
+			if b.Description() != "" {
+				<span class="block text-sm font-normal text-fg-muted">{ b.Description() }</span>
+			}
+		</th>
+		<td class="py-1 pr-4">{ modeLabel(b) }</td>
+		<td class="py-1 pr-4">{ originLabel(b) }</td>
+		<td class="py-1 pr-4">{ scopeLabel(b, n) }</td>
+		<td class="py-1">
+			if b.ReadOnly() {
+				<span class="text-fg-muted">Read-only</span>
+			} else {
+				<span class="flex flex-wrap gap-x-4">
+					<a
+						href={ templ.URL(ManagePath + "/" + b.ID().String()) }
+						hx-get={ ManagePath + "/" + b.ID().String() }
+						hx-target="closest tr"
+						hx-swap="outerHTML"
+					>Edit<span class="sr-only"> { b.Name() }</span></a>
+					<a href={ templ.URL(ManagePath + "/" + b.ID().String() + "/delete") }>Delete<span class="sr-only"> { b.Name() }</span></a>
+				</span>
+			}
+		</td>
+	</tr>
+}
+
+// problem is one entry of the error summary of a form.
+type problem struct{ ID, Text string }
+
+// fieldLabels are the labels of the form fields, in form order.
+var fieldLabels = []struct{ Key, Label string }{
+	{"name", "Name"}, {"frequency", "Frequency (Hz)"}, {"modulation", "Mode"}, {"underlying", "Underlying mode"},
+	{"description", "Description"}, {"scannable", "Scannable"}, {"scope", "Shown on"}, {"device", "Device"}, {"preset", "Preset"},
+}
+
+func (f bookmarkForm) prefix() string {
+	if f.ID == "" {
+		return "bookmark-new-"
+	}
+
+	return "bookmark-" + f.ID + "-"
+}
+
+func (f bookmarkForm) action() string {
+	if f.ID == "" {
+		return ManagePath
+	}
+
+	return ManagePath + "/" + f.ID
+}
+
+// problems lists the field errors in form order, then the others.
+func (f bookmarkForm) problems() []problem {
+	var out []problem
+
+	seen := map[string]bool{}
+
+	for _, fl := range fieldLabels {
+		if msg, ok := f.Errors[fl.Key]; ok {
+			out = append(out, problem{ID: f.prefix() + fl.Key, Text: fl.Label + ": " + msg})
+			seen[fl.Key] = true
+		}
+	}
+
+	for name, msg := range f.Errors {
+		if !seen[name] {
+			out = append(out, problem{Text: msg})
+		}
+	}
+
+	return out
+}
+
+func (f bookmarkForm) describedBy(key string) string {
+	out := f.prefix() + key + "-help"
+	if _, ok := f.Errors[key]; ok {
+		out += " " + f.prefix() + key + "-error"
+	}
+
+	return out
+}
+
+func (f bookmarkForm) invalid(key string) templ.Attributes {
+	if _, ok := f.Errors[key]; ok {
+		return templ.Attributes{"aria-invalid": "true"}
+	}
+
+	return nil
+}
+
+templ formErrors(f bookmarkForm) {
+	if f.Failure != "" {
+		<p class="rounded border border-danger p-3 font-semibold text-danger" role="alert">{ f.Failure }</p>
+	}
+	if ps := f.problems(); len(ps) > 0 {
+		<div class="rounded border border-danger p-3" role="alert" tabindex="-1">
+			<p class="font-semibold text-danger">The bookmark was not saved:</p>
+			<ul class="mt-1 list-disc pl-5">
+				for _, p := range ps {
+					<li>
+						if p.ID != "" {
+							<a href={ templ.SafeURL("#" + p.ID) }>{ p.Text }</a>
+						} else {
+							{ p.Text }
+						}
+					</li>
+				}
+			</ul>
+		</div>
+	}
+}
+
+templ fieldHelp(f bookmarkForm, key, help string) {
+	<p id={ f.prefix() + key + "-help" } class="text-sm text-fg-muted">{ help }</p>
+	if msg, ok := f.Errors[key]; ok {
+		<p id={ f.prefix() + key + "-error" } class="text-sm font-semibold text-danger">{ msg }</p>
+	}
+}
+
+templ textField(f bookmarkForm, key, label, help, kind string, required bool) {
+	<div class="flex flex-col gap-1">
+		<label for={ f.prefix() + key } class="font-medium">
+			{ label }
+			if !required {
+				<span class="text-sm text-fg-muted">(optional)</span>
+			}
+		</label>
+		<input
+			id={ f.prefix() + key }
+			name={ key }
+			value={ f.Values[key] }
+			class="rounded border border-border px-2 py-1"
+			if kind == "number" {
+				type="number"
+				min="1"
+				step="1"
+				inputmode="numeric"
+			} else {
+				type="text"
+			}
+			if key == "modulation" || key == "underlying" {
+				list={ f.prefix() + "modes" }
+				autocomplete="off"
+			}
+			required?={ required }
+			aria-describedby={ f.describedBy(key) }
+			{ f.invalid(key)... }
+		/>
+		@fieldHelp(f, key, help)
+	</div>
+}
+
+// bookmarkFields are the fields of the add and edit forms (BMK-003).
+templ bookmarkFields(f bookmarkForm, n names) {
+	<datalist id={ f.prefix() + "modes" }>
+		for _, mode := range modeOptions(n) {
+			<option value={ mode }></option>
+		}
+	</datalist>
+	@textField(f, "name", "Name", "At most 128 characters.", "text", true)
+	@textField(f, "frequency", "Frequency (Hz)", "A whole number of hertz, for example 145500000.", "number", true)
+	@textField(f, "modulation", "Mode", "A mode the receivers offer, for example nfm, am, usb, lsb, cw or wfm.", "text", true)
+	@textField(f, "underlying", "Underlying mode", "Only for a digital mode: the analog mode it decodes from, for example usb.", "text", false)
+	@textField(f, "description", "Description", "Plain text, at most 1024 characters.", "text", false)
+	<div class="flex flex-col gap-1">
+		<div class="flex items-center gap-2">
+			<input
+				id={ f.prefix() + "scannable" }
+				name="scannable"
+				type="checkbox"
+				value="on"
+				checked?={ f.Values["scannable"] != "" }
+				aria-describedby={ f.describedBy("scannable") }
+			/>
+			<label for={ f.prefix() + "scannable" } class="font-medium">Scannable</label>
+		</div>
+		@fieldHelp(f, "scannable", "The scanner visits this bookmark.")
+	</div>
+	<div class="flex flex-col gap-1">
+		<label for={ f.prefix() + "scope" } class="font-medium">Shown on</label>
+		<select id={ f.prefix() + "scope" } name="scope" class="rounded border border-border px-2 py-1" aria-describedby={ f.describedBy("scope") } { f.invalid("scope")... }>
+			<option value="all" selected?={ f.Values["scope"] == "all" || f.Values["scope"] == "" }>All devices</option>
+			<option value="device" selected?={ f.Values["scope"] == "device" }>One device</option>
+			<option value="preset" selected?={ f.Values["scope"] == "preset" }>One preset</option>
+		</select>
+		@fieldHelp(f, "scope", "One device or one preset: choose it below.")
+	</div>
+	<div class="flex flex-col gap-1">
+		<label for={ f.prefix() + "device" } class="font-medium">Device <span class="text-sm text-fg-muted">(for one device)</span></label>
+		<select id={ f.prefix() + "device" } name="device" class="rounded border border-border px-2 py-1" aria-describedby={ f.describedBy("device") } { f.invalid("device")... }>
+			<option value="" selected?={ f.Values["device"] == "" }>None</option>
+			for _, d := range n.Devices {
+				<option value={ d.ID.String() } selected?={ f.Values["device"] == d.ID.String() }>{ d.Name }</option>
+			}
+		</select>
+		@fieldHelp(f, "device", "The bookmark shows only on this device.")
+	</div>
+	<div class="flex flex-col gap-1">
+		<label for={ f.prefix() + "preset" } class="font-medium">Preset <span class="text-sm text-fg-muted">(for one preset)</span></label>
+		<select id={ f.prefix() + "preset" } name="preset" class="rounded border border-border px-2 py-1" aria-describedby={ f.describedBy("preset") } { f.invalid("preset")... }>
+			<option value="" selected?={ f.Values["preset"] == "" }>None</option>
+			for _, p := range n.Presets {
+				<option value={ p.ID.String() } selected?={ f.Values["preset"] == p.ID.String() }>{ p.Name }</option>
+			}
+		</select>
+		@fieldHelp(f, "preset", "The bookmark shows on the devices that run this preset.")
+	</div>
+}
+
+// addForm adds a hub bookmark. It is pre-filled from the query (f, m, m2,
+// name: the receiver's current tuning).
+templ addForm(f bookmarkForm, n names) {
+	<section aria-labelledby="bookmark-add-title" class="flex flex-col gap-3">
+		<h2 id="bookmark-add-title" class="text-xl font-semibold">Add a bookmark</h2>
+		@formErrors(f)
+		<form class="flex max-w-xl flex-col gap-4" method="post" action={ templ.SafeURL(ManagePath) } novalidate>
+			@bookmarkFields(f, n)
+			<div>
+				<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">Add the bookmark</button>
+			</div>
+		</form>
+	</section>
+}
+
+// editRow is the inline edit of a hub bookmark in the table.
+templ editRow(f bookmarkForm, n names) {
+	<tr id={ rowID(f.ID) } class="border-b border-border">
+		<td colspan="6" class="py-2">
+			<form
+				class="flex flex-col gap-3"
+				method="post"
+				action={ templ.SafeURL(f.action()) }
+				hx-post={ f.action() }
+				hx-target="closest tr"
+				hx-swap="outerHTML"
+				aria-label={ "Edit " + f.Name }
+				novalidate
+			>
+				<input type="hidden" name="version" value={ strconv.Itoa(f.Version) }/>
+				@formErrors(f)
+				<div class="grid gap-3 md:grid-cols-3">
+					@bookmarkFields(f, n)
+				</div>
+				<div class="flex flex-wrap items-center gap-4">
+					<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">Save<span class="sr-only"> { f.Name }</span></button>
+					<a
+						href={ templ.SafeURL(ManagePath) }
+						hx-get={ f.action() + "/row" }
+						hx-target="closest tr"
+						hx-swap="outerHTML"
+					>Cancel</a>
+				</div>
+			</form>
+		</td>
+	</tr>
+}
+
+// editPage is the edit of a hub bookmark on its own page (without htmx).
+templ editPage(f bookmarkForm, n names) {
+	<h1 class="text-2xl font-semibold">Edit { f.Name }</h1>
+	<p><a href={ templ.SafeURL(ManagePath) }>All bookmarks</a></p>
+	@formErrors(f)
+	<form class="flex max-w-xl flex-col gap-4" method="post" action={ templ.SafeURL(f.action()) } novalidate>
+		<input type="hidden" name="version" value={ strconv.Itoa(f.Version) }/>
+		@bookmarkFields(f, n)
+		<div class="flex flex-wrap items-center gap-4">
+			<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">Save the bookmark</button>
+			<a href={ templ.URL(ManagePath + "/" + f.ID + "/delete") }>Delete this bookmark</a>
+		</div>
+	</form>
+}
+
+// packPage shows a pack bookmark: read-only.
+templ packPage(b *Bookmark) {
+	<h1 class="text-2xl font-semibold">{ b.Name() }</h1>
+	<p><a href={ templ.SafeURL(ManagePath) }>All bookmarks</a></p>
+	<p>This bookmark comes from a pack shipped with the hub: it is read-only.</p>
+	<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+		<dt class="font-medium">Frequency</dt>
+		<dd>{ FormatHz(b.Frequency()) }</dd>
+		<dt class="font-medium">Mode</dt>
+		<dd>{ modeLabel(b) }</dd>
+		<dt class="font-medium">Origin</dt>
+		<dd>{ originLabel(b) }</dd>
+		if b.Description() != "" {
+			<dt class="font-medium">Description</dt>
+			<dd>{ b.Description() }</dd>
+		}
+	</dl>
+}
+
+// deletePage asks to confirm the deletion of a hub bookmark (ADM-025).
+templ deletePage(b *Bookmark, failure string) {
+	<h1 class="text-2xl font-semibold">Delete { b.Name() }</h1>
+	if failure != "" {
+		<p class="rounded border border-danger p-3 font-semibold text-danger" role="alert">{ failure }</p>
+	}
+	<p>The bookmark { b.Name() } on { FormatHz(b.Frequency()) } is removed for every listener.</p>
+	<form class="flex flex-wrap items-center gap-4" method="post" action={ templ.SafeURL(ManagePath + "/" + b.ID().String() + "/delete") }>
+		<input type="hidden" name="version" value={ strconv.Itoa(b.Version()) }/>
+		<button type="submit" class="rounded border border-danger px-3 py-1 font-semibold text-danger">Delete the bookmark</button>
+		<a href={ templ.SafeURL(ManagePath) }>Cancel</a>
+	</form>
+}

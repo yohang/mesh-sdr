@@ -3,6 +3,7 @@
 @source "../../layout";
 @source "../../../*/http";
 @source "../../../shell";
+@source "../../../bookmarks/*.templ";
 @source "../js";
 
 /*

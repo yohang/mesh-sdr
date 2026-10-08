@@ -299,8 +299,9 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	settingsStore.Subscribe(func(s *settings.Snapshot) { g.applySettings(timings, s) })
 
 	adminGate := &roleGate{role: identitydomain.RoleAdmin}
+	operatorGate := &roleGate{role: identitydomain.RoleOperator}
 	shellModule := shell.New(shell.Deps{
-		Settings: settingsStore, AdminGate: adminGate, User: userOf, Logger: logger,
+		Settings: settingsStore, AdminGate: adminGate, User: operatorLinks(userOf, operatorGate.Allows), Logger: logger,
 		Images: stationImages{b: images, logger: component(logger, "shell.infra.station_images")},
 	})
 
@@ -343,6 +344,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	})
 
 	adminGate.authz = idm.HTTP
+	operatorGate.authz = idm.HTTP
 	identityHTTP = idm.HTTP
 
 	// Presets and schedules (ADR 0020), wired to the grid.
@@ -398,6 +400,18 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		return nil, nil, err
 	}
 
+	features := gridapp.NewFeatures(gridsqlite.NewDeviceRepository(adapter), gridsqlite.NewCapabilityRepository(adapter),
+		storeListenPolicy{store: settingsStore}, g.links())
+
+	bm, err := newBookmarks(bookmarksDeps{
+		adapter: adapter, features: features, registry: gridsqlite.NewDeviceRepository(adapter), presets: sch.presets,
+		region: func() string { return settingsStore.String("bandplan.region") }, audit: auditLog, broker: broker,
+		policies: policies, idm: idm.HTTP, render: shellModule.Renderer, isAdmin: adminGate.Allows, now: now, logger: logger,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
 	authz := gridhttp.NewAuthzHandler(access, func(r *http.Request) gridapp.Subject { return subjectOf(idm.HTTP.Principal(r.Context())) },
 		func(r *http.Request) string { return clientip.From(r.Context()).String() }, component(logger, "grid.http.authz"))
 
@@ -412,8 +426,8 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		ConfigHandlers:   api.NewConfigHandlers(effective),
 		BrandingHandlers: api.NewBrandingHandlers(images),
 		TokenHandlers:    api.NewTokenHandlers(idm.HTTP, idm.HTTP, idm.Tokens),
-		FeatureHandlers: api.NewFeatureHandlers(idm.HTTP, gridapp.NewFeatures(gridsqlite.NewDeviceRepository(adapter),
-			gridsqlite.NewCapabilityRepository(adapter), storeListenPolicy{store: settingsStore}, g.links())),
+		FeatureHandlers:  api.NewFeatureHandlers(idm.HTTP, features),
+		BookmarkHandlers: bm,
 	}
 
 	router := httpserver.NewRouter(
@@ -435,6 +449,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin), Service: sch.presets,
 			Logger: component(logger, "presets.http"),
 		}),
+		bm,
 		schedules.NewPages(schedules.PagesDeps{
 			Render: shellModule.Renderer, Guard: idm.HTTP.Require(identitydomain.RoleAdmin), Service: sch.schedules,
 			PresetName: sch.presetName, Logger: component(logger, "schedules.http"),

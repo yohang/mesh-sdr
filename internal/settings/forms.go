@@ -28,6 +28,7 @@ type field struct {
 	Help     string
 	Kind     InputKind
 	Options  []string
+	Labels   []string // labels of Options, when the schema names them
 	Min, Max string
 	MaxLen   int
 	MinText  string
@@ -102,7 +103,7 @@ func newField(e Effective) field {
 
 	f := field{
 		Key: e.Key(), ID: fieldID(e.Key()), Label: d.Label(), Help: d.Description(),
-		Kind: in.Kind, Options: in.Options, MaxLen: in.MaxLength, MinText: in.MinText,
+		Kind: in.Kind, Options: in.Options, Labels: in.OptionLabels, MaxLen: in.MaxLength, MinText: in.MinText,
 		Version: e.Version(), Locked: e.Locked(), Origin: e.Origin(), Source: e.Source(),
 		Secret: d.Secret(), Set: e.IsSet(),
 	}
@@ -137,6 +138,15 @@ func (f *field) setValue(v Value) {
 	default:
 		f.Value = textOf(f.Kind, v)
 	}
+}
+
+// optionLabel returns the label of the i-th enum option.
+func optionLabel(f field, i int) string {
+	if i < len(f.Labels) {
+		return f.Labels[i]
+	}
+
+	return f.Options[i]
 }
 
 // displayValue is a value as shown to people (read-only fields, tables).

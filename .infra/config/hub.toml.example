@@ -177,6 +177,11 @@ trusted_proxies = []
 # theme_mode = "auto"
 # shortcut_set = "default"               # default | off
 
+[settings.bandplan]
+# IARU region of the band plan and of the region bookmark pack:
+# r1 (Europe, Africa, Middle East) | r2 (Americas) | r3 (Asia, Pacific).
+# region = "r1"
+
 [settings.waterfall]
 # Waterfall levels (dB, -200 to 50, min below max) and palette every
 # receiver starts with (ADR 0026); listeners keep the Auto levels button.

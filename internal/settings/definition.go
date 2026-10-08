@@ -47,12 +47,14 @@ var inputKinds = []InputKind{
 // schema declares (shown to the user; the server validator is
 // authoritative).
 type Input struct {
-	Kind      InputKind
-	Options   []string // InputEnum
-	Min, Max  *float64 // InputInteger, InputNumber
-	MinText   string   // InputDuration: the smallest duration, e.g. "30d"
-	MaxLength int      // text kinds; 0 means no limit
-	Pattern   string
+	Kind    InputKind
+	Options []string // InputEnum
+	// OptionLabels, when set, are the labels shown for Options (same order).
+	OptionLabels []string
+	Min, Max     *float64 // InputInteger, InputNumber
+	MinText      string   // InputDuration: the smallest duration, e.g. "30d"
+	MaxLength    int      // text kinds; 0 means no limit
+	Pattern      string
 }
 
 // Definition is a key of the settings schema: its default, flags and input.
@@ -105,6 +107,7 @@ func NewDefinition(s DefinitionSpec) (Definition, error) {
 
 	in := s.Input
 	in.Options = slices.Clone(in.Options)
+	in.OptionLabels = slices.Clone(in.OptionLabels)
 
 	return Definition{
 		key: s.Key, def: s.Default, label: label, description: s.Description,
@@ -138,6 +141,7 @@ func (d Definition) Apply() Apply { return d.apply }
 func (d Definition) Input() Input {
 	in := d.input
 	in.Options = slices.Clone(in.Options)
+	in.OptionLabels = slices.Clone(in.OptionLabels)
 
 	return in
 }
