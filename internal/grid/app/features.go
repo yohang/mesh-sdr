@@ -23,8 +23,9 @@ type GlobalListenPolicy interface {
 	ListenPolicy(ctx context.Context) (string, error)
 }
 
-// DeviceFeatures is the public feature summary of one device (API-001):
-// what it is, whether it is online and which modes it offers.
+// DeviceFeatures is the public feature summary of one device (API-001,
+// UI-021): what it is, whether it can be listened to, which modes it
+// offers, its active preset and its listeners.
 type DeviceFeatures struct {
 	ID     shared.DeviceID
 	Node   domain.NodeID
@@ -34,6 +35,8 @@ type DeviceFeatures struct {
 	// up (hub presence): Online is false for an idle device, which only
 	// runs while someone listens.
 	NodeOnline bool
+	// State is the device's runtime state in the registry (SRC-025).
+	State domain.RuntimeState
 	// Modes are the modes the device's node reports available (mode:*
 	// capabilities), sorted; empty when the node has not reported or the
 	// device's driver is missing.
@@ -41,6 +44,39 @@ type DeviceFeatures struct {
 	// ListenPolicy is the effective listen policy of the device (its node
 	// config override, else the global one): anonymous or registered.
 	ListenPolicy string
+	// Listeners counts the open media connections attached to the device
+	// (connections registry).
+	Listeners int
+	// ActivePreset is the preset the node reported active (zero: none);
+	// PresetName names it ("" when unknown to the hub).
+	ActivePreset shared.UUID
+	PresetName   string
+}
+
+// NodeFeatures describes the node of listed devices: its name, whether it
+// is online and its last telemetry while online (RX-035: CPU, temperature,
+// battery; nothing else of the heartbeat).
+type NodeFeatures struct {
+	ID        domain.NodeID
+	Name      string
+	Online    bool
+	Telemetry *Telemetry
+}
+
+// Telemetry is the public part of a node heartbeat (TECHNICAL_SPEC §6.6
+// node.status public subset, plus the battery for RX-035).
+type Telemetry struct {
+	// CPU is the busy ratio, 0 to 1.
+	CPU     float64
+	TempC   *float64
+	Battery *float64
+}
+
+// Summary is the feature summary: the enabled devices in registry order
+// and their nodes.
+type Summary struct {
+	Devices []DeviceFeatures
+	Nodes   []NodeFeatures
 }
 
 // DeviceLister lists the device registry (domain.DeviceRepository).
@@ -59,44 +95,83 @@ type NodeLinks interface {
 	Connected() []domain.NodeID
 }
 
+// NodeLister lists the node registry (domain.NodeRepository).
+type NodeLister interface {
+	List(ctx context.Context) ([]*domain.Node, error)
+}
+
+// DeviceListeners counts the listeners by device (Presence).
+type DeviceListeners interface {
+	ListenersByDevice(ctx context.Context) (map[string]int, error)
+}
+
+// LatestTelemetry gives the last heartbeat sample of a node (History).
+type LatestTelemetry interface {
+	Latest(id domain.NodeID) (LoadSample, bool)
+}
+
+// PresetNamer names a preset ("" when unknown).
+type PresetNamer func(ctx context.Context, id shared.UUID) string
+
+// FeaturesDeps are the dependencies of Features. Links, Nodes, Listeners,
+// Telemetry and PresetName may be nil: every node is then offline, nodes
+// are named by their id, devices have no listeners, nodes no telemetry
+// and presets no name.
+type FeaturesDeps struct {
+	Devices    DeviceLister
+	Caps       CapabilityReader
+	Policy     GlobalListenPolicy
+	Links      NodeLinks
+	Nodes      NodeLister
+	Listeners  DeviceListeners
+	Telemetry  LatestTelemetry
+	PresetName PresetNamer
+}
+
 // Features builds the public feature summary from the device registry, the
-// capability reports and the node links.
-type Features struct {
-	devices DeviceLister
-	caps    CapabilityReader
-	policy  GlobalListenPolicy
-	links   NodeLinks
-}
+// capability reports, the node links, the connections registry and the
+// heartbeat history.
+type Features struct{ d FeaturesDeps }
 
-// NewFeatures returns the use case. links may be nil (no node can connect):
-// every node is then offline.
-func NewFeatures(devices DeviceLister, caps CapabilityReader, policy GlobalListenPolicy, links NodeLinks) *Features {
-	return &Features{devices: devices, caps: caps, policy: policy, links: links}
-}
+// NewFeatures returns the use case.
+func NewFeatures(d FeaturesDeps) *Features { return &Features{d: d} }
 
-// Summary returns the enabled devices in registry order with their modes.
-// A global policy that cannot be read counts as registered: the summary
-// fails closed.
-func (f *Features) Summary(ctx context.Context) ([]DeviceFeatures, error) {
-	devices, err := f.devices.List(ctx)
+// Summary returns the enabled devices in registry order with their modes,
+// and the nodes of those devices in order of first appearance. A global
+// policy that cannot be read counts as registered: the summary fails
+// closed.
+func (f *Features) Summary(ctx context.Context) (Summary, error) {
+	devices, err := f.d.Devices.List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list devices: %w", err)
+		return Summary{}, fmt.Errorf("list devices: %w", err)
 	}
 
-	global, err := f.policy.ListenPolicy(ctx)
+	global, err := f.d.Policy.ListenPolicy(ctx)
 	if err != nil || (global != ListenAnonymous && global != ListenRegistered) {
 		global = ListenRegistered
 	}
 
 	connected := map[domain.NodeID]bool{}
-	if f.links != nil {
-		for _, id := range f.links.Connected() {
+	if f.d.Links != nil {
+		for _, id := range f.d.Links.Connected() {
 			connected[id] = true
 		}
 	}
 
+	listeners := map[string]int{}
+	if f.d.Listeners != nil {
+		if listeners, err = f.d.Listeners.ListenersByDevice(ctx); err != nil {
+			return Summary{}, fmt.Errorf("count listeners: %w", err)
+		}
+	}
+
+	names, err := f.nodeNames(ctx)
+	if err != nil {
+		return Summary{}, err
+	}
+
 	reports := map[domain.NodeID][]domain.Capability{}
-	out := []DeviceFeatures{}
+	out := Summary{Devices: []DeviceFeatures{}, Nodes: []NodeFeatures{}}
 
 	for _, d := range devices {
 		flags := d.Flags()
@@ -106,13 +181,15 @@ func (f *Features) Summary(ctx context.Context) ([]DeviceFeatures, error) {
 
 		caps, ok := reports[d.Node()]
 		if !ok {
-			r, err := f.caps.Get(ctx, d.Node())
+			r, err := f.d.Caps.Get(ctx, d.Node())
 			if err != nil && !errors.Is(err, domain.ErrCapabilitiesNotReported) {
-				return nil, fmt.Errorf("capabilities of %s: %w", d.Node(), err)
+				return Summary{}, fmt.Errorf("capabilities of %s: %w", d.Node(), err)
 			}
 
 			caps = r.Capabilities()
 			reports[d.Node()] = caps
+
+			out.Nodes = append(out.Nodes, f.node(d.Node(), names, connected[d.Node()]))
 		}
 
 		policy := global
@@ -120,13 +197,56 @@ func (f *Features) Summary(ctx context.Context) ([]DeviceFeatures, error) {
 			policy = flags.ListenPolicy
 		}
 
-		out = append(out, DeviceFeatures{
-			ID: d.ID(), Node: d.Node(), Name: d.Name(), Online: d.Online(), NodeOnline: connected[d.Node()],
-			Modes: modes(caps, d.Type()), ListenPolicy: policy,
-		})
+		state, _, _ := d.State()
+		df := DeviceFeatures{
+			ID: d.ID(), Node: d.Node(), Name: d.Name(), Online: d.Online(), NodeOnline: connected[d.Node()], State: state,
+			Modes: modes(caps, d.Type()), ListenPolicy: policy, Listeners: listeners[d.ID().String()],
+			ActivePreset: d.ActivePreset(),
+		}
+
+		if !df.ActivePreset.IsZero() && f.d.PresetName != nil {
+			df.PresetName = f.d.PresetName(ctx, df.ActivePreset)
+		}
+
+		out.Devices = append(out.Devices, df)
 	}
 
 	return out, nil
+}
+
+// nodeNames returns the node names by id (none without a node lister).
+func (f *Features) nodeNames(ctx context.Context) (map[domain.NodeID]string, error) {
+	names := map[domain.NodeID]string{}
+	if f.d.Nodes == nil {
+		return names, nil
+	}
+
+	nodes, err := f.d.Nodes.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list nodes: %w", err)
+	}
+
+	for _, n := range nodes {
+		names[n.ID()] = n.Name().String()
+	}
+
+	return names, nil
+}
+
+// node describes a node of the summary; its telemetry only while online.
+func (f *Features) node(id domain.NodeID, names map[domain.NodeID]string, online bool) NodeFeatures {
+	n := NodeFeatures{ID: id, Name: names[id], Online: online}
+	if n.Name == "" {
+		n.Name = id.String()
+	}
+
+	if online && f.d.Telemetry != nil {
+		if s, ok := f.d.Telemetry.Latest(id); ok {
+			n.Telemetry = &Telemetry{CPU: s.CPU, TempC: s.TempC, Battery: s.Battery}
+		}
+	}
+
+	return n
 }
 
 // modes returns the available mode:* capabilities, unless the node reports

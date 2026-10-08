@@ -230,7 +230,7 @@ func (s *Status) HeartbeatHandler() EventHandler {
 		n.RecordHeartbeat(now, hb.ClockOffsetMS, "", 0)
 		s.tracker.Heartbeat(n.ID(), now, hb.ClockOffsetMS, hb.NTPSynced)
 		s.history.Add(n.ID(), LoadSample{
-			At: now, CPU: hb.CPU, Load1: hb.Load[0], TempC: hb.TempC,
+			At: now, CPU: hb.CPU, Load1: hb.Load[0], TempC: hb.TempC, Battery: hb.Battery,
 			MemAvailableBytes: hb.Mem.AvailableBytes, MemTotalBytes: hb.Mem.TotalBytes,
 		})
 

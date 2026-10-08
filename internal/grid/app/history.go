@@ -13,6 +13,7 @@ type LoadSample struct {
 	CPU               float64
 	Load1             float64
 	TempC             *float64
+	Battery           *float64
 	MemAvailableBytes uint64
 	MemTotalBytes     uint64
 }
@@ -48,6 +49,19 @@ func (h *History) Samples(id domain.NodeID) []LoadSample {
 	defer h.mu.Unlock()
 
 	return append([]LoadSample(nil), h.nodes[id]...)
+}
+
+// Latest returns the last sample of id.
+func (h *History) Latest(id domain.NodeID) (LoadSample, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	ring := h.nodes[id]
+	if len(ring) == 0 {
+		return LoadSample{}, false
+	}
+
+	return ring[len(ring)-1], true
 }
 
 // Forget drops the samples of id.

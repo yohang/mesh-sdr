@@ -109,13 +109,15 @@ func TestFeatures(t *testing.T) {
 	summary := func(p fixedPolicy) []string {
 		t.Helper()
 
-		got, err := app.NewFeatures(devices, caps, p, links{domain.MustNodeID("garden")}).Summary(context.Background())
+		got, err := app.NewFeatures(app.FeaturesDeps{
+			Devices: devices, Caps: caps, Policy: p, Links: links{domain.MustNodeID("garden")},
+		}).Summary(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		var out []string
-		for _, d := range got {
+		for _, d := range got.Devices {
 			out = append(out, fmt.Sprintf("%s@%s %s %v node_online=%v", d.ID, d.Node, d.ListenPolicy, d.Modes, d.NodeOnline))
 		}
 
@@ -137,6 +139,92 @@ func TestFeatures(t *testing.T) {
 		if got := summary(p); got[0] != "hf@attic registered [ft8 wspr] node_online=false" || got[2] != "uhf@garden anonymous [] node_online=true" {
 			t.Errorf("policy %+v: summary = %v", p, got)
 		}
+	}
+}
+
+type listenerCounts map[string]int
+
+func (l listenerCounts) ListenersByDevice(context.Context) (map[string]int, error) { return l, nil }
+
+type nodeList []*domain.Node
+
+func (l nodeList) List(context.Context) ([]*domain.Node, error) { return l, nil }
+
+type latest map[domain.NodeID]app.LoadSample
+
+func (l latest) Latest(id domain.NodeID) (app.LoadSample, bool) {
+	s, ok := l[id]
+
+	return s, ok
+}
+
+// TestFeaturesPickerFields covers what the device picker shows (UI-021):
+// the node names, the device state, its listeners and active preset, and
+// the public telemetry of online nodes only (RX-035).
+func TestFeaturesPickerFields(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	preset := shared.MustParseUUID("0192c3a4-5b6c-7d8e-9f01-23456789abcd")
+
+	dev := func(node, id string) *domain.Device {
+		t.Helper()
+
+		d, err := domain.NewReportedDevice(domain.MustNodeID(node), domain.DeviceSpec{
+			ID: shared.MustDeviceID(id), Name: id, Type: "rtl_sdr", Enabled: true, FreqMin: 1, FreqMax: 2, SampleRates: []int64{1},
+		}, 0, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return d
+	}
+
+	hf, vhf := dev("attic", "hf"), dev("garden", "vhf")
+	hf.ApplyState(domain.StateRunning, "", nil, preset, now)
+
+	temp, battery := 41.5, 87.0
+	got, err := app.NewFeatures(app.FeaturesDeps{
+		Devices: deviceList{hf, vhf}, Caps: reports{}, Policy: fixedPolicy{v: "anonymous"},
+		Links:     links{domain.MustNodeID("attic")},
+		Nodes:     nodeList{domain.NewNode(domain.MustNodeID("attic"), domain.MustNodeName("Attic"), domain.MustNodeURL("https://attic:8074"), now)},
+		Listeners: listenerCounts{"hf": 3},
+		Telemetry: latest{
+			domain.MustNodeID("attic"):  {CPU: 0.25, TempC: &temp, Battery: &battery},
+			domain.MustNodeID("garden"): {CPU: 0.5},
+		},
+		PresetName: func(_ context.Context, id shared.UUID) string {
+			if id == preset {
+				return "Airband"
+			}
+
+			return ""
+		},
+	}).Summary(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got.Devices) != 2 || len(got.Nodes) != 2 {
+		t.Fatalf("summary = %+v", got)
+	}
+
+	d := got.Devices[0]
+	if d.State != domain.StateRunning || d.Listeners != 3 || d.ActivePreset != preset || d.PresetName != "Airband" {
+		t.Errorf("hf = %+v", d)
+	}
+
+	if d := got.Devices[1]; d.Listeners != 0 || !d.ActivePreset.IsZero() || d.PresetName != "" {
+		t.Errorf("vhf = %+v", d)
+	}
+
+	attic, garden := got.Nodes[0], got.Nodes[1]
+	if attic.Name != "Attic" || !attic.Online || attic.Telemetry == nil || attic.Telemetry.CPU != 0.25 ||
+		*attic.Telemetry.TempC != temp || *attic.Telemetry.Battery != battery {
+		t.Errorf("attic = %+v", attic)
+	}
+
+	// An unnamed node goes by its id; an offline one has no telemetry.
+	if garden.Name != "garden" || garden.Online || garden.Telemetry != nil {
+		t.Errorf("garden = %+v", garden)
 	}
 }
 
