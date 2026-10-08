@@ -39,6 +39,9 @@ const (
 	KindAdminConnections Kind = "admin.connections"
 	KindDecodes          Kind = "decodes"
 	KindDiagnostics      Kind = "diagnostics"
+	// KindDeviceLog carries the device log of a device (SRC-005), for
+	// operators and admins only.
+	KindDeviceLog Kind = "device_log"
 )
 
 var (
@@ -46,7 +49,9 @@ var (
 		KindPresence: true, KindMap: true, KindNodes: true, KindDevices: true,
 		KindNotifications: true, KindAdminConnections: true,
 	}
-	perDevice = map[Kind]bool{KindDecodes: true, KindDiagnostics: true}
+	perDevice = map[Kind]bool{KindDecodes: true, KindDiagnostics: true, KindDeviceLog: true}
+	// staffKinds are the topics reserved to operators and admins.
+	staffKinds = map[Kind]bool{KindDeviceLog: true}
 
 	// identifier is the §6.1 identifier charset.
 	identifier = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -100,6 +105,10 @@ func (t Topic) IsZero() bool { return t.kind == "" }
 
 // IsAdmin reports whether the topic is reserved to admins (admin.*).
 func (t Topic) IsAdmin() bool { return strings.HasPrefix(string(t.kind), "admin.") }
+
+// IsStaff reports whether the topic is reserved to operators and admins
+// (staff), whatever the listen policy of its device.
+func (t Topic) IsStaff() bool { return staffKinds[t.kind] }
 
 // String returns the wire form.
 func (t Topic) String() string {

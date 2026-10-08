@@ -130,6 +130,24 @@ type Device struct {
 	OperatorCanRetune bool    `json:"operator_can_retune"`
 	AlwaysOn          bool    `json:"always_on"`
 	SchedulerEnabled  bool    `json:"scheduler_enabled"`
+	// Config are the driver values of the node config (SRC-022), shown
+	// read-only by the hub; nil when the node does not report them.
+	Config *DeviceConfig `json:"config,omitempty"`
+}
+
+// DeviceConfig are the [devices.<id>.driver] values of a device, as set in
+// the node config (SRC-009 … SRC-014). Gain stages, AGC and antennas come
+// with the Soapy drivers.
+type DeviceConfig struct {
+	// RFGain is "auto" or a value in dB.
+	RFGain  string `json:"rf_gain"`
+	PPM     int    `json:"ppm"`
+	BiasTee bool   `json:"bias_tee"`
+	// DirectSampling is off, i or q.
+	DirectSampling string `json:"direct_sampling"`
+	IQSwap         bool   `json:"iqswap"`
+	// LFOOffset is the converter offset in Hz (signed).
+	LFOOffset int64 `json:"lfo_offset"`
 }
 
 // Tool is one external program a decoder needs.
@@ -200,3 +218,40 @@ type EventsDropped struct {
 	Count int64            `json:"count"`
 	Kinds map[string]int64 `json:"kinds"`
 }
+
+// DeviceLog is device.log (node → hub, SRC-005): records of the device log
+// the node keeps in RAM. It is not an event: it carries no seq, is never
+// buffered while the hub is unreachable and is not acknowledged. When the
+// control channel opens the node sends the records it holds (its backlog)
+// with Reset set on the first message of each device; then it pushes the
+// new records as they come.
+type DeviceLog struct {
+	DeviceID string `json:"device_id"`
+	// Reset replaces the records the hub holds for the device; otherwise
+	// the records are appended.
+	Reset   bool        `json:"reset,omitempty"`
+	Records []LogRecord `json:"records"`
+}
+
+// LogRecord is one plain-text record of a device log (at most
+// MaxLogText bytes of text).
+type LogRecord struct {
+	// Time is the record time in Unix milliseconds (node clock).
+	Time int64 `json:"t"`
+	// Source is "connector" (a line the connector wrote to stderr) or
+	// "device" (a device lifecycle record).
+	Source string `json:"source"`
+	// Class is the stderr class of a connector line, or the state of a
+	// lifecycle record.
+	Class string `json:"class,omitempty"`
+	Text  string `json:"text"`
+}
+
+// Log record sources.
+const (
+	LogSourceConnector = "connector"
+	LogSourceDevice    = "device"
+)
+
+// MaxLogText bounds the text of a log record (the stderr line cap).
+const MaxLogText = 4096

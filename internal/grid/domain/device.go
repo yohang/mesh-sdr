@@ -2,7 +2,7 @@ package domain
 
 import (
 	"context"
-	"encoding/json"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,6 +56,38 @@ type DeviceSpec struct {
 	OperatorCanRetune bool
 	AlwaysOn          bool
 	SchedulerEnabled  bool
+	// Config are the reported driver values; nil when the node does not
+	// report them.
+	Config *DeviceConfig
+}
+
+// DeviceConfig are the driver values of a device in its node config
+// (SRC-022: rf_gain, ppm, bias_tee, direct_sampling, iqswap, lfo_offset),
+// mirrored for display only: the hub never changes them.
+type DeviceConfig struct {
+	// RFGain is "auto" or a value in dB.
+	RFGain  string `json:"rf_gain"`
+	PPM     int    `json:"ppm"`
+	BiasTee bool   `json:"bias_tee"`
+	// DirectSampling is off, i or q.
+	DirectSampling string `json:"direct_sampling"`
+	IQSwap         bool   `json:"iqswap"`
+	// LFOOffset is the converter offset in Hz.
+	LFOOffset int64 `json:"lfo_offset"`
+}
+
+// maxPPM bounds the reported ppm (the node config allows ±1000).
+const maxPPM = 1000
+
+func (c DeviceConfig) validate() bool {
+	if c.RFGain != "auto" {
+		db, err := strconv.ParseFloat(c.RFGain, 64)
+		if err != nil || math.IsNaN(db) || math.IsInf(db, 0) {
+			return false
+		}
+	}
+
+	return c.PPM >= -maxPPM && c.PPM <= maxPPM && slices.Contains([]string{"off", "i", "q"}, c.DirectSampling)
 }
 
 // cleanText keeps reported text plain (§7.1): valid UTF-8, no C0 controls.
@@ -87,6 +119,10 @@ func (s DeviceSpec) validate() error {
 		return ErrInvalidDevice.WithDetail("invalid listen_policy of device " + strconv.Quote(s.ID.String()))
 	}
 
+	if s.Config != nil && !s.Config.validate() {
+		return ErrInvalidDevice.WithDetail("invalid driver config of device " + strconv.Quote(s.ID.String()))
+	}
+
 	return nil
 }
 
@@ -101,6 +137,7 @@ type Device struct {
 	freqMax     int64
 	sampleRates []int64
 	flags       DeviceFlags
+	config      *DeviceConfig
 	online      bool
 	state       RuntimeState
 	stateAt     time.Time
@@ -154,6 +191,12 @@ func (d *Device) ApplySpec(node NodeID, spec DeviceSpec, sortOrder int, now time
 		Enabled: spec.Enabled, ListenPolicy: spec.ListenPolicy, OperatorCanRetune: spec.OperatorCanRetune,
 		AlwaysOn: spec.AlwaysOn, SchedulerEnabled: spec.SchedulerEnabled,
 	}
+	d.config = nil
+	if spec.Config != nil {
+		c := *spec.Config
+		d.config = &c
+	}
+
 	d.sortOrder = sortOrder
 	d.reportedAt = ms(now)
 
@@ -235,6 +278,16 @@ func (d *Device) SampleRates() []int64 { return slices.Clone(d.sampleRates) }
 // Flags returns the mirrored policy flags.
 func (d *Device) Flags() DeviceFlags { return d.flags }
 
+// Config returns the reported driver values; ok is false when the node
+// did not report them.
+func (d *Device) Config() (c DeviceConfig, ok bool) {
+	if d.config == nil {
+		return DeviceConfig{}, false
+	}
+
+	return *d.config, true
+}
+
 // Online reports whether the device is running on a connected node.
 func (d *Device) Online() bool { return d.online }
 
@@ -289,6 +342,7 @@ type DeviceSnapshot struct {
 	FreqMin, FreqMax     int64
 	SampleRates          []int64
 	Flags                DeviceFlags
+	Config               *DeviceConfig
 	Online               bool
 	State                RuntimeState
 	StateAt              time.Time
@@ -303,7 +357,7 @@ type DeviceSnapshot struct {
 func (d *Device) Snapshot() DeviceSnapshot {
 	return DeviceSnapshot{
 		ID: d.id.String(), Node: d.node.String(), Name: d.name, Type: d.typ, FreqMin: d.freqMin, FreqMax: d.freqMax,
-		SampleRates: slices.Clone(d.sampleRates), Flags: d.flags, Online: d.online, State: d.state, StateAt: d.stateAt,
+		SampleRates: slices.Clone(d.sampleRates), Flags: d.flags, Config: cloneConfig(d.config), Online: d.online, State: d.state, StateAt: d.stateAt,
 		Reason: d.reason, ActivePreset: d.preset, CenterFreq: d.centerFreq, SortOrder: d.sortOrder, ReportedAt: d.reportedAt,
 	}
 }
@@ -326,13 +380,20 @@ func RehydrateDevice(s DeviceSnapshot) (*Device, error) {
 
 	return &Device{
 		id: id, node: node, name: s.Name, typ: s.Type, freqMin: s.FreqMin, freqMax: s.FreqMax,
-		sampleRates: slices.Clone(s.SampleRates), flags: s.Flags, online: s.Online, state: s.State, stateAt: s.StateAt,
+		sampleRates: slices.Clone(s.SampleRates), flags: s.Flags, config: cloneConfig(s.Config), online: s.Online, state: s.State, stateAt: s.StateAt,
 		reason: s.Reason, preset: s.ActivePreset, centerFreq: s.CenterFreq, sortOrder: s.SortOrder, reportedAt: s.ReportedAt,
 	}, nil
 }
 
-// MarshalFlags encodes the flags (devices.capabilities column).
-func (f DeviceFlags) MarshalFlags() ([]byte, error) { return json.Marshal(f) }
+func cloneConfig(c *DeviceConfig) *DeviceConfig {
+	if c == nil {
+		return nil
+	}
+
+	v := *c
+
+	return &v
+}
 
 // DeviceRepository persists the device registry.
 type DeviceRepository interface {

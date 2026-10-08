@@ -11,7 +11,7 @@ import (
 func TestParseTopic(t *testing.T) {
 	valid := []string{
 		"nodes", "devices", "presence", "map", "notifications", "admin.connections",
-		"decodes:device=dev-hf", "diagnostics:device=a_1",
+		"decodes:device=dev-hf", "diagnostics:device=a_1", "device_log:device=hf",
 	}
 	for _, s := range valid {
 		tp, err := events.ParseTopic(s)
@@ -28,7 +28,7 @@ func TestParseTopic(t *testing.T) {
 
 	invalid := []string{
 		"", "Nodes", "nodes:device=x", "decodes", "decodes:device=", "decodes:node=x",
-		"decodes:device=a b", "admin", "admin.users", "decodes:device=" + strings.Repeat("a", 65),
+		"decodes:device=a b", "admin", "admin.users", "device_log", "decodes:device=" + strings.Repeat("a", 65),
 	}
 	for _, s := range invalid {
 		if _, err := events.ParseTopic(s); !errors.Is(err, events.ErrInvalidTopic) {
@@ -42,5 +42,12 @@ func TestParseTopic(t *testing.T) {
 
 	if !events.MustTopic("admin.connections").IsAdmin() || events.MustTopic("nodes").IsAdmin() {
 		t.Error("IsAdmin")
+	}
+
+	staff := map[string]bool{"device_log:device=hf": true, "decodes:device=hf": false, "nodes": false, "admin.connections": false}
+	for s, want := range staff {
+		if got := events.MustTopic(s).IsStaff(); got != want {
+			t.Errorf("%s IsStaff() = %v, want %v", s, got, want)
+		}
 	}
 }

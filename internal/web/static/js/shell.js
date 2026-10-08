@@ -13,6 +13,7 @@ import "./utc-clock.js";
 import "./sortable-list.js";
 import "./token-url.js";
 import "./download.js";
+import "./device-log.js";
 import { installNavigation } from "./navigation.js";
 import { installShortcuts } from "./shortcuts.js";
 import { installEvents } from "./events.js";

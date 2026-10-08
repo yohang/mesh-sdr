@@ -297,6 +297,10 @@ func TestCatalogues(t *testing.T) {
 		{rxv1.CtlNodeToHub(), rxv1.TypeNodeHeartbeat, true},
 		{rxv1.CtlNodeToHub(), rxv1.TypeDeviceState, true},
 		{rxv1.CtlNodeToHub(), rxv1.TypeCtlHello, false},
+		{rxv1.CtlNodeToHub(), rxv1.TypeDeviceLog, true},
+		{rxv1.HubHubToClient(), rxv1.TypeDeviceLog, true},
+		{rxv1.CtlHubToNode(), rxv1.TypeDeviceLog, false},
+		{rxv1.MediaNodeToClient(), rxv1.TypeDeviceLog, false},
 	}
 	for _, tt := range tests {
 		if got := tt.cat.Contains(tt.typ); got != tt.want {

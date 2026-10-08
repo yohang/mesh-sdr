@@ -14,6 +14,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/events"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
+	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
 	"github.com/yohang/mesh-sdr/internal/http/clientip"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
@@ -135,7 +136,8 @@ func (c *policyCache) refresh(ctx context.Context) {
 }
 
 // topicAuthz decides topic access (§6.6 "Topic access", ADR 0016 decision
-// 7): admin topics need admin (and admin.allowed_networks); per-device
+// 7): admin topics need admin (and admin.allowed_networks); staff topics
+// (the device logs) need operator or admin; per-device
 // topics need listen permission on the device (its effective listen
 // policy); the other topics are open to signed-in users, and to anonymous
 // visitors when some device is anonymous-listenable (public_map does not
@@ -150,6 +152,14 @@ func (a topicAuthz) AuthorizeTopic(ctx context.Context, t events.Topic) error {
 
 	if t.IsAdmin() {
 		if a.id.Authorize(ctx, identitydomain.RoleAdmin) != nil {
+			return events.ErrTopicForbidden
+		}
+
+		return nil
+	}
+
+	if t.IsStaff() {
+		if a.id.Authorize(ctx, identitydomain.RoleOperator) != nil {
 			return events.ErrTopicForbidden
 		}
 
@@ -492,6 +502,44 @@ func (e *gridEvents) nodeDevices(ctx context.Context, id griddomain.NodeID) {
 			Payload:  deviceStatusEvent{DeviceID: device, NodeID: id.String(), State: string(st)},
 		})
 	}
+}
+
+// deviceLogEvent is the device.log payload of /api/ws (SRC-005): plain
+// text records, inserted with textContent by the page.
+type deviceLogEvent struct {
+	DeviceID string           `json:"device_id"`
+	Reset    bool             `json:"reset,omitempty"`
+	Records  []deviceLogEntry `json:"records"`
+}
+
+type deviceLogEntry struct {
+	// T is the record time in Unix milliseconds, Time its display form.
+	T      int64  `json:"t"`
+	Time   string `json:"time"`
+	Source string `json:"source"`
+	Class  string `json:"class,omitempty"`
+	Text   string `json:"text"`
+}
+
+// deviceLog relays device log records to the operators and admins who
+// subscribed to the log of the device (device_log:device=<id>).
+func (e *gridEvents) deviceLog(ctx context.Context, device shared.DeviceID, reset bool, records []gridapp.LogRecord) {
+	topic, err := events.ParseTopic(string(events.KindDeviceLog) + ":device=" + device.String())
+	if err != nil {
+		e.logger.WarnContext(ctx, "device log topic", slog.String("device_id", device.String()), slog.Any("error", err))
+
+		return
+	}
+
+	entries := make([]deviceLogEntry, 0, len(records))
+	for _, r := range records {
+		entries = append(entries, deviceLogEntry{T: r.Time.UnixMilli(), Time: r.Time.UTC().Format(gridhttp.LogTimeLayout), Source: r.Source, Class: r.Class, Text: r.Text})
+	}
+
+	e.b.Publish(ctx, events.Event{
+		Topic: topic, Type: rxv1.TypeDeviceLog.String(), Audience: staff,
+		Payload: deviceLogEvent{DeviceID: device.String(), Reset: reset, Records: entries},
+	})
 }
 
 // forgotten publishes a forgotten device.

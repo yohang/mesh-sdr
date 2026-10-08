@@ -1,0 +1,48 @@
+package http
+
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/grid/app"
+)
+
+// deviceLogPage is the log of a device (SRC-005): the records are text,
+// escaped by templ here and inserted with textContent by the live module
+// (<msdr-device-log>), which announces new records through the throttled
+// status region.
+templ deviceLogPage(v deviceLogView) {
+	<h1 class="text-2xl font-semibold">Log of { v.Device.Name() }</h1>
+	<p class="text-fg-muted">
+		The last { strconv.Itoa(app.DeviceLogSize) } records of the device: the lines its connector writes and its state changes, kept in memory by node { v.Device.Node().String() }. They are not saved. Times are in UTC.
+	</p>
+	<p><a href={ templ.URL("/admin/devices/" + v.Device.ID().String()) }>Back to { v.Device.Name() }</a></p>
+	<msdr-device-log data-device={ v.Device.ID().String() } class="flex flex-col gap-2">
+		<p class="sr-only" role="status" aria-live="polite" data-device-log-status></p>
+		@deviceLogList(v)
+	</msdr-device-log>
+}
+
+// deviceLogList is the live part of the log page, also its htmx fragment
+// (same URL): it refetches itself after the hub events socket
+// (re)subscribed, since records may have been missed meanwhile.
+templ deviceLogList(v deviceLogView) {
+	<section
+		id="device-log"
+		class="flex flex-col gap-2 rounded border border-border bg-surface p-4"
+		aria-labelledby="title-device-log"
+		data-msdr-topics={ v.topic() }
+		hx-get={ v.path() }
+		hx-trigger="msdr:resync from:body"
+		hx-swap="outerMorph"
+	>
+		<h2 id="title-device-log" class="text-lg font-semibold">Records, oldest first</h2>
+		<p data-device-log-empty hidden?={ len(v.Records) > 0 }>No record yet: the node sends them when the device starts, fails or its connector writes.</p>
+		<ol class="flex flex-col gap-1 font-mono text-sm" data-device-log-records>
+			for _, r := range v.Records {
+				<li class="whitespace-pre-wrap break-words">
+					<time datetime={ r.Time.UTC().Format("2006-01-02T15:04:05.000Z") }>{ logTime(r) }</time> <span class="text-fg-muted">[{ logOrigin(r) }]</span> { r.Text }
+				</li>
+			}
+		</ol>
+	</section>
+}

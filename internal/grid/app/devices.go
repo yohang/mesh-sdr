@@ -57,11 +57,19 @@ func SpecOf(d ctl.Device) (domain.DeviceSpec, error) {
 		return domain.DeviceSpec{}, err
 	}
 
-	return domain.DeviceSpec{
+	spec := domain.DeviceSpec{
 		ID: id, Name: d.Name, Type: d.Type, Enabled: d.Enabled, FreqMin: d.FreqMin, FreqMax: d.FreqMax,
 		SampleRates: d.SampleRates, ListenPolicy: d.ListenPolicy, OperatorCanRetune: d.OperatorCanRetune,
 		AlwaysOn: d.AlwaysOn, SchedulerEnabled: d.SchedulerEnabled,
-	}, nil
+	}
+
+	if c := d.Config; c != nil {
+		spec.Config = &domain.DeviceConfig{
+			RFGain: c.RFGain, PPM: c.PPM, BiasTee: c.BiasTee, DirectSampling: c.DirectSampling, IQSwap: c.IQSwap, LFOOffset: c.LFOOffset,
+		}
+	}
+
+	return spec, nil
 }
 
 // Sync applies the devices[] of a capability report (a ReportHandler):

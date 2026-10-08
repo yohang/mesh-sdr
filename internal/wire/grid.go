@@ -57,6 +57,7 @@ type hubGrid struct {
 	status        *app.Status
 	caps          *app.Capabilities
 	devices       *app.Devices
+	deviceLogs    *app.DeviceLogs
 	presence      *app.Presence
 	manager       *control.Manager
 	// states pushes the desired state of the devices (ADR 0020), from
@@ -181,6 +182,8 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter *db.DB, now func() 
 	deviceRepo := gridsqlite.NewDeviceRepository(adapter)
 	g.nodeRepo, g.deviceRepo, g.revocations, g.caPath = nodeRepo, deviceRepo, revocations, cfg.TLS.CACert
 	g.devices = app.NewDevices(deviceRepo, audit, component(logger, "grid.app.devices"))
+	g.deviceLogs = app.NewDeviceLogs(deviceRepo, component(logger, "grid.app.devicelogs"))
+	g.devices.OnForget(g.deviceLogs.Forget)
 
 	if ca != nil {
 		g.tracker = app.NewTracker()
@@ -192,7 +195,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter *db.DB, now func() 
 			HubID: hubID, CA: ca, Client: pki.NewClientSource(ca, pki.KindHub, hubID, now),
 			Nodes: nodeRepo, Revocations: revocations, Control: g.control,
 			HeartbeatInterval: timings.HeartbeatInterval, Now: now, Logger: component(logger, "grid.infra.control"),
-			Keys: keys, Issuer: cfg.Hub.URL, State: g.states,
+			Keys: keys, Issuer: cfg.Hub.URL, State: g.states, Logs: g.deviceLogs,
 		}
 		for _, t := range tweaks {
 			t(&hubOpts)
@@ -338,6 +341,7 @@ func (g *hubGrid) publishEvents(b *events.Broker, policies *policyCache, now fun
 
 	g.nodes.OnChange(ge.node)
 	g.devices.OnForget(ge.forgotten)
+	g.deviceLogs.OnRecords(ge.deviceLog)
 	g.devices.OnForget(func(ctx context.Context, _ *domain.Device) { policies.refresh(ctx) })
 	g.presence.OnChange(ge.presenceChanged)
 

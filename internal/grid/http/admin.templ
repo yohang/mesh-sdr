@@ -7,25 +7,26 @@ import (
 )
 
 // devicesPage lists the device registry, read-only (devices are configured
-// in their node config). Devices of offline nodes are muted.
-templ devicesPage(devices []*domain.Device) {
+// in their node config, ADM-007). Devices of offline nodes are muted and
+// say so in text.
+templ devicesPage(rows []deviceListRow) {
 	<h1 class="text-2xl font-semibold">Devices</h1>
 	<p class="text-fg-muted">Devices are configured only in the node config of their node: this registry is read-only.</p>
-	@devicesTable(devices)
+	@devicesTable(rows)
 }
 
 // devicesTable is the live part of the device list, also its htmx fragment
-// (same URL): it refetches itself when a device changes, or after the hub
-// events socket (re)subscribed (ADR 0016).
-templ devicesTable(devices []*domain.Device) {
+// (same URL): it refetches itself when a device or a node changes, or after
+// the hub events socket (re)subscribed (ADR 0016).
+templ devicesTable(rows []deviceListRow) {
 	<div
 		id="devices-table"
-		data-msdr-topics="devices"
+		data-msdr-topics="devices nodes"
 		hx-get="/admin/devices"
-		hx-trigger="msdr:device.status from:body delay:1s, msdr:resync from:body"
+		hx-trigger="msdr:device.status from:body delay:1s, msdr:node.status from:body delay:1s, msdr:resync from:body"
 		hx-swap="outerMorph"
 	>
-		if len(devices) == 0 {
+		if len(rows) == 0 {
 			<p>No device has been reported yet.</p>
 		} else {
 			<div class="overflow-x-auto">
@@ -33,32 +34,44 @@ templ devicesTable(devices []*domain.Device) {
 					<caption class="sr-only">Device registry</caption>
 					<thead>
 						<tr class="border-b border-border">
-							<th scope="col" class="py-1 pr-4">Device</th>
 							<th scope="col" class="py-1 pr-4">Node</th>
+							<th scope="col" class="py-1 pr-4">Device id</th>
+							<th scope="col" class="py-1 pr-4">Name</th>
 							<th scope="col" class="py-1 pr-4">Type</th>
 							<th scope="col" class="py-1 pr-4">Frequency range</th>
-							<th scope="col" class="py-1">State</th>
+							<th scope="col" class="py-1 pr-4">State</th>
+							<th scope="col" class="py-1 pr-4">Active preset</th>
+							<th scope="col" class="py-1">Listeners</th>
 						</tr>
 					</thead>
 					<tbody>
-						for _, d := range devices {
-							<tr class={ "border-b border-border", templ.KV("text-fg-muted", !d.Online()) }>
+						for _, row := range rows {
+							<tr class={ "border-b border-border", templ.KV("text-fg-muted", !row.NodeUp) }>
+								<td class="py-1 pr-4">{ row.Device.Node().String() }</td>
+								<td class="py-1 pr-4 font-mono">{ row.Device.ID().String() }</td>
 								<th scope="row" class="py-1 pr-4 font-medium">
-									<a href={ templ.URL("/admin/devices/" + d.ID().String()) }>{ d.Name() }</a>
+									<a href={ templ.URL("/admin/devices/" + row.Device.ID().String()) }>{ row.Device.Name() }</a>
 								</th>
-								<td class="py-1 pr-4">{ d.Node().String() }</td>
-								<td class="py-1 pr-4">{ d.Type() }</td>
-								<td class="py-1 pr-4">{ frequency(minFreq(d)) } – { frequency(maxFreq(d)) }</td>
-								<td class="py-1">
-									if since, ok := missing(d); ok {
+								<td class="py-1 pr-4">{ row.Device.Type() }</td>
+								<td class="py-1 pr-4">{ frequency(minFreq(row.Device)) } – { frequency(maxFreq(row.Device)) }</td>
+								<td class="py-1 pr-4">
+									if since, ok := missing(row.Device); ok {
 										no longer reported since { since }
 									} else {
-										{ state(d) }
-										if !d.Online() {
-											(offline)
-										}
+										{ state(row.Device) }
+									}
+									if !row.NodeUp {
+										(node offline)
 									}
 								</td>
+								<td class="py-1 pr-4">
+									if row.ActivePreset != "" {
+										{ row.ActivePreset }
+									} else {
+										None
+									}
+								</td>
+								<td class="py-1">{ strconv.Itoa(row.Listeners) }</td>
 							</tr>
 						}
 					</tbody>
@@ -78,6 +91,9 @@ func maxFreq(d *domain.Device) int64 { _, hi := d.FreqRange(); return hi }
 templ devicePage(v deviceView) {
 	<h1 class="text-2xl font-semibold">{ v.Device.Name() }</h1>
 	<p class="text-fg-muted">Defined in the node config of { v.NodeName } (node { v.Device.Node().String() }). Edit that file to change the device: this page is read-only.</p>
+	if v.CanAdmin {
+		<p><a href={ templ.URL("/admin/devices/" + v.Device.ID().String() + "/log") }>Device log</a></p>
+	}
 	if v.Failure != "" {
 		<p class="font-semibold text-danger" role="alert">{ v.Failure }</p>
 	}
@@ -105,15 +121,38 @@ templ devicePage(v deviceView) {
 			<dd>{ frequency(minFreq(v.Device)) } – { frequency(maxFreq(v.Device)) }</dd>
 			<dt class="font-medium">Sample rates</dt>
 			<dd>{ sampleRates(v.Device.SampleRates()) }</dd>
-			<dt class="font-medium">Listen policy</dt>
-			<dd>{ listenPolicy(v.Device.Flags().ListenPolicy) }</dd>
-			<dt class="font-medium">Operators can retune</dt>
-			<dd>{ yesNo(v.Device.Flags().OperatorCanRetune) }</dd>
 			<dt class="font-medium">Always on</dt>
 			<dd>{ yesNo(v.Device.Flags().AlwaysOn) }</dd>
 			<dt class="font-medium">Scheduler enabled</dt>
 			<dd>{ yesNo(v.Device.Flags().SchedulerEnabled) }</dd>
 		</dl>
+	</section>
+	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-config">
+		<h2 id="title-config" class="text-lg font-semibold">Node config values</h2>
+		<p class="text-fg-muted">Set in node config: read-only here. Edit the node config of { v.NodeName } to change them.</p>
+		<dl class="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-[max-content_1fr]">
+			<dt class="font-medium">Listen policy</dt>
+			<dd>{ listenPolicy(v.Device.Flags().ListenPolicy) }</dd>
+			<dt class="font-medium">Operators can retune</dt>
+			<dd>{ yesNo(v.Device.Flags().OperatorCanRetune) }</dd>
+			if c, ok := v.Device.Config(); ok {
+				<dt class="font-medium">RF gain</dt>
+				<dd>{ rfGain(c.RFGain) }</dd>
+				<dt class="font-medium">Frequency correction</dt>
+				<dd>{ strconv.Itoa(c.PPM) } ppm</dd>
+				<dt class="font-medium">Bias-tee</dt>
+				<dd>{ onOff(c.BiasTee) }</dd>
+				<dt class="font-medium">Direct sampling</dt>
+				<dd>{ directSampling(c.DirectSampling) }</dd>
+				<dt class="font-medium">IQ swap</dt>
+				<dd>{ onOff(c.IQSwap) }</dd>
+				<dt class="font-medium">Converter offset</dt>
+				<dd>{ lfoOffset(c.LFOOffset) }</dd>
+			}
+		</dl>
+		if _, ok := v.Device.Config(); !ok {
+			<p>The node does not report the driver values of this device.</p>
+		}
 	</section>
 	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-state">
 		<h2 id="title-state" class="text-lg font-semibold">State</h2>
