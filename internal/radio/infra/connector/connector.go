@@ -101,6 +101,9 @@ type Options struct {
 	Tools      Tools
 	Ports      *Ports
 	Logger     *slog.Logger
+	// DeviceLog, when set, receives every accepted stderr line of the
+	// connector of a device (the device log, SRC-005).
+	DeviceLog func(device string, l process.Line)
 	// Policy is the restart policy (default process.DevicePolicy, §8.2).
 	Policy *process.RestartPolicy
 	// Timeouts override the §8.2 values (tests).
@@ -281,12 +284,19 @@ func (src *source) Run(ctx context.Context, t domain.Tuning, sink app.IQSink, re
 		policy = *src.s.o.Policy
 	}
 
+	var onLine func(process.Line)
+	if log := src.s.o.DeviceLog; log != nil {
+		id := src.p.ID.String()
+		onLine = func(l process.Line) { log(id, l) }
+	}
+
 	core := uint64(0)
 	in, err := src.s.o.Supervisor.NewInstance(process.Spec{
 		ID: instanceID("dev", src.p.ID.String()), Kind: "connector", Path: path, ToolDirs: src.s.o.Tools.Dirs,
 		TouchOnly:   true,
 		PerRun:      func() (process.Run, error) { return src.perRun(t.Rate().PerSecond(), sink) },
 		StderrRules: connectorRules,
+		OnLine:      onLine,
 		Sink:        func(e process.Event) { src.event(e, report) },
 		Timeouts: process.Timeouts{
 			Start: src.s.o.StartTimeout, IdleOutput: src.s.o.StallTimeout, IdleStrikes: 1, Stop: StopGrace,

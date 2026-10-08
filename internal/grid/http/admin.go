@@ -60,6 +60,8 @@ type AdminDeps struct {
 	Users        UserNames
 	// Schedules lists the schedules of a device; nil shows none.
 	Schedules DeviceSchedules
+	// Logs are the device logs (SRC-005); nil shows none.
+	Logs DeviceLogRecords
 	// PresetName names a preset ("" when unknown); nil shows the id.
 	PresetName func(ctx context.Context, id shared.UUID) string
 	// PresetBand describes a preset (name, centre, sample rate); nil shows
@@ -77,7 +79,8 @@ type AdminDeps struct {
 }
 
 // AdminModule serves the grid pages of the admin area: the read-only device
-// pages (ADM-008) with "forget device" (ADM-009), Admin › Nodes (GRID-005,
+// pages (ADM-007, ADM-008) with "forget device" (ADM-009) and the device
+// log (SRC-005, admins only), Admin › Nodes (GRID-005,
 // GRID-009) and Admin › Connections (GRID-017). Operators read devices and
 // nodes; everything else is for admins.
 type AdminModule struct{ d AdminDeps }
@@ -104,6 +107,8 @@ func (m *AdminModule) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(m.d.Admin, noIndex)
 		r.Post("/admin/devices/{id}/forget", m.forget)
+		r.Get("/admin/devices/{id}/log", m.deviceLog)
+		r.Head("/admin/devices/{id}/log", m.deviceLog)
 		r.Get("/admin/nodes/new", m.newNodePage)
 		r.Post("/admin/nodes", m.addNode)
 		r.Post("/admin/nodes/{id}", m.editNode)
@@ -144,8 +149,20 @@ func (m *AdminModule) page(w http.ResponseWriter, r *http.Request, status int, t
 		layout.AdminPageWith(section, sections, content), fragment)
 }
 
+// deviceListRow is one device of Admin › Devices (ADM-007).
+type deviceListRow struct {
+	Device *domain.Device
+	// NodeUp is false when the node of the device is not online: the row
+	// is muted and says so.
+	NodeUp bool
+	// ActivePreset names the active preset ("" when none).
+	ActivePreset string
+	// Listeners counts the open media connections of the device.
+	Listeners int
+}
+
 func (m *AdminModule) list(w http.ResponseWriter, r *http.Request) {
-	devices, err := m.d.Devices.List(r.Context())
+	rows, err := m.deviceRows(r.Context())
 	if err != nil {
 		m.d.Logger.ErrorContext(r.Context(), "list devices", slog.Any("error", err))
 		m.d.Render.Error(w, r, http.StatusInternalServerError)
@@ -153,7 +170,59 @@ func (m *AdminModule) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.page(w, r, http.StatusOK, "Devices", "devices", devicesPage(devices), devicesTable(devices))
+	m.page(w, r, http.StatusOK, "Devices", "devices", devicesPage(rows), devicesTable(rows))
+}
+
+// deviceRows reads the registry with the health of each node, the active
+// preset and the listeners of each device.
+func (m *AdminModule) deviceRows(ctx context.Context) ([]deviceListRow, error) {
+	devices, err := m.d.Devices.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := m.d.Nodes.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	conns, err := m.d.Connections.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	up := make(map[domain.NodeID]bool, len(nodes))
+	for _, n := range nodes {
+		up[n.ID()] = n.Up()
+	}
+
+	_, perDevice := mediaListeners(conns)
+	rows := make([]deviceListRow, 0, len(devices))
+
+	for _, d := range devices {
+		rows = append(rows, deviceListRow{
+			Device: d, NodeUp: up[d.Node()], ActivePreset: m.presetName(ctx, d.ActivePreset()),
+			Listeners: perDevice[d.ID().String()],
+		})
+	}
+
+	return rows, nil
+}
+
+// presetName names a preset: its name, or its id when unknown ("" for
+// none).
+func (m *AdminModule) presetName(ctx context.Context, id shared.UUID) string {
+	if id.IsZero() {
+		return ""
+	}
+
+	if m.d.PresetName != nil {
+		if name := m.d.PresetName(ctx, id); name != "" {
+			return name
+		}
+	}
+
+	return id.String()
 }
 
 // deviceView is the detail page of a device.
@@ -182,17 +251,7 @@ func (m *AdminModule) view(r *http.Request) (deviceView, int) {
 		return deviceView{}, http.StatusInternalServerError
 	}
 
-	v := deviceView{Device: d, NodeName: d.Node().String(), CanAdmin: m.d.IsAdmin(r)}
-
-	if id := d.ActivePreset(); !id.IsZero() {
-		v.ActivePreset = id.String()
-
-		if m.d.PresetName != nil {
-			if name := m.d.PresetName(r.Context(), id); name != "" {
-				v.ActivePreset = name
-			}
-		}
-	}
+	v := deviceView{Device: d, NodeName: d.Node().String(), CanAdmin: m.d.IsAdmin(r), ActivePreset: m.presetName(r.Context(), d.ActivePreset())}
 
 	if n, err := m.d.Nodes.Get(r.Context(), d.Node().String()); err == nil {
 		v.NodeName = n.Name().String()
@@ -286,6 +345,47 @@ func sampleRates(rates []int64) string {
 	}
 
 	return strings.Join(parts, ", ")
+}
+
+// rfGain shows a reported rf_gain.
+func rfGain(g string) string {
+	if g == "auto" {
+		return "automatic"
+	}
+
+	return g + " dB"
+}
+
+// directSampling shows a reported direct_sampling input.
+func directSampling(s string) string {
+	switch s {
+	case "i":
+		return "I branch"
+	case "q":
+		return "Q branch"
+	default:
+		return "off"
+	}
+}
+
+// lfoOffset shows the signed offset of an up- or downconverter.
+func lfoOffset(hz int64) string {
+	switch {
+	case hz == 0:
+		return "none"
+	case hz < 0:
+		return "−" + frequency(-hz)
+	default:
+		return "+" + frequency(hz)
+	}
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+
+	return "off"
 }
 
 func yesNo(b bool) string {

@@ -96,48 +96,61 @@ func sanitize(s string) string {
 	}, s)
 }
 
-// ring keeps the last N lines (served to admins on demand; the last 20 are
-// attached to DECODER_ERROR events).
-type ring struct {
+// Ring keeps the last N items: the stderr lines of an instance (served to
+// admins on demand; the last 20 are attached to DECODER_ERROR events), and
+// the device logs of the node (SRC-005). Safe for concurrent use.
+type Ring[T any] struct {
 	mu    sync.Mutex
-	lines []Line
+	items []T
 	next  int
 	full  bool
 }
 
-func newRing(n int) *ring { return &ring{lines: make([]Line, n)} }
+// NewRing returns a ring of n items (n = 0 keeps nothing).
+func NewRing[T any](n int) *Ring[T] { return &Ring[T]{items: make([]T, n)} }
 
-func (r *ring) add(l Line) {
+// Add appends v, dropping the oldest item when the ring is full.
+func (r *Ring[T]) Add(v T) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.lines) == 0 {
+	if len(r.items) == 0 {
 		return
 	}
-	r.lines[r.next] = l
-	r.next = (r.next + 1) % len(r.lines)
+	r.items[r.next] = v
+	r.next = (r.next + 1) % len(r.items)
 	if r.next == 0 {
 		r.full = true
 	}
 }
 
-// tail returns up to n most recent lines, oldest first.
-func (r *ring) tail(n int) []Line {
+// Tail returns up to n most recent items, oldest first.
+func (r *Ring[T]) Tail(n int) []T {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	size := r.next
 	if r.full {
-		size = len(r.lines)
+		size = len(r.items)
 	}
-	n = min(n, size)
-	out := make([]Line, 0, n)
+	n = max(0, min(n, size))
+	out := make([]T, 0, n)
 	for i := size - n; i < size; i++ {
 		idx := i
 		if r.full {
-			idx = (r.next + i) % len(r.lines)
+			idx = (r.next + i) % len(r.items)
 		}
-		out = append(out, r.lines[idx])
+		out = append(out, r.items[idx])
 	}
 	return out
+}
+
+// Len returns the number of items held.
+func (r *Ring[T]) Len() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.full {
+		return len(r.items)
+	}
+	return r.next
 }
 
 // bucket is a token bucket (stdlib only; golang.org/x/time/rate would do).

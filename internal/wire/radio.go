@@ -11,6 +11,7 @@ import (
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	radiohttp "github.com/yohang/mesh-sdr/internal/radio/http"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/connector"
+	"github.com/yohang/mesh-sdr/internal/radio/infra/devlog"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/process"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -23,8 +24,9 @@ import (
 // the workdirs left by a previous run. The engines and the stream handler
 // read the desired state pushed by the hub (WFM de-emphasis, presets,
 // waterfall defaults). The sources also probe the device types of the
-// capability report (SRC-001).
-func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, state radiohttp.DesiredState,
+// capability report (SRC-001). The connectors write their stderr lines to
+// the device log (SRC-005).
+func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, state radiohttp.DesiredState, deviceLog *devlog.Log,
 ) (*radioapp.Manager, *radiohttp.Streams, *connector.Sources, error) {
 	devices, err := radioDevices(cfg, logger)
 	if err != nil {
@@ -69,7 +71,7 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 
 	sources := connector.NewSources(connector.Options{
 		Supervisor: sup, Ports: ports, Logger: component(logger, "radio.infra.connector"),
-		Tools: connector.Tools{Paths: cfg.Tools.Paths(), Dirs: cfg.Tools.Dirs},
+		Tools: connector.Tools{Paths: cfg.Tools.Paths(), Dirs: cfg.Tools.Dirs}, DeviceLog: deviceLog.Connector,
 	})
 
 	m, err := radioapp.NewManager(radioapp.Options{

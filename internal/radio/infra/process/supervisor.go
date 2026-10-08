@@ -139,7 +139,7 @@ type Instance struct {
 	s       *Supervisor
 	spec    Spec
 	log     *slog.Logger
-	ring    *ring
+	ring    *Ring[Line]
 	unknown *bucket
 	kick    chan struct{}
 	cur     atomic.Pointer[run]
@@ -192,7 +192,7 @@ func (s *Supervisor) NewInstance(spec Spec) (*Instance, error) {
 		s:       s,
 		spec:    spec,
 		log:     s.opts.Logger.With(slog.String("instance", spec.ID), slog.String("kind", spec.Kind)),
-		ring:    newRing(spec.RingSize),
+		ring:    NewRing[Line](spec.RingSize),
 		unknown: newBucket(spec.UnknownPerSec, spec.UnknownPerSec),
 		kick:    make(chan struct{}, 1),
 	}
@@ -250,7 +250,7 @@ func (in *Instance) Touch() {
 }
 
 // Tail returns the last n stderr lines.
-func (in *Instance) Tail(n int) []Line { return in.ring.tail(n) }
+func (in *Instance) Tail(n int) []Line { return in.ring.Tail(n) }
 
 // DroppedLines is the number of rate-limited unknown lines.
 func (in *Instance) DroppedLines() int64 { return in.dropped.Load() }
@@ -297,7 +297,7 @@ func (in *Instance) Run(ctx context.Context) error {
 		ex := exitInfo(res)
 		in.s.opts.Metrics.ProcessExited(in.spec.Kind, ex.Class)
 		if res.stoppedBy != "ctx" {
-			ex.LastErr = lineTexts(in.ring.tail(20))
+			ex.LastErr = lineTexts(in.ring.Tail(20))
 		}
 		out := decide(in.spec.Mode, res, ex)
 		if in.spec.Probe && errors.Is(out.err, ErrDecoderError) && res.sticky != ClassInputError {
@@ -421,7 +421,7 @@ func (r *run) line(l Line) {
 		return
 	}
 	in.s.opts.Metrics.StderrLine(in.spec.Kind, l.Class, false)
-	in.ring.add(l)
+	in.ring.Add(l)
 	in.log.LogAttrs(context.Background(), slog.LevelDebug, "tool stderr", slog.String("class", string(l.Class)), slog.String("line", l.Text))
 	if rank := stickyRank[l.Class]; rank > 0 {
 		r.mu.Lock()

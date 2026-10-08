@@ -109,6 +109,9 @@ const (
 	TypeCtlStateApplied   MessageType = "ctl.state.applied"
 	TypeCtlPong           MessageType = "ctl.pong"
 	TypeNodeEventsDropped MessageType = "node.events_dropped"
+	// TypeDeviceLog carries device log records (SRC-005): node → hub on
+	// the control channel, hub → admins on /api/ws.
+	TypeDeviceLog MessageType = "device.log"
 )
 
 // ParseMessageType validates s against the §6.2 type grammar.
@@ -193,7 +196,7 @@ var (
 		TypeSessionWelcome, TypePresenceCount, TypePresenceList, TypePresenceJoined, TypePresenceLeft,
 		TypeMapSnapshot, TypeMapFeatureUpsert, TypeMapFeatureRemove, TypeDecodeNew, TypeDiagState,
 		TypeNodeStatus, TypeDeviceStatus, TypePresetChanged, TypeBookmarkChanged, TypeSettingsChanged,
-		TypeNotification, TypeFilesNew, TypeSessionRevoked, TypeAck, TypeError)
+		TypeNotification, TypeFilesNew, TypeSessionRevoked, TypeDeviceLog, TypeAck, TypeError)
 	ctlHubToNode = newCatalogue("control hub→node",
 		TypeCtlHello, TypeCtlStateApply, TypeCtlKeysUpdate, TypeCtlRevocations, TypeCtlPresetActivate,
 		TypeCtlDeviceRetune, TypeCtlDeviceControl, TypeCtlCertRenew, TypeCtlCapabilitiesProbe,
@@ -203,7 +206,7 @@ var (
 		TypeConnectionOpened, TypeConnectionClosed, TypeConnectionHeart, TypeDecodeBatch,
 		TypeMapFeatureBatch, TypeDiagTransition, TypeFileBegin, TypeFileChunk, TypeFileEnd,
 		TypeAuditEvent, TypeLogBatch, TypeCtlStateApplied, TypeCtlPong, TypeNodeEventsDropped,
-		TypeAck, TypeError)
+		TypeDeviceLog, TypeAck, TypeError)
 )
 
 // MediaClientToNode is the catalogue a node accepts on /ws (§6.4).

@@ -29,6 +29,7 @@ import (
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	radiohttp "github.com/yohang/mesh-sdr/internal/radio/http"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/connector"
+	"github.com/yohang/mesh-sdr/internal/radio/infra/devlog"
 	"github.com/yohang/mesh-sdr/internal/radio/infra/engine"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
@@ -129,7 +130,11 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	// policy the media server enforces.
 	state := agent.NewDesiredState(o.devices())
 
-	manager, streams, sources, err := newRadio(cfg, logger, deviceReporter{ag}, state)
+	// The device logs (SRC-005): connector lines and lifecycle records,
+	// pushed to the hub over the control channel.
+	deviceLog := devlog.New(slices.Collect(maps.Keys(cfg.Devices)), devlog.DefaultSize, time.Now)
+
+	manager, streams, sources, err := newRadio(cfg, logger, deviceReporter{ag: ag, log: deviceLog}, state, deviceLog)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +146,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	})
 
 	ctlServer := control.NewNodeServer(control.NodeOptions{
-		Agent: ag, State: appliedState{state, streams}, Media: mediaServer, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
+		Agent: ag, State: appliedState{state, streams}, Media: mediaServer, Logs: deviceLog, HubIdentity: cfg.HubTrust.HubIdentity, Revoked: revoked,
 		Renewer: &control.FileRenewer{NodeID: id.String(), CertFile: cfg.TLS.Cert, Roots: roots, Key: key, Holder: holder, Now: time.Now},
 		Now:     time.Now, Logger: component(logger, "grid.infra.control"),
 	})
@@ -174,10 +179,16 @@ func (s appliedState) Apply(st ctl.StateApply) ctl.StateApplied {
 }
 
 // deviceReporter sends device states to the hub (device.state, coalesced
-// per device in the event buffer, ADR 0008).
-type deviceReporter struct{ ag *agent.Agent }
+// per device in the event buffer, ADR 0008) and records their changes in
+// the device log.
+type deviceReporter struct {
+	ag  *agent.Agent
+	log *devlog.Log
+}
 
 func (r deviceReporter) DeviceState(s radiodomain.Snapshot) {
+	r.log.State(s.ID, string(s.State), s.Reason)
+
 	var center, rate *int64
 
 	// A device with an invalid configuration has no tuning.
@@ -249,8 +260,22 @@ func DevicesOf(cfg config.Node) []ctl.Device {
 			ID: id, Name: d.Name, Type: d.Type, Enabled: d.Enabled == nil || *d.Enabled,
 			FreqMin: d.FreqRange.Min.Hz(), FreqMax: d.FreqRange.Max.Hz(), SampleRates: slices.Clone(d.SampleRates),
 			ListenPolicy: d.ListenPolicy, OperatorCanRetune: d.OperatorCanRetune, AlwaysOn: d.AlwaysOn, SchedulerEnabled: d.SchedulerEnabled,
+			Config: deviceConfigOf(d.Driver),
 		})
 	}
 
 	return out
+}
+
+// deviceConfigOf reports the driver values of a device (SRC-022): the hub
+// shows them read-only.
+func deviceConfigOf(d config.Driver) *ctl.DeviceConfig {
+	ds := d.DirectSampling
+	if ds == "" {
+		ds = "off"
+	}
+
+	return &ctl.DeviceConfig{
+		RFGain: d.RFGain.String(), PPM: d.PPM, BiasTee: d.BiasTee, DirectSampling: ds, IQSwap: d.IQSwap, LFOOffset: d.LFOOffset,
+	}
 }

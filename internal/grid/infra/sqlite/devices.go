@@ -13,6 +13,15 @@ import (
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
+// deviceCapabilities is the devices.capabilities column: the policy flags
+// and the driver values of the node config (SRC-022), absent from the rows
+// of nodes that do not report them.
+type deviceCapabilities struct {
+	domain.DeviceFlags
+
+	Config *domain.DeviceConfig `json:"config,omitempty"`
+}
+
 // DeviceRepository implements domain.DeviceRepository.
 type DeviceRepository struct{ db *db.DB }
 
@@ -65,9 +74,9 @@ func (r *DeviceRepository) Save(ctx context.Context, d *domain.Device) error {
 		return fmt.Errorf("encode sample rates: %w", err)
 	}
 
-	flags, err := s.Flags.MarshalFlags()
+	flags, err := json.Marshal(deviceCapabilities{DeviceFlags: s.Flags, Config: s.Config})
 	if err != nil {
-		return fmt.Errorf("encode flags: %w", err)
+		return fmt.Errorf("encode capabilities: %w", err)
 	}
 
 	var center sql.NullInt64
@@ -118,9 +127,9 @@ func deviceFromRow(row sqlc.Device) (*domain.Device, error) {
 		return nil, fmt.Errorf("device %s sample rates: %w", row.ID, err)
 	}
 
-	var flags domain.DeviceFlags
-	if err := json.Unmarshal([]byte(row.Capabilities), &flags); err != nil {
-		return nil, fmt.Errorf("device %s flags: %w", row.ID, err)
+	var caps deviceCapabilities
+	if err := json.Unmarshal([]byte(row.Capabilities), &caps); err != nil {
+		return nil, fmt.Errorf("device %s capabilities: %w", row.ID, err)
 	}
 
 	preset, err := uuidOf(row.ActivePresetID)
@@ -136,7 +145,7 @@ func deviceFromRow(row sqlc.Device) (*domain.Device, error) {
 
 	return domain.RehydrateDevice(domain.DeviceSnapshot{
 		ID: row.ID, Node: row.NodeID, Name: row.Name, Type: row.Type, FreqMin: row.FreqMin, FreqMax: row.FreqMax,
-		SampleRates: rates, Flags: flags, Online: row.Online != 0, State: domain.RuntimeState(row.RuntimeState),
+		SampleRates: rates, Flags: caps.DeviceFlags, Config: caps.Config, Online: row.Online != 0, State: domain.RuntimeState(row.RuntimeState),
 		StateAt: fromMS(row.RuntimeStateAt), Reason: row.RuntimeReason.String, ActivePreset: preset, CenterFreq: center,
 		SortOrder: int(row.SortOrder), ReportedAt: fromMS(row.ReportedAt),
 	})

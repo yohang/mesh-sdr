@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -138,8 +139,29 @@ func (s *states) waitFor(t *testing.T, d time.Duration, pred func(domain.Snapsho
 type harness struct {
 	m      *app.Manager
 	states *states
+	lines  *lineLog
 	cancel context.CancelFunc
 	done   chan struct{}
+}
+
+// lineLog records the connector lines sent to the device log.
+type lineLog struct {
+	mu    sync.Mutex
+	lines map[string][]string
+}
+
+func (l *lineLog) add(device string, line process.Line) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.lines[device] = append(l.lines[device], line.Text)
+}
+
+func (l *lineLog) of(device string) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return slices.Clone(l.lines[device])
 }
 
 func newHarness(t *testing.T, policy *process.RestartPolicy, devices ...*domain.Device) *harness {
@@ -158,9 +180,10 @@ func newHarness(t *testing.T, policy *process.RestartPolicy, devices ...*domain.
 		t.Fatal(err)
 	}
 
+	lines := &lineLog{lines: map[string][]string{}}
 	src := connector.NewSources(connector.Options{
 		Supervisor: sup, Tools: connector.Tools{Dirs: []string{toolDir}}, Ports: ports, Logger: logger(),
-		Policy: policy, StartTimeout: 2 * time.Second, StallTimeout: 500 * time.Millisecond,
+		Policy: policy, StartTimeout: 2 * time.Second, StallTimeout: 500 * time.Millisecond, DeviceLog: lines.add,
 	})
 
 	st := &states{ch: make(chan domain.Snapshot, 256), seen: map[string]int{}}
@@ -174,7 +197,7 @@ func newHarness(t *testing.T, policy *process.RestartPolicy, devices ...*domain.
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	h := &harness{m: m, states: st, cancel: cancel, done: make(chan struct{})}
+	h := &harness{m: m, states: st, lines: lines, cancel: cancel, done: make(chan struct{})}
 
 	go func() {
 		m.Run(ctx)
@@ -202,6 +225,11 @@ func TestDemandStartsAndLingerStops(t *testing.T) {
 	}
 
 	h.states.waitFor(t, 5*time.Second, func(s domain.Snapshot) bool { return s.State == domain.StateRunning && s.Listeners == 1 })
+
+	// The connector's stderr goes to the device log (SRC-005).
+	if lines := h.lines.of("rtl"); !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "fakeconnector streaming") }) {
+		t.Errorf("device log lines = %q", lines)
+	}
 
 	// Spectrum lines flow from the shared spectrum.
 	frames := make(chan app.SpectrumFrame, 16)

@@ -42,7 +42,9 @@ func startNode(t *testing.T, helloTimeout time.Duration) *node {
 	return startNodeWith(t, helloTimeout, 0, nil)
 }
 
-func startNodeWith(t *testing.T, helloTimeout time.Duration, queueBytes int, prefill func(*agent.Agent)) *node {
+func startNodeWith(t *testing.T, helloTimeout time.Duration, queueBytes int, prefill func(*agent.Agent),
+	tweaks ...func(*control.NodeOptions),
+) *node {
 	t.Helper()
 
 	certPEM, keyPEM, _ := pki.GenerateCA("hub", time.Now())
@@ -61,10 +63,15 @@ func startNodeWith(t *testing.T, helloTimeout time.Duration, queueBytes int, pre
 		prefill(ag)
 	}
 
-	srv := control.NewNodeServer(control.NodeOptions{
+	opts := control.NodeOptions{
 		Agent: ag, HubIdentity: "hub.example.org", Revoked: pki.NewRevokedSet(), HelloTimeout: helloTimeout,
 		QueueBytes: queueBytes, Now: time.Now, Logger: discard,
-	})
+	}
+	for _, f := range tweaks {
+		f(&opts)
+	}
+
+	srv := control.NewNodeServer(opts)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go srv.Run(ctx)

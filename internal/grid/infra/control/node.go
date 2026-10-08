@@ -42,6 +42,19 @@ type State interface {
 	Apply(st ctl.StateApply) ctl.StateApplied
 }
 
+// DeviceLogs is the node's device log (SRC-005), pushed to the hub as
+// device.log messages: the backlog when a channel opens, then the new
+// records.
+type DeviceLogs interface {
+	// Backlog returns the records held (first message of each device with
+	// Reset) and the cursor of the last one.
+	Backlog() ([]ctl.DeviceLog, uint64)
+	// Since returns the records after cursor and the new cursor.
+	Since(cursor uint64) ([]ctl.DeviceLog, uint64)
+	// Changed returns a channel closed at the next record.
+	Changed() <-chan struct{}
+}
+
 // NodeOptions configures a NodeServer.
 type NodeOptions struct {
 	Agent *agent.Agent
@@ -49,6 +62,8 @@ type NodeOptions struct {
 	State State
 	// Media receives keys, revocations and withdrawals; nil ignores them.
 	Media Media
+	// Logs is the device log pushed to the hub; nil sends none.
+	Logs DeviceLogs
 	// HubIdentity is the expected hub id; empty accepts any hub URI SAN.
 	HubIdentity  string
 	Revoked      *pki.RevokedSet
@@ -170,6 +185,15 @@ type nodeSession struct {
 	lastSent int64
 	// more is set when flush stopped with events left to send.
 	more bool
+	// logCursor is the last device log record queued on this channel;
+	// logs are the device.log messages not sent yet (bounded by the
+	// records the node holds).
+	logCursor uint64
+	logs      []ctl.DeviceLog
+	// logsCh is closed at the next record after logCursor; logsMore is
+	// set while the queue is too full for the next message.
+	logsCh   <-chan struct{}
+	logsMore bool
 }
 
 // pageRetry is the delay before sending the next page of a backlog.
@@ -188,14 +212,25 @@ func (n *nodeSession) run(ctx context.Context) error {
 	defer page.Stop()
 
 	for {
+		var logsChanged <-chan struct{}
+		if !n.logsMore {
+			logsChanged = n.logsCh
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-buf.Notify():
 			n.flush()
+		case <-logsChanged:
+			n.flushLogs()
 		case <-page.C:
 			if n.more {
 				n.flush()
+			}
+
+			if n.logsMore {
+				n.flushLogs()
 			}
 		case r, ok := <-reads:
 			if !ok {
@@ -250,6 +285,57 @@ func (n *nodeSession) flush() {
 		}
 
 		n.lastSent = e.Seq
+	}
+}
+
+// flushLogs sends the device log records not sent on this channel yet,
+// within the same window as the events: what does not fit waits for the
+// next page. Device logs are diagnostics: they are not acknowledged, and
+// the records a closed channel did not carry reach the hub with the next
+// backlog.
+func (n *nodeSession) flushLogs() {
+	o := n.s.o
+	n.logsMore = false
+
+	if o.Logs == nil || !n.started {
+		return
+	}
+
+	window := o.QueueBytes / 2
+
+	for {
+		if len(n.logs) == 0 {
+			// Watch before reading: a record added meanwhile closes it.
+			n.logsCh = o.Logs.Changed()
+			n.logs, n.logCursor = o.Logs.Since(n.logCursor)
+
+			if len(n.logs) == 0 {
+				return
+			}
+		}
+
+		env, err := rxv1.NewEnvelope(rxv1.TypeDeviceLog, rxv1.CorrelationID{}, time.Now().UnixMilli(), n.logs[0])
+		if err != nil {
+			o.Logger.Error("encode device log", slog.Any("error", err))
+			n.logs = n.logs[1:]
+
+			continue
+		}
+
+		if p := n.conn.Pending(); p > 0 && p+len(env.Payload()) > window {
+			n.logsMore = true
+
+			return
+		}
+
+		if err := n.conn.Send(env); err != nil {
+			// The channel is closing: stop watching the log.
+			n.logsMore = true
+
+			return
+		}
+
+		n.logs = n.logs[1:]
 	}
 }
 
@@ -344,6 +430,12 @@ func (n *nodeSession) onHello(ctx context.Context, env rxv1.Envelope, hello *tim
 	o.Agent.EmitDropped()
 	o.Agent.EmitCapabilities(ctx)
 	n.flush()
+
+	if o.Logs != nil {
+		n.logsCh = o.Logs.Changed()
+		n.logs, n.logCursor = o.Logs.Backlog()
+		n.flushLogs()
+	}
 
 	// Refine the clock offset with the RTT (§4.5).
 	go func() {

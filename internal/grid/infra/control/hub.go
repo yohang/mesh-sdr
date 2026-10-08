@@ -40,6 +40,8 @@ type HubOptions struct {
 	// State pushes the desired state of the devices (ADR 0020); nil sends
 	// none.
 	State *app.States
+	// Logs receives the device logs (device.log, SRC-005); nil drops them.
+	Logs *app.DeviceLogs
 
 	// Tunables; zero values take the spec defaults.
 	ReconcileEvery time.Duration
@@ -889,6 +891,10 @@ func (s *hubSession) handle(ctx context.Context, env rxv1.Envelope) (app.Event, 
 		s.onStateApplied(ctx, env)
 
 		return app.Event{}, false
+	case rxv1.TypeDeviceLog:
+		s.onDeviceLog(ctx, env)
+
+		return app.Event{}, false
 	}
 
 	seq, err := decode[ctl.SeqOnly](env)
@@ -916,6 +922,23 @@ func (s *hubSession) onStateApplied(ctx context.Context, env rxv1.Envelope) {
 	if o.State != nil {
 		o.State.Applied(ctx, s.id, a)
 		o.Control.Touch(ctx, s.id)
+	}
+}
+
+// onDeviceLog hands device log records to the hub; they are not events
+// (no seq, no ack). A restricted channel (incompatible node) carries none.
+func (s *hubSession) onDeviceLog(ctx context.Context, env rxv1.Envelope) {
+	o := s.m.o
+
+	l, err := decode[ctl.DeviceLog](env)
+	if err != nil {
+		sendError(s.conn, err)
+
+		return
+	}
+
+	if o.Logs != nil && !s.restricted {
+		o.Logs.Receive(ctx, s.id, l)
 	}
 }
 

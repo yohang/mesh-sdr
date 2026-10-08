@@ -31,6 +31,9 @@ func seedDevices(t *testing.T, h *adminHub) {
 	for i, id := range []string{"hf", "vhf"} {
 		spec := griddomain.DeviceSpec{ID: shared.MustDeviceID(id), Name: strings.ToUpper(id) + " receiver", Type: "rtl_sdr",
 			Enabled: true, FreqMin: 100_000, FreqMax: 30_000_000, SampleRates: []int64{2_048_000}, OperatorCanRetune: true}
+		if id == "hf" {
+			spec.Config = &griddomain.DeviceConfig{RFGain: "28.5", PPM: -3, BiasTee: true, DirectSampling: "q", IQSwap: true, LFOOffset: -120_000_000}
+		}
 
 		d, err := griddomain.NewReportedDevice(node, spec, i, now)
 		if err != nil {
@@ -65,8 +68,55 @@ func TestDevicePages(t *testing.T) {
 		t.Errorf("operator detail = %d %s", res.StatusCode, body)
 	}
 
-	if res, _ := h.browser("lis").do(http.MethodGet, "/admin/devices", "", "", nil); res.StatusCode != http.StatusForbidden {
+	lis, admin := h.browser("lis"), h.browser("root")
+
+	if res, _ := lis.do(http.MethodGet, "/admin/devices", "", "", nil); res.StatusCode != http.StatusForbidden {
 		t.Errorf("listener list = %d", res.StatusCode)
+	}
+
+	// ADM-007: the list columns; attic never connected, its rows say so.
+	_, body = op.do(http.MethodGet, "/admin/devices", "", "", nil)
+	for _, want := range []string{">Device id<", ">Active preset<", ">Listeners<", "(node offline)", `class="border-b border-border text-fg-muted"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("operator list lacks %s", want)
+		}
+	}
+
+	// SRC-022: the reported driver values, read-only.
+	_, body = op.do(http.MethodGet, "/admin/devices/hf", "", "", nil)
+	for _, want := range []string{"Set in node config", "28.5 dB", "-3 ppm", "Q branch", "IQ swap", "−120 MHz", "global listen policy"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("operator detail lacks %s", want)
+		}
+	}
+
+	if strings.Contains(string(body), "/admin/devices/hf/log") {
+		t.Error("device log offered to an operator")
+	}
+
+	if _, body := op.do(http.MethodGet, "/admin/devices/vhf", "", "", nil); !strings.Contains(string(body), "does not report the driver values") {
+		t.Error("device without reported values")
+	}
+
+	// SRC-005: the device log is for admins.
+	for b, want := range map[*browser]int{op: http.StatusForbidden, lis: http.StatusForbidden, admin: http.StatusOK} {
+		res, body := b.do(http.MethodGet, "/admin/devices/hf/log", "", "", nil)
+		if res.StatusCode != want {
+			t.Errorf("log = %d, want %d", res.StatusCode, want)
+		}
+
+		if want == http.StatusOK && (!strings.Contains(string(body), `data-msdr-topics="admin.device_log:device=hf"`) ||
+			!strings.Contains(string(body), "No record yet")) {
+			t.Errorf("log page = %s", body)
+		}
+	}
+
+	if _, body := admin.do(http.MethodGet, "/admin/devices/hf", "", "", nil); !strings.Contains(string(body), `href="/admin/devices/hf/log"`) {
+		t.Error("device log not linked for an admin")
+	}
+
+	if res, _ := admin.do(http.MethodGet, "/admin/devices/nope/log", "", "", nil); res.StatusCode != http.StatusNotFound {
+		t.Errorf("log of an unknown device = %d", res.StatusCode)
 	}
 
 	if res, _ := op.do(http.MethodPost, "/admin/devices/vhf/forget", "", "", nil); res.StatusCode != http.StatusForbidden {
@@ -76,8 +126,6 @@ func TestDevicePages(t *testing.T) {
 	if res, _ := op.do(http.MethodGet, "/admin/devices/nope", "", "", nil); res.StatusCode != http.StatusNotFound {
 		t.Errorf("unknown device = %d", res.StatusCode)
 	}
-
-	admin := h.browser("root")
 
 	if _, body := admin.do(http.MethodGet, "/admin/devices/vhf", "", "", nil); !strings.Contains(string(body), "Forget this device") {
 		t.Error("admin detail of a missing device without Forget")
