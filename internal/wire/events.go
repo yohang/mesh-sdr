@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -19,7 +18,6 @@ import (
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
-	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/version"
 )
@@ -44,94 +42,21 @@ type eventsIdentity interface {
 	CheckSession(ctx context.Context, r *http.Request) (time.Time, error)
 }
 
-// policySnapshot is one consistent view of who may listen to what: the
-// effective listen policy of every enabled device (ADR 0018).
-type policySnapshot struct {
-	devices map[string]string
-}
+// reloadListen reloads the listen policies when they may have changed (a
+// settings change, a device report, a forgotten device); when they did,
+// every socket re-authorises its topics against the new view.
+func reloadListen(p *gridapp.ListenPolicies, b *events.Broker, logger *slog.Logger) func(context.Context) {
+	return func(ctx context.Context) {
+		changed, err := p.Refresh(ctx)
+		if err != nil {
+			logger.ErrorContext(ctx, "reload listen policies", slog.Any("error", err))
 
-// anyAnonymous reports whether some device is anonymous-listenable.
-func (p policySnapshot) anyAnonymous() bool {
-	for _, lp := range p.devices {
-		if lp == gridapp.ListenAnonymous {
-			return true
+			return
 		}
-	}
 
-	return false
-}
-
-// viewerCanListen reports whether a viewer may listen to a device: any
-// enabled device for a signed-in user, the anonymous-listenable ones for a
-// visitor.
-func (p policySnapshot) viewerCanListen(v events.Viewer, device string) bool {
-	policy, ok := p.devices[device]
-
-	return ok && (!v.Anonymous() || policy == gridapp.ListenAnonymous)
-}
-
-// canListen reports whether the principal may listen to a device.
-func (p policySnapshot) canListen(pr identitydomain.Principal, device string) bool {
-	policy, ok := p.devices[device]
-	if !ok {
-		return false
-	}
-
-	lp, err := identitydomain.ParseListenPolicy(policy)
-
-	return err == nil && pr.CanListen(lp)
-}
-
-// policyCache holds the current policy snapshot. Topic checks read it
-// without touching the database; it is reloaded when the listen policies
-// may have changed (a listen_policy setting change, a device report, a
-// forgotten device), and the sockets re-authorise their topics only when
-// the snapshot actually changed.
-type policyCache struct {
-	policies *gridapp.ListenPolicies
-	broker   *events.Broker
-	logger   *slog.Logger
-
-	mu   sync.Mutex
-	snap *policySnapshot
-}
-
-// get returns the snapshot, loading it on first use.
-func (c *policyCache) get(ctx context.Context) (policySnapshot, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.snap != nil {
-		return *c.snap, nil
-	}
-
-	devices, err := c.policies.Effective(ctx)
-	if err != nil {
-		return policySnapshot{}, err
-	}
-
-	c.snap = &policySnapshot{devices: devices}
-
-	return *c.snap, nil
-}
-
-// refresh reloads the snapshot; when it changed, every socket re-authorises
-// its topics against the new one.
-func (c *policyCache) refresh(ctx context.Context) {
-	devices, err := c.policies.Effective(ctx)
-	if err != nil {
-		c.logger.ErrorContext(ctx, "reload listen policies", slog.Any("error", err))
-
-		return
-	}
-
-	c.mu.Lock()
-	changed := c.snap == nil || !maps.Equal(c.snap.devices, devices)
-	c.snap = &policySnapshot{devices: devices}
-	c.mu.Unlock()
-
-	if changed {
-		c.broker.RecheckAll()
+		if changed {
+			b.RecheckAll()
+		}
 	}
 }
 
@@ -144,7 +69,7 @@ func (c *policyCache) refresh(ctx context.Context) {
 // exist yet).
 type topicAuthz struct {
 	id       eventsIdentity
-	policies *policyCache
+	policies *gridapp.ListenPolicies
 }
 
 func (a topicAuthz) AuthorizeTopic(ctx context.Context, t events.Topic) error {
@@ -162,15 +87,15 @@ func (a topicAuthz) AuthorizeTopic(ctx context.Context, t events.Topic) error {
 		return nil
 	}
 
-	snap, err := a.policies.get(ctx)
+	view, err := a.policies.View(ctx)
 	if err != nil {
 		return err
 	}
 
 	switch {
-	case t.Device() != "" && !snap.canListen(p, t.Device()):
+	case t.Device() != "" && !view.CanListen(p.IsAnonymous(), t.Device()):
 		return events.ErrTopicForbidden
-	case t.Device() == "" && !snap.anyAnonymous():
+	case t.Device() == "" && !view.AnyAnonymous():
 		return events.ErrTopicForbidden
 	}
 
@@ -273,7 +198,7 @@ func hubOrigin(hubURL string) string {
 }
 
 // newEventsModule builds the /api/ws module.
-func newEventsModule(hubURL string, b *events.Broker, id eventsIdentity, policies *policyCache,
+func newEventsModule(hubURL string, b *events.Broker, id eventsIdentity, policies *gridapp.ListenPolicies,
 	presence *gridapp.Presence, now func() time.Time, logger *slog.Logger,
 ) *events.Module {
 	return events.New(events.Deps{
@@ -283,28 +208,6 @@ func newEventsModule(hubURL string, b *events.Broker, id eventsIdentity, policie
 		Origin:   hubOrigin(hubURL), Version: version.String(), Now: now,
 		Logger: component(logger, "events.http.ws"),
 	})
-}
-
-// listenPolicyWatch reloads the listen policies when the global listen
-// policy changes (a settings Store.Subscribe callback).
-func listenPolicyWatch(c *policyCache, initial string) func(*settings.Snapshot) {
-	var (
-		mu   sync.Mutex
-		last = initial
-	)
-
-	return func(s *settings.Snapshot) {
-		v := s.String("listen_policy")
-
-		mu.Lock()
-		changed := v != last
-		last = v
-		mu.Unlock()
-
-		if changed {
-			c.refresh(context.Background())
-		}
-	}
 }
 
 // nodeStatusEvent is the node.status payload: thin (ADR 0016 decision 2),
@@ -356,7 +259,7 @@ type gridEvents struct {
 	mu        sync.Mutex
 	lastBeat  map[griddomain.NodeID]time.Time
 	presence  chan struct{}
-	policies  *policyCache
+	policies  *gridapp.ListenPolicies
 	listeners listenerCounter
 	history   interface {
 		Latest(id griddomain.NodeID) (gridapp.LoadSample, bool)
@@ -370,7 +273,7 @@ type listenerCounter interface {
 	NodeListeners(ctx context.Context, id griddomain.NodeID) (int, error)
 }
 
-func newGridEvents(b events.Publisher, g *hubGrid, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
+func newGridEvents(b events.Publisher, g *hubGrid, policies *gridapp.ListenPolicies, now func() time.Time, logger *slog.Logger) *gridEvents {
 	return &gridEvents{
 		b: b, nodes: g.nodeRepo, devices: g.devices, policies: policies, now: now, logger: component(logger, "events.wire.grid"),
 		lastBeat: map[griddomain.NodeID]time.Time{}, presence: make(chan struct{}, 1), listeners: g.presence, history: g.history,
@@ -408,7 +311,7 @@ func (e *gridEvents) publishNode(ctx context.Context, id griddomain.NodeID, stat
 	payload := nodeStatusEvent{NodeID: id.String(), Status: status}
 
 	if !slices.Contains(staffOnly, status) {
-		snap, err := e.policies.get(ctx)
+		view, err := e.policies.View(ctx)
 		if err != nil {
 			e.logger.ErrorContext(ctx, "listen policies for node.status", slog.Any("error", err))
 		}
@@ -430,7 +333,7 @@ func (e *gridEvents) publishNode(ctx context.Context, id griddomain.NodeID, stat
 				}
 
 				for _, d := range ids {
-					if snap.viewerCanListen(v, d) {
+					if view.CanListen(v.Anonymous(), d) {
 						return true
 					}
 				}
@@ -530,7 +433,7 @@ func (e *gridEvents) nodeDevices(ctx context.Context, id griddomain.NodeID) {
 // publishDevices publishes device.status for devices; counts are the
 // listeners by device, read when nil.
 func (e *gridEvents) publishDevices(ctx context.Context, devices []*griddomain.Device, counts map[string]int) {
-	snap, err := e.policies.get(ctx)
+	view, err := e.policies.View(ctx)
 	if err != nil {
 		e.logger.ErrorContext(ctx, "listen policies for device.status", slog.Any("error", err))
 
@@ -560,7 +463,7 @@ func (e *gridEvents) publishDevices(ctx context.Context, devices []*griddomain.D
 		// they may listen to (ADR 0018).
 		e.b.Publish(ctx, events.Event{
 			Topic: topicDevices, Type: rxv1.TypeDeviceStatus.String(),
-			Audience: func(v events.Viewer) bool { return v.Staff || snap.viewerCanListen(v, device) },
+			Audience: func(v events.Viewer) bool { return v.Staff || view.CanListen(v.Anonymous(), device) },
 			Payload:  payload,
 		})
 	}
@@ -706,10 +609,10 @@ func (e *gridEvents) deviceListeners(ctx context.Context, last map[string]int) m
 
 // refreshOnDevices reloads the listen policies when a node reports its
 // devices (their listen policy overrides may have changed).
-func refreshOnDevices(c *policyCache) func(context.Context, griddomain.NodeID, []rxv1.MessageType) {
+func refreshOnDevices(reload func(context.Context)) func(context.Context, griddomain.NodeID, []rxv1.MessageType) {
 	return func(ctx context.Context, _ griddomain.NodeID, types []rxv1.MessageType) {
 		if slices.Contains(types, rxv1.TypeNodeCapabilities) {
-			c.refresh(ctx)
+			reload(ctx)
 		}
 	}
 }

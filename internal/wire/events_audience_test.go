@@ -77,7 +77,8 @@ func TestEventAudiences(t *testing.T) {
 
 	global := &fixedGlobal{v: "registered"}
 	broker := events.NewBroker()
-	cache := &policyCache{policies: gridapp.NewListenPolicies(devices, global), broker: broker, logger: quiet}
+	cache := gridapp.NewListenPolicies(devices, global, quiet)
+	reload := reloadListen(cache, broker, quiet)
 	rec := &recordedEvents{}
 	ge := &gridEvents{
 		b: rec, nodes: nodes, devices: gridapp.NewDevices(devices, nil, quiet), policies: cache, now: time.Now, logger: quiet,
@@ -122,7 +123,7 @@ func TestEventAudiences(t *testing.T) {
 	// The cache asks sockets to re-authorise only when policies changed.
 	s := broker.Attach(anon, topicAuthz{policies: cache}, func(events.Event) {})
 
-	cache.refresh(ctx)
+	reload(ctx)
 
 	select {
 	case <-s.Rechecks():
@@ -131,7 +132,7 @@ func TestEventAudiences(t *testing.T) {
 	}
 
 	global.v = "anonymous"
-	cache.refresh(ctx)
+	reload(ctx)
 
 	select {
 	case <-s.Rechecks():
@@ -241,8 +242,7 @@ func TestEventPublicPayloads(t *testing.T) {
 	temp := 48.5
 	history.Add(domain.MustNodeID("open"), gridapp.LoadSample{At: now, CPU: 0.3, Load1: 2, TempC: &temp, MemTotalBytes: 8, MemAvailableBytes: 4})
 
-	broker := events.NewBroker()
-	cache := &policyCache{policies: gridapp.NewListenPolicies(devices, &fixedGlobal{v: "registered"}), broker: broker, logger: quiet}
+	cache := gridapp.NewListenPolicies(devices, &fixedGlobal{v: "registered"}, quiet)
 	rec := &recordedEvents{}
 	counts := &fakeListeners{by: map[string]int{"open-hf": 2}, nodes: map[domain.NodeID]int{domain.MustNodeID("open"): 2}}
 	ge := &gridEvents{

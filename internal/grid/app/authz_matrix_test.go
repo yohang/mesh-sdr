@@ -24,7 +24,7 @@ func newPolicyEnv(t *testing.T, global string, upgrades, mints app.RateLimiter) 
 	n := enrolledNode(t, e)
 
 	inherit, open, closed := device("inherit", "rtl_sdr"), device("open", "rtl_sdr"), device("closed", "rtl_sdr")
-	open.ListenPolicy, closed.ListenPolicy = app.ListenAnonymous, app.ListenRegistered
+	open.ListenPolicy, closed.ListenPolicy = domain.ListenAnonymous, domain.ListenRegistered
 
 	devices := app.NewDevices(sqlite.NewDeviceRepository(e.db), e.audit, discard)
 	if err := devices.Sync(context.Background(), n, ctl.Capabilities{Devices: []ctl.Device{inherit, open, closed}}, e.clock.now()); err != nil {
@@ -55,12 +55,12 @@ func TestMediaAccessRightsMatrix(t *testing.T) {
 		want            map[string][]string // device → perms; nil: refused
 		err             error
 	}{
-		{app.ListenAnonymous, "anonymous", map[string][]string{"inherit": listenOnly, "open": listenOnly}, nil},
-		{app.ListenAnonymous, "listener", map[string][]string{"inherit": listenOnly, "open": listenOnly, "closed": listenOnly}, nil},
-		{app.ListenAnonymous, "admin", map[string][]string{"inherit": full, "open": full, "closed": full}, nil},
-		{app.ListenRegistered, "anonymous", map[string][]string{"open": listenOnly}, nil},
-		{app.ListenRegistered, "listener", map[string][]string{"inherit": listenOnly, "open": listenOnly, "closed": listenOnly}, nil},
-		{app.ListenRegistered, "admin", map[string][]string{"inherit": full, "open": full, "closed": full}, nil},
+		{domain.ListenAnonymous, "anonymous", map[string][]string{"inherit": listenOnly, "open": listenOnly}, nil},
+		{domain.ListenAnonymous, "listener", map[string][]string{"inherit": listenOnly, "open": listenOnly, "closed": listenOnly}, nil},
+		{domain.ListenAnonymous, "admin", map[string][]string{"inherit": full, "open": full, "closed": full}, nil},
+		{domain.ListenRegistered, "anonymous", map[string][]string{"open": listenOnly}, nil},
+		{domain.ListenRegistered, "listener", map[string][]string{"inherit": listenOnly, "open": listenOnly, "closed": listenOnly}, nil},
+		{domain.ListenRegistered, "admin", map[string][]string{"inherit": full, "open": full, "closed": full}, nil},
 		// A global policy that cannot be read fails closed to registered.
 		{"", "anonymous", map[string][]string{"open": listenOnly}, nil},
 	}
@@ -94,14 +94,14 @@ func TestMediaAccessAnonymousRefusedEverywhere(t *testing.T) {
 	n := enrolledNode(t, e)
 
 	closed := device("closed", "rtl_sdr")
-	closed.ListenPolicy = app.ListenRegistered
+	closed.ListenPolicy = domain.ListenRegistered
 
 	devices := app.NewDevices(sqlite.NewDeviceRepository(e.db), e.audit, discard)
 	if err := devices.Sync(context.Background(), n, ctl.Capabilities{Devices: []ctl.Device{device("inherit", "rtl_sdr"), closed}}, e.clock.now()); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, global := range []string{app.ListenRegistered, "unreadable"} {
+	for _, global := range []string{domain.ListenRegistered, "unreadable"} {
 		a := newAuthzEnvOn(t, e, n, global, limiter{allow: true}, limiter{allow: true})
 
 		_, err := a.authorize(fakeSubject{})
@@ -121,7 +121,7 @@ func newAuthzEnvOn(t *testing.T, e *env, n *domain.Node, global string, upgrades
 	access, err := app.NewMediaAccess(app.MediaAccessOptions{
 		Nodes: e.nodes, Devices: sqlite.NewDeviceRepository(e.db), Tracker: tr,
 		Presence: app.NewPresence(conns, sqlite.NewDeviceRepository(e.db), tr, app.DefaultTimings(), e.clock.now, discard),
-		Issuer:   issuer, Policy: authzPolicy(global), HubURL: hubURL,
+		Issuer:   issuer, Policy: app.NewListenPolicies(nil, authzPolicy(global), discard), HubURL: hubURL,
 		Upgrades: upgrades, Mints: mints, Now: e.clock.now, Logger: discard,
 	})
 	if err != nil {
@@ -148,7 +148,7 @@ func TestMediaAccessRateLimits(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newPolicyEnv(t, app.ListenAnonymous, limiter{allow: tc.upgrades}, limiter{allow: tc.mints})
+			a := newPolicyEnv(t, domain.ListenAnonymous, limiter{allow: tc.upgrades}, limiter{allow: tc.mints})
 
 			_, err := a.authorize(fakeSubject{})
 

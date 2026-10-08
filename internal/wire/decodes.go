@@ -25,7 +25,6 @@ type decodesDeps struct {
 	adapter  *db.DB
 	grid     *hubGrid
 	broker   events.Publisher
-	policies *policyCache
 	identity interface {
 		Principal(ctx context.Context) identitydomain.Principal
 		Authorize(ctx context.Context, role identitydomain.Role) error
@@ -126,17 +125,12 @@ func visibleDevices(d decodesDeps) func(ctx context.Context) ([]decodes.Device, 
 			return nil, err
 		}
 
-		snap, err := d.policies.get(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		p := d.identity.Principal(ctx)
+		anonymous := d.identity.Principal(ctx).IsAnonymous()
 		out := []decodes.Device{}
 
 		for _, dev := range summary.Devices {
-			if id := dev.ID.String(); snap.canListen(p, id) {
-				out = append(out, decodes.Device{ID: id, Name: dev.Name})
+			if dev.CanListen(anonymous) {
+				out = append(out, decodes.Device{ID: dev.ID.String(), Name: dev.Name})
 			}
 		}
 

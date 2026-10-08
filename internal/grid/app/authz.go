@@ -49,11 +49,6 @@ type RateLimiter interface {
 	Allow(key string, now time.Time) (bool, time.Duration)
 }
 
-// ListenPolicySource gives the global listen policy (settings).
-type ListenPolicySource interface {
-	ListenPolicy(ctx context.Context) string
-}
-
 // AuthzRequest is a media upgrade seen by the gateway.
 type AuthzRequest struct {
 	NodeID    string
@@ -86,7 +81,8 @@ type MediaAccessOptions struct {
 	Tracker  *Tracker
 	Presence *Presence
 	Issuer   TokenIssuer
-	Policy   ListenPolicySource
+	// Policy gives the global listen policy; nil counts as registered.
+	Policy *ListenPolicies
 	// HubURL is the token issuer; its origin is the only accepted Origin.
 	HubURL string
 	// Upgrades limits media upgrades per client address (10/min, §5.12);
@@ -250,9 +246,9 @@ func (a *MediaAccess) checkLink(id domain.NodeID, n *domain.Node) error {
 // device, retune for them when the node allows operators to retune, all
 // for admins.
 func (a *MediaAccess) scopes(ctx context.Context, s Subject, devices []*domain.Device) []token.Scope {
-	global := ListenAnonymous
+	global := domain.ListenRegistered
 	if a.o.Policy != nil {
-		global = a.o.Policy.ListenPolicy(ctx)
+		global = a.o.Policy.Global(ctx)
 	}
 
 	out := []token.Scope{}
@@ -263,16 +259,11 @@ func (a *MediaAccess) scopes(ctx context.Context, s Subject, devices []*domain.D
 			continue
 		}
 
-		policy := global
-		if f.ListenPolicy != "" {
-			policy = f.ListenPolicy
-		}
-
 		dev := d.ID().String()
 		admin := s.HasOnDevice(RoleAdmin, dev)
 		operator := admin || s.HasOnDevice(RoleOperator, dev)
 
-		if !admin && !operator && !canListen(s, policy) {
+		if !admin && !operator && !allowed(effective(d, global), s.IsAnonymous()) {
 			continue
 		}
 
@@ -289,17 +280,6 @@ func (a *MediaAccess) scopes(ctx context.Context, s Subject, devices []*domain.D
 	}
 
 	return out
-}
-
-func canListen(s Subject, policy string) bool {
-	switch policy {
-	case ListenAnonymous:
-		return true
-	case ListenRegistered:
-		return !s.IsAnonymous()
-	default:
-		return false
-	}
 }
 
 // IsRateLimited returns the wait of a rate-limited authz.

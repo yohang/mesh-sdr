@@ -37,7 +37,6 @@ import (
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/keyring"
-	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/mail"
 	"github.com/yohang/mesh-sdr/internal/presets"
@@ -358,8 +357,14 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	operatorGate.authz = idm.HTTP
 	identityHTTP = idm.HTTP
 
+	// Who may listen to what (the listen policies): one source for the
+	// media authz, the desired state, the events, files, decodes, bookmarks
+	// and the feature summary.
+	listen := gridapp.NewListenPolicies(gridsqlite.NewDeviceRepository(adapter), storeListenPolicy{store: settingsStore},
+		component(logger, "grid.app.listen"))
+
 	// Presets and schedules (ADR 0020), wired to the grid.
-	sch := newScheduling(adapter, g, settingsStore, auditLog, now, logger)
+	sch := newScheduling(adapter, g, settingsStore, listen, auditLog, now, logger)
 
 	if g.states != nil {
 		// The desired state carries listen_policy: a settings change is
@@ -390,19 +395,15 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	}
 
 	// Hub events WebSocket (ADR 0016, ADR 0018) and its grid producers.
-	policies := &policyCache{
-		policies: gridapp.NewListenPolicies(gridsqlite.NewDeviceRepository(adapter), storeListenPolicy{store: settingsStore}),
-		broker:   broker, logger: component(logger, "events.wire.policies"),
-	}
-	events := newEventsModule(cfg.Hub.URL, broker, idm.HTTP, policies, g.presence, now, logger)
-	settingsStore.Subscribe(listenPolicyWatch(policies, settingsStore.String("listen_policy")))
-	ge := g.publishEvents(broker, policies, now, logger)
+	reload := reloadListen(listen, broker, component(logger, "events.wire.policies"))
+	events := newEventsModule(cfg.Hub.URL, broker, idm.HTTP, listen, g.presence, now, logger)
+	settingsStore.Subscribe(func(*settings.Snapshot) { reload(context.Background()) })
+	ge := g.publishEvents(broker, listen, reload, now, logger)
 	workers = append(workers, events.Run, ge.runPresence)
 
 	filesAccess = &fileAccess{
 		signedIn: func(ctx context.Context) bool { return idm.HTTP.Authorize(ctx, identitydomain.RoleListener) == nil },
-		global:   func() string { return settingsStore.String("listen_policy") }, policies: policies,
-		logger: component(logger, "files.wire.access"),
+		policies: listen, logger: component(logger, "files.wire.access"),
 	}
 	filesRepo := files.NewFiles(adapter)
 	filesPolicy := func() files.RetentionPolicy {
@@ -436,7 +437,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	var features *gridapp.Features
 
 	decoded := newDecodes(decodesDeps{
-		adapter: adapter, grid: g, broker: broker, policies: policies, identity: idm.HTTP,
+		adapter: adapter, grid: g, broker: broker, identity: idm.HTTP,
 		features: func() *gridapp.Features { return features }, store: settingsStore, render: shellModule.Renderer, now: now, logger: logger,
 	})
 
@@ -447,21 +448,21 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	imagesHTTP := files.New(images, idm.HTTP.Require(identitydomain.RoleAdmin), currentUser,
 		shellModule.Renderer.Error, component(logger, "files.http"))
-	access, err := g.mediaAccess(cfg, listenPolicy{settingsrc.New(settingsStore, component(logger, "grid.infra.settings"))}, logger)
+	access, err := g.mediaAccess(cfg, listen, logger)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	features = gridapp.NewFeatures(gridapp.FeaturesDeps{
 		Devices: gridsqlite.NewDeviceRepository(adapter), Caps: gridsqlite.NewCapabilityRepository(adapter),
-		Policy: storeListenPolicy{store: settingsStore}, Links: g.links(), Nodes: g.nodeRepo, Listeners: g.presence,
+		Listen: listen, Links: g.links(), Nodes: g.nodeRepo, Listeners: g.presence,
 		Telemetry: g.history, PresetName: sch.presetName,
 	})
 
 	bm, err := newBookmarks(bookmarksDeps{
 		adapter: adapter, features: features, registry: gridsqlite.NewDeviceRepository(adapter), presets: sch.presets,
 		region: func() string { return settingsStore.String("bandplan.region") }, audit: auditLog, broker: broker,
-		policies: policies, idm: idm.HTTP, render: shellModule.Renderer, isAdmin: adminGate.Allows, now: now, logger: logger,
+		policies: listen, idm: idm.HTTP, render: shellModule.Renderer, isAdmin: adminGate.Allows, now: now, logger: logger,
 	})
 	if err != nil {
 		return nil, nil, err

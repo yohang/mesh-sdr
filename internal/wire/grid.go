@@ -315,7 +315,9 @@ func (g *hubGrid) applySettings(base app.Timings, s gridSettings) {
 // transitions (after the device registry listener), committed node event
 // batches, admin node changes, enrollments, forgotten devices and presence
 // changes.
-func (g *hubGrid) publishEvents(b *events.Broker, policies *policyCache, now func() time.Time, logger *slog.Logger) *gridEvents {
+func (g *hubGrid) publishEvents(b *events.Broker, policies *app.ListenPolicies, reload func(context.Context),
+	now func() time.Time, logger *slog.Logger,
+) *gridEvents {
 	ge := newGridEvents(b, g, policies, now, logger)
 
 	if g.status != nil {
@@ -323,8 +325,8 @@ func (g *hubGrid) publishEvents(b *events.Broker, policies *policyCache, now fun
 	}
 
 	if g.control != nil {
-		// Policies first: the events of the batch use the new snapshot.
-		g.control.OnApplied(refreshOnDevices(policies))
+		// Policies first: the events of the batch use the new view.
+		g.control.OnApplied(refreshOnDevices(reload))
 		g.control.OnApplied(ge.applied)
 	}
 
@@ -342,7 +344,7 @@ func (g *hubGrid) publishEvents(b *events.Broker, policies *policyCache, now fun
 	g.nodes.OnChange(ge.node)
 	g.devices.OnForget(ge.forgotten)
 	g.deviceLogs.OnRecords(ge.deviceLog)
-	g.devices.OnForget(func(ctx context.Context, _ *domain.Device) { policies.refresh(ctx) })
+	g.devices.OnForget(func(ctx context.Context, _ *domain.Device) { reload(ctx) })
 	g.presence.OnChange(ge.presenceChanged)
 
 	return ge

@@ -10,6 +10,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
+	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
@@ -44,13 +45,14 @@ func TestDesiredStateCarriesSettings(t *testing.T) {
 	a := dbtest.NewSQLite(t)
 	logger := slog.New(slog.DiscardHandler)
 
+	values := fixedSettings{
+		"listen_policy": "registered", "waterfall.min_db": -110, "waterfall.max_db": -40, "waterfall.palette": "default",
+		"fax_lpm": 60, "fax_min_length": 100, "fax_max_length": 900, "fax_color": true,
+	}
 	d := desiredStates{
-		planner: schedules.NewPlanner(schedules.Deps{Devices: noDevices{}, Logger: logger}),
-		presets: presets.NewService(presets.Deps{Repo: presets.NewPresets(a), Tx: a, Logger: logger}),
-		settings: fixedSettings{
-			"listen_policy": "registered", "waterfall.min_db": -110, "waterfall.max_db": -40, "waterfall.palette": "default",
-			"fax_lpm": 60, "fax_min_length": 100, "fax_max_length": 900, "fax_color": true,
-		},
+		planner:  schedules.NewPlanner(schedules.Deps{Devices: noDevices{}, Logger: logger}),
+		presets:  presets.NewService(presets.Deps{Repo: presets.NewPresets(a), Tx: a, Logger: logger}),
+		settings: values, listen: gridapp.NewListenPolicies(nil, storeListenPolicy{store: values}, logger),
 		now: time.Now,
 	}
 

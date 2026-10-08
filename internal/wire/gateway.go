@@ -15,7 +15,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	httpserver "github.com/yohang/mesh-sdr/internal/http"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
-	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
 )
@@ -67,7 +66,7 @@ func (g *hubGrid) gatewayDialConfig(ctx context.Context, nodeID string) (*tls.Co
 }
 
 // mediaAccess builds the gateway forward auth of the hub.
-func (g *hubGrid) mediaAccess(cfg config.Hub, policy gridapp.ListenPolicySource, logger *slog.Logger) (*gridapp.MediaAccess, error) {
+func (g *hubGrid) mediaAccess(cfg config.Hub, policy *gridapp.ListenPolicies, logger *slog.Logger) (*gridapp.MediaAccess, error) {
 	if g.ca != nil {
 		g.gatewayClient = pki.NewClientSource(g.ca, pki.KindGateway, g.hubID, time.Now)
 	}
@@ -80,12 +79,6 @@ func (g *hubGrid) mediaAccess(cfg config.Hub, policy gridapp.ListenPolicySource,
 		Now:      time.Now, Logger: component(logger, "grid.app.authz"),
 	})
 }
-
-// listenPolicy reads the global listen policy from the settings store,
-// failing closed to registered like the token issuer.
-type listenPolicy struct{ p settingsrc.Policies }
-
-func (l listenPolicy) ListenPolicy(ctx context.Context) string { return string(l.p.ListenPolicy(ctx)) }
 
 // routes is a router module that only adds routes.
 type routes func(r chi.Router)

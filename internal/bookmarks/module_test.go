@@ -102,15 +102,18 @@ func newEnv(t *testing.T) *env {
 	m, err := New(Deps{
 		DB: d, Audit: e.records,
 		Devices: fakeDevices{
-			{ID: shared.MustDeviceID("hf"), Name: "HF", ListenPolicy: ListenAnonymous, ActivePreset: presetA, Modes: []string{"am", "usb", "lsb", "cw", "ft8"}},
-			{ID: shared.MustDeviceID("vhf"), Name: "VHF", ListenPolicy: ListenRegistered},
+			{ID: shared.MustDeviceID("hf"), Name: "HF", ActivePreset: presetA, Modes: []string{"am", "usb", "lsb", "cw", "ft8"}},
+			{ID: shared.MustDeviceID("vhf"), Name: "VHF"},
 		},
-		Presets:  fakePresets{{ID: presetA, Name: "40 m"}, {ID: presetB, Name: "2 m"}},
-		Region:   func() string { return e.region },
-		SignedIn: func(ctx context.Context) bool { return ctx.Value(signedInKey{}) != nil },
-		Changed:  func(_ context.Context, c Change) { e.changes = append(e.changes, c) },
-		Now:      func() time.Time { return t0 },
-		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Presets: fakePresets{{ID: presetA, Name: "40 m"}, {ID: presetB, Name: "2 m"}},
+		Region:  func() string { return e.region },
+		// hf is anonymous-listenable, vhf registered.
+		CanListen: func(ctx context.Context, d shared.DeviceID) (bool, error) {
+			return d.String() == "hf" || ctx.Value(signedInKey{}) != nil, nil
+		},
+		Changed: func(_ context.Context, c Change) { e.changes = append(e.changes, c) },
+		Now:     func() time.Time { return t0 },
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)

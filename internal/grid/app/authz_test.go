@@ -94,7 +94,7 @@ func newAuthzEnv(t *testing.T, policy string) *authzEnv {
 	access, err := app.NewMediaAccess(app.MediaAccessOptions{
 		Nodes: e.nodes, Devices: sqlite.NewDeviceRepository(e.db), Tracker: tr,
 		Presence: app.NewPresence(conns, sqlite.NewDeviceRepository(e.db), tr, app.DefaultTimings(), e.clock.now, discard),
-		Issuer:   issuer, Policy: authzPolicy(policy), HubURL: hubURL,
+		Issuer:   issuer, Policy: app.NewListenPolicies(nil, authzPolicy(policy), discard), HubURL: hubURL,
 		Upgrades: up, Mints: limiter{allow: true}, Now: e.clock.now, Logger: discard,
 	})
 	if err != nil {
@@ -106,7 +106,7 @@ func newAuthzEnv(t *testing.T, policy string) *authzEnv {
 
 type authzPolicy string
 
-func (p authzPolicy) ListenPolicy(context.Context) string { return string(p) }
+func (p authzPolicy) ListenPolicy(context.Context) (string, error) { return string(p), nil }
 
 func (a *authzEnv) online() {
 	a.tracker.Welcomed(a.node.ID(), shared.UUID{}, domain.Compatibility{Level: domain.CompatOK}, a.clock.now())

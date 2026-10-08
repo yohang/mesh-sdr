@@ -35,8 +35,8 @@ func newSettings(ctx context.Context, cfg config.Hub, origins config.Origins, ad
 	return store, settings.NewEffectiveConfig(configBootstrap{cfg: cfg, origins: origins}, store, now), nil
 }
 
-// storeListenPolicy reads the global listen policy (listen_policy) from the
-// settings store for the grid feature summary.
+// storeListenPolicy reads the raw global listen policy (listen_policy) from
+// the settings store for grid/app.ListenPolicies, which validates it.
 type storeListenPolicy struct {
 	store interface{ String(key string) string }
 }

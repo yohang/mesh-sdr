@@ -35,18 +35,10 @@ const (
 	ActionDelete = "bookmark.delete"
 )
 
-// Listen policies of a device (§7.4 listen_policy).
-const (
-	ListenAnonymous  = "anonymous"
-	ListenRegistered = "registered"
-)
-
 // Device is an enabled device of the registry, as the bookmarks see it.
 type Device struct {
 	ID   shared.DeviceID
 	Name string
-	// ListenPolicy is the effective listen policy: anonymous or registered.
-	ListenPolicy string
 	// ActivePreset is the preset the device runs (zero: none).
 	ActivePreset shared.UUID
 	// Modes are the modes the device's node reports available.
@@ -96,8 +88,9 @@ type Deps struct {
 	Presets Presets
 	// Region returns the bandplan.region setting (r1, r2 or r3).
 	Region func() string
-	// SignedIn reports whether the caller of ctx is a signed-in user.
-	SignedIn func(ctx context.Context) bool
+	// CanListen reports whether the caller of ctx may listen to a device
+	// (the listen policy); nil admits nobody.
+	CanListen func(ctx context.Context, device shared.DeviceID) (bool, error)
 	// User returns the signed-in user of ctx (zero when anonymous).
 	User func(ctx context.Context) shared.UUID
 	// Changed, when set, is told every committed change of a hub bookmark.
@@ -218,18 +211,6 @@ func (m *Module) device(ctx context.Context, id string) (Device, bool, error) {
 	return Device{}, false, nil
 }
 
-// canListen reports whether the caller of ctx may listen to a device.
-func (m *Module) canListen(ctx context.Context, d Device) bool {
-	switch d.ListenPolicy {
-	case ListenAnonymous:
-		return true
-	case ListenRegistered:
-		return m.d.SignedIn != nil && m.d.SignedIn(ctx)
-	default:
-		return false
-	}
-}
-
 // ForDevice returns the bookmarks shown on a device in a range (BMK-001,
 // GET /bookmarks): the general and current region pack rows, and the hub
 // rows whose scope matches the device and its active preset. A device the
@@ -240,7 +221,16 @@ func (m *Module) ForDevice(ctx context.Context, deviceID string, rg Range) ([]*B
 		return nil, err
 	}
 
-	if !ok || !m.canListen(ctx, d) {
+	if !ok || m.d.CanListen == nil {
+		return nil, ErrDeviceNotFound
+	}
+
+	allowed, err := m.d.CanListen(ctx, d.ID)
+	if err != nil {
+		return nil, fmt.Errorf("listen policy of %s: %w", d.ID, err)
+	}
+
+	if !allowed {
 		return nil, ErrDeviceNotFound
 	}
 

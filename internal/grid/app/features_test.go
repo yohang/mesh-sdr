@@ -110,7 +110,7 @@ func TestFeatures(t *testing.T) {
 		t.Helper()
 
 		got, err := app.NewFeatures(app.FeaturesDeps{
-			Devices: devices, Caps: caps, Policy: p, Links: links{domain.MustNodeID("garden")},
+			Devices: devices, Caps: caps, Listen: app.NewListenPolicies(nil, p, nil), Links: links{domain.MustNodeID("garden")},
 		}).Summary(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -183,7 +183,7 @@ func TestFeaturesPickerFields(t *testing.T) {
 
 	temp := 41.5
 	got, err := app.NewFeatures(app.FeaturesDeps{
-		Devices: deviceList{hf, vhf}, Caps: reports{}, Policy: fixedPolicy{v: "anonymous"},
+		Devices: deviceList{hf, vhf}, Caps: reports{}, Listen: app.NewListenPolicies(nil, fixedPolicy{v: "anonymous"}, nil),
 		Links:     links{domain.MustNodeID("attic")},
 		Nodes:     nodeList{domain.NewNode(domain.MustNodeID("attic"), domain.MustNodeName("Attic"), domain.MustNodeURL("https://attic:8074"), now)},
 		Listeners: listenerCounts{"hf": 3},
@@ -259,9 +259,15 @@ func TestListenPolicies(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			// A disabled or unknown device is absent: nobody listens to it.
-			all, err := app.NewListenPolicies(devices, tt.global).Effective(ctx)
-			if err != nil || len(all) != 2 || all["open"] != tt.open || all["closed"] != tt.closedD {
-				t.Errorf("Effective = %v, %v", all, err)
+			v, err := app.NewListenPolicies(devices, tt.global, nil).View(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for id, want := range map[string]string{"open": tt.open, "closed": tt.closedD, "off": "", "ghost": ""} {
+				if got, _ := v.Policy(id); got != want {
+					t.Errorf("Policy(%s) = %q, want %q", id, got, want)
+				}
 			}
 		})
 	}

@@ -412,7 +412,7 @@ func (n *Node) validate(o Origins) []Problem {
 		}
 
 		if d.ListenPolicy != "" {
-			c.enum(key+".listen_policy", d.ListenPolicy, "anonymous", "registered")
+			c.enum(key+".listen_policy", d.ListenPolicy, griddomain.ListenAnonymous, griddomain.ListenRegistered)
 		}
 
 		if d.MaxDemods < 0 || d.MaxDemods > 1000 {

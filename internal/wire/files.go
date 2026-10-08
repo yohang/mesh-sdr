@@ -105,8 +105,7 @@ func deviceNames(repo griddomain.DeviceRepository) func(ctx context.Context) (ma
 // policy); under the registered policy, visitors see none.
 type fileAccess struct {
 	signedIn func(ctx context.Context) bool
-	global   func() string
-	policies *policyCache
+	policies *gridapp.ListenPolicies
 	logger   *slog.Logger
 }
 
@@ -121,28 +120,18 @@ func (a fileAccess) visibility(ctx context.Context) files.Access {
 
 // anonymous returns the files a visitor may see; it fails closed.
 func (a fileAccess) anonymous(ctx context.Context) files.Access {
-	if a.global() != gridapp.ListenAnonymous {
+	if a.policies.Global(ctx) != griddomain.ListenAnonymous {
 		return files.Access{Denied: true}
 	}
 
-	snap, err := a.policies.get(ctx)
+	view, err := a.policies.View(ctx)
 	if err != nil {
 		a.logger.ErrorContext(ctx, "listen policies for the files", slog.Any("error", err))
 
 		return files.Access{Denied: true}
 	}
 
-	var hidden []string
-
-	for d, lp := range snap.devices {
-		if lp != gridapp.ListenAnonymous {
-			hidden = append(hidden, d)
-		}
-	}
-
-	slices.Sort(hidden)
-
-	return files.Access{HiddenDevices: hidden}
+	return files.Access{HiddenDevices: view.Restricted()}
 }
 
 // published announces a new file on /api/ws (files.new) to the viewers who

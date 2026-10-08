@@ -40,7 +40,7 @@ type bookmarksDeps struct {
 	region   func() string
 	audit    audit.Appender
 	broker   events.Publisher
-	policies *policyCache
+	policies *gridapp.ListenPolicies
 	idm      *identityhttp.Module
 	render   bookmarks.Renderer
 	isAdmin  func(ctx context.Context) bool
@@ -53,10 +53,10 @@ func newBookmarks(d bookmarksDeps) (*bookmarks.Module, error) {
 	m, err := bookmarks.New(bookmarks.Deps{
 		DB: d.adapter, Audit: d.audit, Devices: bookmarkDevices{features: d.features, registry: d.registry},
 		Presets: bookmarkPresets{presets: d.presets}, Region: d.region,
-		SignedIn: func(ctx context.Context) bool { return d.idm.Authorize(ctx, identitydomain.RoleListener) == nil },
-		User:     currentUser,
-		Changed:  bookmarkChanged(d.broker, d.policies, component(d.logger, "bookmarks.wire.events")),
-		Render:   d.render, Guard: d.idm.Require(identitydomain.RoleOperator),
+		CanListen: listenAs(d.policies, d.idm.Principal),
+		User:      currentUser,
+		Changed:   bookmarkChanged(d.broker, d.policies, component(d.logger, "bookmarks.wire.events")),
+		Render:    d.render, Guard: d.idm.Require(identitydomain.RoleOperator),
 		AdminSections: func(r *http.Request) []layout.AdminSection {
 			if d.isAdmin(r.Context()) {
 				return layout.AdminSections
@@ -71,6 +71,15 @@ func newBookmarks(d bookmarksDeps) (*bookmarks.Module, error) {
 	}
 
 	return m, nil
+}
+
+// listenAs tells the bookmarks whether the caller of ctx may listen to a
+// device (the listen policies).
+func listenAs(p *gridapp.ListenPolicies, principal func(context.Context) identitydomain.Principal,
+) func(context.Context, shared.DeviceID) (bool, error) {
+	return func(ctx context.Context, device shared.DeviceID) (bool, error) {
+		return p.CanListen(ctx, principal(ctx).IsAnonymous(), device.String())
+	}
 }
 
 // bookmarkDevices gives the enabled devices to the bookmarks: the public
@@ -101,7 +110,7 @@ func (b bookmarkDevices) Devices(ctx context.Context) ([]bookmarks.Device, error
 	out := make([]bookmarks.Device, 0, len(summary.Devices))
 	for _, d := range summary.Devices {
 		out = append(out, bookmarks.Device{
-			ID: d.ID, Name: d.Name, ListenPolicy: d.ListenPolicy, ActivePreset: active[d.ID], Modes: d.Modes,
+			ID: d.ID, Name: d.Name, ActivePreset: active[d.ID], Modes: d.Modes,
 		})
 	}
 
@@ -136,7 +145,7 @@ type bookmarkChangedEvent struct {
 // a committed change of a hub bookmark. A bookmark scoped to one device
 // goes to the viewers who may listen to it (and staff); the others go to
 // every subscriber of the topic.
-func bookmarkChanged(b events.Publisher, policies *policyCache, logger *slog.Logger) func(context.Context, bookmarks.Change) {
+func bookmarkChanged(b events.Publisher, policies *gridapp.ListenPolicies, logger *slog.Logger) func(context.Context, bookmarks.Change) {
 	return func(ctx context.Context, c bookmarks.Change) {
 		ev := events.Event{
 			Topic: topicDevices, Type: rxv1.TypeBookmarkChanged.String(),
@@ -146,11 +155,11 @@ func bookmarkChanged(b events.Publisher, policies *policyCache, logger *slog.Log
 		if dev := c.Bookmark.Scope().Device(); !dev.IsZero() {
 			ev.Audience = staff
 
-			snap, err := policies.get(ctx)
+			view, err := policies.View(ctx)
 			if err != nil {
 				logger.ErrorContext(ctx, "listen policies for bookmark.changed", slog.Any("error", err))
 			} else {
-				ev.Audience = func(v events.Viewer) bool { return v.Staff || snap.viewerCanListen(v, dev.String()) }
+				ev.Audience = func(v events.Viewer) bool { return v.Staff || view.CanListen(v.Anonymous(), dev.String()) }
 			}
 		}
 

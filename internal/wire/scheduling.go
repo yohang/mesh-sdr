@@ -14,7 +14,6 @@ import (
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
-	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/schedules"
@@ -90,8 +89,8 @@ func seconds(list []string) []int {
 
 // newScheduling builds the modules. g.states may be nil (grid disabled):
 // nothing is pushed then.
-func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audit.Appender, now func() time.Time,
-	logger *slog.Logger,
+func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, listen *gridapp.ListenPolicies, audit audit.Appender,
+	now func() time.Time, logger *slog.Logger,
 ) *scheduling {
 	ids := shared.NewUUIDv7Generator()
 	devices := scheduleDevices{repo: g.deviceRepo}
@@ -145,7 +144,7 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 	})
 
 	if g.desired != nil {
-		g.desired.source = desiredStates{planner: s.planner, presets: s.presets, settings: values, now: now}
+		g.desired.source = desiredStates{planner: s.planner, presets: s.presets, settings: values, listen: listen, now: now}
 	}
 
 	return s
@@ -307,6 +306,7 @@ type desiredStates struct {
 	planner  *schedules.Planner
 	presets  *presets.Service
 	settings settingsReader
+	listen   *gridapp.ListenPolicies
 	now      func() time.Time
 }
 
@@ -326,15 +326,10 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 		byID[p.ID()] = p
 	}
 
-	policy := s.settings.String("listen_policy")
-	if policy == "" {
-		policy = string(identitydomain.ListenRegistered)
-	}
-
 	st := ctl.StateApply{
 		Presets: map[string]ctl.Preset{}, Devices: map[string]ctl.DesiredDevice{},
 		Policy: ctl.StatePolicy{
-			ListenPolicy: policy, WFMDeemphasis: s.settings.Int("wfm_deemphasis"),
+			ListenPolicy: s.listen.Global(ctx), WFMDeemphasis: s.settings.Int("wfm_deemphasis"),
 			Waterfall: &ctl.StateWaterfall{
 				MinDB: s.settings.Int("waterfall.min_db"), MaxDB: s.settings.Int("waterfall.max_db"), Palette: s.settings.String("waterfall.palette"),
 			},
