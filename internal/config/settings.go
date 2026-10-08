@@ -41,6 +41,9 @@ type SettingsReceiver struct {
 	Name     string   `toml:"name" env:"NAME" jsonschema:"minLength=1,maxLength=64" jsonschema_extras:"x-public=true,x-label=Station name" jsonschema_description:"Station name, shown in the top bar and the page titles."`
 	Location string   `toml:"location" env:"LOCATION" jsonschema:"maxLength=128" jsonschema_extras:"x-public=true,x-label=Location" jsonschema_description:"Station location, as free text (for example a town and a country)."`
 	GPS      GeoPoint `toml:"gps" env:"GPS" jsonschema_extras:"x-public=true,x-label=Position" jsonschema_description:"Station position in decimal degrees (WGS 84). In the env: \"<lat>,<lon>\"."`
+	// AltitudeM is the antenna altitude; it stays at its default (0) until
+	// an admin sets it, and the public status then includes it.
+	AltitudeM int `toml:"altitude_m" env:"ALTITUDE_M" jsonschema:"minimum=-500,maximum=9000" jsonschema_extras:"x-public=true,x-label=Antenna altitude (m)" jsonschema_description:"Antenna altitude above sea level, in metres (optional: published in the public status once set)."`
 	// AdminEmail is the contact e-mail; the public status (API-003) shows
 	// it only when AdminEmailPublic is true.
 	AdminEmail       string `toml:"admin_email" env:"ADMIN_EMAIL" jsonschema:"format=email,maxLength=254" jsonschema_extras:"x-label=Contact e-mail" jsonschema_description:"Contact e-mail of the station administrator."`

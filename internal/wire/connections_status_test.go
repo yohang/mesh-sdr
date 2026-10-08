@@ -133,7 +133,7 @@ func TestPublicStatus(t *testing.T) {
 		{"e-mail private by default", map[string]string{"MESHSDR_SETTINGS__RECEIVER__ADMIN_EMAIL": "admin@example.org"}, false},
 		{"e-mail public", map[string]string{
 			"MESHSDR_SETTINGS__RECEIVER__ADMIN_EMAIL": "admin@example.org", "MESHSDR_SETTINGS__RECEIVER__ADMIN_EMAIL_PUBLIC": "true",
-			"MESHSDR_SETTINGS__RECEIVER__LOCATION": "Lille", "MESHSDR_SETTINGS__RECEIVER__GPS": "50.63,3.06",
+			"MESHSDR_SETTINGS__RECEIVER__LOCATION": "Lille", "MESHSDR_SETTINGS__RECEIVER__ALTITUDE_M": "25", "MESHSDR_SETTINGS__RECEIVER__GPS": "50.63,3.06",
 		}, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -151,6 +151,10 @@ func TestPublicStatus(t *testing.T) {
 
 			if _, has := st["admin_email"]; has != tt.wantEmail {
 				t.Errorf("admin_email present = %v, want %v: %v", has, tt.wantEmail, st)
+			}
+
+			if _, has := st["altitude"]; has != tt.wantEmail || (tt.wantEmail && st["altitude"] != float64(25)) {
+				t.Errorf("altitude = %v", st["altitude"])
 			}
 
 			if tt.wantEmail && (st["location"] != "Lille" || st["position"] == nil) {

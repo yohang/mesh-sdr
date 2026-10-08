@@ -34,6 +34,11 @@ func (s stationStatus) Status(ctx context.Context) (api.StationStatus, error) {
 
 	st.Lat, st.Lon, st.HasPosition = snap.Geo("receiver.gps")
 
+	if e, ok := snap.Get("receiver.altitude_m"); ok && e.Source() != settings.SourceDefault {
+		alt := snap.Int("receiver.altitude_m")
+		st.Altitude = &alt
+	}
+
 	devices, err := s.devices.List(ctx)
 	if err != nil {
 		return api.StationStatus{}, fmt.Errorf("list devices: %w", err)

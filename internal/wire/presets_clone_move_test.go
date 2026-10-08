@@ -57,7 +57,7 @@ func TestPresetCloneAndMovePages(t *testing.T) {
 
 	res, frag := admin.form("/admin/presets/"+ids[0]+"/move", url.Values{"direction": {"down"}}, true)
 	if res.StatusCode != http.StatusOK || !strings.Contains(frag, `id="presets-list"`) || strings.Contains(frag, "<html") ||
-		!strings.Contains(frag, "Preset moved.") || pos("Alpha") != 1 || pos("Bravo") != 0 {
+		!strings.Contains(frag, "Preset moved.") || pos("Alpha") != 1 || pos("Alpha (copy)") != 0 || pos("Bravo") != 2 {
 		t.Fatalf("move down = %d %s", res.StatusCode, frag)
 	}
 

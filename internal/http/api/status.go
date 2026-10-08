@@ -14,7 +14,9 @@ type StationStatus struct {
 	Name, Location string
 	Lat, Lon       float64
 	HasPosition    bool
-	Version        string
+	// Altitude is the antenna altitude in metres; nil when unset.
+	Altitude *int
+	Version  string
 	// AdminEmail is the configured contact e-mail; it is published only
 	// when AdminEmailPublic is true.
 	AdminEmail       string
@@ -69,6 +71,8 @@ func (h StatusHandlers) body(ctx context.Context) (Status, error) {
 	if st.HasPosition {
 		out.Position = &StatusPosition{Lat: st.Lat, Lon: st.Lon}
 	}
+
+	out.Altitude = st.Altitude
 
 	if st.AdminEmailPublic && st.AdminEmail != "" {
 		out.AdminEmail = &st.AdminEmail

@@ -283,6 +283,9 @@ components:
           description: Station location, free text (`receiver.location`); absent when unset.
         position:
           $ref: "#/components/schemas/StatusPosition"
+        altitude:
+          type: integer
+          description: Antenna altitude in metres (`receiver.altitude_m`); absent until set.
         version:
           type: string
           description: Hub version.

@@ -160,7 +160,7 @@ func cloneName(name string, taken map[string]bool) string {
 	}
 }
 
-// Clone stores a copy of a preset at the end of the list: a new id, every
+// Clone stores a copy of a preset right after it in the list: a new id, every
 // field copied, the name suffixed " (copy)" (" (copy 2)"… when taken) and a
 // slug derived from it (made unique).
 func (s *Service) Clone(ctx context.Context, id string) (*Preset, error) {
@@ -209,17 +209,26 @@ func (s *Service) Clone(ctx context.Context, id string) (*Preset, error) {
 			return err
 		}
 
-		order, err := s.d.Repo.NextSortOrder(ctx)
-		if err != nil {
-			return err
-		}
+		// The copy goes right after its source: the presets that follow
+		// shift down by one.
+		at := slices.IndexFunc(all, func(o *Preset) bool { return o.ID() == pid }) + 1
 
-		if p, err = NewPreset(newID, spec, order, now); err != nil {
+		if p, err = NewPreset(newID, spec, at, now); err != nil {
 			return err
 		}
 
 		if err := s.d.Repo.Create(ctx, p); err != nil {
 			return err
+		}
+
+		for i, o := range slices.Insert(slices.Clone(all), at, p) {
+			if o.ID() == newID || o.SortOrder() == i {
+				continue
+			}
+
+			if err := s.d.Repo.SetSortOrder(ctx, o.ID(), i); err != nil {
+				return err
+			}
 		}
 
 		after := auditFields(p)

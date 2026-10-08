@@ -23,7 +23,7 @@ var formPages = []formPage{
 		Intro: "Station information shown to visitors (ADM-003).",
 		Forms: []sectionSpec{
 			{ID: "station", Title: "Station", Keys: []string{
-				"receiver.name", "receiver.location", "receiver.gps",
+				"receiver.name", "receiver.location", "receiver.gps", "receiver.altitude_m",
 			}},
 			{ID: "contact", Title: "Contact and help", Keys: []string{"receiver.admin_email", "receiver.admin_email_public", "receiver.help_url"}},
 			{ID: "panorama", Title: "Panorama text", Keys: []string{"receiver.photo_title", "receiver.photo_desc"}},

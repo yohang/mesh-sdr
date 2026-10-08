@@ -85,6 +85,26 @@ func TestClone(t *testing.T) {
 		t.Errorf("unknown source: %v", err)
 	}
 
+	// Each copy sits right after its source, positions stay contiguous.
+	list, err := s.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var order []string
+
+	for i, p := range list {
+		if p.SortOrder() != i {
+			t.Errorf("%s at %d, want %d", p.Name(), p.SortOrder(), i)
+		}
+
+		order = append(order, p.Name())
+	}
+
+	if wantOrder := []string{"2 m FM", "2 m FM (copy 3)", "2 m FM (copy 2)", "2 m FM (copy)", "2 m FM (copy) (copy)", long.Name(), lc.Name()}; !reflect.DeepEqual(order, wantOrder) {
+		t.Errorf("order = %v, want %v", order, wantOrder)
+	}
+
 	if au.records[1].Action != presets.ActionClone || au.records[1].After["cloned_from"] != src.ID().String() {
 		t.Errorf("audit = %+v", au.records)
 	}

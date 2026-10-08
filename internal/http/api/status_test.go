@@ -38,6 +38,7 @@ func getJSON(t *testing.T, url string) (int, http.Header, []byte) {
 // TestStatus covers API-003: the document shape, the e-mail published only
 // when it is public, and the /status.json alias serving the same body.
 func TestStatus(t *testing.T) {
+	alt := 25
 	devices := []api.StatusDeviceInfo{
 		{ID: "hf", Name: "HF", Type: "rtlsdr", Online: true, Listeners: 2, Preset: &api.StatusPresetInfo{Name: "20 m", CenterFreq: 14_100_000, SampRate: 2_048_000}},
 		{ID: "vhf", Name: "VHF", Type: "airspy"},
@@ -50,7 +51,7 @@ func TestStatus(t *testing.T) {
 		wantPos   bool
 		wantLoc   bool
 	}{
-		{"email public", api.StationStatus{Name: "Attic", Location: "Lille", Lat: 50.6, Lon: 3.06, HasPosition: true, Version: "1.2.3",
+		{"email public", api.StationStatus{Name: "Attic", Location: "Lille", Lat: 50.6, Lon: 3.06, HasPosition: true, Altitude: &alt, Version: "1.2.3",
 			AdminEmail: "admin@example.org", AdminEmailPublic: true, Devices: devices}, true, true, true},
 		{"email private", api.StationStatus{Name: "Attic", Version: "1.2.3", AdminEmail: "admin@example.org", Devices: devices}, false, false, false},
 		{"public without an e-mail", api.StationStatus{Name: "Attic", Version: "dev", AdminEmailPublic: true}, false, false, false},
@@ -74,6 +75,7 @@ func TestStatus(t *testing.T) {
 				Name        string           `json:"name"`
 				Location    *string          `json:"location"`
 				Position    map[string]any   `json:"position"`
+				Altitude    *int             `json:"altitude"`
 				Version     string           `json:"version"`
 				AdminEmail  *string          `json:"admin_email"`
 				DeviceCount int              `json:"device_count"`
@@ -90,6 +92,10 @@ func TestStatus(t *testing.T) {
 
 			if (got.AdminEmail != nil) != tt.wantEmail || (got.Position != nil) != tt.wantPos || (got.Location != nil) != tt.wantLoc {
 				t.Errorf("email/position/location presence = %v/%v/%v, body %s", got.AdminEmail != nil, got.Position != nil, got.Location != nil, body)
+			}
+
+			if (got.Altitude != nil) != tt.wantPos || (tt.wantPos && *got.Altitude != 25) {
+				t.Errorf("altitude = %v, body %s", got.Altitude, body)
 			}
 
 			if tt.wantEmail && *got.AdminEmail != "admin@example.org" {
