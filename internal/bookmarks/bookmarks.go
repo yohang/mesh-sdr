@@ -487,7 +487,7 @@ func (m *Module) Create(ctx context.Context, d Draft) (*Bookmark, error) {
 }
 
 func (m *Module) unique(ctx context.Context, b *Bookmark) error {
-	taken, err := m.repo.KeyTaken(ctx, b.Name(), b.Frequency(), b.Modulation(), b.ID())
+	taken, err := m.repo.KeyTaken(ctx, b.Name(), b.Frequency(), b.Modulation(), b.Scope(), b.ID())
 	if err != nil {
 		return err
 	}

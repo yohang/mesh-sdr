@@ -12,7 +12,8 @@ import (
 type SyncResult struct {
 	Inserted, Updated, Unchanged, Deleted int
 	// Skipped counts the pack bookmarks not stored because a hub bookmark
-	// has the same name, frequency and modulation (hub rows win).
+	// for all devices has the same name, frequency and modulation (hub
+	// rows win).
 	Skipped int
 }
 
@@ -110,13 +111,13 @@ func (m *Module) syncEntry(ctx context.Context, e *packEntry, byID map[string]*B
 		return syncUpdated, m.repo.Update(ctx, b, have.Version)
 	}
 
-	taken, err := m.repo.KeyTaken(ctx, want.Name, want.Frequency, want.Modulation, want.ID)
+	taken, err := m.repo.KeyTaken(ctx, want.Name, want.Frequency, want.Modulation, want.Scope, want.ID)
 	if err != nil {
 		return 0, err
 	}
 
 	if taken {
-		m.d.Logger.WarnContext(ctx, "pack bookmark skipped: a hub bookmark has its name, frequency and modulation",
+		m.d.Logger.WarnContext(ctx, "pack bookmark skipped: a hub bookmark for all devices has its name, frequency and modulation",
 			slog.String("name", want.Name), slog.Int64("frequency", want.Frequency), slog.String("modulation", want.Modulation))
 
 		return syncSkipped, nil

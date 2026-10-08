@@ -11,7 +11,10 @@ import (
 
 func TestRepository(t *testing.T) {
 	ctx := context.Background()
-	repo := NewRepository(dbtest.NewSQLite(t))
+	d := dbtest.NewSQLite(t)
+	seed(t, d)
+
+	repo := NewRepository(d)
 	ids := shared.NewUUIDv7Generator()
 
 	newID := func() shared.UUID {
@@ -42,18 +45,40 @@ func TestRepository(t *testing.T) {
 		t.Fatalf("get = %+v, %v", got, err)
 	}
 
-	// The unique key holds across origins.
-	dup, _ := NewBookmark(newID(), Draft{Name: "Net", Frequency: 7_100_000, Modulation: "lsb"}, shared.UUID{}, t0)
+	// The unique key is per scope.
+	dup, _ := NewBookmark(newID(), Draft{Name: "Net", Frequency: 7_100_000, Modulation: "lsb", Scope: scope}, shared.UUID{}, t0)
 	if err := repo.Create(ctx, dup); !errors.Is(err, ErrDuplicate) {
 		t.Errorf("duplicate insert = %v", err)
 	}
 
-	if taken, err := repo.KeyTaken(ctx, "Net", 7_100_000, "lsb", shared.UUID{}); err != nil || !taken {
+	elsewhere, _ := NewBookmark(newID(), Draft{Name: "Net", Frequency: 7_100_000, Modulation: "lsb"}, shared.UUID{}, t0)
+	if err := repo.Create(ctx, elsewhere); err != nil {
+		t.Errorf("same key for all devices = %v", err)
+	}
+
+	if taken, err := repo.KeyTaken(ctx, "Net", 7_100_000, "lsb", scope, shared.UUID{}); err != nil || !taken {
 		t.Errorf("key taken = %v, %v", taken, err)
 	}
 
-	if taken, err := repo.KeyTaken(ctx, "Net", 7_100_000, "lsb", hub.ID()); err != nil || taken {
+	if taken, err := repo.KeyTaken(ctx, "Net", 7_100_000, "lsb", scope, hub.ID()); err != nil || taken {
 		t.Errorf("key taken by itself = %v, %v", taken, err)
+	}
+
+	vhf, _ := OnDevice(shared.MustDeviceID("vhf"))
+	if taken, err := repo.KeyTaken(ctx, "Net", 7_100_000, "lsb", vhf, shared.UUID{}); err != nil || taken {
+		t.Errorf("key taken on another device = %v, %v", taken, err)
+	}
+
+	// A scope must reference a stored device.
+	ghost, _ := OnDevice(shared.MustDeviceID("ghost"))
+	orphan, _ := NewBookmark(newID(), Draft{Name: "Ghost", Frequency: 7_100_000, Modulation: "lsb", Scope: ghost}, shared.UUID{}, t0)
+
+	if err := repo.Create(ctx, orphan); !errors.Is(err, ErrInvalidBookmark) {
+		t.Errorf("scope on an unknown device = %v", err)
+	}
+
+	if err := repo.Delete(ctx, elsewhere.ID(), OriginDB); err != nil {
+		t.Fatal(err)
 	}
 
 	// Region rows: one tagged r2, one general.

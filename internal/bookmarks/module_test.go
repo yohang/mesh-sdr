@@ -9,7 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
+	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
@@ -34,6 +38,49 @@ var (
 	presetB = shared.MustParseUUID("01900000-0000-7000-8000-00000000000b")
 )
 
+// seed stores node attic with devices hf and vhf, and presets A and B:
+// the scopes of the bookmarks reference them.
+func seed(t *testing.T, d *db.DB) {
+	t.Helper()
+
+	ctx := context.Background()
+	node := griddomain.MustNodeID("attic")
+
+	if err := gridsqlite.NewNodeRepository(d).Create(ctx, griddomain.NewNode(node, griddomain.MustNodeName("Attic"),
+		griddomain.MustNodeURL("https://attic:8074"), t0)); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, id := range []string{"hf", "vhf"} {
+		dev, err := griddomain.NewReportedDevice(node, griddomain.DeviceSpec{
+			ID: shared.MustDeviceID(id), Name: id, Type: "rtl_sdr", Enabled: true, FreqMin: 1, FreqMax: 2_000_000_000, SampleRates: []int64{2_048_000},
+		}, i, t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := gridsqlite.NewDeviceRepository(d).Save(ctx, dev); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i, id := range []shared.UUID{presetA, presetB} {
+		spec, err := presets.NewSpec(presets.Draft{Name: "Preset " + id.String(), CenterFreq: 7_100_000, SampRate: 2_048_000, StartMod: "lsb"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		p, err := presets.NewPreset(id, spec, i, t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := presets.NewPresets(d).Create(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // env is a module on a migrated database with two devices: hf
 // (anonymous, running preset A, analog modes) and vhf (registered, no
 // mode reported).
@@ -49,8 +96,11 @@ func newEnv(t *testing.T) *env {
 
 	e := &env{records: &audit.Records{}, region: "r1"}
 
+	d := dbtest.NewSQLite(t)
+	seed(t, d)
+
 	m, err := New(Deps{
-		DB: dbtest.NewSQLite(t), Audit: e.records,
+		DB: d, Audit: e.records,
 		Devices: fakeDevices{
 			{ID: shared.MustDeviceID("hf"), Name: "HF", ListenPolicy: ListenAnonymous, ActivePreset: presetA, Modes: []string{"am", "usb", "lsb", "cw", "ft8"}},
 			{ID: shared.MustDeviceID("vhf"), Name: "VHF", ListenPolicy: ListenRegistered},
@@ -170,8 +220,20 @@ func TestValidation(t *testing.T) {
 		t.Errorf("%d audit records, %d changes after the refusals", len(*e.records), len(e.changes))
 	}
 
+	// The unique key includes the scope.
+	if _, err := e.m.Create(context.Background(), Draft{Name: "FT8", Frequency: 7_074_000, Modulation: "ft8", Scope: onDevice(t, "hf")}); !errors.Is(err, ErrDuplicate) {
+		t.Errorf("duplicate on the same device = %v", err)
+	}
+
+	e.create(t, Draft{Name: "FT8", Frequency: 7_074_000, Modulation: "ft8", Scope: AllDevices()})
+	e.create(t, Draft{Name: "FT8", Frequency: 7_074_000, Modulation: "ft8", Scope: onPreset(t, presetA)})
+
+	if _, err := e.m.Create(context.Background(), Draft{Name: "FT8", Frequency: 7_074_000, Modulation: "ft8", Scope: onPreset(t, presetA)}); !errors.Is(err, ErrDuplicate) {
+		t.Errorf("duplicate on the same preset = %v", err)
+	}
+
 	if _, err := e.m.Create(context.Background(), Draft{Name: "FT8", Frequency: 7_074_000, Modulation: "ft8", Scope: AllDevices()}); !errors.Is(err, ErrDuplicate) {
-		t.Errorf("duplicate = %v", err)
+		t.Errorf("duplicate for all devices = %v", err)
 	}
 }
 
@@ -260,6 +322,8 @@ func TestSync(t *testing.T) {
 
 	// A hub bookmark that a pack also holds wins over the pack.
 	hub := e.create(t, Draft{Name: "PMR1", Frequency: 446_006_250, Modulation: "nfm", Description: "Our PMR", Scope: AllDevices()})
+	// A hub bookmark scoped to one preset does not hide the pack one.
+	e.create(t, Draft{Name: "PMR2", Frequency: 446_018_750, Modulation: "nfm", Scope: onPreset(t, presetB)})
 
 	res, err := e.m.Sync(ctx)
 	if err != nil {
@@ -313,7 +377,7 @@ func TestSync(t *testing.T) {
 		t.Errorf("hub row after the syncs = %+v, %v", kept, err)
 	}
 
-	if len(e.changes) != 1 || len(*e.records) != 1 {
+	if len(e.changes) != 2 || len(*e.records) != 2 {
 		t.Errorf("the sync audited or announced changes: %d, %d", len(*e.records), len(e.changes))
 	}
 }
@@ -421,5 +485,45 @@ func TestRegionAndScope(t *testing.T) {
 
 	if _, err := NewRange(new(int64(-1)), nil); !errors.Is(err, ErrInvalidRange) {
 		t.Errorf("negative range = %v", err)
+	}
+}
+
+// TestScopeCascade: deleting a preset or forgetting a device deletes the
+// bookmarks scoped to it, and only those.
+func TestScopeCascade(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+
+	all := e.create(t, Draft{Name: "All", Frequency: 7_100_000, Modulation: "lsb", Scope: AllDevices()})
+	dev := e.create(t, Draft{Name: "On HF", Frequency: 7_100_000, Modulation: "lsb", Scope: onDevice(t, "hf")})
+	pre := e.create(t, Draft{Name: "On A", Frequency: 7_100_000, Modulation: "lsb", Scope: onPreset(t, presetA)})
+	other := e.create(t, Draft{Name: "On B", Frequency: 7_100_000, Modulation: "lsb", Scope: onPreset(t, presetB)})
+
+	if err := presets.NewPresets(e.m.d.DB).Delete(ctx, presetA); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := gridsqlite.NewDeviceRepository(e.m.d.DB)
+
+	hf, err := repo.Get(ctx, shared.MustDeviceID("hf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hf.MarkUnavailable(t0)
+
+	if err := repo.Save(ctx, hf); err != nil {
+		t.Fatal(err)
+	}
+
+	if gone, err := repo.DeleteMissing(ctx, hf.ID()); err != nil || !gone {
+		t.Fatalf("forget hf = %v, %v", gone, err)
+	}
+
+	for b, want := range map[*Bookmark]bool{all: true, dev: false, pre: false, other: true} {
+		_, err := e.m.repo.Get(ctx, b.ID())
+		if kept := err == nil; kept != want || (err != nil && !errors.Is(err, ErrBookmarkNotFound)) {
+			t.Errorf("%s kept = %v (%v), want %v", b.Name(), kept, err, want)
+		}
 	}
 }

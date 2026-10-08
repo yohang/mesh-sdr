@@ -64,16 +64,22 @@ func (r *Repository) ByOrigin(ctx context.Context, o Origin) ([]*Bookmark, error
 	return fromRows(rows)
 }
 
-// KeyTaken reports whether another bookmark than except has this name,
-// frequency and modulation.
-func (r *Repository) KeyTaken(ctx context.Context, name string, frequency int64, modulation string, except shared.UUID) (bool, error) {
+// KeyTaken reports whether another bookmark than except has this unique
+// key: name, frequency, modulation and scope.
+func (r *Repository) KeyTaken(ctx context.Context, name string, frequency int64, modulation string, scope Scope, except shared.UUID) (bool, error) {
 	id := []byte{}
 	if !except.IsZero() {
 		id = except.Bytes()
 	}
 
+	preset := []byte{}
+	if p := scope.Preset(); !p.IsZero() {
+		preset = p.Bytes()
+	}
+
 	taken, err := sqlc.New(r.db.Reader(ctx)).BookmarkKeyTaken(ctx, sqlc.BookmarkKeyTakenParams{
-		Name: name, Frequency: frequency, Modulation: modulation, ExceptID: id,
+		Name: name, Frequency: frequency, Modulation: modulation, Scope: string(scope.Kind()),
+		DeviceKey: scope.Device().String(), PresetKey: preset, ExceptID: id,
 	})
 	if err != nil {
 		return false, fmt.Errorf("check bookmark key: %w", err)
@@ -152,8 +158,14 @@ func (r *Repository) Delete(ctx context.Context, id shared.UUID, o Origin) error
 }
 
 func writeError(err error, op string, id shared.UUID) error {
-	if strings.Contains(err.Error(), "UNIQUE constraint failed: bookmarks.name") {
+	msg := err.Error()
+
+	switch {
+	case strings.Contains(msg, "UNIQUE constraint failed") && strings.Contains(msg, "bookmarks"):
 		return ErrDuplicate
+	case strings.Contains(msg, "FOREIGN KEY constraint failed"):
+		// The scope names a device or a preset that no longer exists.
+		return ErrInvalidBookmark.WithViolations(shared.NewViolation("scope", "unknown", "the device or preset no longer exists"))
 	}
 
 	return fmt.Errorf("%s bookmark %s: %w", op, id, err)

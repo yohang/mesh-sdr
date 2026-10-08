@@ -33,6 +33,12 @@ WHERE id = sqlc.arg(id) AND origin = sqlc.arg(origin) AND version = sqlc.arg(exp
 DELETE FROM bookmarks WHERE id = ? AND origin = ?;
 
 -- name: BookmarkKeyTaken :one
+-- BookmarkKeyTaken reports whether another bookmark has this unique key
+-- (name, frequency, modulation and scope; device_key is the device id or
+-- '', preset_key the preset id or an empty blob).
 SELECT EXISTS (
-    SELECT 1 FROM bookmarks WHERE name = ? AND frequency = ? AND modulation = ? AND id <> sqlc.arg(except_id)
+    SELECT 1 FROM bookmarks
+    WHERE name = sqlc.arg(name) AND frequency = sqlc.arg(frequency) AND modulation = sqlc.arg(modulation)
+      AND scope = sqlc.arg(scope) AND COALESCE(device_id, '') = CAST(sqlc.arg(device_key) AS TEXT)
+      AND COALESCE(preset_id, x'') = CAST(sqlc.arg(preset_key) AS BLOB) AND id <> sqlc.arg(except_id)
 );

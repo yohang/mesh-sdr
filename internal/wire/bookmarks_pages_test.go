@@ -123,7 +123,7 @@ func TestBookmarkPages(t *testing.T) {
 		{url.Values{"name": {"Net"}, "frequency": {"7100000"}, "modulation": {"lsb"}, "underlying": {"usb"}, "scope": {"all"}}, "Underlying mode: An analog mode takes no underlying mode."},
 		{url.Values{"name": {"Net"}, "frequency": {"7100000"}, "modulation": {"lsb"}, "scope": {"device"}, "device": {""}}, "Device: Choose a device."},
 		{url.Values{"name": {"Net"}, "frequency": {"7100000"}, "modulation": {"lsb"}, "scope": {"device"}, "device": {"nope"}}, "Device: Choose a device of the registry."},
-		{url.Values{"name": {"PMR1"}, "frequency": {"446006250"}, "modulation": {"nfm"}, "scope": {"all"}}, "Name: A bookmark with this name, frequency and mode exists."},
+		{url.Values{"name": {"PMR1"}, "frequency": {"446006250"}, "modulation": {"nfm"}, "scope": {"all"}}, "Name: A bookmark with this name, frequency and mode exists where it shows."},
 	} {
 		res, body := op.form("/bookmarks/manage", tt.values, false)
 		if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, tt.want) {

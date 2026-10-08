@@ -475,7 +475,7 @@ func (m *Module) formError(r *http.Request, f *bookmarkForm, err error) {
 			f.Failure = sentence(de.Message())
 		}
 	case errors.Is(err, ErrDuplicate):
-		f.setError("name", "A bookmark with this name, frequency and mode exists.")
+		f.setError("name", "A bookmark with this name, frequency and mode exists where it shows.")
 	case errors.Is(err, ErrVersionConflict):
 		f.Failure, f.Conflict = "This bookmark was changed meanwhile: reload the page to edit the current version.", true
 	case errors.Is(err, ErrBookmarkNotFound):

@@ -9,9 +9,9 @@ var (
 	// ErrReadOnly refuses to change a pack bookmark (BMK-002: pack rows are
 	// read-only).
 	ErrReadOnly = shared.NewError(shared.KindConflict, "bookmark_read_only", "pack bookmarks are read-only")
-	// ErrDuplicate is a second bookmark with the same name, frequency and
-	// modulation (TECHNICAL_SPEC §7.1 unique key).
-	ErrDuplicate       = shared.NewError(shared.KindConflict, "bookmark_duplicate", "a bookmark with this name, frequency and modulation exists")
+	// ErrDuplicate is a second bookmark with the same name, frequency,
+	// modulation and scope (TECHNICAL_SPEC §7.1 unique key, per scope).
+	ErrDuplicate       = shared.NewError(shared.KindConflict, "bookmark_duplicate", "a bookmark with this name, frequency and modulation exists for this scope")
 	ErrVersionConflict = shared.NewError(shared.KindConflict, "version_conflict", "the bookmark was changed meanwhile")
 	// ErrDeviceNotFound is a device that does not exist, is disabled, or
 	// that the caller may not listen to: the three answer the same.
