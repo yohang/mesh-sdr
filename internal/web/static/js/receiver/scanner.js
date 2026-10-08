@@ -3,7 +3,9 @@
 // own demodulator (engine.tune and setMode); it never switches the preset
 // nor moves the centre. At each bookmark it waits for the demodulator to
 // settle, then listens: a bookmark is a hit when the smoothed signal level
-// (demod.meter) exceeds the squelch level minus 13 dB. On a hit it dwells
+// (demod.meter) exceeds the squelch level. The scanner needs the squelch on
+// (set by hand or by auto squelch): without it, it refuses to start, and it
+// stops when the squelch is switched off. On a hit it dwells
 // while the signal is present (plus a short hang time), then goes on.
 //
 // It stops on a manual tune (the tuned frequency is not the one it set),
@@ -11,8 +13,6 @@
 // another device, or a lost connection. State changes are announced with a
 // "change" event; "message" ({text}) carries what to tell the visitor.
 
-// A hit is a smoothed level above the squelch level minus this (BMK-006).
-const HIT_MARGIN_DB = 13;
 // Time for the demodulator to retune and the meter to follow (ms).
 const SETTLE_MS = 400;
 // Time listened to at each bookmark before moving on (ms).
@@ -30,9 +30,9 @@ const SMOOTHING = 0.35;
 export class Scanner extends EventTarget {
   /**
    * @param {ReturnType<typeof import("./engine.js").getEngine>} engine
-   * @param {{marks: () => Mark[], tune: (m: Mark) => void, squelch: () => number}} deps
+   * @param {{marks: () => Mark[], tune: (m: Mark) => void}} deps
    *   marks: the bookmarks in band, sorted; tune: tunes this visitor's
-   *   demodulator to a bookmark; squelch: the squelch level in dBFS
+   *   demodulator to a bookmark
    */
   constructor(engine, deps) {
     super();
@@ -65,6 +65,11 @@ export class Scanner extends EventTarget {
     return JSON.stringify([t?.node_id, t?.device_id, e.centerHz, e.device?.sample_rate, e.device?.active_preset?.id ?? ""]);
   }
 
+  /** @returns {boolean} whether the squelch is on: its level is the hit threshold */
+  squelched() {
+    return (this.engine.demod?.squelchDb ?? null) !== null;
+  }
+
   /** @returns {Mark[]} the scannable bookmarks in band */
   list() {
     return this.deps.marks().filter((m) => m.scannable);
@@ -75,6 +80,10 @@ export class Scanner extends EventTarget {
     if (this.running) return true;
     if (!this.engine.demod) {
       this.say("The scanner needs a running demodulator.");
+      return false;
+    }
+    if (!this.squelched()) {
+      this.say("Set the squelch to scan.");
       return false;
     }
     if (this.list().length === 0) {
@@ -150,6 +159,7 @@ export class Scanner extends EventTarget {
       this.check();
     } else if (what === "tune") {
       if (e.demod && e.tunedHz !== this.expectHz) this.stop("manual tune");
+      else if (!this.squelched()) this.stop("squelch off");
     } else if (what === "config") {
       if (this.bandKey() !== this.band) this.stop("the band changed");
     } else if (what === "state") {
@@ -161,7 +171,8 @@ export class Scanner extends EventTarget {
   // is present.
   check() {
     if (this.level === null || this.phase === "settle") return;
-    const threshold = this.deps.squelch() - HIT_MARGIN_DB;
+    const threshold = this.engine.demod?.squelchDb ?? null;
+    if (threshold === null) return;
     const above = this.level > threshold;
     if (this.phase === "listen" && above) {
       clearTimeout(this.timer);
