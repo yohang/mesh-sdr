@@ -7,10 +7,13 @@
 /files 200
 /policy 200
 /about 200
+/receiver/local/no-such-device?f=145500000&m=nfm 200
+/receiver/local/bad%20id 404
 /no-such-page 404
 /login 200
 /setup/not-a-valid-token 404
 / 200 signed-in
+/receiver/local/no-such-device 200 signed-in
 /files 200 signed-in
 /account/password 200 signed-in
 /admin 200 signed-in

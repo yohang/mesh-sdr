@@ -266,6 +266,39 @@ func TestMethods(t *testing.T) {
 	}
 }
 
+// TestReceiverDeepLink covers RX-028: a deep link renders the receiver page
+// (the island reads the device and the tuning from the URL), for unknown
+// devices too; malformed ids are a 404.
+func TestReceiverDeepLink(t *testing.T) {
+	h := router(nil)
+
+	for _, tt := range []struct {
+		path   string
+		status int
+	}{
+		{"/receiver/attic/hf-1?f=7074000&m=usb&sql=-90", http.StatusOK},
+		{"/receiver/local/no-such-device", http.StatusOK},
+		{"/receiver/attic/bad%20id", http.StatusNotFound},
+		{"/receiver/attic", http.StatusNotFound},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			res, body := do(t, h, http.MethodGet, tt.path, nil)
+			if res.StatusCode != tt.status {
+				t.Fatalf("status = %d, want %d", res.StatusCode, tt.status)
+			}
+
+			island := strings.Contains(body, "<msdr-receiver")
+			if island != (tt.status == http.StatusOK) {
+				t.Errorf("receiver island = %v", island)
+			}
+
+			if island && !strings.Contains(body, `data-section="receiver"`) {
+				t.Error("deep link is not in the Receiver section")
+			}
+		})
+	}
+}
+
 func TestErrorPages(t *testing.T) {
 	h := router(nil)
 

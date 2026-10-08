@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -105,6 +106,7 @@ func (m *Module) Routes(r chi.Router) {
 	}
 
 	get("/", m.receiver)
+	get(ReceiverLinkPattern, m.receiverLink)
 	get(SectionMap.Path(), m.placeholder(SectionMap, "The live map is not available yet."))
 	get(SectionDecodes.Path(), m.placeholder(SectionDecodes, "Decoded messages are not available yet."))
 	get(SectionFiles.Path(), m.placeholder(SectionFiles, "Received files are not available yet."))
@@ -170,6 +172,30 @@ func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
 	m.render.Page(w, r, http.StatusOK, page, receiverPage(sh.SiteName, st, desc, rx), nil)
 }
 
+// ReceiverLinkPattern is the deep link of a device (RX-028):
+// /receiver/{nodeId}/{deviceId}?f=<Hz>&m=<mod>&m2=<mod>&sql=<dB>. The
+// query is read by the island only.
+const ReceiverLinkPattern = "/receiver/{nodeId}/{deviceId}"
+
+// linkID is the §6.1 identifier charset, which node and device ids keep to.
+var linkID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// receiverLink serves a deep link: the same receiver page, whose island
+// selects the linked device for this visitor only and tunes its own
+// demodulator (it never switches the preset nor moves the centre). An
+// unknown or unavailable device is the island's "device unavailable"
+// state, so a link to a device the visitor may not list does not reveal
+// whether it exists; a malformed id is a 404.
+func (m *Module) receiverLink(w http.ResponseWriter, r *http.Request) {
+	if !linkID.MatchString(chi.URLParam(r, "nodeId")) || !linkID.MatchString(chi.URLParam(r, "deviceId")) {
+		m.render.NotFound(w, r)
+
+		return
+	}
+
+	m.receiver(w, r)
+}
+
 // placeholder serves the entry page of a section whose module does not
 // exist yet (Map, Decodes, Files): its heading and a short notice. The
 // section's module takes the route over when it lands.
@@ -204,7 +230,7 @@ func product() layout.Product {
 // aboutPage serves the About page: product, version, licence and the link
 // to the source code of this build (AGPL-3.0 section 13), public.
 func (m *Module) aboutPage(w http.ResponseWriter, r *http.Request) {
-	m.render.Page(w, r, http.StatusOK, layout.Page{Title: "About"}, aboutPage(product()), nil)
+	m.render.Page(w, r, http.StatusOK, layout.Page{Title: "About"}, aboutPage(product(), m.shell.Shell(r).HelpURL), nil)
 }
 
 // footerLinks are the information links of the footer and the user menu:
