@@ -62,11 +62,18 @@ type AdminDeps struct {
 	Schedules DeviceSchedules
 	// PresetName names a preset ("" when unknown); nil shows the id.
 	PresetName func(ctx context.Context, id shared.UUID) string
-	Operator   func(http.Handler) http.Handler // operator role (identity)
-	Admin      func(http.Handler) http.Handler // admin role and network (identity)
-	IsAdmin    func(r *http.Request) bool
-	Now        func() time.Time
-	Logger     *slog.Logger
+	// PresetBand describes a preset (name, centre, sample rate); nil shows
+	// no preset on Admin › Connections.
+	PresetBand func(ctx context.Context, id shared.UUID) (PresetBand, bool)
+	// MaskIPs reports privacy.mask_ips; nil masks.
+	MaskIPs func(ctx context.Context) bool
+	// Audit records the reveal of a masked address.
+	Audit    audit.Appender
+	Operator func(http.Handler) http.Handler // operator role (identity)
+	Admin    func(http.Handler) http.Handler // admin role and network (identity)
+	IsAdmin  func(r *http.Request) bool
+	Now      func() time.Time
+	Logger   *slog.Logger
 }
 
 // AdminModule serves the grid pages of the admin area: the read-only device
@@ -108,6 +115,7 @@ func (m *AdminModule) Routes(r chi.Router) {
 		r.Post("/admin/nodes/{id}/probe", m.probeNode)
 		r.Get("/admin/connections", m.connectionsPage)
 		r.Head("/admin/connections", m.connectionsPage)
+		r.Post("/admin/connections/{id}/reveal", m.revealIP)
 	})
 }
 

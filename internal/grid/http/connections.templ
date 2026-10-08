@@ -5,7 +5,7 @@ import "strconv"
 // connectionsPage is Admin › Connections (GRID-017): who is connected now.
 templ connectionsPage(v connectionsView) {
 	<h1 class="text-2xl font-semibold">Connections</h1>
-	<p class="text-fg-muted">Open connections of the presence registry, across every node: listeners of a receiver, and pages following the hub events.</p>
+	<p class="text-fg-muted">Open connections of the presence registry, across every node: receivers, map viewers and pages following the hub events. Client addresses may be masked; an admin can reveal one, which is logged in the audit log.</p>
 	@connectionsTable(v)
 }
 
@@ -19,7 +19,7 @@ templ connectionsTable(v connectionsView) {
 		hx-trigger="msdr:presence.count from:body delay:1s, msdr:resync from:body"
 		hx-swap="outerMorph"
 	>
-		<p>{ strconv.Itoa(v.Listeners) } listeners, { strconv.Itoa(v.Viewers) } pages.</p>
+		<p>{ strconv.Itoa(v.Listeners) } receivers, { strconv.Itoa(v.Viewers) } other clients (map, events).</p>
 		if len(v.Rows) > 0 {
 			<div class="overflow-x-auto">
 				<table class="w-full text-left">
@@ -30,6 +30,8 @@ templ connectionsTable(v connectionsView) {
 							<th scope="col" class="py-1 pr-4">Client</th>
 							<th scope="col" class="py-1 pr-4">Address</th>
 							<th scope="col" class="py-1 pr-4">Node / device</th>
+							<th scope="col" class="py-1 pr-4">Preset</th>
+							<th scope="col" class="py-1 pr-4">Band</th>
 							<th scope="col" class="py-1 pr-4">Since</th>
 							<th scope="col" class="py-1">Last seen</th>
 						</tr>
@@ -39,8 +41,17 @@ templ connectionsTable(v connectionsView) {
 							<tr class="border-b border-border">
 								<th scope="row" class="py-1 pr-4 font-medium">{ c.User }</th>
 								<td class="py-1 pr-4">{ c.Kind }</td>
-								<td class="py-1 pr-4 font-mono">{ c.IP }</td>
-								<td class="py-1 pr-4">{ c.Where }</td>
+								<td class="py-1 pr-4">
+									<span class="font-mono">{ c.IP }</span>
+									if c.Masked {
+										<form class="inline" method="post" action={ templ.SafeURL("/admin/connections/" + c.ID + "/reveal") } hx-post={ "/admin/connections/" + c.ID + "/reveal" } hx-target="#connections-table" hx-swap="outerMorph">
+											<button type="submit" class="ml-2 underline">Reveal<span class="sr-only"> the address of { c.User }</span></button>
+										</form>
+									}
+								</td>
+								<td class="py-1 pr-4">{ c.Device }</td>
+								<td class="py-1 pr-4">{ c.Preset }</td>
+								<td class="py-1 pr-4">{ c.Band }</td>
 								<td class="py-1 pr-4">{ utc(c.OpenedAt) }</td>
 								<td class="py-1">{ utc(c.LastSeen) }</td>
 							</tr>

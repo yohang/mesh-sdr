@@ -56,6 +56,8 @@ func (m *Pages) Routes(r chi.Router) {
 		r.Post("/admin/presets", m.create)
 		r.Post("/admin/presets/{id}", m.replace)
 		r.Post("/admin/presets/{id}/delete", m.delete)
+		r.Post("/admin/presets/{id}/clone", m.clone)
+		r.Post("/admin/presets/{id}/move", m.move)
 	})
 }
 
@@ -67,7 +69,11 @@ func noIndex(next http.Handler) http.Handler {
 }
 
 func (m *Pages) page(w http.ResponseWriter, r *http.Request, status int, title string, content templ.Component) {
-	m.d.Render.Page(w, r, status, layout.Page{Title: title, Section: layout.SectionAdmin}, layout.AdminPage("presets", content), nil)
+	m.pageWith(w, r, status, title, content, nil)
+}
+
+func (m *Pages) pageWith(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component) {
+	m.d.Render.Page(w, r, status, layout.Page{Title: title, Section: layout.SectionAdmin}, layout.AdminPage("presets", content), fragment)
 }
 
 // Notices shown after a redirect (?done=…).
@@ -75,6 +81,7 @@ var notices = map[string]string{
 	"created": "Preset created.",
 	"saved":   "Preset saved.",
 	"deleted": "Preset deleted.",
+	"cloned":  "Preset cloned: this is the copy.",
 }
 
 func (m *Pages) list(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +94,89 @@ func (m *Pages) list(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.page(w, r, http.StatusOK, "Presets", listPage(list, notices[r.URL.Query().Get("done")]))
+}
+
+func movePath(p *Preset) string { return "/admin/presets/" + p.ID().String() + "/move" }
+
+// clone stores a copy of a preset and opens it (ADM-019).
+func (m *Pages) clone(w http.ResponseWriter, r *http.Request) {
+	if !parseForm(w, r, m.d.Render) {
+		return
+	}
+
+	p, err := m.d.Service.Clone(r.Context(), chi.URLParam(r, "id"))
+
+	switch {
+	case err == nil:
+		redirect(w, r, "/admin/presets/"+p.ID().String()+"?done=cloned")
+	case errors.Is(err, ErrPresetNotFound):
+		m.d.Render.Error(w, r, http.StatusNotFound)
+	default:
+		m.d.Logger.ErrorContext(r.Context(), "clone preset", slog.String("preset_id", chi.URLParam(r, "id")), slog.Any("error", err))
+		m.d.Render.Error(w, r, http.StatusInternalServerError)
+	}
+}
+
+// move changes the position of a preset (ADM-021): direction=up|down, or
+// position=<1-based position> (drag and drop). It answers the list. It
+// never retunes a device.
+func (m *Pages) move(w http.ResponseWriter, r *http.Request) {
+	if !parseForm(w, r, m.d.Render) {
+		return
+	}
+
+	var (
+		moved bool
+		err   error
+		id    = chi.URLParam(r, "id")
+	)
+
+	switch dir, pos := r.PostForm.Get("direction"), r.PostForm.Get("position"); {
+	case dir == "up":
+		moved, err = m.d.Service.MoveBy(r.Context(), id, -1)
+	case dir == "down":
+		moved, err = m.d.Service.MoveBy(r.Context(), id, 1)
+	case pos != "":
+		n, perr := strconv.Atoi(pos)
+		if perr != nil || n < 1 {
+			m.d.Render.Error(w, r, http.StatusBadRequest)
+
+			return
+		}
+
+		moved, err = m.d.Service.MoveTo(r.Context(), id, n-1)
+	default:
+		m.d.Render.Error(w, r, http.StatusBadRequest)
+
+		return
+	}
+
+	switch {
+	case errors.Is(err, ErrPresetNotFound):
+		m.d.Render.Error(w, r, http.StatusNotFound)
+
+		return
+	case err != nil:
+		m.d.Logger.ErrorContext(r.Context(), "move preset", slog.String("preset_id", id), slog.Any("error", err))
+		m.d.Render.Error(w, r, http.StatusInternalServerError)
+
+		return
+	}
+
+	list, err := m.d.Service.List(r.Context())
+	if err != nil {
+		m.d.Logger.ErrorContext(r.Context(), "list presets", slog.Any("error", err))
+		m.d.Render.Error(w, r, http.StatusInternalServerError)
+
+		return
+	}
+
+	notice := ""
+	if moved {
+		notice = "Preset moved."
+	}
+
+	m.pageWith(w, r, http.StatusOK, "Presets", listPage(list, notice), presetsList(list, notice))
 }
 
 func (m *Pages) newPage(w http.ResponseWriter, r *http.Request) {

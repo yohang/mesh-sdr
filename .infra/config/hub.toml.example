@@ -152,7 +152,10 @@ trusted_proxies = []
 [settings.receiver]
 # name = "MeshSDR"                       # station name (top bar, titles)
 # location = "Lille, France"
+# altitude_m = 25                       # antenna altitude in metres (optional, published in the status)
 # gps = { lat = 50.63, lon = 3.06 }      # env: "50.63,3.06"
+# admin_email = "admin@example.org"      # contact e-mail
+# admin_email_public = false             # true: published in GET /api/v1/status
 # help_url = "https://example.org/help"
 # photo_title = "View from the roof"
 # photo_desc = "Markdown text"
@@ -162,6 +165,11 @@ trusted_proxies = []
 # This receiver is open to everyone. Be nice.
 # """
 # usage_policy_url = "/policy"           # footer link: a path or an http(s) URL
+
+[settings.privacy]
+# Mask client addresses in Admin > Connections (IPv4 /24, IPv6 /48). An
+# admin can reveal one address at a time; each reveal is audited.
+# mask_ips = true
 
 [settings.ui]
 # Theme mode: light | dark | auto (follows the visitor's prefers-color-scheme).

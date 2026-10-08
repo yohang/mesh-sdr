@@ -2,47 +2,81 @@ package presets
 
 import "strconv"
 
-// listPage is Admin › Presets: every preset by sort order, with its band.
+// listPage is Admin › Presets: every preset by position, with its band.
 templ listPage(list []*Preset, notice string) {
 	<h1 class="text-2xl font-semibold">Presets</h1>
 	<p class="text-fg-muted">A preset tunes a device for every listener: centre frequency, sample rate and the demodulator listeners start with. A device offers only the presets that fit its frequency range and sample rates.</p>
-	if notice != "" {
-		<p class="font-semibold text-success" role="status">{ notice }</p>
-	}
 	<p><a class="font-semibold" href="/admin/presets/new">New preset</a></p>
-	if len(list) == 0 {
-		<p>No presets yet.</p>
-	} else {
-		<div class="overflow-x-auto">
-			<table class="w-full text-left">
-				<caption class="sr-only">Presets</caption>
-				<thead>
-					<tr class="border-b border-border">
-						<th scope="col" class="py-1 pr-4">Preset</th>
-						<th scope="col" class="py-1 pr-4">Centre</th>
-						<th scope="col" class="py-1 pr-4">Sample rate</th>
-						<th scope="col" class="py-1 pr-4">Start</th>
-						<th scope="col" class="py-1">Actions</th>
-					</tr>
-				</thead>
-				<tbody>
-					for _, p := range list {
+	@presetsList(list, notice)
+}
+
+// presetsList is the live part of the page, also the htmx fragment answered
+// to a reorder. Reordering changes the display order only: it never changes
+// the active preset of a device.
+templ presetsList(list []*Preset, notice string) {
+	<div id="presets-list" class="flex flex-col gap-3">
+		if notice != "" {
+			<p class="font-semibold text-success" role="status">{ notice }</p>
+		}
+		if len(list) == 0 {
+			<p>No presets yet.</p>
+		} else {
+			<p class="text-fg-muted">The position sets the order of the receiver's preset list. Drag a row, or use the Move up and Move down buttons.</p>
+			<div class="overflow-x-auto">
+				<table class="w-full text-left">
+					<caption class="sr-only">Presets</caption>
+					<thead>
 						<tr class="border-b border-border">
-							<th scope="row" class="py-1 pr-4 font-medium">
-								<a href={ templ.URL("/admin/presets/" + p.ID().String()) }>{ p.Name() }</a>
-							</th>
-							<td class="py-1 pr-4">{ formatHz(p.CenterFreq()) }</td>
-							<td class="py-1 pr-4">{ strconv.FormatInt(p.SampRate(), 10) } S/s</td>
-							<td class="py-1 pr-4">{ formatHz(p.StartFreq()) } { p.StartMod() }</td>
-							<td class="py-1">
-								<a href={ templ.URL("/admin/presets/" + p.ID().String() + "/delete") }>Delete<span class="sr-only"> { p.Name() }</span></a>
-							</td>
+							<th scope="col" class="py-1 pr-4">Position</th>
+							<th scope="col" class="py-1 pr-4">Preset</th>
+							<th scope="col" class="py-1 pr-4">Centre</th>
+							<th scope="col" class="py-1 pr-4">Sample rate</th>
+							<th scope="col" class="py-1 pr-4">Start</th>
+							<th scope="col" class="py-1">Actions</th>
 						</tr>
-					}
-				</tbody>
-			</table>
-		</div>
-	}
+					</thead>
+					<tbody data-msdr-sortable>
+						for i, p := range list {
+							<tr id={ "preset-" + p.ID().String() } data-sort-id={ p.ID().String() } draggable="true" class="border-b border-border data-dragging:opacity-50 data-drop:border-t-2 data-drop:border-t-accent">
+								<td class="py-1 pr-4">
+									{ strconv.Itoa(i + 1) }
+									<form class="hidden" method="post" action={ templ.SafeURL(movePath(p)) } hx-post={ movePath(p) } hx-target="#presets-list" hx-swap="outerMorph" data-sort-drop>
+										<input type="hidden" name="position" value={ strconv.Itoa(i + 1) }/>
+									</form>
+								</td>
+								<th scope="row" class="py-1 pr-4 font-medium">
+									<a href={ templ.URL("/admin/presets/" + p.ID().String()) }>{ p.Name() }</a>
+								</th>
+								<td class="py-1 pr-4">{ formatHz(p.CenterFreq()) }</td>
+								<td class="py-1 pr-4">{ strconv.FormatInt(p.SampRate(), 10) } S/s</td>
+								<td class="py-1 pr-4">{ formatHz(p.StartFreq()) } { p.StartMod() }</td>
+								<td class="py-1">
+									<div class="flex flex-wrap items-center gap-3">
+										if i > 0 {
+											<form method="post" action={ templ.SafeURL(movePath(p)) } hx-post={ movePath(p) } hx-target="#presets-list" hx-swap="outerMorph">
+												<input type="hidden" name="direction" value="up"/>
+												<button id={ "up-" + p.ID().String() } type="submit" class="underline">Move up<span class="sr-only"> { p.Name() }</span></button>
+											</form>
+										}
+										if i < len(list)-1 {
+											<form method="post" action={ templ.SafeURL(movePath(p)) } hx-post={ movePath(p) } hx-target="#presets-list" hx-swap="outerMorph">
+												<input type="hidden" name="direction" value="down"/>
+												<button id={ "down-" + p.ID().String() } type="submit" class="underline">Move down<span class="sr-only"> { p.Name() }</span></button>
+											</form>
+										}
+										<form method="post" action={ templ.SafeURL("/admin/presets/" + p.ID().String() + "/clone") }>
+											<button type="submit" class="underline">Clone<span class="sr-only"> { p.Name() }</span></button>
+										</form>
+										<a href={ templ.URL("/admin/presets/" + p.ID().String() + "/delete") }>Delete<span class="sr-only"> { p.Name() }</span></a>
+									</div>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</div>
 }
 
 // problem is one entry of the error summary of the form.

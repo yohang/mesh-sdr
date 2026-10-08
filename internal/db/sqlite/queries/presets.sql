@@ -26,5 +26,8 @@ UPDATE presets SET
     version = sqlc.arg(version)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
+-- name: SetPresetSortOrder :execrows
+UPDATE presets SET sort_order = ? WHERE id = ?;
+
 -- name: DeletePreset :execrows
 DELETE FROM presets WHERE id = ?;

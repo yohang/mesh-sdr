@@ -133,6 +133,21 @@ func (r *Presets) Update(ctx context.Context, p *Preset, expectedVersion int) er
 	return nil
 }
 
+// SetSortOrder moves a preset to a display position without touching its
+// definition, its version or its update time (a reorder is not an edit).
+func (r *Presets) SetSortOrder(ctx context.Context, id shared.UUID, order int) error {
+	n, err := sqlc.New(r.db.Writer(ctx)).SetPresetSortOrder(ctx, sqlc.SetPresetSortOrderParams{SortOrder: int64(order), ID: id.Bytes()})
+	if err != nil {
+		return writeError(err, "reorder", id)
+	}
+
+	if n == 0 {
+		return ErrPresetNotFound
+	}
+
+	return nil
+}
+
 // Delete implements Repository.
 func (r *Presets) Delete(ctx context.Context, id shared.UUID) error {
 	n, err := sqlc.New(r.db.Writer(ctx)).DeletePreset(ctx, id.Bytes())

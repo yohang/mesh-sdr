@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,8 @@ const (
 	ActionCreate = "preset.create"
 	ActionUpdate = "preset.update"
 	ActionDelete = "preset.delete"
+	ActionClone  = "preset.clone"
+	ActionMove   = "preset.move"
 )
 
 // Usage lists the schedules that reference a preset (ADM-020).
@@ -132,6 +135,186 @@ func (s *Service) Create(ctx context.Context, d Draft) (*Preset, error) {
 	s.changed(ctx)
 
 	return p, nil
+}
+
+// cloneSuffix starts the suffix of the name of a cloned preset.
+const cloneSuffix = " (copy"
+
+// cloneName returns the first free "<name> (copy)", "<name> (copy 2)"…
+// within MaxNameLength characters.
+func cloneName(name string, taken map[string]bool) string {
+	for n := 1; ; n++ {
+		suffix := cloneSuffix + ")"
+		if n > 1 {
+			suffix = cloneSuffix + " " + strconv.Itoa(n) + ")"
+		}
+
+		base := []rune(name)
+		if room := MaxNameLength - len([]rune(suffix)); len(base) > room {
+			base = []rune(strings.TrimSpace(string(base[:room])))
+		}
+
+		if c := string(base) + suffix; !taken[c] || n > 10000 {
+			return c
+		}
+	}
+}
+
+// Clone stores a copy of a preset right after it in the list: a new id, every
+// field copied, the name suffixed " (copy)" (" (copy 2)"… when taken) and a
+// slug derived from it (made unique).
+func (s *Service) Clone(ctx context.Context, id string) (*Preset, error) {
+	pid, err := ParseID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	now := s.d.Now()
+
+	newID, err := s.d.IDs.New(now)
+	if err != nil {
+		return nil, fmt.Errorf("preset id: %w", err)
+	}
+
+	var p *Preset
+
+	err = s.d.Tx.WithinTx(ctx, func(ctx context.Context) error {
+		src, err := s.d.Repo.Get(ctx, pid)
+		if err != nil {
+			return err
+		}
+
+		all, err := s.d.Repo.List(ctx)
+		if err != nil {
+			return err
+		}
+
+		taken := make(map[string]bool, len(all))
+		for _, o := range all {
+			taken[o.Name()] = true
+		}
+
+		sn := src.Snapshot()
+
+		spec, err := NewSpec(Draft{
+			Name: cloneName(sn.Name, taken), Description: sn.Description, Tags: sn.Tags, CenterFreq: sn.CenterFreq,
+			SampRate: sn.SampRate, StartFreq: &sn.StartFreq, StartMod: sn.StartMod, TuningStep: &sn.TuningStep,
+			InitialSquelchLevel: sn.Squelch, InitialNRLevel: sn.NR, WaterfallLevels: sn.Waterfall,
+		})
+		if err != nil {
+			return err
+		}
+
+		if spec, err = s.uniqueSlug(ctx, spec, shared.UUID{}); err != nil {
+			return err
+		}
+
+		// The copy goes right after its source: the presets that follow
+		// shift down by one.
+		at := slices.IndexFunc(all, func(o *Preset) bool { return o.ID() == pid }) + 1
+
+		if p, err = NewPreset(newID, spec, at, now); err != nil {
+			return err
+		}
+
+		if err := s.d.Repo.Create(ctx, p); err != nil {
+			return err
+		}
+
+		for i, o := range slices.Insert(slices.Clone(all), at, p) {
+			if o.ID() == newID || o.SortOrder() == i {
+				continue
+			}
+
+			if err := s.d.Repo.SetSortOrder(ctx, o.ID(), i); err != nil {
+				return err
+			}
+		}
+
+		after := auditFields(p)
+		after["cloned_from"] = pid.String()
+
+		return s.d.Audit.Append(ctx, audit.Record{Action: ActionClone, TargetType: "preset", TargetID: newID.String(), After: after})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	s.changed(ctx)
+
+	return p, nil
+}
+
+// MoveBy moves a preset by delta positions (-1 up, +1 down), within the
+// list. It reports whether the order changed. Like MoveTo it only renumbers
+// the display positions: no preset is edited, no device is retuned, and the
+// desired state of the nodes is not pushed, since the order is read when the
+// presets are listed.
+func (s *Service) MoveBy(ctx context.Context, id string, delta int) (bool, error) {
+	return s.move(ctx, id, func(from, _ int) int { return from + delta })
+}
+
+// MoveTo moves a preset to an absolute 0-based position (clamped to the
+// list), see MoveBy.
+func (s *Service) MoveTo(ctx context.Context, id string, position int) (bool, error) {
+	return s.move(ctx, id, func(int, int) int { return position })
+}
+
+func (s *Service) move(ctx context.Context, id string, to func(from, count int) int) (bool, error) {
+	pid, err := ParseID(id)
+	if err != nil {
+		return false, err
+	}
+
+	moved := false
+
+	err = s.d.Tx.WithinTx(ctx, func(ctx context.Context) error {
+		moved = false
+
+		list, err := s.d.Repo.List(ctx)
+		if err != nil {
+			return err
+		}
+
+		from := slices.IndexFunc(list, func(p *Preset) bool { return p.ID() == pid })
+		if from < 0 {
+			return ErrPresetNotFound
+		}
+
+		dest := max(0, min(to(from, len(list)), len(list)-1))
+
+		ordered := slices.Clone(list)
+		p := ordered[from]
+		ordered = slices.Delete(ordered, from, from+1)
+		ordered = slices.Insert(ordered, dest, p)
+
+		changed := 0
+
+		for i, o := range ordered {
+			if o.SortOrder() == i {
+				continue
+			}
+
+			if err := s.d.Repo.SetSortOrder(ctx, o.ID(), i); err != nil {
+				return err
+			}
+
+			changed++
+		}
+
+		if changed == 0 {
+			return nil
+		}
+
+		moved = true
+
+		return s.d.Audit.Append(ctx, audit.Record{
+			Action: ActionMove, TargetType: "preset", TargetID: pid.String(),
+			Before: map[string]string{"position": strconv.Itoa(from + 1)}, After: map[string]string{"position": strconv.Itoa(dest + 1)},
+		})
+	})
+
+	return moved, err
 }
 
 // uniqueSlug checks the slug of spec, or finds a free one when it was

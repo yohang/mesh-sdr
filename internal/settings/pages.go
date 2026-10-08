@@ -23,9 +23,9 @@ var formPages = []formPage{
 		Intro: "Station information shown to visitors (ADM-003).",
 		Forms: []sectionSpec{
 			{ID: "station", Title: "Station", Keys: []string{
-				"receiver.name", "receiver.location", "receiver.gps",
+				"receiver.name", "receiver.location", "receiver.gps", "receiver.altitude_m",
 			}},
-			{ID: "contact", Title: "Help", Keys: []string{"receiver.help_url"}},
+			{ID: "contact", Title: "Contact and help", Keys: []string{"receiver.admin_email", "receiver.admin_email_public", "receiver.help_url"}},
 			{ID: "panorama", Title: "Panorama text", Keys: []string{"receiver.photo_title", "receiver.photo_desc"}},
 			{ID: "policy", Title: "Usage policy", Keys: []string{"receiver.usage_policy_text", "receiver.usage_policy_url"}},
 		},
@@ -35,6 +35,7 @@ var formPages = []formPage{
 		Intro: "Who may listen, and how sign-in is protected (ADM-005).",
 		Forms: []sectionSpec{
 			{ID: "listening", Title: "Listening", Keys: []string{"listen_policy"}},
+			{ID: "privacy", Title: "Privacy", Keys: []string{"privacy.mask_ips"}},
 			{ID: "sessions", Title: "Sessions", Description: "New lifetimes apply to sessions opened from now on; activity extends open sessions with the new idle timeout.",
 				Keys: []string{"session.idle_timeout", "session.absolute_timeout", "session.remember_me_timeout"}},
 			{ID: "passwords", Title: "Passwords", Keys: []string{"auth.password_min_length"}},
