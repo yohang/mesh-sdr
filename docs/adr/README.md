@@ -30,3 +30,4 @@ ADRs are written with Status `Proposed` (spikes) and switch to `Accepted` once t
 | [0024](0024-scope-trim.md) | Backlog scope trim for a hobbyist product | Accepted |
 | [0025](0025-pragmatic-ddd.md) | Pragmatic DDD | Accepted |
 | [0026](0026-m1a-scope.md) | M1a scope (KISS) | Accepted |
+| [0027](0027-m1b-scope.md) | M1b scope (KISS) | Proposed |
