@@ -367,6 +367,11 @@ class MapIsland extends HTMLElement {
       maxZoom: finite(l.max_zoom) ? l.max_zoom : 18,
       attribution: "",
       detectRetina: false,
+      // The page's Referrer-Policy (same-origin) sends no Referer to the
+      // tile servers, and the OSM tile usage policy
+      // (https://operations.osmfoundation.org/policies/tiles/) requires a
+      // valid one: tile images send the hub's origin only, nothing else.
+      referrerPolicy: "strict-origin",
     }).addTo(this.map);
     this.tiles.bringToBack();
     if (this.credit) this.credit.textContent = String(l.attribution ?? "");
