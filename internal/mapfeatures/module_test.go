@@ -169,6 +169,46 @@ func TestTrackBounded(t *testing.T) {
 	}
 }
 
+// A feature carries nothing another device reported: a station heard by a
+// second device leaves the map of the first device's viewers and starts a
+// new track, and a call line joins only the locators of its own device.
+func TestFeaturesStayPerDevice(t *testing.T) {
+	e := newEnv(t)
+
+	other := func(d Decode) Decode {
+		d.DeviceID = "hf"
+
+		return d
+	}
+
+	e.ingest(t, aprsAt(t0, "F4ABC-9", 50, 3))
+	e.ingest(t, other(aprsAt(t0.Add(time.Minute), "F4ABC-9", 50.1, 3)))
+
+	f, _ := e.get(t, "aprs:F4ABC-9")
+	if f.DeviceID != "hf" || len(f.Geometry.Track) != 0 {
+		t.Errorf("feature %+v", f)
+	}
+
+	if got := describe(e.take()); !slices.Equal(got, []string{"upsert aprs:F4ABC-9", "remove aprs:F4ABC-9 deleted vhf", "upsert aprs:F4ABC-9"}) {
+		t.Errorf("published %v", got)
+	}
+
+	wsjt := func(payload string) Decode {
+		d := dec(schemaWSJT, "ft8", payload)
+		d.At = t0.Add(2 * time.Minute)
+
+		return d
+	}
+
+	e.ingest(t, other(wsjt(`{"msg":"CQ DL1ABC JO62","callsign":"DL1ABC","locator":"JO62"}`)),
+		wsjt(`{"msg":"CQ K1ABC FN42","callsign":"K1ABC","locator":"FN42"}`),
+		wsjt(`{"msg":"DL1ABC K1ABC RR73","callsign":"K1ABC","callee":"DL1ABC"}`))
+
+	if _, ok := e.get(t, "call:DL1ABC>K1ABC"); ok {
+		t.Error("call line joins a locator of another device")
+	}
+}
+
 // MAP-013: indirect reports are dropped when map.ignore_indirect_reports is
 // set; with map.prefer_recent_reports, a report older than the stored one
 // is dropped, otherwise the last one received wins. A report already

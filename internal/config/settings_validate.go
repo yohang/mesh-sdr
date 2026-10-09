@@ -111,10 +111,6 @@ func linkTemplate(v any) error {
 	return nil
 }
 
-// ValidLinkTemplate reports whether s is a valid, non-empty lookup link
-// template.
-func ValidLinkTemplate(s string) bool { return s != "" && linkTemplate(s) == nil }
-
 // loadSettingsIndex builds the index from the generated hub schema, so that
 // validation reads exactly the published schema.
 var loadSettingsIndex = sync.OnceValues(func() (*settingsIndex, error) {
