@@ -3,7 +3,11 @@ package decoder
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/cmplx"
+	"math/rand/v2"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -105,5 +109,143 @@ func TestAISArgs(t *testing.T) {
 
 	if recs := newAISParser(sessionConfig{})(ax25("APDW17", "AIS", nil, direwolfAIS), time.Now()); len(recs) != 1 {
 		t.Fatalf("records %+v", recs)
+	}
+}
+
+// aisBurst returns the channel bits (NRZI, ±1) of an AIS burst: training
+// sequence, flag, the message bytes (MSB first in the message, each byte
+// sent LSB first) and their FCS, bit-stuffed, flag.
+func aisBurst(msg []byte) []float64 {
+	crc := uint16(0xffff)
+
+	for _, d := range msg {
+		crc ^= uint16(d)
+		for range 8 {
+			if crc&1 != 0 {
+				crc = crc>>1 ^ 0x8408
+			} else {
+				crc >>= 1
+			}
+		}
+	}
+
+	crc = ^crc
+	data := append(slices.Clone(msg), byte(crc), byte(crc>>8))
+	flag := []int{0, 1, 1, 1, 1, 1, 1, 0}
+
+	var raw []int
+	for i := range 24 {
+		raw = append(raw, i%2)
+	}
+
+	raw = append(raw, flag...)
+	ones := 0
+
+	for _, b := range data {
+		for i := range 8 {
+			v := int(b >> i & 1)
+			raw = append(raw, v)
+
+			if v == 0 {
+				ones = 0
+
+				continue
+			}
+
+			if ones++; ones == 5 {
+				raw, ones = append(raw, 0), 0
+			}
+		}
+	}
+
+	raw = append(raw, flag...)
+	raw = append(raw, 0, 0, 0, 0, 0, 0, 0, 0)
+
+	out := make([]float64, len(raw))
+	level := 1.0
+
+	for i, v := range raw {
+		if v == 0 {
+			level = -level
+		}
+
+		out[i] = level
+	}
+
+	return out
+}
+
+// gmsk is the Gaussian filtered (BT 0.4) level of 9600 Bd bits at t.
+func gmsk(bits []float64, t float64) float64 {
+	const symbol = 1.0 / 9600
+
+	c := math.Pi * 0.4 / symbol * math.Sqrt(2/math.Ln2)
+	k0 := int(t / symbol)
+	v := 0.0
+
+	for k := max(k0-4, 0); k <= min(k0+4, len(bits)-1); k++ {
+		tc := t - (float64(k)+0.5)*symbol
+		v += bits[k] * 0.5 * (math.Erf(c*(tc+symbol/2)) - math.Erf(c*(tc-symbol/2)))
+	}
+
+	return v
+}
+
+// aisIQ returns the wide IQ at 48 kHz of three AIS bursts of the message
+// of direwolfAIS (FM, ±2.4 kHz deviation) 0.2 s apart, with noise.
+func aisIQ(t *testing.T) []complex64 {
+	t.Helper()
+
+	payload := "13HOI:001swcL5@KcnL9s7tt0000"
+
+	b, err := unarmor(payload, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg := make([]byte, len(b)/8)
+	for i, v := range b {
+		msg[i/8] |= v << (7 - i%8)
+	}
+
+	const rate = 48000.0
+
+	bits := aisBurst(msg)
+	n := int(float64(len(bits)) / 9600 * rate)
+	r := rand.New(rand.NewPCG(1, 2))
+
+	var (
+		iq    []complex64
+		phase float64
+	)
+
+	for range 3 {
+		for i := range n + int(rate/5) {
+			if i < n {
+				phase += 2 * math.Pi * 2400 * gmsk(bits, float64(i)/rate) / rate
+			}
+
+			iq = append(iq, complex64(cmplx.Rect(0.3, phase)+complex(r.NormFloat64()*0.01, r.NormFloat64()*0.01)))
+		}
+	}
+
+	return iq
+}
+
+// AIS bursts through the FM discriminator of the wide IQ and direwolf -B
+// AIS, parsed (MAR-001).
+func TestAISDecodesBursts(t *testing.T) {
+	recs, _, _ := fixtureRun{mode: "ais", iq: aisIQ(t), until: countAtLeast(3), speed: 2}.run(t, "direwolf")
+
+	if len(recs) < 3 {
+		t.Fatalf("records = %+v", recs)
+	}
+
+	for _, r := range recs {
+		var p AISRecord
+		if err := json.Unmarshal(r.Payload, &p); err != nil || r.Schema != AISSchema || p.MMSI != "227006760" ||
+			p.NMEA != "!AIVDM,1,1,,A,13HOI:001swcL5@KcnL9s7tt0000,0*48" {
+			t.Fatalf("record %q %s: %v", r.Text, r.Payload, err)
+		}
 	}
 }

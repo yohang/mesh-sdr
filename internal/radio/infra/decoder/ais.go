@@ -11,8 +11,9 @@ import (
 	"github.com/yohang/mesh-sdr/internal/radio/app"
 )
 
-// The AIS parser (MAR-001): direwolf -B AIS demodulates the 9600 Bd GMSK
-// bursts and hands each one over KISS as a UI frame AIS>APDW17 whose
+// The AIS decoder (MAR-001): the session FM-demodulates a 48 kHz wide IQ
+// channel (iqFMS16) and direwolf -B AIS demodulates the 9600 Bd GMSK
+// bursts of that flat audio; it hands each one over KISS as a UI frame AIS>APDW17 whose
 // information field is "{DA" (user-defined data, AIS) followed by one
 // !AIVDM sentence carrying the whole burst (radio channel always "A").
 // The sentence is decoded (ITU-R M.1371): the MMSI and its country, the
