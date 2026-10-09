@@ -6,31 +6,35 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 //go:generate go tool templ generate
 
+// SitePath is the admin Site page that shows the images section.
+const SitePath = "/admin/site"
+
 // Module serves the images section actions of the admin Site page.
 type Module struct {
 	branding *Branding
+	render   *render.Renderer
 	guard    func(http.Handler) http.Handler
 	user     func(ctx context.Context) shared.UUID
-	errorPg  func(w http.ResponseWriter, r *http.Request, status int)
 	logger   *slog.Logger
 }
 
 // New returns the module. guard checks the admin role and network; user
-// returns the signed-in user of a request; errorPage writes the shell error
-// page.
-func New(branding *Branding, guard func(http.Handler) http.Handler, user func(ctx context.Context) shared.UUID,
-	errorPage func(w http.ResponseWriter, r *http.Request, status int), logger *slog.Logger,
+// returns the signed-in user of a request.
+func New(branding *Branding, rd *render.Renderer, guard func(http.Handler) http.Handler, user func(ctx context.Context) shared.UUID,
+	logger *slog.Logger,
 ) *Module {
-	return &Module{branding: branding, guard: guard, user: user, errorPg: errorPage, logger: logger}
+	return &Module{branding: branding, render: rd, guard: guard, user: user, logger: logger}
 }
 
 // Middlewares implements internal/http.Module.
@@ -38,13 +42,43 @@ func (m *Module) Middlewares() []func(http.Handler) http.Handler { return nil }
 
 // Routes implements internal/http.Module.
 func (m *Module) Routes(r chi.Router) {
-	r.With(m.guard).Post("/admin/site/images", m.upload)
-	r.With(m.guard).Post("/admin/site/images/remove", m.remove)
+	r.With(m.guard).Post(SitePath+"/images", m.upload)
+	r.With(m.guard).Post(SitePath+"/images/remove", m.remove)
 }
 
-// Section implements the Site page's images section.
+// Outcomes of an image action, shown on the Site page after the redirect
+// of a form sent without JavaScript (?done=…&slot=…).
+const (
+	doneUpdated   = "image_updated"
+	doneRemoved   = "image_removed"
+	doneUnchanged = "image_unchanged"
+)
+
+// notice is the text of an outcome.
+func notice(done string, slot Slot) string {
+	switch done {
+	case doneUpdated:
+		return "The " + slot.Name() + " was updated."
+	case doneRemoved:
+		return "The " + slot.Name() + " was removed: the default applies."
+	case doneUnchanged:
+		return "The " + slot.Name() + " was already the default."
+	default:
+		return ""
+	}
+}
+
+// Section implements the Site page's images section, with the outcome of
+// the action that redirected to it.
 func (m *Module) Section(r *http.Request) templ.Component {
-	return imagesSection(m.views(r.Context()), "", "")
+	q := r.URL.Query()
+
+	text := ""
+	if slot, err := ParseSlot(q.Get("slot")); err == nil {
+		text = notice(q.Get("done"), slot)
+	}
+
+	return imagesSection(m.views(r.Context()), text, "")
 }
 
 type slotView struct {
@@ -84,22 +118,23 @@ func (m *Module) views(ctx context.Context) []slotView {
 	return out
 }
 
-// respond returns the section (htmx) or goes back to the Site page.
-func (m *Module) respond(w http.ResponseWriter, r *http.Request, status int, notice, failure string) {
-	if r.Header.Get("HX-Request") != "true" {
-		http.Redirect(w, r, "/admin/site", http.StatusSeeOther)
+// done answers a successful action: the section (htmx), or the Site page
+// showing the outcome.
+func (m *Module) done(w http.ResponseWriter, r *http.Request, done string, slot Slot) {
+	if !render.WantsFragment(r) {
+		render.Redirect(w, r, SitePath+"?"+url.Values{"done": {done}, "slot": {slot.Name()}}.Encode()+"#receiver-images")
 
 		return
 	}
 
-	w.Header().Add("Vary", "HX-Request")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
+	m.respond(w, r, http.StatusOK, notice(done, slot), "")
+}
 
-	if err := imagesSection(m.views(r.Context()), notice, failure).Render(r.Context(), w); err != nil {
-		m.logger.ErrorContext(r.Context(), "render images section", slog.Any("error", err))
-	}
+// respond answers the section with an outcome: alone for htmx, in an
+// admin page otherwise.
+func (m *Module) respond(w http.ResponseWriter, r *http.Request, status int, text, failure string) {
+	section := imagesSection(m.views(r.Context()), text, failure)
+	m.render.AdminPage(w, r, status, "Site", "site", imagesPage(section), section)
 }
 
 func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +148,7 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 
 	mr, err := r.MultipartReader()
 	if err != nil {
-		m.errorPg(w, r, http.StatusBadRequest)
+		m.render.Error(w, r, http.StatusBadRequest)
 
 		return
 	}
@@ -126,7 +161,7 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 
 		return
 	case errors.Is(err, ErrUnknownImageSlot):
-		m.errorPg(w, r, http.StatusNotFound)
+		m.render.Error(w, r, http.StatusNotFound)
 
 		return
 	case err != nil:
@@ -138,7 +173,7 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 	if _, err := m.branding.Upload(r.Context(), m.user(r.Context()), slot, data); err != nil {
 		var de *shared.Error
 		if errors.As(err, &de) && de.Kind() == shared.KindInvalid {
-			m.respond(w, r, http.StatusUnprocessableEntity, "", de.Message()+".")
+			m.respond(w, r, http.StatusUnprocessableEntity, "", render.Sentence(de.Message()))
 
 			return
 		}
@@ -149,20 +184,17 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.respond(w, r, http.StatusOK, "The "+slot.Name()+" was updated.", "")
+	m.done(w, r, doneUpdated, slot)
 }
 
 func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
-	if err := r.ParseForm(); err != nil {
-		m.errorPg(w, r, http.StatusBadRequest)
-
+	if !m.render.ParseForm(w, r, 4<<10) {
 		return
 	}
 
 	slot, err := ParseSlot(r.PostForm.Get("slot"))
 	if err != nil {
-		m.errorPg(w, r, http.StatusNotFound)
+		m.render.Error(w, r, http.StatusNotFound)
 
 		return
 	}
@@ -175,10 +207,9 @@ func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	notice := "The " + slot.Name() + " was already the default."
 	if removed {
-		notice = "The " + slot.Name() + " was removed: the default applies."
+		m.done(w, r, doneRemoved, slot)
+	} else {
+		m.done(w, r, doneUnchanged, slot)
 	}
-
-	m.respond(w, r, http.StatusOK, notice, "")
 }

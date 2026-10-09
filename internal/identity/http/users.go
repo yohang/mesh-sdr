@@ -11,6 +11,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // UsersPath is Admin › Users (ACC-008).
@@ -25,7 +27,7 @@ const (
 type usersView struct {
 	Query  usersQuery
 	Users  []*domain.User
-	NextQS string
+	Paging layout.Paging
 }
 
 // usersQuery is the filter form as typed.
@@ -34,11 +36,29 @@ type usersQuery struct {
 	Role  string
 	State string
 	Never bool
-	After string
 }
 
-func (q usersQuery) domain() domain.UserQuery {
-	out := domain.UserQuery{Text: strings.TrimSpace(q.Text), NeverLoggedIn: q.Never, After: q.After, Limit: usersPageSize}
+// values returns the filters as a URL query.
+func (q usersQuery) values() url.Values {
+	v := url.Values{}
+
+	for k, s := range map[string]string{"q": q.Text, "role": q.Role, "state": q.State} {
+		if s != "" {
+			v.Set(k, s)
+		}
+	}
+
+	if q.Never {
+		v.Set("never", "1")
+	}
+
+	return v
+}
+
+func (q usersQuery) domain(page int) domain.UserQuery {
+	out := domain.UserQuery{
+		Text: strings.TrimSpace(q.Text), NeverLoggedIn: q.Never, Offset: (page - 1) * usersPageSize, Limit: usersPageSize,
+	}
 
 	if r, err := domain.ParseRole(q.Role); err == nil {
 		out.Role = r
@@ -57,28 +77,21 @@ func (q usersQuery) domain() domain.UserQuery {
 }
 
 func (m *Module) usersPage(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	v := r.URL.Query()
-	q := usersQuery{Text: v.Get("q"), Role: v.Get("role"), State: v.Get("state"), Never: v.Get("never") == "1", After: v.Get("after")}
+	q := usersQuery{Text: v.Get("q"), Role: v.Get("role"), State: v.Get("state"), Never: v.Get("never") == "1"}
+	page := render.PageOf(v)
 
-	users, err := m.accounts.Search(r.Context(), q.domain())
+	users, err := m.accounts.Search(r.Context(), q.domain(page))
 	if err != nil {
 		m.pageFailed(w, r, err)
 
 		return
 	}
 
-	view := usersView{Query: q, Users: users}
-
-	if len(users) == usersPageSize {
-		next := url.Values{"q": {q.Text}, "role": {q.Role}, "state": {q.State}, "after": {users[len(users)-1].Username().Key()}}
-		if q.Never {
-			next.Set("never", "1")
-		}
-
-		view.NextQS = next.Encode()
-	}
+	view := usersView{Query: q, Users: users, Paging: layout.Paging{
+		Label: "Pages of users", Prev: "Previous users", Next: "Next users", Path: UsersPath, Query: q.values(),
+		Page: page, More: len(users) == usersPageSize,
+	}}
 
 	m.pages.AdminPage(w, r, http.StatusOK, pageTitleUsers, "users", usersPage(view), nil)
 }
@@ -152,8 +165,6 @@ func (m *Module) userView(w http.ResponseWriter, r *http.Request) (userView, boo
 }
 
 func (m *Module) userPage(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	if v, ok := m.userView(w, r); ok {
 		m.pages.AdminPage(w, r, http.StatusOK, v.User.Username().String(), "users", userPage(v), nil)
 	}
@@ -162,9 +173,7 @@ func (m *Module) userPage(w http.ResponseWriter, r *http.Request) {
 // userAction runs an admin action on the user of the path, then shows its
 // page again with the outcome.
 func (m *Module) userAction(w http.ResponseWriter, r *http.Request, run func(id domain.UserID, v *userView) (string, error)) {
-	noIndex(w)
-
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 

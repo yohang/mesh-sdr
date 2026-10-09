@@ -13,12 +13,12 @@ import (
 	"net/netip"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/yohang/mesh-sdr/internal/config"
@@ -31,6 +31,8 @@ import (
 	identityhttp "github.com/yohang/mesh-sdr/internal/identity/http"
 	"github.com/yohang/mesh-sdr/internal/mail"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 const (
@@ -38,29 +40,13 @@ const (
 	password = "correct horse battery"
 )
 
-// pages renders the content alone, or the fragment for htmx requests.
-type pages struct{}
+// shell is the stub shell of the test renderer.
+type shell struct{}
 
-func (p pages) AdminPage(w http.ResponseWriter, r *http.Request, status int, title, _ string, content, fragment templ.Component) {
-	p.Page(w, r, status, title, content, fragment)
-}
+func (shell) Shell(*http.Request) layout.Shell { return layout.Shell{SiteName: "Test"} }
 
-func (pages) Page(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component) {
-	c := content
-	if fragment != nil && r.Header.Get("HX-Request") == "true" {
-		c = fragment
-	} else {
-		w.Header().Set("X-Title", title)
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	_ = c.Render(r.Context(), w)
-}
-
-func (pages) Error(w http.ResponseWriter, _ *http.Request, status int) {
-	http.Error(w, http.StatusText(status), status)
-}
+// pages renders the pages in a stub shell.
+func pages() *render.Renderer { return render.New(shell{}, nil, slog.New(slog.DiscardHandler)) }
 
 // adminPage is a test module with an admin-only HTML route.
 type adminPage struct{ m *identityhttp.Module }
@@ -120,7 +106,7 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 		Revocations: revoked,
 	}
 
-	m, err := identity.Wire(ctx, d, pages{})
+	m, err := identity.Wire(ctx, d, pages())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,8 +417,11 @@ func TestLoginErrors(t *testing.T) {
 	c := h.client()
 	c.session()
 
+	// The pages differ by their CSP nonce only.
+	nonce := regexp.MustCompile(`nonce="[^"]*"`)
+
 	res := c.login("alice", "wrong password!", false)
-	wrong := body(t, res)
+	wrong := nonce.ReplaceAllString(body(t, res), "")
 
 	if res.StatusCode != http.StatusUnauthorized || !strings.Contains(wrong, "Incorrect username, e-mail or password.") {
 		t.Errorf("wrong password = %d %s", res.StatusCode, wrong)
@@ -440,7 +429,7 @@ func TestLoginErrors(t *testing.T) {
 
 	// An unknown account gets the same answer (no user enumeration).
 	if res := c.login("nobody", password, false); res.StatusCode != http.StatusUnauthorized ||
-		strings.ReplaceAll(body(t, res), "nobody", "alice") != wrong {
+		nonce.ReplaceAllString(strings.ReplaceAll(body(t, res), "nobody", "alice"), "") != wrong {
 		t.Errorf("unknown account = %d", res.StatusCode)
 	}
 
@@ -727,7 +716,7 @@ func TestAdminRequiresRoleAndNetwork(t *testing.T) {
 }
 
 func TestAuthorize(t *testing.T) {
-	m, err := identityhttp.New(identityhttp.Services{}, pages{}, identityhttp.Config{
+	m, err := identityhttp.New(identityhttp.Services{}, pages(), identityhttp.Config{
 		HubURL: hubURL, AdminNetworks: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 	}, slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -744,13 +733,13 @@ func TestAuthorize(t *testing.T) {
 		t.Errorf("listener operation, anonymous caller: %v", err)
 	}
 
-	if _, err := identityhttp.New(identityhttp.Services{}, pages{}, identityhttp.Config{HubURL: "not a url"}, slog.New(slog.DiscardHandler)); err == nil {
+	if _, err := identityhttp.New(identityhttp.Services{}, pages(), identityhttp.Config{HubURL: "not a url"}, slog.New(slog.DiscardHandler)); err == nil {
 		t.Error("invalid hub.url accepted")
 	}
 
 	var logs bytes.Buffer
 
-	if _, err := identityhttp.New(identityhttp.Services{}, pages{}, identityhttp.Config{HubURL: "http://lan.example"}, slog.New(slog.NewTextHandler(&logs, nil))); err != nil {
+	if _, err := identityhttp.New(identityhttp.Services{}, pages(), identityhttp.Config{HubURL: "http://lan.example"}, slog.New(slog.NewTextHandler(&logs, nil))); err != nil {
 		t.Fatal(err)
 	}
 

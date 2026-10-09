@@ -8,7 +8,9 @@ import (
 
 // listPage is Admin › Schedules, read-only.
 templ listPage(rows []scheduleRow) {
-	<h1 class="text-2xl font-semibold">Schedules</h1>
+	@layout.Title("") {
+		Schedules
+	}
 	<p class="text-fg-muted">A schedule applies a preset to a device during a daily UTC window. This list is read-only.</p>
 	if len(rows) == 0 {
 		<p>No schedules.</p>

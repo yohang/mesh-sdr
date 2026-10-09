@@ -111,6 +111,17 @@ var formPages = []formPage{
 	},
 }
 
+// formPageOf returns the form page of an admin section.
+func formPageOf(section string) formPage {
+	for _, p := range formPages {
+		if p.Section == section {
+			return p
+		}
+	}
+
+	panic("settings: no form page for section " + section)
+}
+
 // overview serves the admin landing page (ADM-001).
 func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 	snap := m.d.Store.Snapshot()
@@ -184,10 +195,7 @@ func (m *Module) storesTable(r *http.Request, notice string) templ.Component {
 
 // purge runs the retention job of a store now ("purge now").
 func (m *Module) purge(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, FormBodyLimit)
-	if err := r.ParseForm(); err != nil {
-		m.d.Render.Error(w, r, http.StatusBadRequest)
-
+	if !m.d.Render.ParseForm(w, r, FormBodyLimit) {
 		return
 	}
 
@@ -220,7 +228,7 @@ func (m *Module) purge(w http.ResponseWriter, r *http.Request) {
 
 	fragment := storesView(rows, notice, failure)
 
-	p := formPages[3]
+	p := formPageOf("retention")
 	snap := m.d.Store.Snapshot()
 
 	views := make([]sectionView, 0, len(p.Forms))
@@ -306,22 +314,6 @@ func purgeQuestion(r RetentionRow) string {
 	}
 
 	return "Delete the " + r.Label + " rows older than " + formatDuration(r.Retention) + " now?"
-}
-
-func humanBytes(n int64) string {
-	const unit = 1024
-
-	if n < unit {
-		return strconv.FormatInt(n, 10) + " B"
-	}
-
-	div, exp := int64(unit), 0
-	for m := n / unit; m >= unit; m /= unit {
-		div *= unit
-		exp++
-	}
-
-	return strconv.FormatFloat(float64(n)/float64(div), 'f', 1, 64) + " " + string("KMGTPE"[exp]) + "iB"
 }
 
 func lastRun(r RetentionRow) string {

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/app"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 func when(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") }
@@ -13,7 +14,9 @@ func when(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") }
 // section (htmx), or the page without htmx.
 templ accountPage(v accountView) {
 	<section class="mx-auto flex w-full max-w-2xl flex-col gap-8 p-4" aria-labelledby="account-title">
-		<h1 id="account-title" class="text-2xl font-bold">Account</h1>
+		@layout.Title("account-title") {
+			Account
+		}
 		@profileSection(v)
 		@emailSection(v)
 		<section id="account-security" class="flex flex-col gap-2" aria-labelledby="account-security-title">
@@ -67,9 +70,9 @@ templ dataSection(v accountView) {
 templ noticeView(id string, n notice) {
 	if n.Text != "" {
 		if n.Error {
-			<p id={ id } class="font-semibold" role="alert">{ n.Text }</p>
+			@layout.Failure(id, n.Text)
 		} else {
-			<p id={ id } class="font-semibold" role="status">{ n.Text }</p>
+			@layout.Notice(id, n.Text)
 		}
 	}
 }
@@ -189,7 +192,9 @@ templ sessionItem(s app.SessionView) {
 // state). The token moves into a hidden field (token-url.js).
 templ emailVerifyPage(token string) {
 	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="email-verify-title" data-replace-url="/account/email/verify">
-		<h1 id="email-verify-title" class="text-2xl font-bold">Confirm your e-mail address</h1>
+		@layout.Title("email-verify-title") {
+			Confirm your e-mail address
+		}
 		<form class="flex flex-col gap-3" method="post" action="/account/email/verify">
 			<input type="hidden" name="token" value={ token }/>
 			<button class="rounded border px-3 py-1 font-semibold" type="submit">Confirm this address</button>
@@ -199,13 +204,14 @@ templ emailVerifyPage(token string) {
 
 templ emailVerifyResult(ok bool, msg string) {
 	<section class="mx-auto flex w-full max-w-prose flex-col gap-4 p-4" aria-labelledby="email-verify-title">
-		<h1 id="email-verify-title" class="text-2xl font-bold">E-mail address</h1>
+		@layout.Title("email-verify-title") {
+			E-mail address
+		}
 		if ok {
-			<p role="status">{ msg }</p>
+			@layout.Notice("", msg)
 		} else {
-			<p role="alert">{ msg }</p>
+			@layout.Failure("", msg)
 		}
 		<p><a href="/account">Back to your account</a></p>
 	</section>
 }
-

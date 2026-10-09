@@ -9,14 +9,11 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"net/http"
 	"sync"
 	"time"
 
-	"github.com/a-h/templ"
-
 	"github.com/yohang/mesh-sdr/internal/db"
-	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // Message is one stored decoded message.
@@ -50,12 +47,6 @@ type Mode struct {
 	Label string
 }
 
-// Renderer renders the pages (internal/web/render).
-type Renderer interface {
-	Page(w http.ResponseWriter, r *http.Request, status int, page layout.Page, content, fragment templ.Component)
-	Error(w http.ResponseWriter, r *http.Request, status int)
-}
-
 // Deps are the dependencies of the module.
 type Deps struct {
 	DB *db.DB
@@ -79,7 +70,7 @@ type Deps struct {
 	// Dedup returns the duplicate key rounding of a mode: its frequency
 	// step (Hz) and time bucket (ADR 0028).
 	Dedup  func(mode string) (step int64, bucket time.Duration)
-	Render Renderer
+	Render *render.Renderer
 	Now    func() time.Time
 	Logger *slog.Logger
 }

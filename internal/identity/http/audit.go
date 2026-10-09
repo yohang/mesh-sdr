@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/identity/app"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // AuditPath is Admin › Audit log (ACC-010).
@@ -66,16 +68,15 @@ func (f auditForm) filter() app.AuditFilter {
 type auditView struct {
 	Form   auditForm
 	Rows   []app.AuditRow
-	NextQS string
+	Paging layout.Paging
 }
 
 func (m *Module) auditPage(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	q := r.URL.Query()
 	form := readAuditForm(q)
+	page := render.PageOf(q)
 	f := form.filter()
-	f.BeforeID, _ = strconv.ParseInt(q.Get("before"), 10, 64)
+	f.Offset, f.Limit = (page-1)*app.AuditPageSize, app.AuditPageSize
 
 	rows, next, err := m.audit.Search(r.Context(), f)
 	if err != nil {
@@ -84,13 +85,10 @@ func (m *Module) auditPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v := auditView{Form: form, Rows: rows}
-
-	if next > 0 {
-		nv := form.values()
-		nv.Set("before", strconv.FormatInt(next, 10))
-		v.NextQS = nv.Encode()
-	}
+	v := auditView{Form: form, Rows: rows, Paging: layout.Paging{
+		Label: "Pages of the audit log", Prev: "Newer entries", Next: "Older entries", Path: AuditPath, Query: form.values(),
+		Page: page, More: next > 0,
+	}}
 
 	m.pages.AdminPage(w, r, http.StatusOK, pageTitleAudit, "audit", auditPage(v), nil)
 }
@@ -126,7 +124,7 @@ func csvCell(s string) string {
 // header like an action, and a cross-site page cannot trigger it. The
 // filters come in the form body (static/js/download.js).
 func (m *Module) auditExport(w http.ResponseWriter, r *http.Request) {
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 

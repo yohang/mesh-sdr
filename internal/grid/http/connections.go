@@ -13,6 +13,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // ActionRevealIP is the audit action of "Reveal" on a masked address
@@ -193,7 +194,7 @@ func (m *AdminModule) presetOf(ctx context.Context, deviceID string, cache map[s
 		return "—", "—"
 	}
 
-	return p.Name, frequency(p.CenterFreq) + " (" + frequency(p.SampRate) + " wide)"
+	return p.Name, layout.FormatHz(p.CenterFreq) + " (" + layout.FormatHz(p.SampRate) + " wide)"
 }
 
 // bandOf names the band plan band (bandplan.region) of a connection without

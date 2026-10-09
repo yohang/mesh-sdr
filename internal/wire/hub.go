@@ -128,7 +128,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	bm, err := newBookmarks(bookmarksDeps{
 		adapter: adapter, features: h.features, presets: h.sch.presets,
 		region: func() string { return settingsStore.String("bandplan.region") }, audit: g.audit, broker: h.broker,
-		policies: h.listen, idm: h.idm.HTTP, render: h.shell.Renderer, isAdmin: h.adminGate.Allows, now: now, logger: logger,
+		policies: h.listen, idm: h.idm.HTTP, render: h.shell.Renderer, now: now, logger: logger,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -209,7 +209,7 @@ func (h *hubModules) newIdentity(ctx context.Context) error {
 		h.workers = append(h.workers, q.Run)
 	}
 
-	idm, err := identity.Wire(ctx, ideps, pages{h.shell.Renderer})
+	idm, err := identity.Wire(ctx, ideps, h.shell.Renderer)
 	if err != nil {
 		return fmt.Errorf("identity: %w", err)
 	}
@@ -324,7 +324,7 @@ func (h *hubModules) newRouter(p hubPages) (http.Handler, error) {
 	authz := gridhttp.NewAuthzHandler(access, func(r *http.Request) gridapp.Subject { return subjectOf(idm.Principal(r.Context())) },
 		func(r *http.Request) string { return clientip.From(r.Context()).String() }, component(h.logger, "grid.http.authz"))
 
-	imagesHTTP := files.New(h.images, admin, currentUser, rd.Error, component(h.logger, "files.http"))
+	imagesHTTP := files.New(h.images, rd, admin, currentUser, component(h.logger, "files.http"))
 	schedulesView := deviceSchedules{schedules: h.sch.schedules, presets: h.sch.presets}
 
 	return httpserver.NewRouter(

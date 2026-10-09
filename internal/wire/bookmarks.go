@@ -18,6 +18,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // SyncBookmarks stores the shipped bookmark packs as the builtin rows of
@@ -41,8 +42,7 @@ type bookmarksDeps struct {
 	broker   events.Publisher
 	policies *gridapp.ListenPolicies
 	idm      *identityhttp.Module
-	render   bookmarks.Renderer
-	isAdmin  func(ctx context.Context) bool
+	render   *render.Renderer
 	now      func() time.Time
 	logger   *slog.Logger
 }
@@ -56,13 +56,6 @@ func newBookmarks(d bookmarksDeps) (*bookmarks.Module, error) {
 		User:      currentUser,
 		Changed:   bookmarkChanged(d.broker, d.policies, component(d.logger, "wire.bookmarks")),
 		Render:    d.render, Guard: d.idm.Require(identitydomain.RoleOperator),
-		AdminSections: func(r *http.Request) []layout.AdminSection {
-			if d.isAdmin(r.Context()) {
-				return layout.AdminSections
-			}
-
-			return layout.OperatorAdminSections
-		},
 		IDs: shared.NewUUIDv7Generator(), Now: d.now, Logger: component(d.logger, "bookmarks.app"),
 	})
 	if err != nil {

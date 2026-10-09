@@ -21,7 +21,9 @@ func invitationTarget(i *domain.Invitation) string {
 // and the mail state.
 templ invitationsPage(v invitationsView) {
 	<section class="flex w-full max-w-4xl flex-col gap-6" aria-labelledby="invitations-title">
-		<h1 id="invitations-title" class="text-2xl font-bold">Invitations</h1>
+		@layout.Title("invitations-title") {
+			Invitations
+		}
 		@noticeView("invitations-notice", v.Notice)
 		if v.MailEnabled {
 			<div class="flex flex-wrap items-center gap-3">
@@ -37,9 +39,9 @@ templ invitationsPage(v invitationsView) {
 			<section class="flex flex-col gap-2 rounded border p-3" aria-labelledby="invitation-created-title">
 				<h2 id="invitation-created-title" class="text-lg font-semibold">Invitation created</h2>
 				if v.Created.Mailed {
-					<p role="status">The link was e-mailed to { v.Created.Invitation.Email().String() }. You can also copy it below.</p>
+					@layout.Notice("", "The link was e-mailed to "+v.Created.Invitation.Email().String()+". You can also copy it below.")
 				} else {
-					<p role="status">Copy this link now and send it to the invitee: it is shown only once.</p>
+					@layout.Notice("", "Copy this link now and send it to the invitee: it is shown only once.")
 				}
 				<label class="flex flex-col gap-1">
 					<span>Invitation link</span>
@@ -113,7 +115,9 @@ templ invitationsPage(v invitationsView) {
 // from the address bar into a hidden field (token-url.js, SR-07).
 templ invitePage(f acceptForm) {
 	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="invite-title" data-replace-url="/invite">
-		<h1 id="invite-title" class="text-2xl font-bold">Create your account</h1>
+		@layout.Title("invite-title") {
+			Create your account
+		}
 		<p>You are invited with the <strong>{ f.Role }</strong> role. See the <a href="/policy">usage policy</a>.</p>
 		@acceptFormView(f)
 	</section>
@@ -121,9 +125,7 @@ templ invitePage(f acceptForm) {
 
 templ acceptFormView(f acceptForm) {
 	<form id="invite-form" class="flex flex-col gap-3" method="post" action="/invite" hx-post="/invite" hx-target="this" hx-swap="outerHTML">
-		if f.Error != "" {
-			<p id="invite-error" class="font-semibold" role="alert">{ f.Error }</p>
-		}
+		@layout.Failure("invite-error", f.Error)
 		<input type="hidden" name="token" value={ f.Token }/>
 		<input type="hidden" name="role" value={ f.Role }/>
 		<input type="hidden" name="invited_email" value={ f.Email }/>
@@ -206,7 +208,9 @@ templ acceptFormView(f acceptForm) {
 
 templ inviteMessage(msg string) {
 	<section class="mx-auto flex w-full max-w-prose flex-col gap-4 p-4" aria-labelledby="invite-title">
-		<h1 id="invite-title" class="text-2xl font-bold">Invitation</h1>
-		<p role="alert">{ msg }</p>
+		@layout.Title("invite-title") {
+			Invitation
+		}
+		@layout.Failure("", msg)
 	</section>
 }

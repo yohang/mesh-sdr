@@ -30,6 +30,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 //go:generate go tool templ generate
@@ -143,18 +145,6 @@ type Services struct {
 	Accounts    AccountService
 }
 
-// Pages renders HTML pages in the app shell.
-type Pages interface {
-	// Page writes a page; fragment, when not nil, is written alone for htmx
-	// fragment requests.
-	Page(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component)
-	// AdminPage writes a page of the admin area: content is shown in the
-	// admin layout, with section (layout.AdminSections) as the current one.
-	AdminPage(w http.ResponseWriter, r *http.Request, status int, title, section string, content, fragment templ.Component)
-	// Error writes the shell error page for status.
-	Error(w http.ResponseWriter, r *http.Request, status int)
-}
-
 // Config is the HTTP configuration of the identity module.
 type Config struct {
 	// HubURL is hub.url: its scheme decides secure cookies (https:
@@ -179,7 +169,7 @@ type Module struct {
 	audit       AuditService
 	keys        app.KeySource
 	now         func() time.Time
-	pages       Pages
+	pages       *render.Renderer
 	logger      *slog.Logger
 	resolver    *clientip.Resolver
 	cop         *http.CrossOriginProtection
@@ -189,8 +179,8 @@ type Module struct {
 	routes      chi.Routes
 }
 
-// New returns the module.
-func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
+// New returns the module. pages renders its pages in the app shell.
+func New(svc Services, pages *render.Renderer, cfg Config, logger *slog.Logger) (*Module, error) {
 	u, err := url.Parse(cfg.HubURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("hub.url %q: not an absolute URL", cfg.HubURL)
@@ -234,10 +224,25 @@ func (m *Module) Middlewares() []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{m.resolver.Middleware, limitAuthBodies, m.session, m.csrf, m.requireJSON, m.passwordGate}
 }
 
-// Routes implements internal/http.Module.
+// Routes implements internal/http.Module. Every page is per visitor:
+// never indexed nor stored (render.NoIndex).
 func (m *Module) Routes(r chi.Router) {
 	m.routes = r
 
+	r.Get(JWKSPath, m.jwks)
+	r.Group(func(r chi.Router) {
+		r.Use(render.NoIndex)
+		m.pageRoutes(r)
+	})
+}
+
+// page writes a page in the app shell; fragment, when not nil, is written
+// alone for htmx fragment requests.
+func (m *Module) page(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component) {
+	m.pages.Page(w, r, status, layout.Page{Title: title}, content, fragment)
+}
+
+func (m *Module) pageRoutes(r chi.Router) {
 	// Read-only pages also answer HEAD, like the shell's.
 	r.Get("/login", m.loginPage)
 	r.Post("/login", m.loginAction)
@@ -279,8 +284,6 @@ func (m *Module) Routes(r chi.Router) {
 	admin.Post(InvitationsPath, m.createInvitationAction)
 	admin.Post(InvitationsPath+"/test-mail", m.testMailAction)
 	admin.Post(InvitationsPath+"/{id}/revoke", m.revokeInvitationAction)
-
-	r.Get(JWKSPath, m.jwks)
 
 	r.Get(ForgotPath, m.forgotPage)
 	r.Post(ForgotPath, m.forgotAction)
@@ -566,26 +569,13 @@ func (m *Module) Require(role domain.Role) func(http.Handler) http.Handler {
 			case err == nil:
 				next.ServeHTTP(w, r)
 			case errors.Is(err, domain.ErrUnauthenticated):
-				m.redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()))
+				render.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()))
 			default:
 				m.logger.WarnContext(r.Context(), "access denied", slog.String("path", redact.Path(r.URL.Path)), slog.Any("error", err))
 				m.pages.Error(w, r, http.StatusForbidden)
 			}
 		})
 	}
-}
-
-// redirect sends a full-page redirect, for htmx (HX-Redirect) and plain
-// requests (303).
-func (m *Module) redirect(w http.ResponseWriter, r *http.Request, to string) {
-	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Redirect", to)
-		w.WriteHeader(http.StatusNoContent)
-
-		return
-	}
-
-	http.Redirect(w, r, to, http.StatusSeeOther)
 }
 
 func (m *Module) deny(w http.ResponseWriter, r *http.Request, status int, err *shared.Error) {

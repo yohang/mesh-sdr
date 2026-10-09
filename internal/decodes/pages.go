@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 //go:generate go tool templ generate
@@ -20,9 +21,6 @@ const Path = "/decodes"
 
 // PageSize is the number of messages of one page.
 const PageSize = 50
-
-// timeLayout is the form value of the time filters (datetime-local, UTC).
-const timeLayout = "2006-01-02T15:04"
 
 // Middlewares implements internal/http.Module.
 func (m *Module) Middlewares() []func(http.Handler) http.Handler { return nil }
@@ -35,27 +33,22 @@ func (m *Module) Routes(r chi.Router) {
 // filter is the filter form of the page; its fields are the query
 // parameters.
 type filter struct {
-	Mode, Device, From, Until string
-	Before                    int64
+	Mode, Device, From, To string
 	// Errors are the invalid fields, by name.
 	Errors map[string]string
 }
 
-// query returns the filter as a query string, before set to before.
-func (f filter) query(before int64) string {
+// query returns the filter as a URL query.
+func (f filter) query() url.Values {
 	q := url.Values{}
 
-	for k, v := range map[string]string{"mode": f.Mode, "device": f.Device, "from": f.From, "until": f.Until} {
+	for k, v := range map[string]string{"mode": f.Mode, "device": f.Device, "from": f.From, "to": f.To} {
 		if v != "" {
 			q.Set(k, v)
 		}
 	}
 
-	if before > 0 {
-		q.Set("before", strconv.FormatInt(before, 10))
-	}
-
-	return q.Encode()
+	return q
 }
 
 // listView is the Decodes page.
@@ -67,8 +60,7 @@ type listView struct {
 	SignedIn bool
 	// Retention is the retention notice ("Decodes are kept for N days").
 	Retention string
-	// Next is the query of the next (older) page, "" on the last one.
-	Next string
+	Paging    layout.Paging
 }
 
 // deviceName names a device of the view.
@@ -83,44 +75,34 @@ func (v listView) deviceName(id string) string {
 }
 
 func parseFilter(q url.Values) (filter, time.Time, time.Time) {
-	f := filter{Mode: q.Get("mode"), Device: q.Get("device"), From: q.Get("from"), Until: q.Get("until"), Errors: map[string]string{}}
+	f := filter{Mode: q.Get("mode"), Device: q.Get("device"), From: q.Get("from"), To: q.Get("to"), Errors: map[string]string{}}
 
-	var from, until time.Time
-
-	if f.From != "" {
-		t, err := time.ParseInLocation(timeLayout, f.From, time.UTC)
-		if err != nil {
-			f.Errors["from"] = "Enter a date and time."
+	at := func(name, value string) time.Time {
+		if value == "" {
+			return time.Time{}
 		}
 
-		from = t
-	}
-
-	if f.Until != "" {
-		t, err := time.ParseInLocation(timeLayout, f.Until, time.UTC)
+		t, err := time.ParseInLocation(layout.DateTimeLocal, value, time.UTC)
 		if err != nil {
-			f.Errors["until"] = "Enter a date and time."
+			f.Errors[name] = "Enter a date and time."
 		}
 
-		until = t
+		return t
 	}
 
-	if b := q.Get("before"); b != "" {
-		f.Before, _ = strconv.ParseInt(b, 10, 64)
-	}
-
-	return f, from, until
+	return f, at("from", f.From), at("to", f.To)
 }
 
 // listPage serves the Decodes page: the messages of the devices the visitor
 // may listen to, newest first, with mode, device and time filters.
 func (m *Module) listPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	f, from, until := parseFilter(r.URL.Query())
+	q := r.URL.Query()
+	f, from, to := parseFilter(q)
 
 	devices, err := m.d.Visible(ctx)
 	if err != nil {
-		m.d.Logger.ErrorContext(ctx, "decodes: visible devices", slog.Any("error", err))
+		m.d.Logger.ErrorContext(ctx, "list visible devices", slog.Any("error", err))
 		m.d.Render.Error(w, r, http.StatusInternalServerError)
 
 		return
@@ -147,20 +129,25 @@ func (m *Module) listPage(w http.ResponseWriter, r *http.Request) {
 		v.Filter = f
 	}
 
+	v.Paging = layout.Paging{
+		Label: "Pages of decoded messages", Prev: "Newer messages", Next: "Older messages", Path: Path,
+		Query: f.query(), Page: render.PageOf(q),
+	}
+
 	if len(f.Errors) == 0 {
 		rows, err := m.repo.List(ctx, Filter{
-			Devices: ids, Mode: f.Mode, Device: f.Device, From: from, Until: until, Before: f.Before, Limit: PageSize + 1,
+			Devices: ids, Mode: f.Mode, Device: f.Device, From: from, To: to,
+			Offset: (v.Paging.Page - 1) * PageSize, Limit: PageSize + 1,
 		})
 		if err != nil {
-			m.d.Logger.ErrorContext(ctx, "decodes: list", slog.Any("error", err))
+			m.d.Logger.ErrorContext(ctx, "list decoded messages", slog.Any("error", err))
 			m.d.Render.Error(w, r, http.StatusInternalServerError)
 
 			return
 		}
 
 		if len(rows) > PageSize {
-			rows = rows[:PageSize]
-			v.Next = f.query(rows[len(rows)-1].ID)
+			rows, v.Paging.More = rows[:PageSize], true
 		}
 
 		// JS8 frames are grouped into threads (DEC-030).

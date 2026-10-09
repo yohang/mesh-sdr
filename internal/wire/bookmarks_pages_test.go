@@ -196,13 +196,23 @@ func TestBookmarkPages(t *testing.T) {
 	}
 
 	// Pack rows are listed, read-only.
-	_, page := op.do(http.MethodGet, "/bookmarks/manage?origin=builtin&from=446000000&to=446200000", "", "", nil)
+	_, page := op.do(http.MethodGet, "/bookmarks/manage?origin=builtin&from=446000&to=446200", "", "", nil)
 	if !strings.Contains(string(page), "PMR1") || !strings.Contains(string(page), "Pack (pmr)") || !strings.Contains(string(page), "Read-only") ||
 		strings.Contains(string(page), "Edit<span") {
 		t.Fatalf("pack rows = %s", page)
 	}
 
 	pack := "/bookmarks/manage/" + string(bookmarkRow.FindSubmatch(page)[1])
+
+	// The packs hold more rows than a page: the table is paged.
+	if _, first := op.do(http.MethodGet, "/bookmarks/manage?origin=builtin", "", "", nil); !strings.Contains(string(first), `href="/bookmarks/manage?origin=builtin&amp;page=2">Next bookmarks</a>`) ||
+		strings.Contains(string(first), "Previous bookmarks") {
+		t.Error("first page without the next one")
+	}
+
+	if _, second := op.do(http.MethodGet, "/bookmarks/manage?origin=builtin&page=2", "", "", nil); !strings.Contains(string(second), `href="/bookmarks/manage?origin=builtin">Previous bookmarks</a>`) {
+		t.Error("second page without the previous one")
+	}
 
 	if res, _ := op.form(pack, edit, false); res.StatusCode != http.StatusConflict {
 		t.Errorf("save of a pack row = %d", res.StatusCode)

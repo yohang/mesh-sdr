@@ -11,6 +11,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // Password reset pages (ACC-003, FEATURE_SPEC §10.3).
@@ -36,14 +37,11 @@ func (m *Module) forgotView(r *http.Request) forgotView {
 }
 
 func (m *Module) forgotPage(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-	m.pages.Page(w, r, http.StatusOK, pageTitleForgot, forgotPage(m.forgotView(r)), nil)
+	m.page(w, r, http.StatusOK, pageTitleForgot, forgotPage(m.forgotView(r)), nil)
 }
 
 func (m *Module) forgotAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -68,7 +66,7 @@ func (m *Module) forgotAction(w http.ResponseWriter, r *http.Request) {
 		v.Sent = true
 	}
 
-	m.pages.Page(w, r, status, pageTitleForgot, forgotPage(v), forgotFormView(v))
+	m.page(w, r, status, pageTitleForgot, forgotPage(v), forgotFormView(v))
 }
 
 // resetForm is the reset page's form.
@@ -88,7 +86,7 @@ func (m *Module) resetPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.pages.Page(w, r, http.StatusOK, pageTitleReset, resetPage(resetForm{Token: token, MinLength: m.resets.MinLength(r.Context())}), nil)
+	m.page(w, r, http.StatusOK, pageTitleReset, resetPage(resetForm{Token: token, MinLength: m.resets.MinLength(r.Context())}), nil)
 }
 
 func (m *Module) resetLanding(w http.ResponseWriter, r *http.Request) {
@@ -102,9 +100,9 @@ func (m *Module) resetRefused(w http.ResponseWriter, r *http.Request, err error)
 	switch {
 	case errors.As(err, &rl):
 		w.Header().Set("Retry-After", fmt.Sprint(int(rl.RetryAfter().Seconds())))
-		m.pages.Page(w, r, http.StatusTooManyRequests, pageTitleReset, resetInvalid(fmt.Sprintf(msgThrottled, humanWait(rl.RetryAfter()))), nil)
+		m.page(w, r, http.StatusTooManyRequests, pageTitleReset, resetInvalid(fmt.Sprintf(msgThrottled, humanWait(rl.RetryAfter()))), nil)
 	case errors.Is(err, domain.ErrInvalidToken):
-		m.pages.Page(w, r, http.StatusNotFound, pageTitleReset, resetInvalid(msgResetInvalid), nil)
+		m.page(w, r, http.StatusNotFound, pageTitleReset, resetInvalid(msgResetInvalid), nil)
 	default:
 		m.logger.ErrorContext(r.Context(), "password reset check failed", slog.Any("error", err))
 		m.pages.Error(w, r, http.StatusInternalServerError)
@@ -114,7 +112,7 @@ func (m *Module) resetRefused(w http.ResponseWriter, r *http.Request, err error)
 func (m *Module) resetAction(w http.ResponseWriter, r *http.Request) {
 	setupHeaders(w)
 
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -123,7 +121,7 @@ func (m *Module) resetAction(w http.ResponseWriter, r *http.Request) {
 	password := r.PostForm.Get("password")
 	if password != r.PostForm.Get("confirm_password") {
 		f.Error = "The passwords do not match."
-		m.pages.Page(w, r, http.StatusUnprocessableEntity, pageTitleReset, resetPage(f), resetFormView(f))
+		m.page(w, r, http.StatusUnprocessableEntity, pageTitleReset, resetPage(f), resetFormView(f))
 
 		return
 	}
@@ -136,12 +134,12 @@ func (m *Module) resetAction(w http.ResponseWriter, r *http.Request) {
 	case err == nil:
 		// Every session of the user is revoked, the request's included.
 		http.SetCookie(w, m.cookie(m.sessionCookieName(), "", -1))
-		m.redirect(w, r, "/login?reset=1")
+		render.Redirect(w, r, "/login?reset=1")
 	case errors.Is(err, domain.ErrInvalidToken), errors.Is(err, domain.ErrRateLimited):
 		m.resetRefused(w, r, err)
 	case errors.Is(err, domain.ErrInvalidPassword) && errors.As(err, &de):
-		f.Error = sentence(de.Message())
-		m.pages.Page(w, r, http.StatusUnprocessableEntity, pageTitleReset, resetPage(f), resetFormView(f))
+		f.Error = render.Sentence(de.Message())
+		m.page(w, r, http.StatusUnprocessableEntity, pageTitleReset, resetPage(f), resetFormView(f))
 	default:
 		m.logger.ErrorContext(r.Context(), "password reset failed", slog.Any("error", err))
 		m.pages.Error(w, r, http.StatusInternalServerError)

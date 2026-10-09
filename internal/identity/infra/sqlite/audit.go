@@ -108,6 +108,7 @@ func (r *AuditLog) Search(ctx context.Context, q domain.AuditQuery) ([]domain.Au
 	rows, err := sqlc.New(r.db.Reader(ctx)).SearchAuditEntries(ctx, sqlc.SearchAuditEntriesParams{
 		BeforeID: q.BeforeID, ActorUserID: actor, ActorKind: string(q.ActorKind), ActionPrefix: q.ActionPrefix,
 		TargetType: q.TargetType, TargetID: q.TargetID, FromMs: from, ToMs: to, MaxRows: int64(limit),
+		SkipRows: int64(max(q.Offset, 0)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("search audit entries: %w", err)

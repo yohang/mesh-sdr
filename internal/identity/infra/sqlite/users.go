@@ -215,7 +215,7 @@ func (r *Users) Search(ctx context.Context, uq domain.UserQuery) ([]*domain.User
 
 	rows, err := q.SearchUsers(ctx, sqlc.SearchUsersParams{
 		Text: uq.Text, Enabled: enabled, NeverLoggedIn: boolInt(uq.NeverLoggedIn), RoleID: role,
-		After: strings.ToLower(uq.After), MaxRows: int64(limit),
+		MaxRows: int64(limit), SkipRows: int64(max(uq.Offset, 0)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("search users: %w", err)

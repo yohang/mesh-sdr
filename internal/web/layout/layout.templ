@@ -287,7 +287,9 @@ templ mainRegion(p Page, content templ.Component) {
 // Error is the content of an error page (403, 404, 500…), rendered inside the
 // shell: htmx swaps error responses into #main too.
 templ Error(status int, title, message string) {
-	<h1 class="text-2xl font-semibold">{ title }</h1>
+	@Title("") {
+		{ title }
+	}
 	<p class="mt-2 text-fg-muted">{ message }</p>
 	<p class="mt-4 text-sm text-fg-muted">HTTP { strconv.Itoa(status) } · <a href="/">Back to the home page</a></p>
 }

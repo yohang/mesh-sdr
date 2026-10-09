@@ -24,6 +24,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/infra/settingsrc"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // Login rate limit per client address (TECHNICAL_SPEC §5.12): 5 per minute.
@@ -175,9 +176,9 @@ type Module struct {
 	HTTP   *identityhttp.Module
 }
 
-// Wire builds the identity module. pages renders the login page in the
-// app shell.
-func Wire(ctx context.Context, d Deps, pages identityhttp.Pages) (*Module, error) {
+// Wire builds the identity module. pages renders its pages in the app
+// shell.
+func Wire(ctx context.Context, d Deps, pages *render.Renderer) (*Module, error) {
 	r := newRepos(d)
 
 	local, err := app.NewLocalProvider(ctx, r.users, d.DB, r.hasher, d.Now, component(d.Logger, "identity.app.local"))

@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/yohang/mesh-sdr/internal/grid/app"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // deviceLogPage is the log of a device (SRC-005): the records are text,
@@ -11,7 +12,9 @@ import (
 // (<msdr-device-log>), which announces new records through the throttled
 // status region.
 templ deviceLogPage(v deviceLogView) {
-	<h1 class="text-2xl font-semibold">Log of { v.Device.Name() }</h1>
+	@layout.Title("") {
+		Log of { v.Device.Name() }
+	}
 	<p class="text-fg-muted">
 		The last { strconv.Itoa(app.DeviceLogSize) } records of the device: the lines its connector writes and its state changes, kept in memory by node { v.Device.Node().String() }. They are not saved. Times are in UTC.
 	</p>

@@ -12,6 +12,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 const (
@@ -32,10 +33,10 @@ type setupForm struct {
 	Field string
 }
 
-// setupHeaders: the setup page carries a single-use token, so it is never
-// cached, indexed or sent as a referrer (SR-07, SR-28).
+// setupHeaders: the setup page carries a single-use token, so besides
+// being never cached nor indexed (render.NoIndex, every identity page) it
+// is never sent as a referrer (SR-07, SR-28).
 func setupHeaders(w http.ResponseWriter) {
-	noIndex(w)
 	w.Header().Set("Referrer-Policy", "no-referrer")
 }
 
@@ -83,7 +84,7 @@ func (m *Module) setupPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	f := setupForm{Token: token, MinLength: m.setup.MinLength(r.Context())}
-	m.pages.Page(w, r, http.StatusOK, pageTitleSetup, setupPage(f), nil)
+	m.page(w, r, http.StatusOK, pageTitleSetup, setupPage(f), nil)
 }
 
 func (m *Module) setupAction(w http.ResponseWriter, r *http.Request) {
@@ -93,16 +94,7 @@ func (m *Module) setupAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseForm(); err != nil {
-		status := http.StatusBadRequest
-
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			status = http.StatusRequestEntityTooLarge
-		}
-
-		m.pages.Error(w, r, status)
-
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -117,7 +109,7 @@ func (m *Module) setupAction(w http.ResponseWriter, r *http.Request) {
 	password := r.PostForm.Get("password")
 	if password != r.PostForm.Get("confirm_password") {
 		f.Error, f.Field = "The passwords do not match.", "password"
-		m.pages.Page(w, r, http.StatusUnprocessableEntity, pageTitleSetup, setupPage(f), setupFormView(f))
+		m.page(w, r, http.StatusUnprocessableEntity, pageTitleSetup, setupPage(f), setupFormView(f))
 
 		return
 	}
@@ -136,7 +128,7 @@ func (m *Module) setupAction(w http.ResponseWriter, r *http.Request) {
 			http.SetCookie(w, c)
 		}
 
-		m.redirect(w, r, "/")
+		render.Redirect(w, r, "/")
 
 		return
 	}
@@ -161,7 +153,7 @@ func (m *Module) setupAction(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusUnprocessableEntity
 
 	if f.Field != "" && errors.As(err, &de) {
-		f.Error = sentence(de.Message())
+		f.Error = render.Sentence(de.Message())
 	} else {
 		status = http.StatusInternalServerError
 		f.Error = msgSetupFailed
@@ -169,7 +161,7 @@ func (m *Module) setupAction(w http.ResponseWriter, r *http.Request) {
 		m.logger.ErrorContext(r.Context(), "first admin setup failed", slog.Any("error", err))
 	}
 
-	m.pages.Page(w, r, status, pageTitleSetup, setupPage(f), setupFormView(f))
+	m.page(w, r, status, pageTitleSetup, setupPage(f), setupFormView(f))
 }
 
 // setupRefused shows why the link cannot be used: invalid (404) or too many
@@ -184,5 +176,5 @@ func (m *Module) setupRefused(w http.ResponseWriter, r *http.Request, err error)
 		w.Header().Set("Retry-After", fmt.Sprint(int(rl.RetryAfter().Seconds())))
 	}
 
-	m.pages.Page(w, r, status, pageTitleSetup, setupInvalid(msg), nil)
+	m.page(w, r, status, pageTitleSetup, setupInvalid(msg), nil)
 }

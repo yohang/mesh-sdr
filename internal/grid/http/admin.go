@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 //go:generate go tool templ generate
@@ -26,12 +26,6 @@ type Devices interface {
 	ListByNode(ctx context.Context, id domain.NodeID) ([]*domain.Device, error)
 	Get(ctx context.Context, id string) (*domain.Device, error)
 	Forget(ctx context.Context, actor audit.Actor, id string) error
-}
-
-// Renderer renders pages in the app shell (internal/web/render).
-type Renderer interface {
-	Page(w http.ResponseWriter, r *http.Request, status int, page layout.Page, content, fragment templ.Component)
-	Error(w http.ResponseWriter, r *http.Request, status int)
 }
 
 // ScheduleRow is one schedule of a device, as the device page shows it.
@@ -51,7 +45,7 @@ type DeviceSchedules interface {
 
 // AdminDeps are the dependencies of the admin grid pages.
 type AdminDeps struct {
-	Render       Renderer
+	Render       *render.Renderer
 	Devices      Devices
 	Nodes        NodeAdmin
 	History      LoadHistory
@@ -98,14 +92,14 @@ func (m *AdminModule) Middlewares() []func(http.Handler) http.Handler { return n
 // Routes implements internal/http.Module.
 func (m *AdminModule) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
-		r.Use(m.d.Operator, noIndex)
+		r.Use(m.d.Operator, render.NoIndex)
 		r.Get("/admin/devices", m.list)
 		r.Get("/admin/devices/{id}", m.detail)
 		r.Get("/admin/nodes", m.nodesPage)
 		r.Get("/admin/nodes/{id}", m.nodePage)
 	})
 	r.Group(func(r chi.Router) {
-		r.Use(m.d.Admin, noIndex)
+		r.Use(m.d.Admin, render.NoIndex)
 		r.Post("/admin/devices/{id}/forget", m.forget)
 		r.Get("/admin/devices/{id}/log", m.deviceLog)
 		r.Get("/admin/nodes/new", m.newNodePage)
@@ -130,21 +124,8 @@ func (m *AdminModule) now() time.Time {
 	return m.d.Now()
 }
 
-func noIndex(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Robots-Tag", "noindex")
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (m *AdminModule) page(w http.ResponseWriter, r *http.Request, status int, title, section string, content, fragment templ.Component) {
-	sections := layout.OperatorAdminSections
-	if m.d.IsAdmin(r) {
-		sections = layout.AdminSections
-	}
-
-	m.d.Render.Page(w, r, status, layout.Page{Title: title, Section: layout.SectionAdmin},
-		layout.AdminPageWith(section, sections, content), fragment)
+	m.d.Render.AdminPage(w, r, status, title, section, content, fragment)
 }
 
 // deviceListRow is one device of Admin › Devices (ADM-007).
@@ -285,7 +266,7 @@ func (m *AdminModule) forget(w http.ResponseWriter, r *http.Request) {
 
 	err := m.d.Devices.Forget(r.Context(), audit.Caller, id)
 	if err == nil {
-		redirect(w, r, "/admin/devices")
+		render.Redirect(w, r, "/admin/devices")
 
 		return
 	}
@@ -323,22 +304,10 @@ func disabledReason(reason string) string {
 	}
 }
 
-// frequency formats a frequency in Hz for people.
-func frequency(hz int64) string {
-	switch {
-	case hz >= 1_000_000:
-		return strings.TrimRight(strings.TrimRight(strconv.FormatFloat(float64(hz)/1e6, 'f', 6, 64), "0"), ".") + " MHz"
-	case hz >= 1_000:
-		return strings.TrimRight(strings.TrimRight(strconv.FormatFloat(float64(hz)/1e3, 'f', 3, 64), "0"), ".") + " kHz"
-	default:
-		return strconv.FormatInt(hz, 10) + " Hz"
-	}
-}
-
 func sampleRates(rates []int64) string {
 	parts := make([]string, len(rates))
 	for i, r := range rates {
-		parts[i] = frequency(r)
+		parts[i] = layout.FormatHz(r)
 	}
 
 	return strings.Join(parts, ", ")
@@ -371,9 +340,9 @@ func lfoOffset(hz int64) string {
 	case hz == 0:
 		return "none"
 	case hz < 0:
-		return "−" + frequency(-hz)
+		return "−" + layout.FormatHz(-hz)
 	default:
-		return "+" + frequency(hz)
+		return "+" + layout.FormatHz(hz)
 	}
 }
 

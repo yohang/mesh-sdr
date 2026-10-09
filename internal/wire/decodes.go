@@ -17,6 +17,7 @@ import (
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // decodesDeps are the hub parts the decodes module uses.
@@ -31,7 +32,7 @@ type decodesDeps struct {
 	// features gives the enabled devices.
 	features *gridapp.Features
 	store    *settings.Store
-	render   decodes.Renderer
+	render   *render.Renderer
 	now      func() time.Time
 	logger   *slog.Logger
 }

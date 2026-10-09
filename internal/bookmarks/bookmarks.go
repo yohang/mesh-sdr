@@ -20,12 +20,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/a-h/templ"
-
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
-	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // Audit actions.
@@ -73,12 +71,6 @@ type Change struct {
 	Bookmark *Bookmark
 }
 
-// Renderer renders pages in the app shell (internal/web/render).
-type Renderer interface {
-	Page(w http.ResponseWriter, r *http.Request, status int, page layout.Page, content, fragment templ.Component)
-	Error(w http.ResponseWriter, r *http.Request, status int)
-}
-
 // Deps are the dependencies of the module. Only DB, Now and Logger are
 // needed by the pack sync (`meshsdr hub migrate`); the hub sets the rest.
 type Deps struct {
@@ -95,14 +87,12 @@ type Deps struct {
 	User func(ctx context.Context) shared.UUID
 	// Changed, when set, is told every committed change of a hub bookmark.
 	Changed func(ctx context.Context, c Change)
-	Render  Renderer
+	Render  *render.Renderer
 	// Guard admits the operators and admins (identity).
-	Guard func(http.Handler) http.Handler
-	// AdminSections returns the admin sections the visitor may open.
-	AdminSections func(r *http.Request) []layout.AdminSection
-	IDs           *shared.UUIDv7Generator
-	Now           func() time.Time
-	Logger        *slog.Logger
+	Guard  func(http.Handler) http.Handler
+	IDs    *shared.UUIDv7Generator
+	Now    func() time.Time
+	Logger *slog.Logger
 }
 
 // Module is the bookmarks module: use cases, JSON API handlers and pages

@@ -66,11 +66,10 @@ type Filter struct {
 	Devices []string
 	// Mode and Device narrow the list ("" for any).
 	Mode, Device string
-	// From and Until bound the decode time [From, Until); zero: open.
-	From, Until time.Time
-	// Before is the id the page starts below (0: the newest).
-	Before int64
-	Limit  int
+	// From and To bound the decode time [From, To); zero: open.
+	From, To time.Time
+	// Offset skips the newest messages (the previous pages).
+	Offset, Limit int
 }
 
 // List returns the messages of f, newest first.
@@ -86,19 +85,16 @@ func (r *Repository) List(ctx context.Context, f Filter) ([]Message, error) {
 
 	p := sqlc.ListDecodedMessagesParams{
 		DevicesJson: string(devices),
-		Mode:        f.Mode, Device: f.Device, FromMs: math.MinInt64, ToMs: math.MaxInt64, BeforeID: math.MaxInt64, MaxRows: int64(f.Limit),
+		Mode:        f.Mode, Device: f.Device, FromMs: math.MinInt64, ToMs: math.MaxInt64, MaxRows: int64(f.Limit),
+		SkipRows: int64(f.Offset),
 	}
 
 	if !f.From.IsZero() {
 		p.FromMs = f.From.UnixMilli()
 	}
 
-	if !f.Until.IsZero() {
-		p.ToMs = f.Until.UnixMilli()
-	}
-
-	if f.Before > 0 {
-		p.BeforeID = f.Before
+	if !f.To.IsZero() {
+		p.ToMs = f.To.UnixMilli()
 	}
 
 	rows, err := sqlc.New(r.db.Reader(ctx)).ListDecodedMessages(ctx, p)

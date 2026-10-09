@@ -5,6 +5,7 @@
 package shell
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -76,7 +77,12 @@ func New(d Deps) Wired {
 	}
 
 	source := NewShellSource(lookAndFeel, nav, d.User, now)
-	rd := render.New(source, component("web.render"))
+	var admin func(ctx context.Context) bool
+	if d.AdminGate != nil {
+		admin = d.AdminGate.Allows
+	}
+
+	rd := render.New(source, admin, component("web.render"))
 
 	station := NewStation(settings, d.Images)
 

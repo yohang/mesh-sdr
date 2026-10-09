@@ -8,6 +8,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/http/redact"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // PasswordChangePath is the password change page (AUTH-006, AUTH-007).
@@ -76,6 +77,6 @@ func (m *Module) passwordGate(next http.Handler) http.Handler {
 			}
 		}
 
-		m.redirect(w, r, to)
+		render.Redirect(w, r, to)
 	})
 }

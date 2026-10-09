@@ -14,6 +14,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // AccountPath is the account page (ACC-004).
@@ -79,8 +80,6 @@ func (m *Module) accountView(r *http.Request) (accountView, error) {
 }
 
 func (m *Module) accountPage(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	v, err := m.accountView(r)
 	if err != nil {
 		m.pageFailed(w, r, err)
@@ -88,13 +87,13 @@ func (m *Module) accountPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.pages.Page(w, r, http.StatusOK, pageTitleAccount, accountPage(v), nil)
+	m.page(w, r, http.StatusOK, pageTitleAccount, accountPage(v), nil)
 }
 
 // pageFailed answers an unexpected error of a page.
 func (m *Module) pageFailed(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, domain.ErrUnauthenticated) {
-		m.redirect(w, r, "/login")
+		render.Redirect(w, r, "/login")
 
 		return
 	}
@@ -117,7 +116,7 @@ func (m *Module) formError(r *http.Request, err error, field string) (notice, in
 	case errors.Is(err, domain.ErrInvalidCurrentPassword):
 		return notice{Text: msgCurrentIncorrect, Error: true, Field: "current_password"}, http.StatusUnprocessableEntity
 	case errors.As(err, &de) && de.Kind() != shared.KindUnavailable:
-		return notice{Text: sentence(de.Message()), Error: true, Field: field}, http.StatusUnprocessableEntity
+		return notice{Text: render.Sentence(de.Message()), Error: true, Field: field}, http.StatusUnprocessableEntity
 	}
 
 	m.logger.ErrorContext(r.Context(), "account change failed", slog.Any("error", err))
@@ -128,13 +127,11 @@ func (m *Module) formError(r *http.Request, err error, field string) (notice, in
 // section answers a section form: the section alone for htmx, otherwise
 // the whole page.
 func (m *Module) section(w http.ResponseWriter, r *http.Request, status int, v accountView, fragment func(accountView) templ.Component) {
-	m.pages.Page(w, r, status, pageTitleAccount, accountPage(v), fragment(v))
+	m.page(w, r, status, pageTitleAccount, accountPage(v), fragment(v))
 }
 
 func (m *Module) profileAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -158,9 +155,7 @@ func (m *Module) profileAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) emailAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -191,8 +186,6 @@ func (m *Module) emailAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) revokeSessionAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	ref := chi.URLParam(r, "ref")
 	st := FromContext(r.Context())
 
@@ -200,7 +193,7 @@ func (m *Module) revokeSessionAction(w http.ResponseWriter, r *http.Request) {
 	if err == nil && st.session != nil && st.session.Ref() == ref {
 		// The current session: this is a sign out.
 		http.SetCookie(w, m.cookie(m.sessionCookieName(), "", -1))
-		m.redirect(w, r, "/login")
+		render.Redirect(w, r, "/login")
 
 		return
 	}
@@ -209,8 +202,6 @@ func (m *Module) revokeSessionAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) revokeOthersAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	n, err := m.accounts.RevokeOtherSessions(r.Context(), m.Actor(r.Context()))
 	m.sessionsResult(w, r, err, fmt.Sprintf("%d other session(s) signed out.", n))
 }
@@ -218,8 +209,6 @@ func (m *Module) revokeOthersAction(w http.ResponseWriter, r *http.Request) {
 // revokeAllAction signs out every session of the user, this one included
 // ("Sign out everywhere"), then goes to the login page.
 func (m *Module) revokeAllAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	if _, err := m.accounts.RevokeAllOwnSessions(r.Context(), m.Actor(r.Context())); err != nil {
 		m.sessionsResult(w, r, err, "")
 
@@ -227,7 +216,7 @@ func (m *Module) revokeAllAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.SetCookie(w, m.cookie(m.sessionCookieName(), "", -1))
-	m.redirect(w, r, "/login")
+	render.Redirect(w, r, "/login")
 }
 
 func (m *Module) sessionsResult(w http.ResponseWriter, r *http.Request, err error, ok string) {
@@ -252,24 +241,6 @@ func (m *Module) sessionsResult(w http.ResponseWriter, r *http.Request, err erro
 	m.section(w, r, status, v, sessionsSection)
 }
 
-// parseForm parses a form body; it answers the error itself.
-func (m *Module) parseForm(w http.ResponseWriter, r *http.Request) bool {
-	if err := r.ParseForm(); err != nil {
-		status := http.StatusBadRequest
-
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			status = http.StatusRequestEntityTooLarge
-		}
-
-		m.pages.Error(w, r, status)
-
-		return false
-	}
-
-	return true
-}
-
 // E-mail confirmation (anyone holding the link; GET shows, POST applies).
 
 const pageTitleEmail = "Confirm your e-mail address"
@@ -279,23 +250,23 @@ func (m *Module) emailVerifyPage(w http.ResponseWriter, r *http.Request) {
 
 	token := chi.URLParam(r, "token")
 	if err := m.profile.CheckEmailToken(r.Context(), token); err != nil {
-		m.pages.Page(w, r, http.StatusNotFound, pageTitleEmail, emailVerifyResult(false, "This link has expired or was already used."), nil)
+		m.page(w, r, http.StatusNotFound, pageTitleEmail, emailVerifyResult(false, "This link has expired or was already used."), nil)
 
 		return
 	}
 
-	m.pages.Page(w, r, http.StatusOK, pageTitleEmail, emailVerifyPage(token), nil)
+	m.page(w, r, http.StatusOK, pageTitleEmail, emailVerifyPage(token), nil)
 }
 
 func (m *Module) emailVerifyLanding(w http.ResponseWriter, r *http.Request) {
 	setupHeaders(w)
-	m.pages.Page(w, r, http.StatusNotFound, pageTitleEmail, emailVerifyResult(false, "Open the link from the e-mail again to confirm your address."), nil)
+	m.page(w, r, http.StatusNotFound, pageTitleEmail, emailVerifyResult(false, "Open the link from the e-mail again to confirm your address."), nil)
 }
 
 func (m *Module) emailVerifyAction(w http.ResponseWriter, r *http.Request) {
 	setupHeaders(w)
 
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -303,9 +274,9 @@ func (m *Module) emailVerifyAction(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case err == nil:
-		m.pages.Page(w, r, http.StatusOK, pageTitleEmail, emailVerifyResult(true, "Your e-mail address is confirmed."), nil)
+		m.page(w, r, http.StatusOK, pageTitleEmail, emailVerifyResult(true, "Your e-mail address is confirmed."), nil)
 	case errors.Is(err, domain.ErrInvalidToken):
-		m.pages.Page(w, r, http.StatusNotFound, pageTitleEmail, emailVerifyResult(false, "This link has expired or was already used."), nil)
+		m.page(w, r, http.StatusNotFound, pageTitleEmail, emailVerifyResult(false, "This link has expired or was already used."), nil)
 	default:
 		m.logger.ErrorContext(r.Context(), "e-mail confirmation failed", slog.Any("error", err))
 		m.pages.Error(w, r, http.StatusInternalServerError)

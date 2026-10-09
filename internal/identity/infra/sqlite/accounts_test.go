@@ -130,7 +130,7 @@ func TestAccounts(t *testing.T) {
 			{domain.UserQuery{Role: domain.RoleListener}, "carl"},
 			{domain.UserQuery{Enabled: &off}, "carl"},
 			{domain.UserQuery{Enabled: &on, NeverLoggedIn: true}, "anna bob"},
-			{domain.UserQuery{After: "anna", Limit: 1}, "bob"},
+			{domain.UserQuery{Offset: 1, Limit: 1}, "bob"},
 		} {
 			if got := names(tc.q); joinSpace(got) != tc.want {
 				t.Errorf("search %+v = %v, want %s", tc.q, got, tc.want)
@@ -413,6 +413,10 @@ func TestAccounts(t *testing.T) {
 		recs, _ := r.Audit.Search(ctx, domain.AuditQuery{Limit: 2})
 		if got := search(domain.AuditQuery{BeforeID: recs[1].ID}); joinSpace(got) != "auth.login.failure auth.login.success" {
 			t.Errorf("next page = %v", got)
+		}
+
+		if got := search(domain.AuditQuery{Offset: 2}); joinSpace(got) != "auth.login.failure auth.login.success" {
+			t.Errorf("offset page = %v", got)
 		}
 	})
 }

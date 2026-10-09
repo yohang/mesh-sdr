@@ -123,4 +123,21 @@ func TestAdminImagesSection(t *testing.T) {
 	if res, _ := h.browser("op").do(http.MethodPost, "/admin/site/images", ctype, body, nil); res.StatusCode != http.StatusForbidden {
 		t.Errorf("operator upload = %d", res.StatusCode)
 	}
+
+	// Without JavaScript: the Site page shows the outcome after the
+	// redirect, and a refused upload shows the section with its failure.
+	res, _ = b.do(http.MethodPost, "/admin/site/images", ctype, body, nil)
+	if loc := res.Header.Get("Location"); res.StatusCode != http.StatusSeeOther || loc != "/admin/site?done=image_updated&slot=panorama#receiver-images" {
+		t.Fatalf("no-JS upload = %d %q", res.StatusCode, loc)
+	}
+
+	if _, page := b.do(http.MethodGet, "/admin/site?done=image_updated&slot=panorama", "", "", nil); !strings.Contains(string(page), `role="status">The panorama was updated.</p>`) {
+		t.Error("site page without the outcome")
+	}
+
+	svgType, svgBody := multipartBody(t, []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), map[string]string{"slot": "panorama"})
+	if res, page := b.do(http.MethodPost, "/admin/site/images", svgType, svgBody, nil); res.StatusCode != http.StatusUnprocessableEntity ||
+		!strings.Contains(string(page), `<main id="main"`) || !strings.Contains(string(page), `role="alert"`) {
+		t.Errorf("no-JS refused upload = %d %s", res.StatusCode, page)
+	}
 }

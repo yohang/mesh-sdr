@@ -20,7 +20,9 @@ func userURL(u *domain.User) string { return "/admin/users/" + u.ID().String() }
 templ usersPage(v usersView) {
 	<section class="flex w-full max-w-5xl flex-col gap-6" aria-labelledby="users-title">
 		<div class="flex flex-wrap items-center gap-4">
-			<h1 id="users-title" class="text-2xl font-bold">Users</h1>
+			@layout.Title("users-title") {
+				Users
+			}
 			<a href="/admin/invitations">Invite a user</a>
 		</div>
 		<form class="flex flex-wrap items-end gap-3" method="get" action="/admin/users" role="search">
@@ -80,9 +82,7 @@ templ usersPage(v usersView) {
 				</table>
 			}
 		}
-		if v.NextQS != "" {
-			<p><a href={ templ.SafeURL("/admin/users?" + v.NextQS) }>Next page</a></p>
-		}
+		@layout.Pager(v.Paging)
 	</section>
 }
 
@@ -91,7 +91,9 @@ templ usersPage(v usersView) {
 templ userPage(v userView) {
 	<section class="flex w-full max-w-3xl flex-col gap-6" aria-labelledby="user-title">
 		<p><a href="/admin/users">All users</a></p>
-		<h1 id="user-title" class="text-2xl font-bold">{ v.User.Username().String() }</h1>
+		@layout.Title("user-title") {
+			{ v.User.Username().String() }
+		}
 		@noticeView("user-notice", v.Notice)
 		if v.Password != "" {
 			<label class="flex flex-col gap-1 rounded border p-3">
@@ -106,7 +108,8 @@ templ userPage(v userView) {
 			</label>
 		}
 		<dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
-			<dt>Display name</dt><dd>{ v.User.DisplayName().String() }</dd>
+			<dt>Display name</dt>
+			<dd>{ v.User.DisplayName().String() }</dd>
 			<dt>E-mail</dt>
 			<dd>
 				{ v.User.Email().String() }
@@ -114,7 +117,8 @@ templ userPage(v userView) {
 					(not confirmed)
 				}
 			</dd>
-			<dt>Roles</dt><dd>{ app.GrantNames(v.User.Grants()) }</dd>
+			<dt>Roles</dt>
+			<dd>{ app.GrantNames(v.User.Grants()) }</dd>
 			<dt>State</dt>
 			<dd>
 				if v.User.Enabled() {
@@ -126,8 +130,10 @@ templ userPage(v userView) {
 					, must change the password
 				}
 			</dd>
-			<dt>Created</dt><dd>{ when(v.User.CreatedAt()) }</dd>
-			<dt>Last sign-in</dt><dd>{ lastLogin(v.User) }</dd>
+			<dt>Created</dt>
+			<dd>{ when(v.User.CreatedAt()) }</dd>
+			<dt>Last sign-in</dt>
+			<dd>{ lastLogin(v.User) }</dd>
 		</dl>
 		<section class="flex flex-col gap-3" aria-labelledby="user-roles-title">
 			<h2 id="user-roles-title" class="text-xl font-semibold">Roles</h2>

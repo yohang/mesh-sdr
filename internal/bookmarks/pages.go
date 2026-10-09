@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -31,7 +32,7 @@ func (m *Module) Middlewares() []func(http.Handler) http.Handler { return nil }
 // edited inline with htmx and the pages work without it.
 func (m *Module) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
-		r.Use(m.d.Guard, noIndex)
+		r.Use(m.d.Guard, render.NoIndex)
 
 		for path, h := range map[string]http.HandlerFunc{
 			ManagePath: m.listPage, ManagePath + "/{id}": m.editPage, ManagePath + "/{id}/row": m.rowPage,
@@ -46,21 +47,8 @@ func (m *Module) Routes(r chi.Router) {
 	})
 }
 
-func noIndex(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Robots-Tag", "noindex")
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (m *Module) page(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component) {
-	sections := layout.OperatorAdminSections
-	if m.d.AdminSections != nil {
-		sections = m.d.AdminSections(r)
-	}
-
-	m.d.Render.Page(w, r, status, layout.Page{Title: title, Section: layout.SectionAdmin},
-		layout.AdminPageWith("bookmarks", sections, content), fragment)
+	m.d.Render.AdminPage(w, r, status, title, "bookmarks", content, fragment)
 }
 
 // Notices shown after a redirect (?done=…).
@@ -102,16 +90,12 @@ func (m *Module) names(ctx context.Context) (names, error) {
 		err error
 	)
 
-	if m.d.Devices != nil {
-		if n.Devices, err = m.d.Devices.Devices(ctx); err != nil {
-			return names{}, err
-		}
+	if n.Devices, err = m.d.Devices.Devices(ctx); err != nil {
+		return names{}, err
 	}
 
-	if m.d.Presets != nil {
-		if n.Presets, err = m.d.Presets.Presets(ctx); err != nil {
-			return names{}, err
-		}
+	if n.Presets, err = m.d.Presets.Presets(ctx); err != nil {
+		return names{}, err
 	}
 
 	return n, nil
@@ -128,8 +112,11 @@ type listView struct {
 	Notice string
 	// NoticeID is the bookmark the notice is about (created, saved): its
 	// row shows the notice, next to the anchor the redirect scrolls to.
-	NoticeID  string
-	Truncated bool
+	NoticeID string
+	// Total counts the bookmarks matching the filters; Rows is one page of
+	// them.
+	Total  int
+	Paging layout.Paging
 }
 
 // rowNotice reports whether a row of the table shows the notice.
@@ -165,6 +152,19 @@ type filterForm struct {
 // active reports whether a filter is set.
 func (f filterForm) active() bool {
 	return f.Origin != "" || f.Device != "" || f.Scope != "" || f.Band != "" || f.From != "" || f.To != ""
+}
+
+// query returns the filters as a URL query.
+func (f filterForm) query() url.Values {
+	q := url.Values{}
+
+	for k, v := range map[string]string{"origin": f.Origin, "device": f.Device, "scope": f.Scope, "band": f.Band, "from": f.From, "to": f.To} {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+
+	return q
 }
 
 // filterOf reads the filters of the query.
@@ -209,13 +209,13 @@ func (m *Module) filterOf(q url.Values) (filterForm, Filter) {
 			return nil
 		}
 
-		n, err := strconv.ParseInt(s, 10, 64)
-		if err != nil || n < 0 {
+		n, ok := render.ParseKHz(s)
+		if !ok {
 			if ff.Errors == nil {
 				ff.Errors = map[string]string{}
 			}
 
-			ff.Errors[name] = "Enter a frequency in Hz."
+			ff.Errors[name] = "Enter a frequency in kHz."
 
 			return nil
 		}
@@ -240,12 +240,13 @@ func (m *Module) filterOf(q url.Values) (filterForm, Filter) {
 	return ff, f
 }
 
-// maxRows bounds the rows of the table: a filter narrows the rest.
-const maxRows = 1000
+// PageSize is the number of rows of a page of the table.
+const PageSize = 100
 
 func (m *Module) listView(r *http.Request, add bookmarkForm) (listView, error) {
 	ctx := r.Context()
-	ff, f := m.filterOf(r.URL.Query())
+	q := r.URL.Query()
+	ff, f := m.filterOf(q)
 
 	n, err := m.names(ctx)
 	if err != nil {
@@ -259,24 +260,33 @@ func (m *Module) listView(r *http.Request, add bookmarkForm) (listView, error) {
 
 	v := listView{
 		Names: n, Filter: ff, Bands: m.Bandplan().Bands(0, 1<<62), Region: m.Region(), Add: add,
-		Notice: notices[r.URL.Query().Get("done")], NoticeID: r.URL.Query().Get("id"),
+		Notice: notices[q.Get("done")], NoticeID: q.Get("id"), Total: len(rows),
+		Paging: layout.Paging{
+			Label: "Pages of bookmarks", Prev: "Previous bookmarks", Next: "Next bookmarks", Path: ManagePath,
+			Query: ff.query(), Page: render.PageOf(q),
+		},
 	}
 
-	if len(rows) > maxRows {
-		rows, v.Truncated = rows[:maxRows], true
+	// After a save, the page holding the bookmark the notice is about.
+	if q.Get("page") == "" && v.NoticeID != "" {
+		if i := slices.IndexFunc(rows, func(b *Bookmark) bool { return b.ID().String() == v.NoticeID }); i >= 0 {
+			v.Paging.Page = i/PageSize + 1
+		}
 	}
 
-	v.Rows = rows
+	start := min((v.Paging.Page-1)*PageSize, len(rows))
+	end := min(start+PageSize, len(rows))
+	v.Rows, v.Paging.More = rows[start:end], end < len(rows)
 
 	return v, nil
 }
 
 func (m *Module) listPage(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	add := bookmarkForm{Values: map[string]string{
+	add := bookmarkForm{Form: render.Form{Values: map[string]string{
 		"name": q.Get("name"), "frequency": q.Get("f"), "modulation": q.Get("m"), "underlying": q.Get("m2"),
 		"scope": string(ScopeAll), "scannable": "on",
-	}}
+	}}}
 
 	m.renderList(w, r, http.StatusOK, add)
 }
@@ -350,7 +360,7 @@ func (m *Module) rowPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !render.WantsFragment(r) {
-		http.Redirect(w, r, ManagePath, http.StatusSeeOther)
+		render.Redirect(w, r, ManagePath)
 
 		return
 	}
@@ -382,16 +392,16 @@ func (m *Module) deletePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) create(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r, m.d.Render) {
+	if !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
-	f := bookmarkForm{Values: formValues(r)}
+	f := bookmarkForm{Form: render.Form{Values: formValues(r)}}
 
 	if d, ok := f.draft(); ok {
 		b, err := m.Create(r.Context(), d)
 		if err == nil {
-			redirect(w, r, noticePath("created", b))
+			render.Redirect(w, r, noticePath("created", b))
 
 			return
 		}
@@ -399,12 +409,12 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		m.formError(r, &f, err)
 	}
 
-	m.renderList(w, r, f.status(), f)
+	m.renderList(w, r, f.Status(), f)
 }
 
 func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	cur, ok := m.bookmark(w, r)
-	if !ok || !parseForm(w, r, m.d.Render) {
+	if !ok || !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
@@ -421,7 +431,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f := bookmarkForm{ID: cur.ID().String(), Name: cur.Name(), Version: version, Values: formValues(r)}
+	f := bookmarkForm{ID: cur.ID().String(), Name: cur.Name(), Version: version, Form: render.Form{Values: formValues(r)}}
 
 	if d, ok := f.draft(); ok {
 		b, err := m.Update(r.Context(), f.ID, version, d)
@@ -437,7 +447,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			redirect(w, r, noticePath("saved", b))
+			render.Redirect(w, r, noticePath("saved", b))
 
 			return
 		}
@@ -445,12 +455,12 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		m.formError(r, &f, err)
 	}
 
-	m.renderEdit(w, r, f.status(), cur, f)
+	m.renderEdit(w, r, f.Status(), cur, f)
 }
 
 func (m *Module) delete(w http.ResponseWriter, r *http.Request) {
 	b, ok := m.bookmark(w, r)
-	if !ok || !parseForm(w, r, m.d.Render) {
+	if !ok || !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
@@ -463,7 +473,7 @@ func (m *Module) delete(w http.ResponseWriter, r *http.Request) {
 
 	err := m.Delete(r.Context(), b.ID().String(), version)
 	if err == nil {
-		redirect(w, r, ManagePath+"?done=deleted")
+		render.Redirect(w, r, ManagePath+"?done=deleted")
 
 		return
 	}
@@ -489,19 +499,10 @@ func (m *Module) delete(w http.ResponseWriter, r *http.Request) {
 
 // formError records a refused save on the form.
 func (m *Module) formError(r *http.Request, f *bookmarkForm, err error) {
-	var de *shared.Error
-
 	switch {
-	case errors.Is(err, ErrInvalidBookmark) && errors.As(err, &de):
-		for _, v := range de.Violations() {
-			f.setError(v.Path(), sentence(v.Message()))
-		}
-
-		if len(f.Errors) == 0 {
-			f.Failure = sentence(de.Message())
-		}
+	case errors.Is(err, ErrInvalidBookmark) && f.AddViolations(err):
 	case errors.Is(err, ErrDuplicate):
-		f.setError("name", "A bookmark with this name, frequency and mode exists where it shows.")
+		f.SetError("name", "A bookmark with this name, frequency and mode exists where it shows.")
 	case errors.Is(err, ErrVersionConflict):
 		f.Failure, f.Conflict = "This bookmark was changed meanwhile: reload the page to edit the current version.", true
 	case errors.Is(err, ErrBookmarkNotFound):
@@ -516,35 +517,10 @@ func (m *Module) formError(r *http.Request, f *bookmarkForm, err error) {
 
 // bookmarkForm is the state of a bookmark form (add, or edit of one).
 type bookmarkForm struct {
+	render.Form
 	ID      string // empty: a new bookmark
 	Name    string // current name of an edited bookmark
 	Version int
-	Values  map[string]string
-	Errors  map[string]string
-	Failure string
-	// Conflict and Broken select the status of a failed save.
-	Conflict, Broken bool
-}
-
-func (f *bookmarkForm) setError(field, msg string) {
-	if f.Errors == nil {
-		f.Errors = map[string]string{}
-	}
-
-	if _, ok := f.Errors[field]; !ok {
-		f.Errors[field] = msg
-	}
-}
-
-func (f *bookmarkForm) status() int {
-	switch {
-	case f.Broken:
-		return http.StatusInternalServerError
-	case f.Conflict:
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
 }
 
 // formKeys are the posted fields of the bookmark form.
@@ -569,11 +545,11 @@ func (f *bookmarkForm) draft() (Draft, bool) {
 	}
 
 	if s := v["frequency"]; s == "" {
-		f.setError("frequency", "Required.")
+		f.SetError("frequency", "Required.")
 	} else {
 		n, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
-			f.setError("frequency", "Enter a whole number of Hz.")
+			f.SetError("frequency", "Enter a whole number of Hz.")
 		}
 
 		d.Frequency = n
@@ -585,21 +561,21 @@ func (f *bookmarkForm) draft() (Draft, bool) {
 	case ScopeDevice:
 		dev, derr := shared.NewDeviceID(v["device"])
 		if derr != nil {
-			f.setError("device", "Choose a device.")
+			f.SetError("device", "Choose a device.")
 		} else if d.Scope, err = OnDevice(dev); err != nil {
-			f.setError("device", "Choose a device.")
+			f.SetError("device", "Choose a device.")
 		}
 	case ScopePreset:
 		p, perr := shared.ParseUUID(v["preset"])
 		if perr != nil {
-			f.setError("preset", "Choose a preset.")
+			f.SetError("preset", "Choose a preset.")
 		} else if d.Scope, err = OnPreset(p); err != nil {
-			f.setError("preset", "Choose a preset.")
+			f.SetError("preset", "Choose a preset.")
 		}
 	case ScopeAll:
 		d.Scope = AllDevices()
 	default:
-		f.setError("scope", "Choose where the bookmark shows.")
+		f.SetError("scope", "Choose where the bookmark shows.")
 	}
 
 	return d, len(f.Errors) == 0
@@ -621,72 +597,16 @@ func formOf(b *Bookmark) bookmarkForm {
 		v["preset"] = p.String()
 	}
 
-	return bookmarkForm{ID: b.ID().String(), Name: b.Name(), Version: b.Version(), Values: v}
-}
-
-// sentence capitalises a message and ends it with a full stop.
-func sentence(s string) string {
-	if s == "" {
-		return s
-	}
-
-	s = strings.ToUpper(s[:1]) + s[1:]
-	if !strings.HasSuffix(s, ".") {
-		s += "."
-	}
-
-	return s
+	return bookmarkForm{ID: b.ID().String(), Name: b.Name(), Version: b.Version(), Form: render.Form{Values: v}}
 }
 
 // formBodyLimit bounds the bookmark forms.
 const formBodyLimit = 16 << 10
 
-func parseForm(w http.ResponseWriter, r *http.Request, rd Renderer) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, formBodyLimit)
-	if err := r.ParseForm(); err != nil {
-		status := http.StatusBadRequest
-
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			status = http.StatusRequestEntityTooLarge
-		}
-
-		rd.Error(w, r, status)
-
-		return false
-	}
-
-	return true
-}
-
-// redirect answers a successful form: 303, or HX-Redirect for htmx.
 // noticePath is the table after b was created or saved: its row, scrolled
 // to, shows the notice.
 func noticePath(done string, b *Bookmark) string {
 	id := b.ID().String()
 
 	return ManagePath + "?done=" + done + "&id=" + url.QueryEscape(id) + "#" + rowID(id)
-}
-
-func redirect(w http.ResponseWriter, r *http.Request, path string) {
-	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Redirect", path)
-		w.WriteHeader(http.StatusNoContent)
-
-		return
-	}
-
-	http.Redirect(w, r, path, http.StatusSeeOther)
-}
-
-// FormatHz formats a frequency in Hz for people (kHz or MHz).
-func FormatHz(hz int64) string {
-	switch {
-	case hz >= 1_000_000:
-		return strconv.FormatFloat(float64(hz)/1e6, 'f', -1, 64) + " MHz"
-	case hz >= 1_000:
-		return strconv.FormatFloat(float64(hz)/1e3, 'f', -1, 64) + " kHz"
-	default:
-		return strconv.FormatInt(hz, 10) + " Hz"
-	}
 }

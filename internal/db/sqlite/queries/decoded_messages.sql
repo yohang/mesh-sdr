@@ -11,16 +11,15 @@ RETURNING id;
 -- name: ListDecodedMessages :many
 -- ListDecodedMessages returns the messages of the devices of devices_json
 -- (a JSON array: sqlc.slice breaks the numbered arguments), newest first,
--- older than before_id, with optional mode and device filters and a decode
+-- skipping skip_rows, with optional mode and device filters and a decode
 -- time range [from_ms, to_ms).
 SELECT * FROM decoded_messages
 WHERE device_id IN (SELECT value FROM json_each(sqlc.arg(devices_json)))
   AND (sqlc.arg(mode) = '' OR mode = sqlc.arg(mode))
   AND (sqlc.arg(device) = '' OR device_id = sqlc.arg(device))
   AND decoded_at >= sqlc.arg(from_ms) AND decoded_at < sqlc.arg(to_ms)
-  AND id < sqlc.arg(before_id)
 ORDER BY id DESC
-LIMIT sqlc.arg(max_rows);
+LIMIT sqlc.arg(max_rows) OFFSET sqlc.arg(skip_rows);
 
 -- name: DeleteDecodedBefore :execrows
 -- DeleteDecodedBefore deletes up to max_rows messages decoded before
