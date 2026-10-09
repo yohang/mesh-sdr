@@ -24,6 +24,8 @@ import { installConfirm } from "./confirm.js";
 import "./receiver/dock.js";
 import "./receiver/island.js";
 import { installReceiverNotices } from "./receiver/grid.js";
+// Map island (ADR 0029): loads Leaflet on the Map page only.
+import "./map/island.js";
 
 installNavigation();
 installShortcuts();
