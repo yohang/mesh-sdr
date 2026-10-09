@@ -1,8 +1,9 @@
 // Package mapfeatures is the data side of the map (MAP-002, MAP-007,
 // MAP-012, MAP-013, ADR 0029): the features the hub projects from the
 // decoded messages at ingest (APRS positions and objects, WSJT and JS8
-// locators and the call lines between located stations), stored in
-// map_features in the ingest transaction and published as
+// locators and the call lines between located stations, aircraft merged
+// per device, AIR-006, with their country and registration, AIR-007),
+// stored in map_features in the ingest transaction and published as
 // map.feature.upsert / map.feature.remove deltas after the commit; the
 // expiry job; the receiver markers; GET /api/v1/map/features and
 // /api/v1/map/config; and the Map page (MAP-001), whose island
@@ -31,6 +32,8 @@ const (
 	KindAPRS    Kind = "aprs"
 	KindLocator Kind = "locator"
 	KindCall    Kind = "call"
+	// KindAircraft is an aircraft (AIR-006).
+	KindAircraft Kind = "aircraft"
 )
 
 // SourceDecode is the source of the features projected from decodes.
@@ -159,7 +162,10 @@ type Change struct {
 // Settings are the map settings the module applies (MAP-011, MAP-012,
 // MAP-013).
 type Settings struct {
-	PositionRetention     time.Duration
+	PositionRetention time.Duration
+	// AircraftTTL is the lifetime of an ADS-B position
+	// (aircraft.adsb_ttl_s, AIR-006).
+	AircraftTTL           time.Duration
 	CallRetention         time.Duration
 	MaxCalls              int
 	IgnoreIndirectReports bool

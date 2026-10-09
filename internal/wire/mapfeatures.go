@@ -50,6 +50,7 @@ func newMap(d mapDeps) *mapfeatures.Module {
 
 			return mapfeatures.Settings{
 				PositionRetention:     time.Duration(s.Int("map.position_retention_s")) * time.Second,
+				AircraftTTL:           time.Duration(s.Int("aircraft.adsb_ttl_s")) * time.Second,
 				CallRetention:         time.Duration(s.Int("map.call_retention_s")) * time.Second,
 				MaxCalls:              s.Int("map.max_calls"),
 				IgnoreIndirectReports: s.Bool("map.ignore_indirect_reports"),
@@ -162,6 +163,6 @@ func mapChanged(b events.Publisher, policies *gridapp.ListenPolicies, logger *sl
 func mapDecode(m decodes.Message) mapfeatures.Decode {
 	return mapfeatures.Decode{
 		NodeID: m.NodeID, DeviceID: m.DeviceID, Mode: m.Mode, Schema: m.Schema, FreqHz: m.FreqHz, At: m.DecodedAt,
-		Payload: m.Payload,
+		Text: m.Text, Payload: m.Payload,
 	}
 }

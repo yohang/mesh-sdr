@@ -11,7 +11,7 @@ import (
 var t0 = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
 
 var testSettings = Settings{
-	PositionRetention: 2 * time.Hour, CallRetention: 5 * time.Minute, MaxCalls: 5, PreferRecentReports: true,
+	PositionRetention: 2 * time.Hour, CallRetention: 5 * time.Minute, MaxCalls: 5, PreferRecentReports: true, AircraftTTL: 15 * time.Minute,
 }
 
 func dec(schema, mode, payload string) Decode {

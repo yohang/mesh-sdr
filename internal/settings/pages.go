@@ -107,6 +107,8 @@ var formPages = []formPage{
 			},
 			{ID: "paging", Title: "Paging", Keys: []string{"decoders.paging_filter", "decoders.paging_charset"}},
 			{ID: "ism", Title: "ISM", Keys: []string{"decoders.ism_report_levels"}},
+			{ID: "aircraft", Title: "Aircraft", Description: "Aircraft positions on the map (ADS-B); the hub removes the expired ones every 30 seconds.",
+				Keys: []string{"aircraft.adsb_ttl_s"}},
 		},
 	},
 	{

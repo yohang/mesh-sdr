@@ -48,7 +48,9 @@ var (
 // another node's device and messages the database refuses are skipped and
 // logged: only a database failure fails the batch. Duplicates (same
 // device, mode, text, rounded frequency and time bucket, ADR 0028) are
-// dropped. The stored ones are published by Flush after the commit.
+// dropped; a high-rate mode keeps one message per subject per interval
+// (Deps.Sample), the others only reach the map. The stored ones are
+// published by Flush after the commit.
 func (m *Module) Ingest(ctx context.Context, node string, payload json.RawMessage, now time.Time) error {
 	var batch ctl.DecodeBatch
 	if err := json.Unmarshal(payload, &batch); err != nil {
@@ -85,6 +87,8 @@ func (m *Module) Ingest(ctx context.Context, node string, payload json.RawMessag
 			continue
 		}
 
+		sampled := m.sample(&r)
+
 		id, inserted, err := m.repo.Insert(ctx, r)
 
 		switch {
@@ -94,6 +98,13 @@ func (m *Module) Ingest(ctx context.Context, node string, payload json.RawMessag
 			continue
 		case err != nil:
 			return err
+		case !inserted && sampled && m.d.Stored != nil:
+			// Thinned out: not stored, still projected.
+			if err := m.d.Stored(ctx, r.Message); err != nil {
+				return err
+			}
+
+			continue
 		case !inserted:
 			continue
 		}
@@ -216,6 +227,24 @@ func (m *Module) validRow(node string, d ctl.Decode, now time.Time) (row, string
 	r.DedupKey = DedupKey(r.DeviceID, r.Mode, r.Text, round(r.FreqHz, step), r.DecodedAt.UnixMilli()/bucket.Milliseconds())
 
 	return r, ""
+}
+
+// sample gives a message of a thinned mode the duplicate key of its subject
+// and interval (one stored message per subject per interval) and reports
+// whether it did.
+func (m *Module) sample(r *row) bool {
+	if m.d.Sample == nil {
+		return false
+	}
+
+	subject, every := m.d.Sample(r.Message)
+	if subject == "" || every <= 0 {
+		return false
+	}
+
+	r.DedupKey = DedupKey(r.DeviceID, r.Mode, "subject:"+subject, 0, r.DecodedAt.UnixMilli()/every.Milliseconds())
+
+	return true
 }
 
 // round rounds hz to the nearest multiple of step.

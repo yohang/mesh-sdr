@@ -334,3 +334,57 @@ func TestIngestStored(t *testing.T) {
 		t.Errorf("rows after a rollback %+v %v", rows, err)
 	}
 }
+
+// A high-rate mode keeps one message per subject per interval; the others
+// still reach the map (Stored), unpublished.
+func TestIngestSampled(t *testing.T) {
+	e := newEnv(t)
+
+	var stored []string
+
+	e.m.d.Stored = func(_ context.Context, m Message) error {
+		stored = append(stored, fmt.Sprintf("%d %s", m.ID, m.Text))
+
+		return nil
+	}
+	e.m.d.Sample = func(m Message) (string, time.Duration) {
+		var p struct {
+			ICAO string `json:"icao"`
+		}
+
+		_ = json.Unmarshal(m.Payload, &p)
+
+		return p.ICAO, 30 * time.Second
+	}
+
+	aircraft := func(at time.Time, icao, text string) ctl.Decode {
+		d := decode("vhf", at, text)
+		d.Payload = json.RawMessage(`{"icao":"` + icao + `"}`)
+
+		return d
+	}
+
+	e.ingest(t, "n1", aircraft(t0, "4CA1FA", "4CA1FA 12000 ft"), aircraft(t0.Add(time.Second), "4CA1FA", "4CA1FA 12100 ft"),
+		aircraft(t0.Add(2*time.Second), "3C6586", "3C6586 35000 ft"))
+	e.ingest(t, "n1", aircraft(t0.Add(31*time.Second), "4CA1FA", "4CA1FA 13000 ft"))
+
+	var texts []string
+	for _, m := range e.published {
+		texts = append(texts, m.Text)
+	}
+
+	if fmt.Sprint(texts) != "[4CA1FA 12000 ft 3C6586 35000 ft 4CA1FA 13000 ft]" {
+		t.Errorf("published %v", texts)
+	}
+
+	if len(stored) != 4 || stored[1] != "0 4CA1FA 12100 ft" {
+		t.Errorf("stored %v", stored)
+	}
+
+	// A message without a subject is not thinned.
+	e.ingest(t, "n1", aircraft(t0.Add(40*time.Second), "", "anonymous"), aircraft(t0.Add(41*time.Second), "", "anonymous 2"))
+
+	if len(e.published) != 5 {
+		t.Errorf("published %d", len(e.published))
+	}
+}

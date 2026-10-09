@@ -11,11 +11,17 @@ import (
 // the ingestion transaction of ctx (TECHNICAL_SPEC §7.3 "Transactional
 // outbox" rule 1): its reports pass the report filters (MAP-013), then are
 // upserted; killed objects are deleted; calls between two located stations
-// become call lines, capped to map.max_calls. The changes are published by
+// become call lines, capped to map.max_calls; aircraft are merged
+// (aircraft.go). The changes are published by
 // Flush after the commit. Only a database failure fails the batch.
 func (m *Module) Ingest(ctx context.Context, d Decode) error {
 	s := m.d.Settings()
 	now := m.d.Now()
+
+	if d.Schema == schemaAircraft {
+		return m.ingestAircraft(ctx, d, s, now)
+	}
+
 	p := project(d, s)
 
 	for _, key := range p.kills {

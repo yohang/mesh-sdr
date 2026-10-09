@@ -11,6 +11,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
+	"github.com/yohang/mesh-sdr/internal/decodes"
 	"github.com/yohang/mesh-sdr/internal/events"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
@@ -263,5 +264,24 @@ func TestDevicesOfPositions(t *testing.T) {
 
 	if got := DevicesOf(cfg); *got[0].GPS != (ctl.Position{Lat: 50.63, Lon: 3.06, Source: ctl.PositionNode}) || got[1].GPS.Source != ctl.PositionDevice {
 		t.Errorf("with node gps: %+v %+v", got[0].GPS, got[1].GPS)
+	}
+}
+
+// ADS-B messages are thinned by aircraft address; other modes are not.
+func TestSampleOf(t *testing.T) {
+	cases := []struct {
+		mode, schema, payload, subject string
+		every                          time.Duration
+	}{
+		{"adsb", "aircraft.v1", `{"icao":"4CA1FA"}`, "4CA1FA", 30 * time.Second},
+		{"adsb", "aircraft.v1", `{}`, "", 30 * time.Second},
+		{"packet", "aprs.v1", `{"icao":"4CA1FA"}`, "", 0},
+	}
+
+	for _, c := range cases {
+		subject, every := sampleOf(decodes.Message{Mode: c.mode, Schema: c.schema, Payload: json.RawMessage(c.payload)})
+		if subject != c.subject || every != c.every {
+			t.Errorf("%s %s: %q %v", c.mode, c.payload, subject, every)
+		}
 	}
 }
