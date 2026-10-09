@@ -137,7 +137,7 @@ func TestNAVTEXTagger(t *testing.T) {
 		}
 	}
 
-	// A line outside a message has no header.
+	// Without NNNN, the next lines keep the header of their message.
 	got = nil
 	l.feed([]byte("NOISE\r\n"), time.Unix(1_800_000_000, 0))
 
