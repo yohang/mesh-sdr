@@ -274,3 +274,49 @@ func TestListPage(t *testing.T) {
 		t.Errorf("anonymous without device: %s", body)
 	}
 }
+
+// Stored sees each stored message inside the ingestion transaction (the map
+// projection): duplicates are not passed again, and its error rolls the
+// whole batch back.
+func TestIngestStored(t *testing.T) {
+	e := newEnv(t)
+
+	var stored []string
+
+	fail := false
+	e.m.d.Stored = func(ctx context.Context, m Message) error {
+		if fail {
+			return errors.New("map down")
+		}
+
+		var n int
+		if err := e.db.Reader(ctx).QueryRowContext(ctx, `SELECT count(*) FROM decoded_messages WHERE id = ?`, m.ID).Scan(&n); err != nil || n != 1 {
+			t.Errorf("message %d not visible in the transaction: %d %v", m.ID, n, err)
+		}
+
+		stored = append(stored, m.Text)
+
+		return nil
+	}
+
+	e.ingest(t, "n1", decode("vhf", t0, "[DTMF] 1"), decode("vhf", t0, "[DTMF] 1"), decode("hf", t0, "[DTMF] 2"))
+
+	if fmt.Sprint(stored) != "[[DTMF] 1 [DTMF] 2]" {
+		t.Errorf("stored %v", stored)
+	}
+
+	fail = true
+	raw, _ := json.Marshal(ctl.DecodeBatch{Seq: 2, Decodes: []ctl.Decode{decode("vhf", t0.Add(time.Minute), "[DTMF] 3")}})
+
+	err := e.db.WithinTx(context.Background(), func(ctx context.Context) error { return e.m.Ingest(ctx, "n1", raw, e.now) })
+	if err == nil {
+		t.Fatal("batch committed despite the Stored error")
+	}
+
+	e.m.Discard("n1")
+
+	rows, err := e.m.repo.List(context.Background(), Filter{Devices: []string{"vhf"}, Limit: 10})
+	if err != nil || len(rows) != 1 {
+		t.Errorf("rows after a rollback %+v %v", rows, err)
+	}
+}
