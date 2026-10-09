@@ -35,14 +35,23 @@ type Module interface {
 // serves its own problem+json errors, like any other path under /api), the
 // static assets and each module's routes. publicURL is the hub public URL
 // (hub.url): the CSP names the receiver worklet on its origin
-// (WorkletScripts).
+// (WorkletScripts). The modules that implement ImageSources add image
+// origins to it.
 func NewRouter(logger *slog.Logger, publicURL string, api http.Handler, modules ...Module) http.Handler {
 	r := chi.NewRouter()
+
+	var images []ImageSources
+
+	for _, m := range modules {
+		if s, ok := m.(ImageSources); ok {
+			images = append(images, s)
+		}
+	}
 
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
-	r.Use(securityHeaders(WorkletScripts(publicURL)))
+	r.Use(securityHeaders(WorkletScripts(publicURL), images))
 	// HEAD requests are served by the GET routes (the read-only pages, the
 	// API GET operations).
 	r.Use(middleware.GetHead)

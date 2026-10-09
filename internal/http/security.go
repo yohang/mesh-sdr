@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/a-h/templ"
@@ -23,17 +25,26 @@ import (
 //   - style-src 'self': no inline <style> nor style="" attributes. htmx 4
 //     injects its indicator CSS as a constructable stylesheet, which this
 //     does not block.
+//   - img-src 'self' data:, plus the origins of images, the HTTPS origins
+//     of the map tiles the browser loads directly (MAP-004, ADR 0029).
+//     Boosted navigation keeps the first document, so every page carries
+//     them.
 //   - connect-src 'self': fetch, htmx and same-origin WebSockets.
-func ContentSecurityPolicy(nonce string, scripts ...string) string {
+func ContentSecurityPolicy(nonce string, scripts, images []string) string {
 	src := "'nonce-" + nonce + "'"
 	if len(scripts) > 0 {
 		src += " " + strings.Join(scripts, " ")
 	}
 
+	img := "'self' data:"
+	if len(images) > 0 {
+		img += " " + strings.Join(images, " ")
+	}
+
 	return "default-src 'none'; " +
 		"script-src " + src + "; " +
 		"style-src 'self'; " +
-		"img-src 'self' data:; " +
+		"img-src " + img + "; " +
 		"font-src 'self'; " +
 		"connect-src 'self'; " +
 		"media-src 'self' blob:; " +
@@ -78,18 +89,45 @@ func WorkletScripts(publicURL string) []string {
 	return []string{u.Scheme + "://" + u.Host + web.ReceiverWorkletPath}
 }
 
+// ImageSources is implemented by a Module whose pages load images from
+// other origins (the map tiles): the CSP img-src lists them besides 'self'.
+// It is called on every response, so its answer follows the settings.
+type ImageSources interface {
+	ImageSources() []string
+}
+
+// imageOrigin is an origin img-src may list: HTTPS, a host name, no port,
+// path nor wildcard.
+var imageOrigin = regexp.MustCompile(`^https://[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$`)
+
+// imageSources returns the valid, distinct origins of sources; the others
+// are dropped, so a bad value can never widen or break the policy.
+func imageSources(sources []ImageSources) []string {
+	var out []string
+
+	for _, s := range sources {
+		for _, o := range s.ImageSources() {
+			if imageOrigin.MatchString(o) && !slices.Contains(out, o) {
+				out = append(out, o)
+			}
+		}
+	}
+
+	return out
+}
+
 // securityHeaders sets the baseline security headers on every response and a
 // fresh CSP nonce per request. The nonce is stored in the request context
 // with templ.WithNonce: templates read it with templ.GetNonce(ctx), and
 // templ.JSONScript picks it up. HSTS is set by the gateway.
-func securityHeaders(scripts []string) func(http.Handler) http.Handler {
+func securityHeaders(scripts []string, images []ImageSources) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 128 bits from the CSPRNG, base32: valid nonce characters.
 			nonce := rand.Text()
 
 			h := w.Header()
-			h.Set("Content-Security-Policy", ContentSecurityPolicy(nonce, scripts...))
+			h.Set("Content-Security-Policy", ContentSecurityPolicy(nonce, scripts, imageSources(images)))
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("Referrer-Policy", "same-origin")
 			h.Set("Cross-Origin-Opener-Policy", "same-origin")
