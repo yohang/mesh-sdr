@@ -450,7 +450,7 @@ func (ss *session) startDecoder(d *demodState, m domain.DigitalMode, variant str
 	}
 
 	rx := &reception{}
-	spec := app.DecoderSpec{Mode: m, Variant: variant, OffsetHz: float64(offset), Dial: func() int64 { return ss.tuning(d).dial }}
+	spec := app.DecoderSpec{Mode: m, Variant: variant, Device: d.device, OffsetHz: float64(offset), Dial: func() int64 { return ss.tuning(d).dial }}
 
 	id, run, err := ss.s.dec.Decoders.Start(spec, func(id shared.UUID) app.DecoderEvents {
 		return app.DecoderEvents{

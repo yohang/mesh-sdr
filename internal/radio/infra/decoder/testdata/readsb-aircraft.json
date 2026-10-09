@@ -1,0 +1,8 @@
+{ "now" : 291581.045,
+  "messages" : 128,
+  "aircraft" : [
+{"hex":"4ca1fa","type":"adsb_icao","flight":"EIN5AT  ","alt_baro":12000,"gs":212.1,"track":315.00,"geom_rate":1536,"squawk":"7700","emergency":"general","category":"A2","lat":51.900009,"lon":3.799973,"nic":8,"rc":186,"seen_pos":0.151,"r_dst":9.531,"r_dir":231.0,"version":0,"nac_p":8,"nac_v":1,"sil":2,"sil_type":"unknown","alert":0,"spi":0,"mlat":[],"tisb":[],"messages":37,"seen":0.1,"rssi":-16.3},
+{"hex":"a4f3b2","type":"adsb_icao","flight":"N123AB  ","alt_baro":"ground","gs":1.4,"track":90.00,"category":"A1","lat":52.009999,"lon":4.010010,"nic":8,"rc":186,"seen_pos":0.550,"r_dst":0.705,"r_dir":31.6,"version":0,"nac_p":8,"sil":2,"sil_type":"unknown","mlat":[],"tisb":[],"messages":16,"seen":0.0,"rssi":-16.3},
+{"hex":"3c6586","type":"adsb_icao","flight":"DLH9LF  ","alt_baro":35000,"gs":360.6,"track":123.69,"geom_rate":-1024,"squawk":"1000","category":"A3","lat":52.100006,"lon":4.300003,"nic":8,"rc":186,"seen_pos":0.451,"r_dst":12.600,"r_dir":61.4,"version":0,"nac_p":8,"nac_v":1,"sil":2,"sil_type":"unknown","alert":0,"spi":0,"mlat":[],"tisb":[],"messages":37,"seen":0.4,"rssi":-16.3}
+  ]
+}

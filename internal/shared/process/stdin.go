@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"time"
 )
 
 // DropOldest is the bounded buffer between a DSP tap and a streaming decoder's
@@ -39,8 +40,27 @@ func (b *DropOldest) Write(p []byte) (int, error) {
 		b.size -= len(b.chunks[0])
 		b.chunks = b.chunks[1:]
 	}
-	b.cond.Signal()
+	b.cond.Broadcast()
 	return len(p), nil
+}
+
+// Wait blocks until at least n bytes are buffered, the buffer is closed or
+// d has passed, and reports whether n bytes are buffered (a tool that
+// must find input on its stdin as soon as it starts).
+func (b *DropOldest) Wait(n int, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	t := time.AfterFunc(d, func() {
+		b.mu.Lock()
+		b.cond.Broadcast()
+		b.mu.Unlock()
+	})
+	defer t.Stop()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for b.size < n && !b.closed && time.Now().Before(deadline) {
+		b.cond.Wait()
+	}
+	return b.size >= n
 }
 
 // Close ends Feed after the remaining data has been written.

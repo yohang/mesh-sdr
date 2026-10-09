@@ -426,6 +426,62 @@ func TestTapWideIQ(t *testing.T) {
 	}
 }
 
+// A wide IQ tap at the device rate (the ADS-B decoder on a 2.4 MS/s
+// device) takes the whole band, undecimated, around a centred
+// demodulator.
+func TestTapWideIQDeviceRate(t *testing.T) {
+	e := New(slog.New(slog.DiscardHandler))
+	defer e.Close()
+
+	e.Start(tuning())
+
+	p := params()
+	p.OffsetHz = 0
+
+	d, err := e.NewDemod(p, func(app.AudioOut) {}, func(app.Meter) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	var (
+		mu sync.Mutex
+		iq []complex64
+		ok = true
+	)
+
+	cancel, err := d.TapWideIQ(rate, -rate/2, rate/2, func(b app.WideIQBlock) {
+		mu.Lock()
+		iq = append(iq, b.Samples...)
+		ok = ok && b.Rate == rate
+		mu.Unlock()
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+
+	feed(e, 0, 400*time.Millisecond, 100_000)
+	eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+
+		return len(iq) > rate/4
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	var acc complex128
+	for i := len(iq) / 2; i+1 < len(iq); i++ {
+		acc += complex128(iq[i+1]) * cmplx.Conj(complex128(iq[i]))
+	}
+
+	if f := cmplx.Phase(acc) / (2 * math.Pi) * rate; math.Abs(f-100_000) > 500 || !ok {
+		t.Errorf("tone at %.0f Hz (rates ok %v)", f, ok)
+	}
+}
+
 // feedFM pushes d of a broadcast FM carrier at offset Hz modulated by a
 // toneHz tone (deviation dev), paced at about real time.
 func feedFM(e *Engine, from uint64, d time.Duration, offset, toneHz, dev float64) uint64 {

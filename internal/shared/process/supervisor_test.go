@@ -893,6 +893,33 @@ func TestDropOldestBuffer(t *testing.T) {
 	}
 }
 
+// Wait returns once enough input is buffered, at the deadline, or when the
+// buffer closes.
+func TestDropOldestWait(t *testing.T) {
+	b := NewDropOldest(100)
+	go func() {
+		for range 3 {
+			time.Sleep(10 * time.Millisecond)
+			_, _ = b.Write([]byte("aaaa"))
+		}
+	}()
+	if !b.Wait(12, 2*time.Second) {
+		t.Error("12 bytes not seen")
+	}
+	start := time.Now()
+	if b.Wait(50, 30*time.Millisecond) || time.Since(start) < 30*time.Millisecond {
+		t.Error("Wait beyond the buffered bytes returned early")
+	}
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		b.Close()
+	}()
+	start = time.Now()
+	if b.Wait(50, 2*time.Second) || time.Since(start) > time.Second {
+		t.Error("Wait did not end on Close")
+	}
+}
+
 func TestStreamingDecoderWithStdinFeed(t *testing.T) {
 	rec := newRecorder()
 	sup, _ := newSup(t, rec)

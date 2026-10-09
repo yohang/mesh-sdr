@@ -102,6 +102,10 @@ type Options struct {
 	ClockSynced func() bool
 	// Now is the decode time source (tests).
 	Now func() time.Time
+	// Position returns the position of a device (its own, else its
+	// node's; ok false: unknown): the receiver position of the ADS-B
+	// decoder (AIR-004).
+	Position func(device string) (lat, lon float64, ok bool)
 }
 
 // Runner implements app.DecoderRunner with external tools and the native
@@ -174,7 +178,22 @@ const (
 	// iqFMS16: the FM discriminator output, flat (no de-emphasis), as
 	// s16le (AIS through direwolf, OpenWebRX+'s FmDemod).
 	iqFMS16
+	// iqSC16: complex int16 little-endian, I then Q (readsb --iformat
+	// SC16).
+	iqSC16
 )
+
+// bytesPerSample is the size of one input sample of a format.
+func (f iqFormat) bytesPerSample() int {
+	switch f {
+	case iqCF32:
+		return 8
+	case iqSC16:
+		return 4
+	default:
+		return 2
+	}
+}
 
 // toolSpec is the descriptor of a decoder tool (§8.4): its program, its
 // argv for a session, its input, stderr rules and output parser: stdout
@@ -194,6 +213,9 @@ type toolSpec struct {
 	// textLog: the live records of a session are kept as text logs and
 	// sent to Files (FIL-005: the skimmers).
 	textLog bool
+	// poll, when set, is the output file the tool rewrites in its workdir
+	// (readsb): the session polls it instead of reading stdout lines.
+	poll *workdirPoll
 }
 
 // lineParser parses one output line of a tool into zero or more records.
@@ -208,6 +230,8 @@ type sessionConfig struct {
 	settings Settings
 	// dial returns the dial frequency (nil in tests).
 	dial func() int64
+	// position returns the receiver position (nil: unknown).
+	position func() (lat, lon float64, ok bool)
 }
 
 // single turns the result of a parser of one record into records.
@@ -240,6 +264,7 @@ var toolSpecs = map[string]toolSpec{
 	"rttyskimmer": {
 		tool: "csdr-rttyskimmer", args: skimmerArgs, rules: skimmerRules, iq: iqRealS16, lines: newSkimmerParser("RTTY"), textLog: true,
 	},
+	"adsb":  {tool: "readsb", args: readsbArgs, rules: readsbRules, iq: iqSC16, poll: readsbPoll},
 	"ism":   {tool: "rtl_433", args: ismArgs, rules: rtl433Rules, iq: iqCF32, lines: newISMParser("ISM")},
 	"wmbus": {tool: "rtl_433", args: wmbusArgs, rules: rtl433Rules, iq: iqCF32, lines: newISMParser("WMBUS")},
 }
@@ -262,17 +287,17 @@ func (r *Runner) startTool(spec app.DecoderSpec, ev app.DecoderEvents) (app.Deco
 	}
 
 	cfg := sessionConfig{variant: spec.Variant, settings: r.o.Settings(), dial: spec.Dial}
+	if pos := r.o.Position; pos != nil && spec.Device != "" {
+		cfg.position = func() (float64, float64, bool) { return pos(spec.Device) }
+	}
 
 	policy := process.DecoderPolicy()
 	if n := cfg.settings.MaxRestarts; n > 0 {
 		policy.CrashLoopCount = n
 	}
 
-	// 2 s of input: s16 audio or real part, or cf32.
-	sampleBytes := 2
-	if ts.iq == iqCF32 {
-		sampleBytes = 8
-	}
+	// 2 s of input: s16 audio or real part, sc16 or cf32.
+	sampleBytes := ts.iq.bytesPerSample()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &toolSession{
@@ -311,12 +336,15 @@ func (r *Runner) startTool(spec app.DecoderSpec, ev app.DecoderEvents) (app.Deco
 		Limits:      r.o.Limits,
 	}
 
-	if ts.frames != nil {
+	switch {
+	case ts.frames != nil:
 		parse := ts.frames(cfg)
 		ps.Prepare = writeDirewolfConfig
 		ps.PerRun = s.kissRun(ps.Args)
 		ps.Stdout = func(ctx context.Context, rd io.Reader) error { return s.direwolfStdout(ctx, rd, parse) }
-	} else {
+	case ts.poll != nil:
+		s.pollSpec(&ps, ts.poll, cfg)
+	default:
 		parse := ts.lines(cfg)
 		ps.Stdout = func(_ context.Context, rd io.Reader) error {
 			process.ScanLines(rd, func(text string, _ bool) {
@@ -414,7 +442,7 @@ func (s *toolSession) Audio(b app.AudioBlock) {
 }
 
 // WideIQ implements app.DecoderRun: the wide IQ (at the tool's input rate)
-// is written as cf32, as the s16le real part or as the s16le FM
+// is written as cf32, sc16, the s16le real part or the s16le FM
 // discriminator output to the stdin buffer (never blocking).
 func (s *toolSession) WideIQ(b app.WideIQBlock) {
 	s.mu.Lock()
@@ -439,10 +467,14 @@ func (s *toolSession) WideIQ(b app.WideIQBlock) {
 	s.raw = s.raw[:0]
 
 	for _, v := range b.Samples {
-		if s.iq == iqCF32 {
+		switch s.iq {
+		case iqCF32:
 			s.raw = binary.LittleEndian.AppendUint32(s.raw, math.Float32bits(real(v)))
 			s.raw = binary.LittleEndian.AppendUint32(s.raw, math.Float32bits(imag(v)))
-		} else {
+		case iqSC16:
+			s.raw = binary.LittleEndian.AppendUint16(s.raw, uint16(dsp.ToS16(real(v))))
+			s.raw = binary.LittleEndian.AppendUint16(s.raw, uint16(dsp.ToS16(imag(v))))
+		default:
 			s.raw = binary.LittleEndian.AppendUint16(s.raw, uint16(dsp.ToS16(real(v))))
 		}
 	}

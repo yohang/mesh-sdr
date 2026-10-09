@@ -173,6 +173,7 @@ type Tools struct {
 	RTL433          string   `toml:"rtl_433" env:"RTL_433" jsonschema:"description=Absolute path of rtl_433 (ISM sensors)."`
 	CWSkimmer       string   `toml:"csdr_cwskimmer" env:"CSDR_CWSKIMMER" jsonschema:"description=Absolute path of csdr-cwskimmer (CW skimmer)."`
 	RTTYSkimmer     string   `toml:"csdr_rttyskimmer" env:"CSDR_RTTYSKIMMER" jsonschema:"description=Absolute path of csdr-rttyskimmer (RTTY skimmer)."`
+	Readsb          string   `toml:"readsb" env:"READSB" jsonschema:"description=Absolute path of readsb (ADS-B)."`
 }
 
 // tool is one [tools] path key: its TOML key, the program name and its
@@ -193,6 +194,7 @@ func (t Tools) all() []tool {
 		{"rtl_433", "rtl_433", t.RTL433},
 		{"csdr_cwskimmer", "csdr-cwskimmer", t.CWSkimmer},
 		{"csdr_rttyskimmer", "csdr-rttyskimmer", t.RTTYSkimmer},
+		{"readsb", "readsb", t.Readsb},
 	}
 }
 

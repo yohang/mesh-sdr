@@ -142,7 +142,7 @@ func TestToolboxProbesInstalledTools(t *testing.T) {
 		}
 	}
 
-	for name, want := range map[string]string{"jt9": "2.7.0", "wsprd": "2.7.0", "direwolf": "1.7", "multimon-ng": "1.3.1", "rtl_433": "25.02"} {
+	for name, want := range map[string]string{"jt9": "2.7.0", "wsprd": "2.7.0", "direwolf": "1.7", "multimon-ng": "1.3.1", "rtl_433": "25.02", "readsb": "3.14.1630"} {
 		if versions[name] != want {
 			t.Errorf("%s version = %q, want %q", name, versions[name], want)
 		}
