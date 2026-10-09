@@ -239,8 +239,9 @@ trusted_proxies = []
 # Decoding (Admin › Decoding), pushed to the nodes in the desired state.
 [settings.decoders]
 # max_restarts = 5                       # unexpected exits within 5 min before a decoder gives up (1..100)
-# digimodes_fft_size = 2048              # decoder waterfall FFT size of PSK, RTTY, SITOR-B, CW (512, 1024, 2048, 4096)
+# digimodes_fft_size = 2048              # decoder waterfall FFT size of PSK, RTTY, SITOR-B, NAVTEX, DSC, CW (512, 1024, 2048, 4096)
 # cw_showcw = false                      # the CW decoder also prints dots and dashes
+# dsc_show_errors = true                 # the DSC decoder also reports what it could not decode as a call
 # wsjt_decoding_depth = 3                # WSJT-X decoding depth: 1 fast, 2 normal, 3 deep
 # fst4_enabled_intervals = ["15", "30"]  # FST4 T/R periods (s): 15, 30, 60, 120, 300, 900, 1800
 # fst4w_enabled_intervals = ["120", "300"] # FST4W T/R periods (s): 120, 300, 900, 1800

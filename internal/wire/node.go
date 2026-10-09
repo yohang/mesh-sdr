@@ -77,14 +77,14 @@ func (p decoderProber) Capabilities(ctx context.Context) ctl.Capabilities {
 func decoderSettings(d *ctl.StateDecoders, def config.SettingsDecoders) decoder.Settings {
 	s := decoder.Settings{
 		FST4Intervals: seconds(def.FST4Intervals), FST4WIntervals: seconds(def.FST4WIntervals),
-		Q65Combinations: def.Q65Combinations, JS8Profiles: def.JS8Profiles,
+		Q65Combinations: def.Q65Combinations, JS8Profiles: def.JS8Profiles, DSCShowErrors: def.DSCShowErrors,
 	}
 
 	if d == nil {
 		return s
 	}
 
-	s.MaxRestarts, s.FFTSize, s.ShowCW = d.MaxRestarts, d.DigimodesFFTSize, d.ShowCW
+	s.MaxRestarts, s.FFTSize, s.ShowCW, s.DSCShowErrors = d.MaxRestarts, d.DigimodesFFTSize, d.ShowCW, d.DSCShowErrors
 	s.WSJTDepth, s.WSJTDepths, s.JS8Depth = d.WSJTDepth, d.WSJTDepths, d.JS8Depth
 	s.PagingFilter, s.PagingCharset, s.ISMReportLevels = d.PagingFilter, d.PagingCharset, d.ISMReportLevels
 
