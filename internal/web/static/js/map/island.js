@@ -1,10 +1,10 @@
-// Map island (MAP-001, MAP-002, MAP-004, MAP-008, MAP-012, MAP-014,
-// MAP-016, MAP-018, FEATURE_SPEC §10.10, ADR 0029): <msdr-map> draws the
-// map features on the vendored Leaflet.
+// Map island (MAP-001, MAP-002, MAP-004 to MAP-006, MAP-008 to MAP-012,
+// MAP-014 to MAP-016, MAP-018, FEATURE_SPEC §10.10, ADR 0029): <msdr-map>
+// draws the map features on the vendored Leaflet.
 //
 // Feed: it loads GET /api/v1/map/config (layers, receivers),
 // /api/v1/map/features and /api/v1/features (the names and nodes of the
-// devices), then applies the map.feature.upsert and map.feature.remove
+// devices) and /api/v1/bandplan (the amateur bands), then applies the map.feature.upsert and map.feature.remove
 // deltas of the map topic (data-msdr-topics="map", static/js/events.js).
 // It loads again on every msdr:resync, which the dispatcher fires after the
 // subscription is acknowledged: on the first load (so no event is missed),
@@ -18,18 +18,22 @@
 // second; above 1000 entities the vectors move to Leaflet's canvas
 // renderer. Every type has a shape and a color (kinds.js): APRS stations
 // are dots with their track and a heading tick when the course is known,
-// locators are squares, calls dashed lines, receivers triangles. Features
-// fade over the second half of their life and are dropped at expires_at.
+// receivers triangles. The stations of one Maidenhead square are one
+// square (MAP-009) and calls are dashed great circle lines (MAP-011); both
+// are coloured by band, by mode or by type (the colour mode, MAP-010,
+// colours.js), and the band or mode legend isolates one. Features fade over
+// the second half of their life and are dropped at expires_at.
 //
-// Panels: Layers (base layer, remembered by this browser with savePref,
-// never on the account), the Features legend (per-type visibility, counts,
+// Panels: Layers (base layer and overlays: day and night, the Maidenhead
+// grid and the tile overlays of the config; remembered by this browser with
+// savePref, never on the account), the Features legend (per-type visibility, counts,
 // a labelled collapse button; per-session state), the detail panel
 // (detail.js) and the list view (list.js), the accessible equivalent of the
 // map. Tile attribution is plain text.
 //
 // URL (MAP-016): ?callsign=, ?locator=, ?icao=, ?mmsi= centre the map on
 // the item and open its detail when it arrives; ?layers= (comma-separated
-// feature types and/or a base layer id) sets what is shown; ?node= shows
+// feature types, a base layer id and/or overlay ids) sets what is shown; ?node= shows
 // the features heard by the devices of one node only. They combine.
 
 import { getJSON } from "../csrf.js";
@@ -37,17 +41,26 @@ import { backoff, eventsState } from "../events.js";
 import { getState, loadPref, savePref, setState } from "../receiver/session.js";
 import { el } from "../receiver/dom.js";
 import { onThemeChange, readToken } from "../tokens.js";
-import { renderDetail } from "./detail.js";
+import { ColourLegend, colourKey, hamBands, SERIES } from "./colours.js";
+import { renderDetail, renderSquare } from "./detail.js";
 import { finite, isLocator, locatorBounds } from "./geo.js";
+import { greatCircle } from "./greatcircle.js";
+import { maidenheadGrid } from "./grid.js";
 import { isType, TYPES, typeOf } from "./kinds.js";
 import { loadLeaflet } from "./leaflet.js";
 import { ListView } from "./list.js";
 import { Store } from "./store.js";
+import { nightPolygon } from "./terminator.js";
 
 const CONFIG_URL = "/api/v1/map/config";
 const FEATURES_URL = "/api/v1/map/features";
 const DEVICES_URL = "/api/v1/features";
+const BANDPLAN_URL = "/api/v1/bandplan";
 const LAYER_PREF = "msdr.map.layer";
+const OVERLAY_PREF = "msdr.map.overlays";
+const NIGHT_EVERY_MS = 60000; // the terminator moves 0.25° a minute
+const COLOURED = new Set(["locator", "call"]);
+const COLOUR_MODES = ["band", "mode", "off"];
 const MIN_FLUSH_MS = 250; // at most 4 redraws per second
 const CANVAS_ABOVE = 1000;
 const FADE_TICK_MS = 15000;
@@ -101,6 +114,17 @@ class MapIsland extends HTMLElement {
     this.rendererKind = "";
     this.colorVersion = 0;
     this.config = /** @type {any} */ (null);
+    /** @type {import("./colours.js").Band[]} */
+    this.bands = [];
+    /** @type {Map<string, string>} the square of each locator entity */
+    this.squareOf = new Map();
+    /** @type {Map<string, Set<string>>} the locator entities of each square */
+    this.squares = new Map();
+    /** @type {Map<string, any>} the overlays shown, by id */
+    this.overlays = new Map();
+    const colourMode = getState("map.colour", "band");
+    this.colourMode = COLOUR_MODES.includes(colourMode) ? colourMode : "band";
+    this.isolated = this.colourMode === "off" ? "" : getState("map.isolate", "");
     this.status = this.querySelector("[data-map-status]");
     this.notice = /** @type {HTMLElement} */ (this.querySelector("[data-map-notice]"));
     this.signedIn = false;
@@ -139,6 +163,7 @@ class MapIsland extends HTMLElement {
     clearTimeout(this.statusTimer);
     clearTimeout(this.expiry);
     clearInterval(this.fade);
+    clearInterval(this.nightTimer);
     this.map?.remove();
     this.map = null;
   }
@@ -156,14 +181,15 @@ class MapIsland extends HTMLElement {
     this.node = param(q, "node");
     /** @type {Set<string> | null} types asked for by ?layers= */
     this.urlTypes = null;
-    this.urlBase = "";
+    /** @type {string[]} base layer and overlay ids asked for by ?layers= */
+    this.urlLayers = [];
     const layers = param(q, "layers")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
     for (const id of layers) {
       if (isType(id)) (this.urlTypes ??= new Set()).add(id);
-      else if (/^[a-z0-9_]{1,64}$/.test(id)) this.urlBase = id;
+      else if (/^[a-z0-9_]{1,64}$/.test(id)) this.urlLayers.push(id);
     }
   }
 
@@ -175,13 +201,15 @@ class MapIsland extends HTMLElement {
     this.querySelector("[data-map-fallback]")?.remove();
     const stage = /** @type {HTMLElement} */ (this.querySelector("[data-map-stage]"));
     stage.hidden = false;
-    for (const b of this.querySelectorAll("[data-map-toggle], [data-map-list-toggle], [data-map-search]")) {
+    for (const b of this.querySelectorAll("[data-map-toggle], [data-map-list-toggle], [data-map-search], [data-map-colour-label]")) {
       /** @type {HTMLElement} */ (b).hidden = false;
     }
 
     const canvas = this.querySelector("[data-map-canvas]");
     this.map = L.map(canvas, { attributionControl: false, zoomControl: false, worldCopyJump: true, minZoom: 2 });
     this.map.setView([30, 0], 2);
+    // Night shading under the features (overlayPane is at 400).
+    this.map.createPane("night").style.zIndex = "350";
     const Credit = L.Control.extend({
       options: { position: "bottomright" },
       onAdd: () => {
@@ -198,6 +226,7 @@ class MapIsland extends HTMLElement {
     this.list = new ListView(/** @type {HTMLElement} */ (this.querySelector("[data-map-list]")), (e, opener) => this.select(e.id, { opener }));
     this.setupToggles();
     this.setupLegend();
+    this.setupColours();
     this.setupSearch();
     this.setupDetail();
     if (this.focusLocator) {
@@ -219,6 +248,8 @@ class MapIsland extends HTMLElement {
     for (const t of TYPES) this.colors[t.color] = readToken(t.color) || "#0b5cad";
     this.colors.surface = readToken("color-surface") || "#ffffff";
     this.colors.focus = readToken("color-focus") || "#9a3412";
+    this.colors.ink = readToken("color-map-ink") || "#1b1f24";
+    for (let i = 1; i <= SERIES; i++) this.colors[`series-${i}`] = readToken(`color-series-${i}`) || "#0b5cad";
     this.colorVersion++;
   }
 
@@ -261,8 +292,18 @@ class MapIsland extends HTMLElement {
     this.loading = true;
     this.buffer = [];
     try {
-      const [config, features, devices] = await Promise.all([getJSON(CONFIG_URL), getJSON(FEATURES_URL), getJSON(DEVICES_URL)]);
+      const [config, features, devices, plan] = await Promise.all([
+        getJSON(CONFIG_URL),
+        getJSON(FEATURES_URL),
+        getJSON(DEVICES_URL),
+        // Without the band plan, squares and calls are coloured by mode only.
+        getJSON(BANDPLAN_URL).catch(() => null),
+      ]);
       if (!this.isConnected) return;
+      if (plan) {
+        this.bands = hamBands(plan);
+        this.colorVersion++;
+      }
       this.attempt = 0;
       this.devices = new Map();
       for (const d of Array.isArray(devices?.devices) ? devices.devices : []) {
@@ -323,6 +364,7 @@ class MapIsland extends HTMLElement {
   // applyConfig sets the base layers (when they changed).
   applyConfig() {
     const layers = Array.isArray(this.config?.base_layers) ? this.config.base_layers : [];
+    this.applyOverlays();
     const sig = JSON.stringify(layers.map((/** @type {any} */ l) => l.id));
     if (sig === this.layersSig) return;
     this.layersSig = sig;
@@ -331,7 +373,7 @@ class MapIsland extends HTMLElement {
     box.replaceChildren();
     const ids = layers.map((/** @type {any} */ l) => l.id);
     const saved = loadPref(LAYER_PREF) ?? "";
-    const current = [this.urlBase, saved, this.config?.default_base_layer].find((id) => id && ids.includes(id)) ?? ids[0] ?? "";
+    const current = [...this.urlLayers, saved, this.config?.default_base_layer].find((id) => id && ids.includes(id)) ?? ids[0] ?? "";
     if (layers.length === 0) box.append(el("p", { class: "text-sm text-fg-muted" }, "No base layer is offered."));
     for (const l of layers) {
       const id = `map-base-${l.id}`;
@@ -354,27 +396,102 @@ class MapIsland extends HTMLElement {
    * @param {string} id
    */
   setBase(id) {
-    const L = this.L;
     const l = (this.baseLayers ?? []).find((/** @type {any} */ x) => x.id === id);
     this.tiles?.remove();
-    this.tiles = null;
-    if (!l || typeof l.url !== "string" || !l.url.startsWith("https://")) {
-      if (this.credit) this.credit.textContent = "";
-      return;
-    }
-    this.tiles = L.tileLayer(l.url, {
+    this.tiles = l ? this.tileLayer(l, 1) : null;
+    this.tiles?.addTo(this.map).bringToBack();
+    this.showCredit();
+  }
+
+  /**
+   * tileLayer returns the tile layer of a base layer or overlay of the
+   * config; null unless its URL is https.
+   * @param {any} l @param {number} zIndex
+   */
+  tileLayer(l, zIndex) {
+    if (typeof l.url !== "string" || !l.url.startsWith("https://")) return null;
+    const layer = this.L.tileLayer(l.url, {
       subdomains: typeof l.subdomains === "string" && l.subdomains ? l.subdomains : "abc",
       maxZoom: finite(l.max_zoom) ? l.max_zoom : 18,
       attribution: "",
       detectRetina: false,
+      zIndex,
       // The page's Referrer-Policy (same-origin) sends no Referer to the
       // tile servers, and the OSM tile usage policy
       // (https://operations.osmfoundation.org/policies/tiles/) requires a
       // valid one: tile images send the hub's origin only, nothing else.
       referrerPolicy: "strict-origin",
-    }).addTo(this.map);
-    this.tiles.bringToBack();
-    if (this.credit) this.credit.textContent = String(l.attribution ?? "");
+    });
+    layer.credit = String(l.attribution ?? "");
+    return layer;
+  }
+
+  // showCredit sets the attribution of the tiles shown.
+  showCredit() {
+    if (!this.credit) return;
+    const parts = [this.tiles, ...this.overlays.values()].map((l) => l?.credit).filter(Boolean);
+    this.credit.textContent = parts.join(" | ");
+  }
+
+  // applyOverlays lists the overlays (when they changed): day and night
+  // (MAP-006, on by default), the Maidenhead grid and the tile overlays of
+  // the config (MAP-005).
+  applyOverlays() {
+    const tiles = (Array.isArray(this.config?.overlays) ? this.config.overlays : []).filter(
+      (/** @type {any} */ l) => typeof l?.id === "string" && typeof l.url === "string",
+    );
+    const all = [{ id: "night", name: "Day and night (shaded night side)" }, { id: "grid", name: "Maidenhead grid" }, ...tiles];
+    const sig = JSON.stringify(all.map((o) => o.id));
+    if (sig === this.overlaysSig) return;
+    this.overlaysSig = sig;
+    const saved = loadPref(OVERLAY_PREF);
+    const on = new Set(saved === null ? ["night"] : saved.split(","));
+    for (const id of this.urlLayers) on.add(id);
+    const box = /** @type {HTMLElement} */ (this.querySelector("[data-map-overlays]"));
+    box.replaceChildren();
+    for (const o of all) {
+      const id = `map-overlay-${o.id}`;
+      const label = el("label", { class: "flex items-center gap-2 text-sm max-md:min-h-11", for: id });
+      const input = /** @type {HTMLInputElement} */ (el("input", { type: "checkbox", id }));
+      input.checked = on.has(o.id);
+      input.addEventListener("change", () => {
+        this.setOverlay(o, input.checked);
+        savePref(OVERLAY_PREF, [...this.overlays.keys()].join(","));
+      });
+      label.append(input, document.createTextNode(String(o.name ?? o.id)));
+      box.append(label);
+      this.setOverlay(o, input.checked);
+    }
+  }
+
+  /**
+   * setOverlay shows or hides an overlay.
+   * @param {any} o @param {boolean} on
+   */
+  setOverlay(o, on) {
+    this.overlays.get(o.id)?.remove();
+    this.overlays.delete(o.id);
+    if (o.id === "night") clearInterval(this.nightTimer);
+    const layer = on ? this.overlayLayer(o) : null;
+    if (layer) {
+      layer.addTo(this.map);
+      this.overlays.set(o.id, layer);
+    }
+    this.showCredit();
+  }
+
+  /**
+   * overlayLayer builds the layer of an overlay.
+   * @param {any} o
+   */
+  overlayLayer(o) {
+    if (o.id === "grid") return maidenheadGrid(this.L, () => this.colors.ink);
+    if (o.id !== "night") return this.tileLayer(o, 2);
+    const night = this.L.polygon(nightPolygon(Date.now()), {
+      pane: "night", interactive: false, stroke: false, fillColor: this.colors.ink, fillOpacity: 0.25,
+    });
+    this.nightTimer = setInterval(() => night.setLatLngs(nightPolygon(Date.now())), NIGHT_EVERY_MS);
+    return night;
   }
 
   // showNotices shows the non-live notices: stale map, truncated list,
@@ -478,6 +595,51 @@ class MapIsland extends HTMLElement {
     }
   }
 
+  // setupColours wires the colour mode (per-session state) and the band or
+  // mode legend (MAP-010).
+  setupColours() {
+    const select = /** @type {HTMLSelectElement} */ (this.querySelector("[data-map-colour]"));
+    select.value = this.colourMode;
+    select.addEventListener("change", () => {
+      this.colourMode = COLOUR_MODES.includes(select.value) ? select.value : "band";
+      setState("map.colour", this.colourMode);
+      this.isolate("");
+    });
+    this.keys = new ColourLegend(/** @type {HTMLElement} */ (this.querySelector("[data-map-keys]")), (id) =>
+      this.isolate(this.isolated === id ? "" : id),
+    );
+  }
+
+  /**
+   * isolate shows the squares and calls of one band or mode only ("": all).
+   * @param {string} id
+   */
+  isolate(id) {
+    this.isolated = id;
+    setState("map.isolate", id || undefined);
+    this.colorVersion++;
+    this.redrawAll();
+  }
+
+  /**
+   * keyOf returns the band or mode an entity is coloured by; null for the
+   * types that keep their color, and when the colour mode is off.
+   * @param {Entity} e
+   */
+  keyOf(e) {
+    return e.feature && COLOURED.has(e.kind) ? colourKey(this.colourMode, e.feature.details, this.bands) : null;
+  }
+
+  /**
+   * colourOf returns the color of an entity: its band's or mode's, else
+   * its type's.
+   * @param {Entity} e
+   */
+  colourOf(e) {
+    const k = this.keyOf(e);
+    return k && k.series >= 0 ? this.colors[`series-${k.series + 1}`] : this.colors[typeOf(e.kind).color];
+  }
+
   // setupSearch wires the toolbar search (FEATURE_SPEC §10.10).
   setupSearch() {
     const form = /** @type {HTMLFormElement} */ (this.querySelector("[data-map-search]"));
@@ -523,6 +685,10 @@ class MapIsland extends HTMLElement {
    * @param {string} [field] the URL parameter it comes from
    */
   find(value, loose, field = "") {
+    if ((field === "locator" || field === "") && isLocator(value) && value.length >= 4) {
+      const square = this.entityOf(`square:${value.slice(0, 4)}`);
+      if (square) return square;
+    }
     /** @type {Entity | null} */
     let partial = null;
     for (const id of this.store.ids()) {
@@ -560,11 +726,13 @@ class MapIsland extends HTMLElement {
   }
 
   /**
-   * shown tells whether an entity is drawn: its type is shown and it
-   * passes the node filter.
+   * shown tells whether an entity is drawn: its type is shown, it passes
+   * the node filter and, for a square or call, the isolated band or mode.
    * @param {Entity} e
    */
   shown(e) {
+    const k = this.isolated ? this.keyOf(e) : null;
+    if (k && k.id !== this.isolated) return false;
     return this.visible?.get(typeOf(e.kind).id) !== false && this.byNode(e) && e.at !== null;
   }
 
@@ -601,7 +769,14 @@ class MapIsland extends HTMLElement {
       for (const id of this.layers.keys()) dirty.add(id);
       for (const id of this.store.ids()) dirty.add(id);
     }
-    for (const id of dirty) this.draw(id);
+    /** @type {Set<string>} the squares to redraw */
+    const squares = new Set();
+    for (const id of dirty) {
+      if (id.startsWith("square:")) squares.add(id);
+      else if (id.startsWith("locator:")) this.regroup(id, squares);
+      else this.draw(id);
+    }
+    for (const id of squares) this.drawSquare(id);
     if (previous) this.map.removeLayer(previous);
     // Drop the next feature at its expiry, not at the next fade tick.
     clearTimeout(this.expiry);
@@ -609,8 +784,104 @@ class MapIsland extends HTMLElement {
     if (next !== null) this.expiry = setTimeout(() => this.schedule(), Math.min(FADE_TICK_MS, Math.max(0, next - Date.now())) + 50);
     this.updateCounts();
     this.focusPending();
-    if (dirty.has(this.selected)) this.renderDetail();
+    if (dirty.has(this.selected) || squares.has(this.selected)) this.renderDetail();
     this.renderList(false);
+  }
+
+  /**
+   * regroup files a locator entity under its square (MAP-009) and adds
+   * the squares it left and joined to squares.
+   * @param {string} id @param {Set<string>} squares
+   */
+  regroup(id, squares) {
+    const g = this.store.entity(id)?.feature?.geometry;
+    const loc = typeof g?.locator === "string" && isLocator(g.locator) && g.locator.length >= 4 ? g.locator.slice(0, 4).toUpperCase() : "";
+    const old = this.squareOf.get(id);
+    if (old && old !== loc) {
+      const members = this.squares.get(old);
+      members?.delete(id);
+      if (members?.size === 0) this.squares.delete(old);
+    }
+    if (old) squares.add(`square:${old}`);
+    if (!loc) {
+      this.squareOf.delete(id);
+      return;
+    }
+    this.squareOf.set(id, loc);
+    let members = this.squares.get(loc);
+    if (!members) {
+      members = new Set();
+      this.squares.set(loc, members);
+    }
+    members.add(id);
+    squares.add(`square:${loc}`);
+  }
+
+  /**
+   * stationsIn returns the stations of a square that pass a test.
+   * @param {string} square @param {(e: Entity) => boolean} test
+   */
+  stationsIn(square, test) {
+    /** @type {Entity[]} */
+    const out = [];
+    for (const id of this.squares.get(square) ?? []) {
+      const e = this.store.entity(id);
+      if (e && test(e)) out.push(e);
+    }
+    return out;
+  }
+
+  /**
+   * entityOf returns the entity of an id, a square included, or null.
+   * @param {string} id
+   * @returns {Entity | null}
+   */
+  entityOf(id) {
+    if (!id.startsWith("square:")) return this.store.entity(id);
+    const square = id.slice(7);
+    const stations = this.stationsIn(square, (e) => this.byNode(e));
+    const b = locatorBounds(square);
+    if (stations.length === 0 || !b) return null;
+    return {
+      id, kind: "locator", subject: square, feature: null, receiver: null, devices: [],
+      updated_at: Math.max(...stations.map((e) => e.updated_at)), at: [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2],
+    };
+  }
+
+  /**
+   * drawSquare draws a locator square in the color of its newest shown
+   * station, fading with it (MAP-009).
+   * @param {string} id square:<locator>
+   */
+  drawSquare(id) {
+    const stations = this.stationsIn(id.slice(7), (e) => this.shown(e));
+    const old = this.layers.get(id);
+    const b = locatorBounds(id.slice(7));
+    if (stations.length === 0 || !b) {
+      old?.group.remove();
+      this.layers.delete(id);
+      return;
+    }
+    const newest = stations.reduce((a, x) => (x.updated_at > a.updated_at ? x : a));
+    const selected = id === this.selected || stations.some((e) => e.id === this.selected);
+    const op = opacity(newest, this.now);
+    const sig = [newest.feature?.key, newest.updated_at, stations.length, this.rendererKind, selected, this.colorVersion].join("|");
+    if (old && old.sig === sig) {
+      old.style(op);
+      return;
+    }
+    old?.group.remove();
+    const color = this.colourOf(newest);
+    const rect = this.L.rectangle(b, {
+      renderer: this.renderer, color: selected ? this.colors.focus : color, weight: selected ? 3 : 1, fillColor: color,
+    });
+    const group = this.L.featureGroup([rect]);
+    group.on("click", () => this.select(id));
+    const layer = { group, sig, style: (/** @type {number} */ o) => rect.setStyle({ opacity: o, fillOpacity: 0.3 * o }) };
+    layer.style(op);
+    // Under the stations and lines it holds.
+    group.addTo(this.map).bringToBack();
+    this.layers.set(id, layer);
   }
 
   /**
@@ -654,8 +925,7 @@ class MapIsland extends HTMLElement {
    */
   build(e) {
     const L = this.L;
-    const type = typeOf(e.kind);
-    const color = this.colors[type.color];
+    const color = this.colourOf(e);
     const selected = e.id === this.selected;
     const stroke = selected ? this.colors.focus : this.colors.surface;
     const renderer = this.renderer;
@@ -686,21 +956,11 @@ class MapIsland extends HTMLElement {
     const g = f.geometry;
     if (g.type === "line") {
       if (![g.from?.lat, g.from?.lon, g.to?.lat, g.to?.lon].every(finite)) return null;
-      const line = L.polyline(
-        [
-          [g.from.lat, g.from.lon],
-          [g.to.lat, g.to.lon],
-        ],
-        { renderer, color, weight: selected ? 4 : 2, dashArray: "6 6" },
-      );
+      const line = L.polyline(greatCircle([g.from.lat, g.from.lon], [g.to.lat, g.to.lon]), {
+        renderer, color, weight: selected ? 4 : 2, dashArray: "6 6",
+      });
       group.addLayer(line);
       style = (op) => line.setStyle({ opacity: op });
-    } else if (g.type === "locator") {
-      const b = locatorBounds(g.locator);
-      if (!b) return null;
-      const rect = L.rectangle(b, { renderer, color: selected ? this.colors.focus : color, weight: selected ? 3 : 1, fillColor: color });
-      group.addLayer(rect);
-      style = (op) => rect.setStyle({ opacity: op, fillOpacity: 0.3 * op });
     } else {
       const at = /** @type {[number, number]} */ (e.at);
       /** @type {any[]} */
@@ -730,16 +990,31 @@ class MapIsland extends HTMLElement {
     return { group, style };
   }
 
-  // updateCounts sets the legend counts (shown entities per type).
+  // updateCounts sets the legend counts: entities per type, and squares
+  // and calls per band or mode (whatever is isolated).
   updateCounts() {
     /** @type {Map<string, number>} */
     const counts = new Map();
+    /** @type {Map<string, {key: import("./colours.js").Key, count: number}>} */
+    const keys = new Map();
     for (const id of this.store.ids()) {
       const e = this.store.entity(id);
       if (!e || !this.byNode(e)) continue;
       const t = typeOf(e.kind).id;
       counts.set(t, (counts.get(t) ?? 0) + 1);
+      const k = this.visible?.get(t) !== false ? this.keyOf(e) : null;
+      if (k) {
+        const x = keys.get(k.id) ?? { key: k, count: 0 };
+        x.count++;
+        keys.set(k.id, x);
+      }
     }
+    const entries = [...keys.values()].sort((a, b) => a.key.rank - b.key.rank || a.key.label.localeCompare(b.key.label));
+    if (this.isolated && this.loaded && !keys.has(this.isolated)) {
+      // What was isolated is gone: show everything again.
+      this.isolate("");
+    }
+    this.keys?.render(this.colourMode, entries, this.isolated);
     for (const t of TYPES) {
       const item = this.legend?.get(t.id);
       if (!item) continue;
@@ -775,7 +1050,7 @@ class MapIsland extends HTMLElement {
     this.returnFocus = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     if (previous && previous !== id) this.store.dirty.add(previous);
     this.store.dirty.add(id);
-    const e = this.store.entity(id);
+    const e = this.entityOf(id);
     const panel = /** @type {HTMLElement} */ (this.querySelector("#map-detail"));
     const wasHidden = panel.hidden;
     panel.hidden = false;
@@ -783,7 +1058,7 @@ class MapIsland extends HTMLElement {
     if (wasHidden) this.map?.invalidateSize();
     if (centre && e?.at && this.map) {
       const g = e.feature?.geometry;
-      const b = g?.type === "locator" ? locatorBounds(g.locator) : null;
+      const b = id.startsWith("square:") ? locatorBounds(e.subject) : g?.type === "locator" ? locatorBounds(g.locator) : null;
       if (b) this.map.fitBounds(b, { maxZoom: FOCUS_ZOOM });
       else this.map.setView(e.at, Math.max(this.map.getZoom(), FOCUS_ZOOM));
     }
@@ -819,13 +1094,19 @@ class MapIsland extends HTMLElement {
     this.detailStale = false;
     const title = /** @type {HTMLElement} */ (panel.querySelector("[data-map-detail-title]"));
     const body = /** @type {HTMLElement} */ (panel.querySelector("[data-map-detail-body]"));
-    const e = this.store.entity(this.selected);
+    const e = this.entityOf(this.selected);
     if (!e) {
       body.replaceChildren(el("p", { class: "mt-2 text-sm" }, "This feature is no longer on the map: it expired or was removed."));
       return;
     }
-    title.textContent = e.subject || "(unnamed)";
-    body.replaceChildren(renderDetail(e, this.context()));
+    if (e.id.startsWith("square:")) {
+      title.textContent = `Square ${e.subject}`;
+      const stations = this.stationsIn(e.subject, (x) => this.byNode(x));
+      body.replaceChildren(renderSquare(stations, this.context(), (x, opener) => this.select(x.id, { opener })));
+    } else {
+      title.textContent = e.subject || "(unnamed)";
+      body.replaceChildren(renderDetail(e, this.context()));
+    }
     if (e.at && !this.querySelector("[data-map-stage]")?.hidden) {
       const b = el("button", { type: "button", class: "button mt-3 max-md:min-h-11" }, "Centre the map on it");
       b.addEventListener("click", () => this.select(e.id, { centre: true, focus: false }));
@@ -837,7 +1118,8 @@ class MapIsland extends HTMLElement {
 
   /** @returns {import("./detail.js").DetailContext} */
   context() {
-    return { devices: this.devices, receivers: [...this.store.receivers.values()], now: Date.now() };
+    const links = this.config?.links && typeof this.config.links === "object" ? this.config.links : {};
+    return { devices: this.devices, receivers: [...this.store.receivers.values()], bands: this.bands, links, now: Date.now() };
   }
 
   /**
