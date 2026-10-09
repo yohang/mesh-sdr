@@ -142,3 +142,42 @@ func TestGuardProblemCodes(t *testing.T) {
 		})
 	}
 }
+
+// The guard reads the escaped path, as the router does: a path parameter
+// holding an encoded slash is still its operation, checked like any other;
+// a request that matches no operation is refused before routing.
+func TestGuardEscapedPathsFailClosed(t *testing.T) {
+	for _, tt := range []struct {
+		name, method, path string
+		status             int
+		checked            bool
+	}{
+		{"encoded slash in a parameter", http.MethodGet, "/api/v1/files/a%2Fb/content", http.StatusForbidden, true},
+		{"encoded slash in a thumbnail id", http.MethodGet, "/api/v1/files/a%2F..%2Fb/thumbnail", http.StatusForbidden, true},
+		{"plain parameter", http.MethodGet, "/api/v1/files/abc/content", http.StatusForbidden, true},
+		{"plain path", http.MethodGet, "/api/v1/healthz/live", http.StatusForbidden, true},
+		{"encoded slash between segments", http.MethodGet, "/api/v1/config%2Feffective", http.StatusNotFound, false},
+		{"unknown path", http.MethodGet, "/api/v1/nope", http.StatusNotFound, false},
+		{"unknown method", http.MethodDelete, "/api/v1/config/effective", http.StatusMethodNotAllowed, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			checked := false
+			h := mustHandler(t, authzFunc(func(context.Context, domain.Role) error {
+				checked = true
+
+				return domain.ErrForbidden
+			}))
+
+			root := chi.NewRouter()
+			root.Use(middleware.GetHead)
+			root.Mount("/api/v1", h)
+
+			rec := httptest.NewRecorder()
+			root.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
+
+			if rec.Code != tt.status || checked != tt.checked {
+				t.Errorf("status = %d, authorizer called %v; want %d, %v", rec.Code, checked, tt.status, tt.checked)
+			}
+		})
+	}
+}

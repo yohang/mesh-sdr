@@ -18,7 +18,6 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
-	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
@@ -427,7 +426,7 @@ func (n *Node) validate(o Origins) []Problem {
 		c.fail("tls.key", CodeRequired, "tls.cert and tls.key go together")
 	}
 
-	if _, err := pki.ParseFingerprint(n.HubTrust.CAFingerprint); n.HubTrust.CAFingerprint != "" && err != nil {
+	if fp := n.HubTrust.CAFingerprint; fp != "" && !validFingerprint(fp) {
 		c.fail("hub_trust.ca_fingerprint", CodeInvalidValue, "want a SHA-256 fingerprint: 64 hex digits, colons optional")
 	}
 
@@ -475,4 +474,15 @@ func (c *checker) settings(h *Hub) {
 	for _, vi := range CheckSettings(func(k string) (any, bool) { v, ok := values[k]; return v, ok }) {
 		c.fail(settingsPrefix+vi.Path(), string(vi.Code()), vi.Message())
 	}
+}
+
+// validFingerprint reports whether s is a SHA-256 fingerprint: 64 hex
+// digits, colons optional.
+func validFingerprint(s string) bool {
+	s = strings.ReplaceAll(s, ":", "")
+	if len(s) != 64 {
+		return false
+	}
+
+	return strings.Trim(strings.ToLower(s), "0123456789abcdef") == ""
 }

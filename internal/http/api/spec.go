@@ -174,16 +174,25 @@ func goName(id string) string {
 	return string(unicode.ToUpper(r)) + id[n:]
 }
 
-// match returns the operation of r (path with or without the /api/v1
-// prefix: the handler is mounted under it), routed as method.
-func (s spec) match(method string, r *http.Request) *operation {
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
+// match returns the operation of r, routed as method, and whether its
+// path is the path of some operation. It reads the escaped path, as the
+// router does (an encoded slash stays inside its segment), with or without
+// the /api/v1 prefix: the handler is mounted under it.
+func (s spec) match(method string, r *http.Request) (*operation, bool) {
+	path := strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1")
+	known := false
 
 	for i, op := range s.operations {
-		if op.method == method && op.path.MatchString(path) {
-			return &s.operations[i]
+		if !op.path.MatchString(path) {
+			continue
 		}
+
+		if op.method == method {
+			return &s.operations[i], true
+		}
+
+		known = true
 	}
 
-	return nil
+	return nil, known
 }
