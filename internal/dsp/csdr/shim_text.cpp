@@ -1,5 +1,6 @@
 // C ABI shim over the libcsdr++ text decoder modules (ADR 0014): PSK,
-// RTTY, SITOR-B and CW, as OpenWebRX+ chains them (csdr/chain/digimodes.py).
+// RTTY, SITOR-B, NAVTEX, DSC and CW, as OpenWebRX+ chains them
+// (csdr/chain/digimodes.py).
 
 #include "shim_text.h"
 
@@ -8,11 +9,14 @@
 #include <csdr/agc.hpp>
 #include <csdr/baudot.hpp>
 #include <csdr/ccir476.hpp>
+#include <csdr/ccir493.hpp>
 #include <csdr/complex.hpp>
 #include <csdr/cw.hpp>
 #include <csdr/dbpsk.hpp>
+#include <csdr/dsc.hpp>
 #include <csdr/filter.hpp>
 #include <csdr/fir.hpp>
+#include <csdr/navtex.hpp>
 #include <csdr/rtty.hpp>
 #include <csdr/sitorb.hpp>
 #include <csdr/timingrecovery.hpp>
@@ -83,6 +87,20 @@ msdr_stage* msdr_sitorb_new(unsigned errors_allowed, int invert) {
 
 msdr_stage* msdr_ccir476_new(void) {
     return msdr::build([&]() -> msdr_stage* { return new msdr::Stage<byte, byte>(new Csdr::Ccir476Decoder()); });
+}
+
+msdr_stage* msdr_navtex_new(void) {
+    return msdr::build([&]() -> msdr_stage* { return new msdr::Stage<byte, byte>(new Csdr::NavtexDecoder()); });
+}
+
+msdr_stage* msdr_ccir493_new(unsigned errors_allowed, int invert) {
+    return msdr::build([&]() -> msdr_stage* {
+        return new msdr::Stage<float, byte>(new Csdr::Ccir493Decoder(errors_allowed, invert != 0));
+    });
+}
+
+msdr_stage* msdr_dsc_new(void) {
+    return msdr::build([&]() -> msdr_stage* { return new msdr::Stage<byte, byte>(new Csdr::DscDecoder()); });
 }
 
 msdr_stage* msdr_cw_new(unsigned sample_rate, int show_cw) {
