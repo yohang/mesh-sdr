@@ -26,14 +26,19 @@ M3 ("Map & tracking", milestone #5) has 46 open tickets in five epics: Map, Avia
 - **Projection**: the hub projects features at ingest. `decodes.Ingest` upserts `map_features` from the parsed payload in the same transaction. There is no new control message.
 - **Activation**: ADS-B and AIS run while a listener has them on a demod, as in M2. Background services stay in M4.
 - **Tiles**:
-  - The browser loads keyless OSM-family layers directly: OpenStreetMap, OpenTopoMap, Esri, CartoDB, plus the OpenSeaMap overlay.
+  - The browser loads keyless layers directly: OpenStreetMap, OpenTopoMap and Esri, plus the OpenSeaMap overlay. CartoDB is dropped: its tiles now require an API key.
+  - Tile requests send the hub origin as Referer (`strict-origin`, OSM tile usage policy); every other request keeps `same-origin`.
   - CSP `img-src` is built from the enabled layers.
   - There is no tile proxy, no Stadia, no Google Maps and no OpenWeatherMap or radar overlay.
 - **Positions**:
   - New node config `gps`, with an optional `devices.<id>.gps`, reported in the capabilities; fallback is `receiver.gps`.
-  - Receivers are shown coarse by default (4-character locator); a DB setting allows precise display (SR-32).
+  - Receivers are shown coarse by default (centre of the 4-character locator); the DB setting `map.precise_receivers` allows precise display (SR-32). The same rule applies to the station position in `/api/v1/status`.
+  - readsb gets the device or node `gps` only; there is no `receiver.gps` fallback on nodes.
+- **Features**: one row per device (`<kind>:<subject>@<device>`), so tracks, kills, report filters and the call cap never cross devices; the browser merges a station heard by several devices. `GET /api/v1/map/features` returns the newest 5000 the caller may listen to, with a `truncated` flag.
+- **AIS input**: a 48 kHz ±12.5 kHz channel from the wide IQ tap with its own FM discriminator; the NFM listener chain destroys 9600 Bd GMSK.
+- **Aircraft view**: the map (and its list view) is the aircraft display; the Decoders tab keeps text lines.
 - **Retention**:
-  - The ticket keys are used: `map.position_retention_s` (default 7200) plus the per-mode TTLs (`adsb_ttl` and similar), which set `expires_at`.
+  - The ticket keys are used: `map.position_retention_s` (default 7200) plus the per-mode TTLs (`aircraft.adsb_ttl_s` for ADS-B), which set `expires_at`.
   - A job every 30 s hard-deletes the expired rows and publishes the removals. There are no tombstones. The `map.retention.<kind>` keys are not used.
 - **AIS**: one channel per demod.
 - **Spots**: M3a writes `decoded_messages` and `map_features` only; spot fields stay in the payload. The reporters come in M4.
