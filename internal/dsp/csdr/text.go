@@ -17,11 +17,13 @@ import (
 // Symbol is an element type a byte stage reads.
 type Symbol interface{ complex64 | float32 | byte }
 
-// ByteStage is a libcsdr++ module that writes bytes. Its decoders write
-// without bound checks: Process needs an output at least as long as its
-// input plus the carry.
+// ByteStage is a libcsdr++ module that writes bytes. Most of its decoders
+// write without bound checks: Process needs an output of OutputLen bytes.
 type ByteStage[T Symbol] struct {
 	h *C.msdr_stage
+	// per and extra size the output: per bytes per input item plus extra
+	// (1 and 0 for the decoders that write at most one byte per item).
+	per, extra int
 }
 
 func newByteStage[T Symbol](h *C.msdr_stage, what string) (*ByteStage[T], error) {
@@ -29,18 +31,22 @@ func newByteStage[T Symbol](h *C.msdr_stage, what string) (*ByteStage[T], error)
 		return nil, fmt.Errorf("%w: %s", ErrBuild, what)
 	}
 
-	return &ByteStage[T]{h: h}, nil
+	return &ByteStage[T]{h: h, per: 1}, nil
 }
 
+// OutputLen returns the output length Process needs for n input items:
+// they and the carry, times the bytes the module may write per item.
+func (s *ByteStage[T]) OutputLen(n int) int { return (n+s.Pending())*s.per + s.extra }
+
 // Process appends in to the carry, runs the module and returns the number
-// of bytes written to out. out must hold len(in) + Pending() bytes.
+// of bytes written to out. out must hold OutputLen(len(in)) bytes.
 func (s *ByteStage[T]) Process(in []T, out []byte) (int, error) {
 	if s.h == nil {
 		return 0, ErrClosed
 	}
 
-	if len(out) < len(in)+s.Pending() {
-		return 0, fmt.Errorf("%w: output of %d bytes for %d inputs", ErrProcess, len(out), len(in)+s.Pending())
+	if need := s.OutputLen(len(in)); len(out) < need {
+		return 0, fmt.Errorf("%w: output of %d bytes, %d needed", ErrProcess, len(out), need)
 	}
 
 	var inPtr, outPtr unsafe.Pointer
@@ -166,6 +172,47 @@ func NewSitorB(errorsAllowed int, invert bool) (*ByteStage[float32], error) {
 // NewCCIR476 returns Csdr::Ccir476Decoder: CCIR 476 codes to characters.
 func NewCCIR476() (*ByteStage[byte], error) {
 	return newByteStage[byte](C.msdr_ccir476_new(), "ccir476")
+}
+
+// NewNAVTEX returns Csdr::NavtexDecoder: of the SITOR-B characters, it
+// keeps the NAVTEX messages only (from a "ZCZC B1B2B3B4" header line to
+// the NNNN end), unchanged.
+func NewNAVTEX() (*ByteStage[byte], error) {
+	return newByteStage[byte](C.msdr_navtex_new(), "navtex")
+}
+
+// NewCCIR493 returns Csdr::Ccir493Decoder: 10-bit CCIR 493 (DSC) symbols
+// from float bits, the DX/RX time diversity applied; errorsAllowed
+// invalid symbols in a row resync it.
+func NewCCIR493(errorsAllowed int, invert bool) (*ByteStage[float32], error) {
+	if errorsAllowed < 0 {
+		return nil, fmt.Errorf("%w: ccir493 errors %d", ErrBuild, errorsAllowed)
+	}
+
+	return newByteStage[float32](C.msdr_ccir493_new(C.uint(errorsAllowed), cbool(invert)), "ccir493")
+}
+
+// DSC output bounds: Csdr::DscDecoder writes a JSON line per call (at most
+// about 400 bytes for at least 20 symbols read) or per undecoded run of at
+// least 4 symbols (at most about 230 bytes), and works only with dscRoom
+// bytes free.
+const (
+	dscPerSymbol = 64
+	dscRoom      = 256
+)
+
+// NewDSC returns Csdr::DscDecoder: CCIR 493 symbols to one JSON line per
+// DSC call ({"format": …, "src": …, "ecc": true…}), or per run of symbols
+// that is not a call ({"format": "error", "data": …}).
+func NewDSC() (*ByteStage[byte], error) {
+	s, err := newByteStage[byte](C.msdr_dsc_new(), "dsc")
+	if err != nil {
+		return nil, err
+	}
+
+	s.per, s.extra = dscPerSymbol, dscRoom
+
+	return s, nil
 }
 
 // CW is Csdr::CwDecoder<complex<float>>.

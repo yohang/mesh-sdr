@@ -1,6 +1,7 @@
 // Package dsptest synthesises the test signals of the native text decoders
-// (DEC-006 to DEC-012): BPSK with Varicode, RTTY with ITA2 (Baudot),
-// SITOR-B with CCIR 476 and FEC repetition, and Morse code. The signals are
+// (DEC-006 to DEC-012, MAR-002, MAR-003): BPSK with Varicode, RTTY with
+// ITA2 (Baudot), SITOR-B with CCIR 476 and FEC repetition, DSC with CCIR
+// 493 and time diversity, and Morse code. The signals are
 // complex baseband IQ with the signal at an offset, as the selector of a
 // USB demodulator delivers it. Tests and the dev fake connector use them.
 package dsptest
@@ -269,6 +270,68 @@ func SITORB(text string, shiftHz, rate, offsetHz float64) []complex64 {
 				bits = append(bits, v)
 			}
 		}
+	}
+
+	return fsk(bits, 100, shiftHz, rate, offsetHz)
+}
+
+// CCIR 493 phasing symbols.
+const (
+	dscPhaseDX  = 125
+	dscPhaseRX0 = 104
+	dscPhaseRX7 = 111
+)
+
+// DSC returns a DSC call (ITU-R M.493) at 100 Bd with shiftHz, sent twice
+// (a decoder releases a call only once more symbols follow it): a dot
+// pattern, the phasing sequence (DX 125, RX 111 down to 104), then the
+// symbols in the DX positions, each repeated two DX positions later in an
+// RX position. A symbol is 10 bits: 7 information bits LSB first then the
+// count of their zero bits MSB first; bit 1 (B) is the lower tone.
+func DSC(symbols []int, shiftHz, rate, offsetHz float64) []complex64 {
+	var bits []float64
+
+	for i := range 200 {
+		bits = append(bits, float64(1-2*(i%2)))
+	}
+
+	for range 2 {
+		// DX k carries dx[k]; RX k carries the RX phasing for the first 8,
+		// then repeats DX k−2.
+		dx := []int{dscPhaseDX, dscPhaseDX, dscPhaseDX, dscPhaseDX, dscPhaseDX, dscPhaseDX}
+		dx = append(dx, symbols...)
+
+		for k := range len(dx) + 2 {
+			d, r := dscPhaseDX, dscPhaseRX7-k
+			if k < len(dx) {
+				d = dx[k]
+			}
+
+			if k >= dscPhaseRX7-dscPhaseRX0+1 {
+				r = dx[k-2]
+			}
+
+			for _, c := range []int{d, r} {
+				zeros := 0
+
+				for b := range 7 {
+					v := 1
+					if c>>b&1 == 0 {
+						v, zeros = 0, zeros+1
+					}
+
+					bits = append(bits, float64(1-2*v))
+				}
+
+				for b := 2; b >= 0; b-- {
+					bits = append(bits, float64(1-2*(zeros>>b&1)))
+				}
+			}
+		}
+	}
+
+	for range 100 {
+		bits = append(bits, 1)
 	}
 
 	return fsk(bits, 100, shiftHz, rate, offsetHz)

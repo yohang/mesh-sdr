@@ -1,7 +1,7 @@
 // C ABI over the libcsdr++ modules of the native text decoders (DEC-006 to
-// DEC-012): PSK, RTTY, SITOR-B and CW. The stages are driven by
-// msdr_stage_process and released by msdr_stage_free (shim.h). Decoders
-// output bytes (bits or characters).
+// DEC-012, MAR-002, MAR-003): PSK, RTTY, SITOR-B, NAVTEX, DSC and CW. The
+// stages are driven by msdr_stage_process and released by msdr_stage_free
+// (shim.h). Decoders output bytes (bits, codes or characters).
 #ifndef MESHSDR_CSDR_SHIM_TEXT_H
 #define MESHSDR_CSDR_SHIM_TEXT_H
 
@@ -33,6 +33,17 @@ msdr_stage* msdr_baudot_new(void);
 msdr_stage* msdr_sitorb_new(unsigned errors_allowed, int invert);
 // Csdr::Ccir476Decoder: CCIR 476 codes to characters.
 msdr_stage* msdr_ccir476_new(void);
+// Csdr::NavtexDecoder: characters to the NAVTEX messages only (ZCZC
+// header line to NNNN), copied unchanged.
+msdr_stage* msdr_navtex_new(void);
+// Csdr::Ccir493Decoder: float symbols to CCIR 493 (DSC) symbols, the
+// time diversity (DX/RX) applied; errors_allowed invalid symbols in a row
+// resync it.
+msdr_stage* msdr_ccir493_new(unsigned errors_allowed, int invert);
+// Csdr::DscDecoder: CCIR 493 symbols to one JSON line per DSC call. It
+// writes more than it reads (a call of about 20 symbols is up to 400
+// bytes) and checks the room it has: it needs at least 256 bytes free.
+msdr_stage* msdr_dsc_new(void);
 // Csdr::CwDecoder<complex<float>> at sample_rate; show_cw also prints the
 // dots and dashes.
 msdr_stage* msdr_cw_new(unsigned sample_rate, int show_cw);
