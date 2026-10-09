@@ -217,12 +217,12 @@ func TestAdminMapSettings(t *testing.T) {
 		t.Fatalf("GET /admin/map = %d", res.StatusCode)
 	}
 
-	layers := url.Values{"section": {"layers"}, "map.base_layers": {"opentopomap\ncartodb_voyager"}, "map.default_base_layer": {"osm"}}
+	layers := url.Values{"section": {"layers"}, "map.base_layers": {"opentopomap\nesri_world_topo_map"}, "map.default_base_layer": {"osm"}}
 	if res, form := b.form("/admin/map", layers, true); res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(form, "offered base layers") {
 		t.Errorf("default layer not offered = %d %s", res.StatusCode, form)
 	}
 
-	layers.Set("map.default_base_layer", "cartodb_voyager")
+	layers.Set("map.default_base_layer", "esri_world_topo_map")
 
 	if res, form := b.form("/admin/map", layers, true); res.StatusCode != http.StatusOK || !strings.Contains(form, "Saved.") {
 		t.Errorf("layers = %d %s", res.StatusCode, form)
@@ -240,7 +240,7 @@ func TestAdminMapSettings(t *testing.T) {
 	}
 
 	res, body = b.do(http.MethodGet, "/api/v1/map/config", "", "", nil)
-	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"default_base_layer":"cartodb_voyager"`) ||
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"default_base_layer":"esri_world_topo_map"`) ||
 		!strings.Contains(string(body), `"callsign_url":"https://example.org/call/{}"`) || strings.Contains(string(body), `"id":"osm"`) {
 		t.Errorf("GET /api/v1/map/config = %d %s", res.StatusCode, body)
 	}

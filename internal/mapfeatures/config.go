@@ -40,18 +40,6 @@ var layers = []Layer{
 		Attribution: "Tiles © Esri — Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), and the GIS User Community",
 		MaxZoom:     19,
 	},
-	{
-		ID: "cartodb_positron", Name: "CARTO Positron", URL: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-		Subdomains: "abcd", Attribution: osmCredit + " © CARTO", MaxZoom: 20,
-	},
-	{
-		ID: "cartodb_dark_matter", Name: "CARTO Dark Matter", URL: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-		Subdomains: "abcd", Attribution: osmCredit + " © CARTO", MaxZoom: 20,
-	},
-	{
-		ID: "cartodb_voyager", Name: "CARTO Voyager", URL: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-		Subdomains: "abcd", Attribution: osmCredit + " © CARTO", MaxZoom: 20,
-	},
 }
 
 // Layers returns the known base layers of ids, in the order of ids; unknown
