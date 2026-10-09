@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,10 +19,10 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
-	"github.com/yohang/mesh-sdr/internal/grid/agent"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/agent"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/media"
@@ -208,7 +209,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	ag, err := agent.New(agent.Options{
 		NodeID: id.String(), Version: version.String(),
 		Buffer: agent.NewBuffer(cfg.Node.EventBuffer.MaxEvents, int(cfg.Node.EventBuffer.MaxBytes.Bytes())),
-		Prober: o.prober, Now: time.Now, Logger: component(logger, "grid.agent"),
+		Prober: o.prober, Now: time.Now, Logger: component(logger, "grid.infra.agent"),
 	})
 	if err != nil {
 		return nil, err
@@ -216,7 +217,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 
 	// The files the decoders produce go to the hub through the outbox
 	// (FIL-005), under the node's runtime directory.
-	outbox := agent.NewOutbox(filepath.Join(cfg.Node.RuntimeDir, "outbox"), ag, time.Now, component(logger, "grid.agent.outbox"))
+	outbox := agent.NewOutbox(filepath.Join(cfg.Node.RuntimeDir, "outbox"), ag, time.Now, component(logger, "grid.infra.agent.outbox"))
 	if o.outbox != nil {
 		o.outbox(outbox)
 	}
@@ -240,7 +241,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	dec := radioDecoding{
 		publisher: decodePublisher{ag: ag},
 		files: filePublisher{
-			outbox: outbox, dir: filepath.Join(cfg.Node.RuntimeDir, "produced"), logger: component(logger, "radio.infra.files"),
+			outbox: outbox, dir: filepath.Join(cfg.Node.RuntimeDir, "produced"), logger: component(logger, "wire.file_publisher"),
 		},
 		settings: func() decoder.Settings { return decoderSettings(state.Policy().Decoders, defaults) },
 		reprobe:  (&coalesced{run: func() { ag.EmitCapabilities(context.Background()) }}).trigger,
@@ -428,13 +429,13 @@ func (p filePublisher) Produced(f radioapp.ProducedFile) {
 
 		err := p.send(meta, f.Data)
 		if err != nil {
-			p.logger.Warn("decoded file not sent to the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
+			p.logger.WarnContext(context.Background(), "decoded file not sent to the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
 				slog.Int("bytes", len(f.Data)), slog.Any("error", err))
 
 			return
 		}
 
-		p.logger.Debug("decoded file queued for the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
+		p.logger.DebugContext(context.Background(), "decoded file queued for the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
 			slog.Int("bytes", len(f.Data)))
 	}()
 }
@@ -480,12 +481,7 @@ func NodeEnrollment(cfg config.Node, logger *slog.Logger, token griddomain.Enrol
 		return nil, fmt.Errorf("node.id: %w", err)
 	}
 
-	key, err := pki.GenerateKey()
-	if err != nil {
-		return nil, err
-	}
-
-	self, err := pki.SelfSigned(key, id.String(), cfg.Node.Listen, now())
+	key, self, err := selfSigned(cfg, id, now())
 	if err != nil {
 		return nil, err
 	}
@@ -495,16 +491,40 @@ func NodeEnrollment(cfg config.Node, logger *slog.Logger, token griddomain.Enrol
 		CAFingerprint: caFingerprint, Now: now, Logger: component(logger, "grid.infra.enroll"),
 	})
 
-	srv := httpserver.NewServer(cfg.Node.Listen, e.Handler())
-	srv.ErrorLog = slog.NewLogLogger(component(logger, "grid.http.server").Handler(), slog.LevelDebug)
-	srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{self}}
-
 	return &Enrollment{
-		Process:  &Process{addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server")},
+		Process:  preEnrollment(cfg.Node.Listen, self, e.ServeEnroll, logger),
 		Enroller: e,
 		Key:      key,
 		Paths:    enroll.Paths{Key: cfg.TLS.Key, Cert: cfg.TLS.Cert, CA: cfg.HubTrust.CACert},
 	}, nil
+}
+
+// selfSigned returns a fresh node key and its self-signed certificate, the
+// identity of a node before its enrollment (§4.2 step 3).
+func selfSigned(cfg config.Node, id griddomain.NodeID, now time.Time) (*ecdsa.PrivateKey, tls.Certificate, error) {
+	key, err := pki.GenerateKey()
+	if err != nil {
+		return nil, tls.Certificate{}, err
+	}
+
+	cert, err := pki.SelfSigned(key, id.String(), cfg.Node.Listen, now)
+	if err != nil {
+		return nil, tls.Certificate{}, err
+	}
+
+	return key, cert, nil
+}
+
+// preEnrollment is the process of a node that is not enrolled: the
+// pre-enrollment API (enroll serves POST /enroll, nil answers 501) on
+// listen, over TLS 1.3 with the self-signed certificate cert.
+func preEnrollment(listen string, cert tls.Certificate, enroll http.HandlerFunc, logger *slog.Logger) *Process {
+	srv := httpserver.NewServer(listen, gridhttp.NewPreEnrollmentRouter(enroll, component(logger, "grid.http.enrollment")))
+	// Refused handshakes are expected noise.
+	srv.ErrorLog = slog.NewLogLogger(component(logger, "grid.http.server").Handler(), slog.LevelDebug)
+	srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}
+
+	return &Process{addr: listen, server: srv, logger: component(logger, "grid.http.server")}
 }
 
 // DevicesOf lists the [devices.<id>] of the node config, ordered by id

@@ -45,7 +45,6 @@ func (m *Pages) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(m.d.Guard, noIndex)
 		r.Get("/admin/schedules", m.list)
-		r.Head("/admin/schedules", m.list)
 	})
 }
 

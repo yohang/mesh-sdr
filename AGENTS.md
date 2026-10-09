@@ -65,7 +65,7 @@ docs/adr/               architecture decision records
 
 Modules (bounded contexts):
 
-- `grid` (layered): nodes, enrollment, internal CA / mTLS, control channel, heartbeat, capabilities, device registry, gateway (`infra/gateway`, net/http: TLS, hub router, node media proxy) and its forward auth, node media WebSocket and access-token verification
+- `grid` (layered): nodes, enrollment, internal CA / mTLS, control channel, heartbeat, capabilities, device registry, gateway (`infra/gateway`, net/http: TLS, hub router, node media proxy) and its forward auth, node media WebSocket and access-token verification, node agent (`infra/agent`: event buffer, file outbox, desired state)
 - `identity` (layered): users, roles, sessions, passwords, invitations, access tokens, CSRF, audit log; wired by `internal/identity/wire.go`
 - `radio` (layered): node devices (ADR 0019): device lifecycle and manager, owrx connectors under the process supervisor (`internal/shared/process`, ADR 0017), DSP engine (`infra/engine`), media stream handler (`http`)
 - `settings`: DB settings store, config locking/precedence, effective configuration, admin settings pages

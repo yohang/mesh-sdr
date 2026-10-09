@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -46,29 +45,12 @@ func (h ConfigHandlers) GetEffectiveConfig(_ context.Context, req GetEffectiveCo
 		doc.Entries = append(doc.Entries, c)
 	}
 
-	download := req.Params.Download != nil && *req.Params.Download
-
-	return effectiveConfigResponse{doc: doc, download: download}, nil
-}
-
-type effectiveConfigResponse struct {
-	doc      EffectiveConfig
-	download bool
-}
-
-func (r effectiveConfigResponse) VisitGetEffectiveConfigResponse(w http.ResponseWriter) error {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-
-	if r.download {
-		w.Header().Set("Content-Disposition",
-			`attachment; filename="meshsdr-config-`+r.doc.GeneratedAt.Format(time.DateOnly)+`.json"`)
+	res := jsonOK{v: doc, indent: true}
+	if req.Params.Download != nil && *req.Params.Download {
+		res.download = "meshsdr-config-" + doc.GeneratedAt.Format(time.DateOnly) + ".json"
 	}
 
-	w.WriteHeader(http.StatusOK)
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-
-	return enc.Encode(r.doc)
+	return res, nil
 }
+
+func (j jsonOK) VisitGetEffectiveConfigResponse(w http.ResponseWriter) error { return j.write(w) }

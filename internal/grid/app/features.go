@@ -18,6 +18,7 @@ type DeviceFeatures struct {
 	ID     shared.DeviceID
 	Node   domain.NodeID
 	Name   string
+	Type   string
 	Online bool
 	// NodeOnline reports whether the device's node has its control channel
 	// up (hub presence): Online is false for an idle device, which only
@@ -25,6 +26,9 @@ type DeviceFeatures struct {
 	NodeOnline bool
 	// State is the device's runtime state in the registry (SRC-025).
 	State domain.RuntimeState
+	// Status is the admin summary of the device (domain.Device.Status):
+	// ready or busy while its node is up and it can run, unlike Online.
+	Status domain.DeviceStatus
 	// Modes are the modes the device's node reports available (mode:*
 	// capabilities), sorted; empty when the node has not reported or the
 	// device's driver is missing.
@@ -177,10 +181,11 @@ func (f *Features) Summary(ctx context.Context) (Summary, error) {
 		}
 
 		state, _, _ := d.State()
+		n := listeners[d.ID().String()]
 		df := DeviceFeatures{
-			ID: d.ID(), Node: d.Node(), Name: d.Name(), Online: d.Online(), NodeOnline: connected[d.Node()], State: state,
-			Modes: modes(caps, d.Type()), ListenPolicy: effective(d, global), Listeners: listeners[d.ID().String()],
-			ActivePreset: d.ActivePreset(),
+			ID: d.ID(), Node: d.Node(), Name: d.Name(), Type: d.Type(), Online: d.Online(), NodeOnline: connected[d.Node()], State: state,
+			Status: d.Status(connected[d.Node()], n), Modes: modes(caps, d.Type()), ListenPolicy: effective(d, global),
+			Listeners: n, ActivePreset: d.ActivePreset(),
 		}
 
 		if !df.ActivePreset.IsZero() && f.d.PresetName != nil {

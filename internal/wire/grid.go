@@ -43,9 +43,12 @@ func (c caInfo) Fingerprint() (string, error) {
 type hubGrid struct {
 	keys          *hubKeys
 	caPath        string
+	audit         auditAppender
 	revocations   domain.RevocationRepository
 	nodeRepo      domain.NodeRepository
 	deviceRepo    domain.DeviceRepository
+	capRepo       domain.CapabilityRepository
+	connRepo      domain.ConnectionRepository
 	gatewayClient *pki.CertSource
 	ca            *pki.CA
 	hubID         string
@@ -164,23 +167,16 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter *db.DB, now func() 
 	// once identity is wired (newHub).
 	keys := newHubKeys(now)
 
-	audit := newAuditAppender(adapter, now)
-	nodeRepo := gridsqlite.NewNodeRepository(adapter)
-	revocations := gridsqlite.NewRevocationRepository(adapter)
-
 	g := &hubGrid{
-		keys:    keys,
-		ca:      ca,
-		hubID:   hubID,
-		history: app.NewHistory(),
-		nodes:   app.NewNodes(nodeRepo, revocations, adapter, audit, caInfo{ca: ca}, timings, now, component(logger, "grid.app.nodes")),
+		keys: keys, ca: ca, hubID: hubID, caPath: cfg.TLS.CACert, audit: newAuditAppender(adapter, now), history: app.NewHistory(),
+		nodeRepo: gridsqlite.NewNodeRepository(adapter), deviceRepo: gridsqlite.NewDeviceRepository(adapter),
+		revocations: gridsqlite.NewRevocationRepository(adapter), capRepo: gridsqlite.NewCapabilityRepository(adapter),
+		connRepo: gridsqlite.NewConnectionRepository(adapter),
 	}
+	g.nodes = newNodes(g.nodeRepo, g.revocations, adapter, g.audit, ca, timings, now, logger)
 
-	gridLogger := component(logger, "grid.wire")
-	capRepo := gridsqlite.NewCapabilityRepository(adapter)
-	connRepo := gridsqlite.NewConnectionRepository(adapter)
-	deviceRepo := gridsqlite.NewDeviceRepository(adapter)
-	g.nodeRepo, g.deviceRepo, g.revocations, g.caPath = nodeRepo, deviceRepo, revocations, cfg.TLS.CACert
+	audit, nodeRepo, revocations, deviceRepo := g.audit, g.nodeRepo, g.revocations, g.deviceRepo
+	gridLogger := component(logger, "wire.grid")
 	g.devices = app.NewDevices(deviceRepo, audit, component(logger, "grid.app.devices"))
 	g.deviceLogs = app.NewDeviceLogs(deviceRepo, component(logger, "grid.app.devicelogs"))
 	g.devices.OnForget(g.deviceLogs.Forget)
@@ -219,7 +215,7 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter *db.DB, now func() 
 		})
 		g.workers = append(g.workers, g.status.Run)
 
-		g.caps = app.NewCapabilities(capRepo, nodeRepo, g.manager, component(logger, "grid.app.capabilities"))
+		g.caps = app.NewCapabilities(g.capRepo, nodeRepo, g.manager, component(logger, "grid.app.capabilities"))
 		g.control.Handle(rxv1.TypeNodeCapabilities, g.caps.Handler())
 		g.caps.OnReport(g.devices.Sync)
 		g.caps.OnReport(func(_ context.Context, n *domain.Node, _ ctl.Capabilities, _ time.Time) error {
@@ -230,9 +226,9 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter *db.DB, now func() 
 		g.control.Handle(rxv1.TypeDeviceState, g.devices.StateHandler())
 		g.status.Listen(g.devices.NodeStatusChanged)
 
-		g.presence = app.NewPresence(connRepo, deviceRepo, g.tracker, timings, now, component(logger, "grid.app.presence"))
+		g.presence = app.NewPresence(g.connRepo, deviceRepo, g.tracker, timings, now, component(logger, "grid.app.presence"))
 		for _, t := range []rxv1.MessageType{rxv1.TypeConnectionOpened, rxv1.TypeConnectionHeart, rxv1.TypeConnectionClosed} {
-			g.control.Handle(t, g.presence.Handler())
+			g.control.Handle(t, g.presence.Handler(t))
 		}
 
 		g.control.OnBoot(g.presence.NodeRestarted)
@@ -243,8 +239,8 @@ func newHubGrid(cfg config.Hub, logger *slog.Logger, adapter *db.DB, now func() 
 		g.enrollment = enrollment
 		g.workers = append(g.workers, enrollment.Run, g.manager.Run)
 	} else {
-		g.caps = app.NewCapabilities(capRepo, nodeRepo, nil, component(logger, "grid.app.capabilities"))
-		g.presence = app.NewPresence(connRepo, deviceRepo, nil, timings, now, component(logger, "grid.app.presence"))
+		g.caps = app.NewCapabilities(g.capRepo, nodeRepo, nil, component(logger, "grid.app.capabilities"))
+		g.presence = app.NewPresence(g.connRepo, deviceRepo, nil, timings, now, component(logger, "grid.app.presence"))
 	}
 
 	g.workers = append(g.workers, g.presence.Run)
@@ -274,22 +270,21 @@ func HubNodes(cfg config.Hub, logger *slog.Logger, adapter *db.DB) (*app.Nodes, 
 		return nil, err
 	}
 
-	audit := newAuditAppender(adapter, time.Now)
-
-	return app.NewNodes(gridsqlite.NewNodeRepository(adapter), gridsqlite.NewRevocationRepository(adapter), adapter,
-		audit, caInfo{ca: ca}, app.DefaultTimings(), time.Now, component(logger, "grid.app.nodes")), nil
+	return newNodes(gridsqlite.NewNodeRepository(adapter), gridsqlite.NewRevocationRepository(adapter), adapter,
+		newAuditAppender(adapter, time.Now), ca, app.DefaultTimings(), time.Now, logger), nil
 }
 
-// gridSettings reads the grid DB settings.
-type gridSettings interface {
-	Get(key string) (settings.Effective, bool)
-	Int(key string) int
+// newNodes builds the node registry service.
+func newNodes(nodes domain.NodeRepository, revocations domain.RevocationRepository, adapter *db.DB, audit auditAppender,
+	ca *pki.CA, timings app.Timings, now func() time.Time, logger *slog.Logger,
+) *app.Nodes {
+	return app.NewNodes(nodes, revocations, adapter, audit, caInfo{ca: ca}, timings, now, component(logger, "grid.app.nodes"))
 }
 
 // applySettings applies the grid timings of the settings snapshot: a value
 // set in the DB or the config replaces the base timing, a default keeps it
 // (the defaults are the FEATURE_SPEC ones; tests run with faster bases).
-func (g *hubGrid) applySettings(base app.Timings, s gridSettings) {
+func (g *hubGrid) applySettings(base app.Timings, s *settings.Snapshot) {
 	t := base
 
 	if e, ok := s.Get("grid.heartbeat_interval_s"); ok && e.Source() != settings.SourceDefault {

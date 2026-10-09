@@ -13,17 +13,17 @@ import (
 )
 
 // stationStatus builds the public status (API-003) from the settings, the
-// device registry, the node links, the presence registry and the presets.
+// feature summary and the presets.
 type stationStatus struct {
 	settings *settings.Store
-	devices  gridapp.DeviceLister
-	links    gridapp.NodeLinks
-	presence *gridapp.Presence
+	features *gridapp.Features
 	presets  *presets.Service
 }
 
-// Status implements api.StatusSource. Disabled devices are left out; it
-// carries no node address.
+// Status implements api.StatusSource: the enabled devices, without node
+// address. A device is online in the admin sense (ready or busy:
+// gridapp.DeviceFeatures.Status), not only while it runs
+// (DeviceFeatures.Online).
 func (s stationStatus) Status(ctx context.Context) (api.StationStatus, error) {
 	snap := s.settings.Snapshot()
 	st := api.StationStatus{
@@ -39,47 +39,19 @@ func (s stationStatus) Status(ctx context.Context) (api.StationStatus, error) {
 		st.Altitude = &alt
 	}
 
-	devices, err := s.devices.List(ctx)
+	summary, err := s.features.Summary(ctx)
 	if err != nil {
-		return api.StationStatus{}, fmt.Errorf("list devices: %w", err)
+		return api.StationStatus{}, fmt.Errorf("feature summary: %w", err)
 	}
 
-	conns, err := s.presence.List(ctx)
-	if err != nil {
-		return api.StationStatus{}, fmt.Errorf("list connections: %w", err)
-	}
-
-	listeners := map[string]int{}
-
-	for _, c := range conns {
-		if i := c.Info(); i.Kind == griddomain.ConnectionMedia && i.DeviceID != "" {
-			listeners[i.DeviceID]++
-		}
-	}
-
-	up := map[griddomain.NodeID]bool{}
-
-	if s.links != nil {
-		for _, id := range s.links.Connected() {
-			up[id] = true
-		}
-	}
-
-	for _, d := range devices {
-		if !d.Flags().Enabled {
-			continue
-		}
-
-		n := listeners[d.ID().String()]
-		status := d.Status(up[d.Node()], n)
-
+	for _, d := range summary.Devices {
 		info := api.StatusDeviceInfo{
-			ID: d.ID().String(), Name: d.Name(), Type: d.Type(), Listeners: n,
-			Online: status == griddomain.DeviceReady || status == griddomain.DeviceBusy,
+			ID: d.ID.String(), Name: d.Name, Type: d.Type, Listeners: d.Listeners,
+			Online: d.Status == griddomain.DeviceReady || d.Status == griddomain.DeviceBusy,
 		}
 
-		if id := d.ActivePreset(); !id.IsZero() {
-			if p, err := s.presets.Get(ctx, id.String()); err == nil {
+		if !d.ActivePreset.IsZero() {
+			if p, err := s.presets.Get(ctx, d.ActivePreset.String()); err == nil {
 				info.Preset = &api.StatusPresetInfo{Name: p.Name(), CenterFreq: p.CenterFreq(), SampRate: p.SampRate()}
 			}
 		}

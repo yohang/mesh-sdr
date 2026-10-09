@@ -94,23 +94,6 @@ func (h *hubKeys) Issue(_ context.Context, c token.Claims) (string, error) {
 	return token.Sign(c, priv)
 }
 
-// nodeRevocations sends identity revocations (sessions by token.SessionRef,
-// users by id) to the nodes, dated with the hub clock.
-type nodeRevocations struct {
-	b   gridapp.RevocationBroadcaster
-	now func() time.Time
-}
-
-// PublishRevocation implements identityapp.RevocationPublisher.
-func (n nodeRevocations) PublishRevocation(ctx context.Context, r identityapp.Revocation) {
-	users := make([]string, 0, len(r.Users))
-	for _, u := range r.Users {
-		users = append(users, u.String())
-	}
-
-	n.b.BroadcastRevocations(ctx, n.now(), r.Sessions, users)
-}
-
 // connectionBinder lets POST /api/v1/auth/token refresh only connections
 // the gateway authz opened for the same caller: issued by the hub (not
 // recorded from a node report), same node, still open, and the same user

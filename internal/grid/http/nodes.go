@@ -51,6 +51,10 @@ type CapabilityReports interface {
 // ConnectionRegistry reads the open connections (presence registry).
 type ConnectionRegistry interface {
 	List(ctx context.Context) ([]*domain.Connection, error)
+	// ListenersByDevice and NodeListeners count the open media
+	// connections of each device and of a node.
+	ListenersByDevice(ctx context.Context) (map[string]int, error)
+	NodeListeners(ctx context.Context, id domain.NodeID) (int, error)
 }
 
 // certWarnAfter is the share of a node certificate's life after which the
@@ -70,24 +74,6 @@ type nodeRow struct {
 type deviceRow struct {
 	Device *domain.Device
 	Status domain.DeviceStatus
-}
-
-// mediaListeners counts the open media connections per node and per
-// device.
-func mediaListeners(conns []*domain.Connection) (perNode, perDevice map[string]int) {
-	perNode, perDevice = map[string]int{}, map[string]int{}
-
-	for _, c := range conns {
-		if i := c.Info(); i.Kind == domain.ConnectionMedia && i.NodeID != "" {
-			perNode[i.NodeID]++
-
-			if i.DeviceID != "" {
-				perDevice[i.DeviceID]++
-			}
-		}
-	}
-
-	return perNode, perDevice
 }
 
 func newDeviceRow(d *domain.Device, n *domain.Node, perDevice map[string]int) deviceRow {
@@ -189,17 +175,21 @@ func (m *AdminModule) nodesView(r *http.Request) (nodesView, error) {
 		return nodesView{}, err
 	}
 
-	conns, err := m.d.Connections.List(ctx)
+	perDevice, err := m.d.Connections.ListenersByDevice(ctx)
 	if err != nil {
 		return nodesView{}, err
 	}
 
-	listeners, perDevice := mediaListeners(conns)
 	now := m.now()
 	v := nodesView{CanAdmin: m.d.IsAdmin(r)}
 
 	for _, n := range nodes {
-		row := nodeRow{Node: n, Listeners: listeners[n.ID().String()], CertWarn: certWarn(n, now)}
+		listeners, err := m.d.Connections.NodeListeners(ctx, n.ID())
+		if err != nil {
+			return nodesView{}, err
+		}
+
+		row := nodeRow{Node: n, Listeners: listeners, CertWarn: certWarn(n, now)}
 
 		for _, d := range devices {
 			if d.Node() == n.ID() {
@@ -241,15 +231,16 @@ func (m *AdminModule) nodeView(r *http.Request) (nodeView, int) {
 		return nodeView{}, http.StatusInternalServerError
 	}
 
-	conns, err := m.d.Connections.List(ctx)
+	perDevice, err := m.d.Connections.ListenersByDevice(ctx)
+	if err == nil {
+		v.Listeners, err = m.d.Connections.NodeListeners(ctx, n.ID())
+	}
+
 	if err != nil {
-		m.d.Logger.ErrorContext(ctx, "list connections", slog.Any("error", err))
+		m.d.Logger.ErrorContext(ctx, "count listeners", slog.Any("error", err))
 
 		return nodeView{}, http.StatusInternalServerError
 	}
-
-	listeners, perDevice := mediaListeners(conns)
-	v.Listeners = listeners[n.ID().String()]
 
 	for _, d := range devices {
 		v.Devices = append(v.Devices, newDeviceRow(d, n, perDevice))

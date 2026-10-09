@@ -100,19 +100,14 @@ func (m *AdminModule) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(m.d.Operator, noIndex)
 		r.Get("/admin/devices", m.list)
-		r.Head("/admin/devices", m.list)
 		r.Get("/admin/devices/{id}", m.detail)
-		r.Head("/admin/devices/{id}", m.detail)
 		r.Get("/admin/nodes", m.nodesPage)
-		r.Head("/admin/nodes", m.nodesPage)
 		r.Get("/admin/nodes/{id}", m.nodePage)
-		r.Head("/admin/nodes/{id}", m.nodePage)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(m.d.Admin, noIndex)
 		r.Post("/admin/devices/{id}/forget", m.forget)
 		r.Get("/admin/devices/{id}/log", m.deviceLog)
-		r.Head("/admin/devices/{id}/log", m.deviceLog)
 		r.Get("/admin/nodes/new", m.newNodePage)
 		r.Post("/admin/nodes", m.addNode)
 		r.Post("/admin/nodes/{id}", m.editNode)
@@ -123,7 +118,6 @@ func (m *AdminModule) Routes(r chi.Router) {
 		r.Post("/admin/nodes/{id}/delete", m.deleteNode)
 		r.Post("/admin/nodes/{id}/probe", m.probeNode)
 		r.Get("/admin/connections", m.connectionsPage)
-		r.Head("/admin/connections", m.connectionsPage)
 		r.Post("/admin/connections/{id}/reveal", m.revealIP)
 	})
 }
@@ -190,7 +184,7 @@ func (m *AdminModule) deviceRows(ctx context.Context) ([]deviceListRow, error) {
 		return nil, err
 	}
 
-	conns, err := m.d.Connections.List(ctx)
+	perDevice, err := m.d.Connections.ListenersByDevice(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +194,6 @@ func (m *AdminModule) deviceRows(ctx context.Context) ([]deviceListRow, error) {
 		up[n.ID()] = n.Up()
 	}
 
-	_, perDevice := mediaListeners(conns)
 	rows := make([]deviceListRow, 0, len(devices))
 
 	for _, d := range devices {

@@ -60,7 +60,7 @@ func startNode(t *testing.T, id string, tok domain.EnrollmentToken, caFP [32]byt
 	}
 	e := enroll.NewNodeEnroller(o)
 
-	srv := httptest.NewUnstartedServer(e.Handler())
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(e.ServeEnroll))
 	srv.TLS = pkiTLS(self)
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
@@ -103,7 +103,7 @@ func TestEnrollment(t *testing.T) {
 	dir := t.TempDir()
 	p := enroll.Paths{Key: filepath.Join(dir, "tls", "node.key"), Cert: filepath.Join(dir, "tls", "node.pem"), CA: filepath.Join(dir, "tls", "ca.pem")}
 
-	if err := enroll.WriteFiles(p, n.opts.Key, res); err != nil {
+	if err := enroll.WriteFiles(p, n.opts.Key, res.CA.Raw, res.Chain...); err != nil {
 		t.Fatal(err)
 	}
 

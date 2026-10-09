@@ -2,16 +2,15 @@ package wire
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
 	"os"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
@@ -35,18 +34,7 @@ func EnsureCA(certPath, keyPath string, now time.Time) (bool, error) {
 		return false, fmt.Errorf("hub CA: %s and %s must both exist or both be absent", certPath, keyPath)
 	}
 
-	certPEM, keyPEM, err := pki.GenerateCA("MeshSDR hub CA", now)
-	if err != nil {
-		return false, err
-	}
-
-	if err := pki.WriteFileExclusive(keyPath, keyPEM, 0o600); err != nil {
-		return false, err
-	}
-
-	if err := pki.WriteFileExclusive(certPath, certPEM, 0o644); err != nil {
-		_ = os.Remove(keyPath)
-
+	if _, err := pki.CreateCA(certPath, keyPath, now); err != nil {
 		return false, err
 	}
 
@@ -134,7 +122,7 @@ func localURL(listen string) (string, error) {
 
 // Run starts the hub (declaring the local node), enrolls the local node
 // in-process when needed, then serves the hub and the node until ctx is
-// done.
+// done or one of them stops.
 func (a *AllProcess) Run(ctx context.Context) error {
 	if err := a.hub.runStartup(ctx); err != nil {
 		return err
@@ -153,213 +141,54 @@ func (a *AllProcess) Run(ctx context.Context) error {
 			"(meshsdr hub node token "+a.nodeCfg.Node.ID+") to re-enroll it at the next start")
 	}
 
+	var node *Process
+
+	if runNode {
+		var err error
+		if node, err = Node(a.nodeCfg, a.root, a.now()); err != nil {
+			return err
+		}
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var (
-		wg   sync.WaitGroup
-		mu   sync.Mutex
-		errs []error
-	)
+	var g errgroup.Group
 
-	run := func(f func(context.Context) error) {
-		wg.Go(func() {
-			if err := f(ctx); err != nil {
-				mu.Lock()
-				errs = append(errs, err)
-				mu.Unlock()
-			}
+	for _, p := range []*Process{a.hub, node} {
+		if p != nil {
+			g.Go(func() error {
+				defer cancel()
 
-			cancel()
-		})
-	}
-
-	run(a.hub.Run)
-
-	if runNode {
-		node, err := Node(a.nodeCfg, a.root, a.now())
-		if err != nil {
-			cancel()
-			wg.Wait()
-
-			return err
+				return p.Run(ctx)
+			})
 		}
-
-		run(node.Run)
 	}
 
-	wg.Wait()
-
-	return errors.Join(errs...)
+	return g.Wait()
 }
 
-// enrollLocal issues the local node certificate from the hub CA unless the
-// node files hold a valid certificate for the enrolled node (first start,
-// lost files, re-enrollment).
+// enrollLocal issues the local node certificate from the hub CA when the
+// node files hold none valid for the enrolled node.
 func (a *AllProcess) enrollLocal(ctx context.Context) error {
 	cfg := a.nodeCfg
-	id := cfg.Node.ID
 
-	n, err := a.g.nodes.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	if n.Enrollment() == griddomain.EnrollmentRevoked {
-		return griddomain.ErrNodeRevoked
-	}
-
-	key, err := localKey(cfg.TLS.Key)
-	if err != nil {
-		return err
-	}
-
-	if a.validLocalCert(ctx, n, key) {
-		return nil
-	}
-
-	csr, err := pki.CreateNodeCSR(key, id, cfg.Node.Listen)
-	if err != nil {
-		return err
-	}
-
-	der, err := a.g.ca.SignNodeCSR(csr, id, n.URL().Host(), a.now())
-	if err != nil {
-		return err
-	}
-
-	leaf, err := x509.ParseCertificate(der)
-	if err != nil {
-		return err
-	}
-
-	fp := pki.Fingerprint(der)
-
-	info, err := griddomain.NewCertInfo(fp[:], pki.SerialString(leaf), leaf.NotAfter)
-	if err != nil {
-		return err
-	}
-
-	// Files first: a crash after them leaves a certificate the database
-	// does not pin, which the next start replaces.
 	paths := enroll.Paths{Key: cfg.TLS.Key, Cert: cfg.TLS.Cert, CA: cfg.HubTrust.CACert}
-	if cfg.HubTrust.CACert == a.hubCACert() {
+	if cfg.HubTrust.CACert == a.g.caPath {
 		paths.CA = ""
 	}
 
-	if err := writeLocalFiles(paths, key, der, a.g.ca); err != nil {
-		return err
-	}
-
-	if err := a.g.nodes.EnrollLocal(ctx, id, info); err != nil {
-		return err
-	}
-
-	a.logger.InfoContext(ctx, "local node enrolled in-process", slog.String("node_id", id), slog.String("cert_serial", info.Serial()))
-
-	return nil
-}
-
-func (a *AllProcess) hubCACert() string { return a.g.caPath }
-
-// validLocalCert reports whether the node certificate file belongs to key,
-// chains to the hub CA, names the node and is the one the hub pins, not
-// revoked nor expired.
-func (a *AllProcess) validLocalCert(ctx context.Context, n *griddomain.Node, key *ecdsa.PrivateKey) bool {
-	pemData, err := os.ReadFile(a.nodeCfg.TLS.Cert)
-	if err != nil {
-		return false
-	}
-
-	certs, err := pki.ParseCertsPEM(pemData)
-	if err != nil || len(certs) == 0 {
-		return false
-	}
-
-	leaf := certs[0]
-
-	if pub, ok := leaf.PublicKey.(*ecdsa.PublicKey); !ok || !pub.Equal(&key.PublicKey) {
-		return false
-	}
-
-	if err := pki.VerifyLeaf(leaf, a.g.ca.Pool(), x509.ExtKeyUsageServerAuth, a.now()); err != nil {
-		return false
-	}
-
-	if kind, id, ok := pki.Identity(leaf); !ok || kind != pki.KindNode || id != n.ID().String() {
-		return false
-	}
-
-	if n.Enrollment() != griddomain.EnrollmentEnrolled || !n.AcceptsFingerprint(pki.Fingerprint(leaf.Raw)) {
-		return false
-	}
-
-	revoked, err := a.g.revocations.List(ctx, a.now())
-	if err != nil {
-		return false
-	}
-
-	for _, r := range revoked {
-		if r.Serial() == pki.SerialString(leaf) {
-			return false
-		}
-	}
-
-	return true
-}
-
-// localKey loads the node key, or generates one when the file is absent.
-func localKey(path string) (*ecdsa.PrivateKey, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return pki.GenerateKey()
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("tls.key: %w", err)
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("tls.key: %w", err)
-	}
-
-	if info.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("tls.key %s has mode %04o, want 0600", path, info.Mode().Perm())
-	}
-
-	signer, err := pki.ParseKeyPEM(data)
-	if err != nil {
-		return nil, fmt.Errorf("tls.key: %w", err)
-	}
-
-	key, ok := signer.(*ecdsa.PrivateKey)
-	if !ok {
-		return nil, errors.New("tls.key: not an ECDSA key")
-	}
-
-	return key, nil
-}
-
-// writeLocalFiles writes the node key (0600), its certificate and, when
-// the node does not share the hub CA file, a copy of the CA certificate.
-func writeLocalFiles(p enroll.Paths, key *ecdsa.PrivateKey, der []byte, ca *pki.CA) error {
-	keyPEM, err := pki.EncodeKeyPEM(key)
+	info, issued, err := enroll.Local(ctx, enroll.LocalOptions{
+		ID: cfg.Node.ID, Listen: cfg.Node.Listen, CA: a.g.ca, Nodes: a.g.nodes, Revocations: a.g.revocations,
+		Paths: paths, Now: a.now,
+	})
 	if err != nil {
 		return err
 	}
 
-	files := []pki.File{
-		{Path: p.Key, Data: keyPEM, Perm: 0o600},
-		{Path: p.Cert, Data: pki.EncodeCertsPEM(der), Perm: 0o644},
-	}
-
-	if p.CA != "" {
-		files = append([]pki.File{{Path: p.CA, Data: ca.PEM(), Perm: 0o644}}, files...)
-	}
-
-	if err := pki.WriteFilesAtomic(files...); err != nil {
-		return fmt.Errorf("write local node identity: %w", err)
+	if issued {
+		a.logger.InfoContext(ctx, "local node enrolled in-process", slog.String("node_id", cfg.Node.ID),
+			slog.String("cert_serial", info.Serial()))
 	}
 
 	return nil

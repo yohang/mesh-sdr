@@ -27,6 +27,7 @@ import (
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/http/api"
 	"github.com/yohang/mesh-sdr/internal/http/api/apitest"
+	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -106,7 +107,7 @@ allowed_networks = ["10.0.0.0/8"]
 		t.Fatal(err)
 	}
 
-	admin := UserAdmin(cfg, quiet, adapter)
+	admin := identity.UserAdmin(IdentityDeps(cfg, quiet, adapter))
 	for name, role := range users {
 		if _, err := admin.Add(ctx, identityapp.AddUserInput{Username: name, Role: role, Password: contractPassword}); err != nil {
 			t.Fatal(err)

@@ -12,7 +12,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/events"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
-	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
@@ -29,8 +28,8 @@ type decodesDeps struct {
 		Principal(ctx context.Context) identitydomain.Principal
 		Authorize(ctx context.Context, role identitydomain.Role) error
 	}
-	// features gives the enabled devices (set once built).
-	features func() *gridapp.Features
+	// features gives the enabled devices.
+	features *gridapp.Features
 	store    *settings.Store
 	render   decodes.Renderer
 	now      func() time.Time
@@ -50,7 +49,7 @@ func newDecodes(d decodesDeps) *decodes.Module {
 		Retention:  func() time.Duration { return d.store.Duration("retention.decoded_messages.max_age") },
 		MaxRows:    func() int { return d.store.Int("retention.decoded_messages.max_rows") },
 		Published:  decodeNew(d.broker, logger),
-		DeviceNode: deviceNode(gridsqlite.NewDeviceRepository(d.adapter)),
+		DeviceNode: deviceNode(d.grid.deviceRepo),
 		Modes:      catalogueModes(),
 		Dedup:      dedupOf,
 		Render:     d.render, Now: d.now, Logger: logger,
@@ -120,7 +119,7 @@ func dedupOf(mode string) (int64, time.Duration) {
 // (ADR 0026: the Decodes page follows the listen policy).
 func visibleDevices(d decodesDeps) func(ctx context.Context) ([]decodes.Device, error) {
 	return func(ctx context.Context) ([]decodes.Device, error) {
-		summary, err := d.features().Summary(ctx)
+		summary, err := d.features.Summary(ctx)
 		if err != nil {
 			return nil, err
 		}

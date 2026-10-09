@@ -17,7 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/yohang/mesh-sdr/internal/grid/agent"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/agent"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/media"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"

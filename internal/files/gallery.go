@@ -82,7 +82,6 @@ func (g *Gallery) Routes(r chi.Router) {
 	for path, h := range map[string]http.HandlerFunc{GalleryPath: g.list, GalleryPath + "/{id}": g.detail} {
 		h := g.gate(h)
 		r.Get(path, h)
-		r.Head(path, h)
 	}
 
 	r.With(g.d.Operator).Post(GalleryPath+"/{id}/delete", g.delete)

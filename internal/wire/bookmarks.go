@@ -35,7 +35,6 @@ func SyncBookmarks(ctx context.Context, adapter *db.DB, logger *slog.Logger) (bo
 type bookmarksDeps struct {
 	adapter  *db.DB
 	features *gridapp.Features
-	registry gridapp.DeviceLister
 	presets  *presets.Service
 	region   func() string
 	audit    audit.Appender
@@ -51,11 +50,11 @@ type bookmarksDeps struct {
 // newBookmarks builds the bookmarks module of the hub.
 func newBookmarks(d bookmarksDeps) (*bookmarks.Module, error) {
 	m, err := bookmarks.New(bookmarks.Deps{
-		DB: d.adapter, Audit: d.audit, Devices: bookmarkDevices{features: d.features, registry: d.registry},
+		DB: d.adapter, Audit: d.audit, Devices: bookmarkDevices{features: d.features},
 		Presets: bookmarkPresets{presets: d.presets}, Region: d.region,
 		CanListen: listenAs(d.policies, d.idm.Principal),
 		User:      currentUser,
-		Changed:   bookmarkChanged(d.broker, d.policies, component(d.logger, "bookmarks.wire.events")),
+		Changed:   bookmarkChanged(d.broker, d.policies, component(d.logger, "wire.bookmarks")),
 		Render:    d.render, Guard: d.idm.Require(identitydomain.RoleOperator),
 		AdminSections: func(r *http.Request) []layout.AdminSection {
 			if d.isAdmin(r.Context()) {
@@ -83,12 +82,8 @@ func listenAs(p *gridapp.ListenPolicies, principal func(context.Context) identit
 }
 
 // bookmarkDevices gives the enabled devices to the bookmarks: the public
-// feature summary (listen policy, modes) and the active preset of the
-// registry.
-type bookmarkDevices struct {
-	features *gridapp.Features
-	registry gridapp.DeviceLister
-}
+// feature summary (listen policy, modes, active preset).
+type bookmarkDevices struct{ features *gridapp.Features }
 
 // Devices implements bookmarks.Devices.
 func (b bookmarkDevices) Devices(ctx context.Context) ([]bookmarks.Device, error) {
@@ -97,21 +92,9 @@ func (b bookmarkDevices) Devices(ctx context.Context) ([]bookmarks.Device, error
 		return nil, err
 	}
 
-	all, err := b.registry.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list devices: %w", err)
-	}
-
-	active := make(map[shared.DeviceID]shared.UUID, len(all))
-	for _, d := range all {
-		active[d.ID()] = d.ActivePreset()
-	}
-
 	out := make([]bookmarks.Device, 0, len(summary.Devices))
 	for _, d := range summary.Devices {
-		out = append(out, bookmarks.Device{
-			ID: d.ID, Name: d.Name, ActivePreset: active[d.ID], Modes: d.Modes,
-		})
+		out = append(out, bookmarks.Device{ID: d.ID, Name: d.Name, ActivePreset: d.ActivePreset, Modes: d.Modes})
 	}
 
 	return out, nil

@@ -190,15 +190,10 @@ func (s *Presence) NodeRestarted(ctx context.Context, id domain.NodeID, now time
 	return err
 }
 
-// Handler applies connection.opened, connection.heartbeat and
-// connection.closed events of media sessions (control ingestion).
-func (s *Presence) Handler() EventHandler {
-	return func(ctx context.Context, n *domain.Node, ev Event, now time.Time) error {
-		p, err := decodeEvent[ctl.Connection](ev)
-		if err != nil {
-			return nil //nolint:nilerr // a malformed event is skipped
-		}
-
+// Handler applies the connection.opened, connection.heartbeat or
+// connection.closed events (t) of media sessions (control ingestion).
+func (s *Presence) Handler(t rxv1.MessageType) EventHandler {
+	return On(s.logger, func(ctx context.Context, n *domain.Node, p ctl.Connection, now time.Time) error {
 		id, err := shared.ParseUUID(p.CID)
 		if err != nil {
 			s.logger.WarnContext(ctx, "connection event with an invalid cid skipped", slog.String("node_id", n.ID().String()))
@@ -210,7 +205,7 @@ func (s *Presence) Handler() EventHandler {
 
 		switch {
 		case errors.Is(err, domain.ErrConnectionNotFound):
-			if ev.Type == rxv1.TypeConnectionClosed {
+			if t == rxv1.TypeConnectionClosed {
 				return nil
 			}
 
@@ -257,7 +252,7 @@ func (s *Presence) Handler() EventHandler {
 			return nil
 		}
 
-		switch ev.Type {
+		switch t {
 		case rxv1.TypeConnectionClosed:
 			c.Close(domain.ParseCloseReason(p.Reason), now)
 		default:
@@ -270,7 +265,7 @@ func (s *Presence) Handler() EventHandler {
 		}
 
 		return s.repo.Save(ctx, c)
-	}
+	})
 }
 
 // ownedDevice returns id when it is a device of node, "" otherwise: a node

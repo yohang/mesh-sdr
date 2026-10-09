@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/yohang/mesh-sdr/internal/identity"
 	"github.com/yohang/mesh-sdr/internal/identity/infra/keyring"
-	"github.com/yohang/mesh-sdr/internal/wire"
 )
 
 func (a *app) newKeysCmd() *cobra.Command {
@@ -55,7 +55,7 @@ func (a *app) withKeyring(ctx context.Context, fn func(k *keyring.Keyring, now t
 
 	now := time.Now()
 
-	k, err := wire.TokenKeyring(cfg, now)
+	k, err := identity.Keyring(cfg, now)
 	if err != nil {
 		return err
 	}

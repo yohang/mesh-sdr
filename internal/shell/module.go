@@ -106,20 +106,16 @@ func (m *Module) Routes(r chi.Router) {
 	r.NotFound(m.render.NotFound)
 	r.MethodNotAllowed(m.methodNotAllowed)
 
-	// Read-only pages answer GET and HEAD (net/http drops HEAD bodies).
-	get := func(pattern string, h http.HandlerFunc) {
-		r.Get(pattern, h)
-		r.Head(pattern, h)
-	}
-
-	get("/", m.receiver)
-	get(ReceiverLinkPattern, m.receiverLink)
-	get(SectionMap.Path(), m.placeholder(SectionMap, "The live map is not available yet."))
-	get("/robots.txt", robots)
-	get("/policy", m.policyPage)
-	get(AboutPath, m.aboutPage)
-	get("/manifest.webmanifest", m.manifest)
-	get("/favicon.ico", favicon(m.static))
+	// Read-only pages also answer HEAD: the router serves it with the GET
+	// route (chi middleware.GetHead; net/http drops HEAD bodies).
+	r.Get("/", m.receiver)
+	r.Get(ReceiverLinkPattern, m.receiverLink)
+	r.Get(SectionMap.Path(), m.placeholder(SectionMap, "The live map is not available yet."))
+	r.Get("/robots.txt", robots)
+	r.Get("/policy", m.policyPage)
+	r.Get(AboutPath, m.aboutPage)
+	r.Get("/manifest.webmanifest", m.manifest)
+	r.Get("/favicon.ico", favicon(m.static))
 }
 
 // allowCandidates are the methods probed for the Allow header of a 405.
@@ -135,7 +131,13 @@ func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 		var allowed []string
 
 		for _, method := range allowCandidates {
-			if rctx.Routes.Match(chi.NewRouteContext(), method, r.URL.Path) {
+			// HEAD is served by the GET route (middleware.GetHead).
+			probe := method
+			if method == http.MethodHead {
+				probe = http.MethodGet
+			}
+
+			if rctx.Routes.Match(chi.NewRouteContext(), probe, r.URL.Path) {
 				allowed = append(allowed, method)
 			}
 		}

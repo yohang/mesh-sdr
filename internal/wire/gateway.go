@@ -103,17 +103,9 @@ func subjectOf(p identitydomain.Principal) gridapp.Subject { return subject{p: p
 
 func (s subject) IsAnonymous() bool { return s.p.IsAnonymous() }
 
-func (s subject) UserID() shared.UUID {
-	u, _ := shared.ParseUUID(s.p.UserID().String())
+func (s subject) UserID() shared.UUID { return s.p.UserID().UUID() }
 
-	return u
-}
-
-func (s subject) SessionID() shared.UUID {
-	u, _ := shared.ParseUUID(s.p.SessionID().String())
-
-	return u
-}
+func (s subject) SessionID() shared.UUID { return s.p.SessionID().UUID() }
 
 func (s subject) Roles() []string {
 	roles := s.p.Roles()

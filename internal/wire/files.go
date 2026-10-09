@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -151,17 +150,15 @@ func (a fileAccess) published(b events.Publisher) func(ctx context.Context, e fi
 // acknowledged like any refused file.
 type fileEvents struct {
 	ingest  *files.Ingest
-	devices interface {
-		ListByNode(ctx context.Context, id griddomain.NodeID) ([]*griddomain.Device, error)
-	}
-	logger *slog.Logger
+	devices *gridapp.Devices
+	logger  *slog.Logger
 }
 
 // register adds the handlers to the control channel.
 func (f fileEvents) register(c *gridapp.Control) {
-	c.Handle(rxv1.TypeFileBegin, f.begin)
-	c.Handle(rxv1.TypeFileChunk, f.chunk)
-	c.Handle(rxv1.TypeFileEnd, f.end)
+	c.Handle(rxv1.TypeFileBegin, gridapp.On(f.logger, f.begin))
+	c.Handle(rxv1.TypeFileChunk, gridapp.On(f.logger, f.chunk))
+	c.Handle(rxv1.TypeFileEnd, gridapp.On(f.logger, f.end))
 	c.OnApplied(func(ctx context.Context, id griddomain.NodeID, types []rxv1.MessageType) {
 		if slices.Contains(types, rxv1.TypeFileEnd) {
 			// The batch is committed: a closing channel must not cut the
@@ -171,19 +168,14 @@ func (f fileEvents) register(c *gridapp.Control) {
 	})
 }
 
-func (f fileEvents) refused(ctx context.Context, n *griddomain.Node, ev gridapp.Event, reason string) error {
+func (f fileEvents) refused(ctx context.Context, n *griddomain.Node, t rxv1.MessageType, reason string) error {
 	f.logger.WarnContext(ctx, "file event from a node refused", slog.String("node_id", n.ID().String()),
-		slog.String("type", string(ev.Type)), slog.String("reason", reason))
+		slog.String("type", t.String()), slog.String("reason", reason))
 
 	return nil
 }
 
-func (f fileEvents) begin(ctx context.Context, n *griddomain.Node, ev gridapp.Event, now time.Time) error {
-	var p ctl.FileBegin
-	if err := json.Unmarshal(ev.Payload, &p); err != nil {
-		return f.refused(ctx, n, ev, "invalid payload")
-	}
-
+func (f fileEvents) begin(ctx context.Context, n *griddomain.Node, p ctl.FileBegin, now time.Time) error {
 	in := files.Incoming{
 		Node: n.ID().String(), Kind: files.Kind(p.Kind), MIME: files.MIMEType(p.MIME), Size: p.Size, Mode: p.Mode,
 		FrequencyHz: p.FrequencyHz, Metadata: p.Metadata,
@@ -227,30 +219,25 @@ func (f fileEvents) begin(ctx context.Context, n *griddomain.Node, ev gridapp.Ev
 	}
 
 	if len(errs) > 0 {
-		return f.refused(ctx, n, ev, errors.Join(errs...).Error())
+		return f.refused(ctx, n, rxv1.TypeFileBegin, errors.Join(errs...).Error())
 	}
 
-	devices, err := f.devices.ListByNode(ctx, n.ID())
+	owned, err := f.devices.OwnedBy(ctx, n.ID(), in.DeviceID)
 	if err != nil {
 		return err
 	}
 
-	if !slices.ContainsFunc(devices, func(d *griddomain.Device) bool { return d.ID() == in.DeviceID }) {
-		return f.refused(ctx, n, ev, "device "+strconv.Quote(p.DeviceID)+" is not a device of the node")
+	if !owned {
+		return f.refused(ctx, n, rxv1.TypeFileBegin, "device "+strconv.Quote(p.DeviceID)+" is not a device of the node")
 	}
 
 	return f.ingest.Begin(ctx, in, n.Runtime().ClockOffsetMS, now)
 }
 
-func (f fileEvents) chunk(ctx context.Context, n *griddomain.Node, ev gridapp.Event, now time.Time) error {
-	var p ctl.FileChunk
-	if err := json.Unmarshal(ev.Payload, &p); err != nil {
-		return f.refused(ctx, n, ev, "invalid payload")
-	}
-
+func (f fileEvents) chunk(ctx context.Context, n *griddomain.Node, p ctl.FileChunk, now time.Time) error {
 	id, err := shared.ParseUUID(p.FileID)
 	if err != nil {
-		return f.refused(ctx, n, ev, "invalid file id")
+		return f.refused(ctx, n, rxv1.TypeFileChunk, "invalid file id")
 	}
 
 	var data []byte
@@ -266,15 +253,10 @@ func (f fileEvents) chunk(ctx context.Context, n *griddomain.Node, ev gridapp.Ev
 	return f.ingest.Chunk(ctx, n.ID().String(), id, p.Offset, data, now)
 }
 
-func (f fileEvents) end(ctx context.Context, n *griddomain.Node, ev gridapp.Event, _ time.Time) error {
-	var p ctl.FileEnd
-	if err := json.Unmarshal(ev.Payload, &p); err != nil {
-		return f.refused(ctx, n, ev, "invalid payload")
-	}
-
+func (f fileEvents) end(ctx context.Context, n *griddomain.Node, p ctl.FileEnd, _ time.Time) error {
 	id, err := shared.ParseUUID(p.FileID)
 	if err != nil {
-		return f.refused(ctx, n, ev, "invalid file id")
+		return f.refused(ctx, n, rxv1.TypeFileEnd, "invalid file id")
 	}
 
 	return f.ingest.End(ctx, n.ID().String(), id)

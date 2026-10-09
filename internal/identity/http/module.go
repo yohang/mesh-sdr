@@ -238,21 +238,17 @@ func (m *Module) Middlewares() []func(http.Handler) http.Handler {
 func (m *Module) Routes(r chi.Router) {
 	m.routes = r
 
-	// Read-only pages answer GET and HEAD, like the shell's.
+	// Read-only pages also answer HEAD, like the shell's.
 	r.Get("/login", m.loginPage)
-	r.Head("/login", m.loginPage)
 	r.Post("/login", m.loginAction)
 	r.Post("/logout", m.logoutAction)
 
 	r.Get(app.SetupPath+"/{token}", m.setupPage)
-	r.Head(app.SetupPath+"/{token}", m.setupPage)
 	r.Get(app.SetupPath, m.setupLanding)
-	r.Head(app.SetupPath, m.setupLanding)
 	r.Post(app.SetupPath, m.setupAction)
 
 	listener := r.With(m.Require(domain.RoleListener))
 	listener.Get(AccountPath, m.accountPage)
-	listener.Head(AccountPath, m.accountPage)
 	listener.Post(AccountPath+"/profile", m.profileAction)
 	listener.Post(AccountPath+"/email", m.emailAction)
 	listener.Post(AccountPath+"/sessions/revoke-others", m.revokeOthersAction)
@@ -262,18 +258,14 @@ func (m *Module) Routes(r chi.Router) {
 	listener.Post(AccountPath+"/delete", m.deleteOwnAction)
 
 	r.Get(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
-	r.Head(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
 	r.Get(AccountPath+"/email/verify", m.emailVerifyLanding)
 	r.Post(AccountPath+"/email/verify", m.emailVerifyAction)
 
 	admin := r.With(m.Require(domain.RoleAdmin))
 	admin.Get(AuditPath, m.auditPage)
-	admin.Head(AuditPath, m.auditPage)
 	admin.Post(AuditPath+"/export", m.auditExport)
 	admin.Get(UsersPath, m.usersPage)
-	admin.Head(UsersPath, m.usersPage)
 	admin.Get(UsersPath+"/{id}", m.userPage)
-	admin.Head(UsersPath+"/{id}", m.userPage)
 	admin.Post(UsersPath+"/{id}/roles", m.userRolesAction)
 	admin.Post(UsersPath+"/{id}/enable", m.userEnableAction(true))
 	admin.Post(UsersPath+"/{id}/disable", m.userEnableAction(false))
@@ -284,29 +276,23 @@ func (m *Module) Routes(r chi.Router) {
 	admin.Post(UsersPath+"/{id}/export", m.userExportAction)
 	admin.Post(UsersPath+"/{id}/delete", m.userDeleteAction)
 	admin.Get(InvitationsPath, m.invitationsPage)
-	admin.Head(InvitationsPath, m.invitationsPage)
 	admin.Post(InvitationsPath, m.createInvitationAction)
 	admin.Post(InvitationsPath+"/test-mail", m.testMailAction)
 	admin.Post(InvitationsPath+"/{id}/revoke", m.revokeInvitationAction)
 
 	r.Get(JWKSPath, m.jwks)
-	r.Head(JWKSPath, m.jwks)
 
 	r.Get(ForgotPath, m.forgotPage)
-	r.Head(ForgotPath, m.forgotPage)
 	r.Post(ForgotPath, m.forgotAction)
 	r.Get(ResetPath+"/{token}", m.resetPage)
-	r.Head(ResetPath+"/{token}", m.resetPage)
 	r.Get(ResetPath, m.resetLanding)
 	r.Post(ResetPath, m.resetAction)
 
 	r.Get("/invite/{token}", m.invitePage)
-	r.Head("/invite/{token}", m.invitePage)
 	r.Get("/invite", m.inviteLanding)
 	r.Post("/invite", m.acceptAction)
 
 	r.With(m.Require(domain.RoleListener)).Get(PasswordChangePath, m.passwordPage)
-	r.With(m.Require(domain.RoleListener)).Head(PasswordChangePath, m.passwordPage)
 	r.With(m.Require(domain.RoleListener)).Post(PasswordChangePath, m.passwordAction)
 }
 

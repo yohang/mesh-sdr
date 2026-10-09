@@ -60,7 +60,7 @@ func TestStatus(t *testing.T) {
 			h := api.NewStatusHandlers(fakeStatus{tt.st}, discard)
 
 			root := chi.NewRouter()
-			root.Mount("/api/v1", api.NewHandler(api.Server{StatusHandlers: h}, anonymous, discard))
+			root.Mount("/api/v1", newHandler(t, api.Server{StatusHandlers: h}, anonymous))
 			root.Method(http.MethodGet, "/status.json", h.Alias())
 
 			srv := httptest.NewServer(root)

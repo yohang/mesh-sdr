@@ -45,7 +45,7 @@ type Devices interface {
 }
 
 // DesiredState is the desired state pushed by the hub
-// (grid/agent.DesiredState): the presets of each device and the global
+// (grid/infra/agent.DesiredState): the presets of each device and the global
 // settings.
 type DesiredState interface {
 	Device(id string) (ctl.DesiredDevice, bool)

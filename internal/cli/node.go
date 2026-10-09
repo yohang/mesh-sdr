@@ -30,17 +30,10 @@ func (a *app) runNode(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, meta, err := config.LoadNode(a.configOptions())
+	cfg, logger, err := a.loadNode(ctx)
 	if err != nil {
 		return err
 	}
-
-	logger, err := a.newLogger(cfg.Log)
-	if err != nil {
-		return err
-	}
-
-	logConfig(ctx, logger, config.RoleNode, meta)
 
 	p, err := wire.Node(cfg, logger, time.Now())
 	if err != nil {
@@ -62,4 +55,21 @@ func (a *app) runNode(ctx context.Context) error {
 	logger.InfoContext(ctx, "node stopped")
 
 	return nil
+}
+
+// loadNode loads the node config and builds the logger.
+func (a *app) loadNode(ctx context.Context) (config.Node, *slog.Logger, error) {
+	cfg, meta, err := config.LoadNode(a.configOptions())
+	if err != nil {
+		return config.Node{}, nil, err
+	}
+
+	logger, err := a.newLogger(cfg.Log)
+	if err != nil {
+		return config.Node{}, nil, err
+	}
+
+	logConfig(ctx, logger, config.RoleNode, meta)
+
+	return cfg, logger, nil
 }

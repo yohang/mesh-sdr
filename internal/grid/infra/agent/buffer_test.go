@@ -3,7 +3,7 @@ package agent_test
 import (
 	"testing"
 
-	"github.com/yohang/mesh-sdr/internal/grid/agent"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/agent"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 )
 

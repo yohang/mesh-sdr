@@ -153,14 +153,14 @@ func TestListenPolicySingleSource(t *testing.T) {
 				})
 
 				bm, err := bookmarks.New(bookmarks.Deps{
-					DB: a, Devices: bookmarkDevices{features: features, registry: repo},
+					DB: a, Devices: bookmarkDevices{features: features},
 					CanListen: listenAs(listen, caller.Principal), Region: func() string { return "r1" }, Now: time.Now, Logger: quiet,
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				visible, err := visibleDevices(decodesDeps{identity: caller, features: func() *gridapp.Features { return features }})(ctx)
+				visible, err := visibleDevices(decodesDeps{identity: caller, features: features})(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}

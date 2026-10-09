@@ -33,15 +33,10 @@ func (m *Module) ShellUser(r *http.Request) *layout.User {
 		return nil
 	}
 
-	name := p.Username().String()
-	if d := p.DisplayName(); !d.IsZero() {
-		name = d.String()
-	}
-
 	role := p.Role().String()
 
 	return &layout.User{
-		Name:  name,
+		Name:  p.Name(),
 		Role:  strings.ToUpper(role[:1]) + role[1:],
 		Links: []layout.Link{{Label: "Account", Href: AccountPath}},
 	}

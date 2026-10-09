@@ -50,7 +50,6 @@ func (m *Pages) Routes(r chi.Router) {
 			"/admin/presets/{id}/delete": m.deletePage,
 		} {
 			r.Get(path, h)
-			r.Head(path, h)
 		}
 
 		r.Post("/admin/presets", m.create)

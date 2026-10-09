@@ -11,15 +11,36 @@ import (
 
 // Response writers and helpers shared by the handlers.
 
-// jsonOK writes a 200 JSON body, not cached.
-type jsonOK struct{ v any }
+// jsonOK writes a 200 JSON body, not cached, with the cookies to set and,
+// for a download, its file name.
+type jsonOK struct {
+	v        any
+	cookies  []*http.Cookie
+	download string
+	indent   bool
+}
 
 func (j jsonOK) write(w http.ResponseWriter) error {
+	for _, c := range j.cookies {
+		http.SetCookie(w, c)
+	}
+
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
+
+	enc := json.NewEncoder(w)
+
+	if j.download != "" {
+		w.Header().Set("Content-Disposition", `attachment; filename="`+j.download+`"`)
+	}
+
+	if j.indent {
+		enc.SetIndent("", "  ")
+	}
+
 	w.WriteHeader(http.StatusOK)
 
-	return json.NewEncoder(w).Encode(j.v)
+	return enc.Encode(j.v)
 }
 
 // rateLimited is a 429 problem with Retry-After.

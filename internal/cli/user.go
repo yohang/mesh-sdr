@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/yohang/mesh-sdr/internal/config"
+	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/wire"
@@ -119,23 +120,9 @@ func (a *app) newUserCmd() *cobra.Command {
 
 // withUserAdmin opens the hub database, checks its schema and calls fn.
 func (a *app) withUserAdmin(ctx context.Context, fn func(*identityapp.UserAdmin) error) error {
-	cfg, _, logger, err := a.loadHub(ctx, true)
-	if err != nil {
-		return err
-	}
-
-	adapter, err := wire.OpenDB(ctx, cfg.DB, logger)
-	if err != nil {
-		return err
-	}
-
-	defer func() { _ = adapter.Close() }()
-
-	if err := adapter.Migrator().Check(ctx); err != nil {
-		return fmt.Errorf("schema is not current: %w", err)
-	}
-
-	return fn(wire.UserAdmin(cfg, logger, adapter))
+	return a.withHubDB(ctx, true, true, func(h hubEnv) error {
+		return fn(identity.UserAdmin(wire.IdentityDeps(h.cfg, h.logger, h.db)))
+	})
 }
 
 func (a *app) userAdd(ctx context.Context, name, email, displayName, roleName string) error {

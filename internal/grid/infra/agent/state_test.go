@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/yohang/mesh-sdr/internal/grid/agent"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/agent"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 )
 

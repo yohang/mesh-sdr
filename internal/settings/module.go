@@ -90,17 +90,12 @@ func (m *Module) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(m.d.Guard, noIndex)
 
-		get := func(pattern string, h http.HandlerFunc) {
-			r.Get(pattern, h)
-			r.Head(pattern, h)
-		}
-
-		get("/admin", m.overview)
-		get("/admin/system", m.system)
+		r.Get("/admin", m.overview)
+		r.Get("/admin/system", m.system)
 		r.Post("/admin/retention/purge", m.purge)
 
 		for _, p := range formPages {
-			get(p.Path, m.formPage(p))
+			r.Get(p.Path, m.formPage(p))
 			r.Post(p.Path, m.save(p))
 		}
 	})

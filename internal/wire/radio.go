@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -60,7 +61,7 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 		}
 
 		if n > 0 {
-			logger.Warn("removed workdirs left by a previous run", slog.Int("count", n))
+			logger.WarnContext(context.Background(), "removed workdirs left by a previous run", slog.Int("count", n))
 		}
 	}
 
@@ -142,7 +143,7 @@ func radioDevices(cfg config.Node, logger *slog.Logger) ([]*radiodomain.Device, 
 				return nil, fmt.Errorf("devices.%s: %w", id, idErr)
 			}
 
-			logger.Error("invalid device configuration: the device is reported failed",
+			logger.ErrorContext(context.Background(), "invalid device configuration: the device is reported failed",
 				slog.String("device_id", id), slog.Any("error", err))
 
 			dev = radiodomain.NewInvalidDevice(did, c.Name)

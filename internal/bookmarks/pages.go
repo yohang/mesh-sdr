@@ -38,7 +38,6 @@ func (m *Module) Routes(r chi.Router) {
 			ManagePath + "/{id}/delete": m.deletePage,
 		} {
 			r.Get(path, h)
-			r.Head(path, h)
 		}
 
 		r.Post(ManagePath, m.create)

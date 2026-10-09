@@ -216,21 +216,15 @@ func (a scheduleDevices) NodeDevices(ctx context.Context, node string) ([]schedu
 		return nil, err
 	}
 
-	list, err := a.repo.ListByNode(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]schedules.Device, len(list))
-	for i, d := range list {
-		out[i] = scheduleDevice(d)
-	}
-
-	return out, nil
+	return scheduleDeviceList(a.repo.ListByNode(ctx, id))
 }
 
 func (a scheduleDevices) All(ctx context.Context) ([]schedules.Device, error) {
-	list, err := a.repo.List(ctx)
+	return scheduleDeviceList(a.repo.List(ctx))
+}
+
+// scheduleDeviceList converts a registry listing.
+func scheduleDeviceList(list []*griddomain.Device, err error) ([]schedules.Device, error) {
 	if err != nil {
 		return nil, err
 	}

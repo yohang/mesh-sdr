@@ -148,14 +148,7 @@ func Rows(c ctl.Capabilities) ([]domain.Capability, error) {
 
 // Handler applies node.capabilities events (control ingestion).
 func (s *Capabilities) Handler() EventHandler {
-	return func(ctx context.Context, n *domain.Node, ev Event, now time.Time) error {
-		caps, err := decodeEvent[ctl.Capabilities](ev)
-		if err != nil {
-			s.logger.WarnContext(ctx, "invalid node.capabilities skipped", slog.String("node_id", n.ID().String()), slog.Any("error", err))
-
-			return nil
-		}
-
+	return On(s.logger, func(ctx context.Context, n *domain.Node, caps ctl.Capabilities, now time.Time) error {
 		hash, doc, err := Hash(caps)
 		if err != nil {
 			return err
@@ -202,7 +195,7 @@ func (s *Capabilities) Handler() EventHandler {
 			slog.Int("capabilities", len(rows)), slog.Int("devices", len(caps.Devices)))
 
 		return nil
-	}
+	})
 }
 
 func truncate(s string, n int) string {

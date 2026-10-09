@@ -46,6 +46,10 @@ func (p Principal) Username() Username { return p.username }
 // DisplayName returns the display name (zero when none).
 func (p Principal) DisplayName() DisplayName { return p.display }
 
+// Name returns the name shown for the user: the display name, else the
+// username ("" when anonymous).
+func (p Principal) Name() string { return shownName(p.display, p.username) }
+
 // MustChangePassword reports whether the user must set a new password.
 func (p Principal) MustChangePassword() bool { return p.mustChPw }
 

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/yohang/mesh-sdr/internal/identity/app"
@@ -37,7 +36,7 @@ func (h AuthHandlers) GetSession(ctx context.Context, _ GetSessionRequestObject)
 		cookies = append(cookies, cookie)
 	}
 
-	return sessionResponse{info: sessionInfo(h.sessions.Principal(ctx), token), cookies: cookies}, nil
+	return jsonOK{v: sessionInfo(h.sessions.Principal(ctx), token), cookies: cookies}, nil
 }
 
 func sessionInfo(p domain.Principal, token string) SessionInfo {
@@ -68,20 +67,4 @@ func sessionInfo(p domain.Principal, token string) SessionInfo {
 	return info
 }
 
-// sessionResponse is the session of the caller, with cookies to set.
-type sessionResponse struct {
-	info    SessionInfo
-	cookies []*http.Cookie
-}
-
-func (s sessionResponse) VisitGetSessionResponse(w http.ResponseWriter) error {
-	for _, c := range s.cookies {
-		http.SetCookie(w, c)
-	}
-
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	return json.NewEncoder(w).Encode(s.info)
-}
+func (j jsonOK) VisitGetSessionResponse(w http.ResponseWriter) error { return j.write(w) }

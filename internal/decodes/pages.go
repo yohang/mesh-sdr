@@ -30,7 +30,6 @@ func (m *Module) Middlewares() []func(http.Handler) http.Handler { return nil }
 // Routes implements internal/http.Module.
 func (m *Module) Routes(r chi.Router) {
 	r.Get(Path, m.listPage)
-	r.Head(Path, m.listPage)
 }
 
 // filter is the filter form of the page; its fields are the query

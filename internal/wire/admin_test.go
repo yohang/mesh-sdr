@@ -17,6 +17,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
+	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/wire"
@@ -53,7 +54,7 @@ func newAdminHub(t *testing.T, env map[string]string) *adminHub {
 	cfg.Auth.TokenKeyDir = filepath.Join(t.TempDir(), "keys")
 	a := dbtest.NewSQLite(t)
 
-	admin := wire.UserAdmin(cfg, discard, a)
+	admin := identity.UserAdmin(wire.IdentityDeps(cfg, discard, a))
 	for name, role := range map[string]domain.Role{"root": domain.RoleAdmin, "op": domain.RoleOperator, "lis": domain.RoleListener} {
 		if _, err := admin.Add(context.Background(), identityapp.AddUserInput{Username: name, Role: role, Password: testPassword}); err != nil {
 			t.Fatal(err)

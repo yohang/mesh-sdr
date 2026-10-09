@@ -72,7 +72,7 @@ func TestFeatures(t *testing.T) {
 		{"admin", admin, []string{"hf", "vhf", "uhf"}, []string{"attic", "roof"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(api.NewHandler(api.Server{FeatureHandlers: api.NewFeatureHandlers(tt.authz, s)}, tt.authz, discard))
+			srv := httptest.NewServer(newHandler(t, api.Server{FeatureHandlers: api.NewFeatureHandlers(tt.authz, s)}, tt.authz))
 			t.Cleanup(srv.Close)
 
 			res, err := http.Get(srv.URL + "/features")
@@ -148,4 +148,16 @@ func TestFeatures(t *testing.T) {
 
 		})
 	}
+}
+
+// newHandler returns the /api/v1 handler of srv.
+func newHandler(t *testing.T, srv api.Server, authz api.Authorizer) http.Handler {
+	t.Helper()
+
+	h, err := api.NewHandler(srv, authz, 1<<20, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return h
 }

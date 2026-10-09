@@ -28,6 +28,23 @@ type Event struct {
 // change the node's runtime state, which is saved after the batch.
 type EventHandler func(ctx context.Context, n *domain.Node, ev Event, now time.Time) error
 
+// On returns the handler of the events whose payload is a T: the payload is
+// decoded first, tolerating unknown fields (newer-minor nodes, §4.8); a
+// malformed one is skipped with a warning, not fatal for the batch.
+func On[T any](logger *slog.Logger, h func(ctx context.Context, n *domain.Node, p T, now time.Time) error) EventHandler {
+	return func(ctx context.Context, n *domain.Node, ev Event, now time.Time) error {
+		var p T
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			logger.WarnContext(ctx, "malformed node event skipped", slog.String("node_id", n.ID().String()),
+				slog.String("type", ev.Type.String()), slog.Any("error", err))
+
+			return nil
+		}
+
+		return h(ctx, n, p, now)
+	}
+}
+
 // BootHandler runs, inside the welcome transaction, when a node reports a
 // boot id different from the last one (§4.9 "Node restarts").
 type BootHandler func(ctx context.Context, id domain.NodeID, now time.Time) error

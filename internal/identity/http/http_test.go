@@ -131,12 +131,17 @@ func newHub(t *testing.T, mutate ...func(*config.Hub)) *hub {
 		TokenHandlers:  api.NewTokenHandlers(m.HTTP, m.HTTP, m.Tokens),
 	}
 
+	apiHandler, err := api.NewHandler(srv, m.HTTP, 1<<20, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	return &hub{
 		t:       t,
 		logs:    logs,
 		mail:    mails,
 		revoked: revoked,
-		handler: httpserver.NewRouter(logger, "", api.NewHandler(srv, m.HTTP, logger), m.HTTP, adminPage{m.HTTP}),
+		handler: httpserver.NewRouter(logger, "", apiHandler, m.HTTP, adminPage{m.HTTP}),
 		admin:   identity.UserAdmin(d),
 		setup:   m.Setup,
 	}

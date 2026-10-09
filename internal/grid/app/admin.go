@@ -176,7 +176,7 @@ func (s *Nodes) Update(ctx context.Context, actor audit.Actor, id string, name, 
 		return s.repo.Save(ctx, n, v)
 	})
 	if err != nil {
-		s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.update", TargetType: "node", TargetID: id, Result: audit.ResultDenied, After: map[string]string{"reason": err.Error()}})
+		s.denied(ctx, actor, "node.update", id, err)
 
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (s *Nodes) Delete(ctx context.Context, actor audit.Actor, id string) error 
 	}
 
 	if err := n.CheckDeletable(); err != nil {
-		s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.delete", TargetType: "node", TargetID: id, Result: audit.ResultDenied, After: map[string]string{"reason": err.Error()}})
+		s.denied(ctx, actor, "node.delete", id, err)
 
 		return err
 	}
@@ -284,7 +284,7 @@ func (s *Nodes) Revoke(ctx context.Context, actor audit.Actor, id string) (*doma
 		return s.repo.Save(ctx, n, v)
 	})
 	if err != nil {
-		s.audit.Record(ctx, audit.Record{Actor: actor, Action: "node.revoke", TargetType: "node", TargetID: id, Result: audit.ResultDenied, After: map[string]string{"reason": err.Error()}})
+		s.denied(ctx, actor, "node.revoke", id, err)
 
 		return nil, fmt.Errorf("revoke node %s: %w", id, err)
 	}
@@ -418,4 +418,12 @@ func revoke(ctx context.Context, repo domain.RevocationRepository, cert domain.C
 	}
 
 	return repo.Add(ctx, r)
+}
+
+// denied records a node change refused for err.
+func (s *Nodes) denied(ctx context.Context, actor audit.Actor, action, id string, err error) {
+	s.audit.Record(ctx, audit.Record{
+		Actor: actor, Action: action, TargetType: "node", TargetID: id, Result: audit.ResultDenied,
+		After: map[string]string{"reason": err.Error()},
+	})
 }
