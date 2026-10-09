@@ -641,7 +641,11 @@ components:
       type: object
       additionalProperties: false
       required: [lat, lon]
-      description: Station position in decimal degrees (WGS 84); absent when unset.
+      description: |
+        Station position (`receiver.gps`) in decimal degrees (WGS 84);
+        absent when unset. Unless `map.precise_receivers` is set, it is the
+        centre of its 4-character Maidenhead locator, like the receivers of
+        `GET /map/config` (SR-32).
       properties:
         lat:
           type: number
