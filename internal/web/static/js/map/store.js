@@ -75,7 +75,7 @@ function valid(f) {
  * @param {Feature} f
  * @returns {[number, number] | null}
  */
-export function position(f) {
+function position(f) {
   const g = f.geometry;
   if (g.type === "line") {
     const a = g.from;

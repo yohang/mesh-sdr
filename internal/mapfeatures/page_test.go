@@ -77,12 +77,11 @@ func TestMapPage(t *testing.T) {
 
 // The tile origins of the offered layers, one per subdomain, feed the CSP.
 func TestTileOrigins(t *testing.T) {
-	got := TileOrigins([]string{"osm", "opentopomap", "esri_world_imagery", "esri_world_topo_map", "cartodb_positron", "nope"})
+	got := TileOrigins([]string{"osm", "opentopomap", "esri_world_imagery", "esri_world_topo_map", "nope"})
 	want := []string{
 		"https://tile.openstreetmap.org",
 		"https://a.tile.opentopomap.org", "https://b.tile.opentopomap.org", "https://c.tile.opentopomap.org",
 		"https://server.arcgisonline.com",
-		"https://a.basemaps.cartocdn.com", "https://b.basemaps.cartocdn.com", "https://c.basemaps.cartocdn.com", "https://d.basemaps.cartocdn.com",
 	}
 
 	if !slices.Equal(got, want) {
