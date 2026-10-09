@@ -1,5 +1,7 @@
 package config
 
+import "slices"
+
 // Settings is the [settings] table of hub.toml: admin settings (TECHNICAL_SPEC
 // §7.4 "Locking semantics"). Each leaf maps 1:1 to a DB settings key (the
 // dotted path without "settings."). A leaf set in a file or the env is
@@ -43,6 +45,8 @@ type Settings struct {
 	Files     SettingsFiles     `toml:"files" envPrefix:"FILES__" jsonschema:"description=Retention of the files the nodes send (FIL-004)."`
 	Grid      SettingsGrid      `toml:"grid" envPrefix:"GRID__" jsonschema:"description=Node health (GRID-009)."`
 	Decoders  SettingsDecoders  `toml:"decoders" envPrefix:"DECODERS__" jsonschema:"description=Decoding settings pushed to the nodes (Admin › Decoding)."`
+	Map       SettingsMap       `toml:"map" envPrefix:"MAP__" jsonschema:"description=Map layers, retention and report filtering (Admin › Map)."`
+	Links     SettingsLinks     `toml:"links" envPrefix:"LINKS__" jsonschema:"description=Lookup link templates (MAP-015)."`
 
 	Invitations   SettingsInvitations   `toml:"invitations" envPrefix:"INVITATIONS__" jsonschema:"description=Invitations (ACC-002)."`
 	PasswordReset SettingsPasswordReset `toml:"password_reset" envPrefix:"PASSWORD_RESET__" jsonschema:"description=Password reset links (ACC-003)."`
@@ -181,6 +185,43 @@ type SettingsWSJTDepths struct {
 	Q65   int `toml:"q65" env:"Q65" jsonschema:"minimum=0,maximum=3" jsonschema_extras:"x-label=Q65 depth" jsonschema_description:"0 to 3; 0: the WSJT decoding depth."`
 }
 
+// BaseLayers are the ids of the map base layers the hub knows (MAP-004):
+// keyless tile providers the browser loads directly.
+var BaseLayers = []string{
+	"osm", "opentopomap", "esri_world_imagery", "esri_world_street_map", "esri_world_topo_map",
+	"cartodb_positron", "cartodb_dark_matter", "cartodb_voyager",
+}
+
+// SettingsMap is the [settings.map] table (MAP-004, MAP-007, MAP-011,
+// MAP-012, MAP-013): Admin › Map.
+type SettingsMap struct {
+	BaseLayers       []string `toml:"base_layers" env:"BASE_LAYERS" jsonschema:"minItems=1,maxItems=8,enum=osm,enum=opentopomap,enum=esri_world_imagery,enum=esri_world_street_map,enum=esri_world_topo_map,enum=cartodb_positron,enum=cartodb_dark_matter,enum=cartodb_voyager" jsonschema_extras:"x-public=true,x-label=Base layers" jsonschema_description:"Base layers offered on the map, one per line: osm, opentopomap, esri_world_imagery, esri_world_street_map, esri_world_topo_map, cartodb_positron, cartodb_dark_matter or cartodb_voyager."`
+	DefaultBaseLayer string   `toml:"default_base_layer" env:"DEFAULT_BASE_LAYER" jsonschema:"enum=osm,enum=opentopomap,enum=esri_world_imagery,enum=esri_world_street_map,enum=esri_world_topo_map,enum=cartodb_positron,enum=cartodb_dark_matter,enum=cartodb_voyager" jsonschema_extras:"x-public=true,x-label=Default base layer,x-enum-labels=OpenStreetMap,x-enum-labels=OpenTopoMap,x-enum-labels=Esri World Imagery,x-enum-labels=Esri World Street Map,x-enum-labels=Esri World Topo Map,x-enum-labels=CARTO Positron,x-enum-labels=CARTO Dark Matter,x-enum-labels=CARTO Voyager" jsonschema_description:"Base layer the map opens with. Must be one of the offered base layers."`
+	// PositionRetentionS is the lifetime of a map position without a TTL
+	// of its own (MAP-012).
+	PositionRetentionS int `toml:"position_retention_s" env:"POSITION_RETENTION_S" jsonschema:"minimum=60,maximum=604800" jsonschema_extras:"x-public=true,x-label=Position lifetime (s)" jsonschema_description:"A position, a locator or a station heard again restarts its lifetime; without a new report it leaves the map after this many seconds (60 to 604800)."`
+	MaxCalls           int `toml:"max_calls" env:"MAX_CALLS" jsonschema:"minimum=0,maximum=100" jsonschema_extras:"x-public=true,x-label=Call lines shown" jsonschema_description:"Most recent call lines (QSOs between two located stations) kept on the map (0 to 100; 0: no call lines)."`
+	CallRetentionS     int `toml:"call_retention_s" env:"CALL_RETENTION_S" jsonschema:"minimum=10,maximum=86400" jsonschema_extras:"x-public=true,x-label=Call line lifetime (s)" jsonschema_description:"A call line leaves the map this many seconds after the call was heard (10 to 86400)."`
+	// IgnoreIndirectReports and PreferRecentReports filter the reports
+	// before they are written (MAP-013).
+	IgnoreIndirectReports bool `toml:"ignore_indirect_reports" env:"IGNORE_INDIRECT_REPORTS" jsonschema_extras:"x-label=Ignore indirect reports" jsonschema_description:"Drop the positions heard through a digipeater or relayed as third-party traffic: the map shows only the stations heard directly."`
+	PreferRecentReports   bool `toml:"prefer_recent_reports" env:"PREFER_RECENT_REPORTS" jsonschema_extras:"x-label=Keep the most recent report" jsonschema_description:"A report older than the one the map shows for the same station (a delayed or replayed packet) is dropped. Off: the last report received wins."`
+	// PreciseReceivers shows the receivers at their configured position;
+	// off, at the centre of their 4-character locator (SR-32).
+	PreciseReceivers bool `toml:"precise_receivers" env:"PRECISE_RECEIVERS" jsonschema_extras:"x-label=Show the exact receiver positions" jsonschema_description:"Show the receivers at their exact configured position on the map. Off: at the centre of their 4-character locator (about 100 by 200 km), which keeps the station location private."`
+}
+
+// SettingsLinks is the [settings.links] table (MAP-015, ADM-032): lookup
+// links with one {} placeholder, replaced by the URL-encoded value.
+type SettingsLinks struct {
+	CallsignURL string `toml:"callsign_url" env:"CALLSIGN_URL" jsonschema:"maxLength=2048" jsonschema_extras:"x-public=true,x-label=Callsign lookup" jsonschema_description:"Callsign lookup link: an http or https URL with exactly one {} placeholder for the callsign. Empty: no link."`
+	VesselURL   string `toml:"vessel_url" env:"VESSEL_URL" jsonschema:"maxLength=2048" jsonschema_extras:"x-public=true,x-label=Vessel lookup" jsonschema_description:"Vessel lookup link: an http or https URL with exactly one {} placeholder for the MMSI. Empty: no link."`
+	FlightURL   string `toml:"flight_url" env:"FLIGHT_URL" jsonschema:"maxLength=2048" jsonschema_extras:"x-public=true,x-label=Flight lookup" jsonschema_description:"Flight lookup link: an http or https URL with exactly one {} placeholder for the flight number. Empty: no link."`
+	ModesURL    string `toml:"modes_url" env:"MODES_URL" jsonschema:"maxLength=2048" jsonschema_extras:"x-public=true,x-label=Mode S lookup" jsonschema_description:"Aircraft lookup link: an http or https URL with exactly one {} placeholder for the ICAO 24-bit address. Empty: no link."`
+	SondeURL    string `toml:"sonde_url" env:"SONDE_URL" jsonschema:"maxLength=2048" jsonschema_extras:"x-public=true,x-label=Sonde lookup" jsonschema_description:"Radiosonde lookup link: an http or https URL with exactly one {} placeholder for the sonde serial. Empty: no link."`
+	GeoIPURL    string `toml:"geoip_url" env:"GEOIP_URL" jsonschema:"maxLength=2048" jsonschema_extras:"x-label=IP address lookup" jsonschema_description:"IP address lookup link of the admin connections view: an http or https URL with exactly one {} placeholder for the address. Empty: no link."`
+}
+
 // SettingsFiles is the [settings.files] table: retention of the files the
 // nodes send (FIL-004), applied after each new file and by a periodic job,
 // oldest files first.
@@ -243,6 +284,18 @@ func DefaultSettings() Settings {
 			MaxRestarts: 5, DigimodesFFTSize: 2048, WSJTDecodingDepth: 3, WSJTDecodingDepths: SettingsWSJTDepths{JT65: 1},
 			FST4Intervals: []string{"15", "30"}, FST4WIntervals: []string{"120", "300"}, Q65Combinations: []string{"A30", "E120", "C60"},
 			JS8Profiles: []string{"normal", "slow"}, JS8DecodingDepth: 3, PagingCharset: "US",
+		},
+		Map: SettingsMap{
+			BaseLayers: slices.Clone(BaseLayers), DefaultBaseLayer: "osm",
+			PositionRetentionS: 7200, MaxCalls: 5, CallRetentionS: 300, PreferRecentReports: true,
+		},
+		Links: SettingsLinks{
+			CallsignURL: "https://www.qrzcq.com/call/{}",
+			VesselURL:   "https://www.vesselfinder.com/vessels/details/{}",
+			FlightURL:   "https://flightaware.com/live/flight/{}",
+			ModesURL:    "https://flightaware.com/live/modes/{}/redirect",
+			SondeURL:    "https://sondehub.org/{}",
+			GeoIPURL:    "https://www.geolocation.com/?ip={}#ipresult",
 		},
 		Invitations:   SettingsInvitations{TTLHours: 168},
 		PasswordReset: SettingsPasswordReset{TTLMinutes: 30},

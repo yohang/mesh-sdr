@@ -262,6 +262,30 @@ trusted_proxies = []
 # fst4w = 0
 # q65 = 0
 
+# Map (Admin › Map): base layers, lifetimes and report filtering.
+[settings.map]
+# Base layers offered: osm, opentopomap, esri_world_imagery,
+# esri_world_street_map, esri_world_topo_map, cartodb_positron,
+# cartodb_dark_matter, cartodb_voyager (default: all of them).
+# base_layers = ["osm", "opentopomap", "cartodb_positron"]
+# default_base_layer = "osm"             # one of base_layers
+# position_retention_s = 7200            # positions and locators leave the map after this long (60..604800 s)
+# max_calls = 5                          # call lines kept (0..100; 0: none)
+# call_retention_s = 300                 # call line lifetime (10..86400 s)
+# ignore_indirect_reports = false        # drop digipeated and third-party positions
+# prefer_recent_reports = true           # drop a report older than the one shown
+# precise_receivers = false              # false: receivers at their 4-character locator (SR-32)
+
+# Lookup links: an http(s) URL with exactly one {} placeholder (the
+# URL-encoded value); empty: no link.
+[settings.links]
+# callsign_url = "https://www.qrzcq.com/call/{}"
+# vessel_url = "https://www.vesselfinder.com/vessels/details/{}"
+# flight_url = "https://flightaware.com/live/flight/{}"
+# modes_url = "https://flightaware.com/live/modes/{}/redirect"
+# sonde_url = "https://sondehub.org/{}"
+# geoip_url = "https://www.geolocation.com/?ip={}#ipresult"
+
 [settings.invitations]
 # ttl_hours = 168                        # invitation link validity (1..720 hours)
 
