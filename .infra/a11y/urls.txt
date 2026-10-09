@@ -3,6 +3,7 @@
 # signed-in are checked after signing in as the seeded admin.
 / 200
 /map 200
+/map?callsign=F4ABC-9&locator=JO10&layers=aprs,locator,receiver,opentopomap&node=local 200
 /decodes 200
 /files 200
 /policy 200
@@ -41,6 +42,7 @@
 /admin/grid 200 signed-in
 /admin/decoding 200 signed-in
 /admin/map 200 signed-in
+/map 200 signed-in
 /decodes 200 signed-in
 /admin/presets 200 signed-in
 /admin/presets/new 200 signed-in

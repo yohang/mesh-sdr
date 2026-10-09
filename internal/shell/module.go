@@ -69,7 +69,6 @@ func (m *Module) Routes(r chi.Router) {
 	// route (chi middleware.GetHead; net/http drops HEAD bodies).
 	r.Get("/", m.receiver)
 	r.Get(ReceiverLinkPattern, m.receiverLink)
-	r.Get(sectionLink(layout.SectionMap).Href, m.placeholder(layout.SectionMap, "The live map is not available yet."))
 	r.Get("/robots.txt", robots)
 	r.Get("/policy", m.policyPage)
 	r.Get(AboutPath, m.aboutPage)
@@ -173,18 +172,6 @@ func (m *Module) receiverLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.receiver(w, r)
-}
-
-// placeholder serves the entry page of a section whose module does not
-// exist yet (Map, Decodes): its heading and a short notice. The
-// section's module takes the route over when it lands.
-func (m *Module) placeholder(section, notice string) http.HandlerFunc {
-	l := sectionLink(section)
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		page := layout.Page{Title: l.Label, Section: section}
-		m.render.Page(w, r, http.StatusOK, page, placeholderPage(l.Label, notice), nil)
-	}
 }
 
 // policyPage serves the usage policy (UI-003), public.

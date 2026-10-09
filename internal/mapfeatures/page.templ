@@ -1,0 +1,79 @@
+package mapfeatures
+
+// mapPage is the Map section (FEATURE_SPEC §10.10, MAP-001): the toolbar
+// (search, layers, legend, list view, UTC clock), the map with its layers
+// panel and legend, the detail panel and the list view. The island
+// (static/js/map/island.js) fills them from GET /api/v1/map/config and
+// /map/features, then follows the map topic of /api/ws. Every value it
+// shows from a feature is set with textContent.
+templ mapPage(v mapView) {
+	<msdr-map class="flex flex-col gap-2" data-msdr-topics="map">
+		@templ.JSONScript("msdr-map-config", v.Config)
+		<div class="flex flex-wrap items-center gap-2">
+			<h1 class="mr-auto text-2xl font-semibold">Map</h1>
+			<form class="flex min-w-0 items-center gap-1" role="search" data-map-search hidden>
+				<label for="map-search" class="sr-only">Find a callsign, locator, ICAO address or MMSI</label>
+				<input
+					id="map-search"
+					type="search"
+					name="q"
+					maxlength="64"
+					autocomplete="off"
+					placeholder="Callsign, locator…"
+					class="w-40 min-w-0 rounded border border-border bg-surface px-2 py-1 max-md:min-h-11"
+				/>
+				<button type="submit" class="button max-md:min-h-11">Find</button>
+			</form>
+			<button type="button" class="button max-md:min-h-11" aria-expanded="false" aria-controls="map-layers" data-map-toggle="layers" hidden>Layers</button>
+			<button type="button" class="button max-md:min-h-11" aria-expanded="false" aria-controls="map-legend" data-map-toggle="legend" hidden>Legend</button>
+			<button type="button" class="button max-md:min-h-11" aria-pressed="false" data-map-list-toggle hidden>Show as list</button>
+			<msdr-utc-clock class="whitespace-nowrap font-mono tabular-nums text-fg-muted">
+				<time datetime={ v.Now.UTC().Format("2006-01-02T15:04Z") }>{ v.Now.UTC().Format("15:04") }</time> UTC
+			</msdr-utc-clock>
+		</div>
+		<p data-map-fallback class="text-fg-muted">The map needs JavaScript to show the stations and receivers.</p>
+		<p data-map-status role="status" class="min-h-5 text-sm text-fg-muted"></p>
+		<p data-map-notice class="notice notice-info text-sm" hidden></p>
+		<div class="flex flex-col gap-2 md:flex-row">
+			<div class="relative isolate min-w-0 flex-1">
+				<div data-map-stage class="map-stage relative h-[calc(100dvh-17rem)] min-h-72 overflow-hidden rounded border border-border" hidden>
+					<div
+						id="map-canvas"
+						data-map-canvas
+						class="size-full"
+						role="region"
+						aria-label="Map"
+						aria-describedby="map-canvas-help"
+					></div>
+					<p id="map-canvas-help" class="sr-only">
+						The arrow keys move the map, plus and minus zoom. Show as list gives the same features as a table.
+					</p>
+					<section id="map-layers" class="map-panel map-panel-start" aria-labelledby="map-layers-title" hidden>
+						<h2 id="map-layers-title" class="font-semibold">Layers</h2>
+						<fieldset class="mt-2">
+							<legend class="text-sm font-medium">Base layer</legend>
+							<div class="mt-1 flex flex-col gap-1" data-map-bases></div>
+						</fieldset>
+					</section>
+					<section id="map-legend" class="map-panel map-legend" aria-labelledby="map-legend-title" hidden>
+						<h2 id="map-legend-title" class="font-semibold">Features</h2>
+						<fieldset class="mt-1">
+							<legend class="sr-only">Feature types shown on the map</legend>
+							<ul class="flex flex-col gap-1" data-map-types></ul>
+						</fieldset>
+					</section>
+				</div>
+				<div data-map-list hidden></div>
+			</div>
+			<aside id="map-detail" class="map-detail" aria-labelledby="map-detail-title" hidden>
+				<div class="flex items-start justify-between gap-2">
+					<h2 id="map-detail-title" class="min-w-0 break-words text-lg font-semibold" tabindex="-1" data-map-detail-title></h2>
+					<button type="button" class="icon-button shrink-0" aria-label="Close the details" data-map-detail-close>
+						<span aria-hidden="true">×</span>
+					</button>
+				</div>
+				<div data-map-detail-body></div>
+			</aside>
+		</div>
+	</msdr-map>
+}

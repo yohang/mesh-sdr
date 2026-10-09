@@ -13,6 +13,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/mapfeatures"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	"github.com/yohang/mesh-sdr/internal/settings"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // topicMap is the map topic of /api/ws (MAP-002).
@@ -25,17 +26,19 @@ type mapDeps struct {
 	policies *gridapp.ListenPolicies
 	identity interface {
 		Principal(ctx context.Context) identitydomain.Principal
+		Authorize(ctx context.Context, role identitydomain.Role) error
 	}
 	features *gridapp.Features
 	store    *settings.Store
+	render   *render.Renderer
 	now      func() time.Time
 	logger   *slog.Logger
 }
 
 // newMap builds the map features module (MAP-002, MAP-007, MAP-012,
 // MAP-013): the projection of the decodes, its deltas on the map topic, the
-// expiry job and GET /api/v1/map/features and /map/config, all filtered by
-// the listen policies.
+// expiry job, GET /api/v1/map/features and /map/config, all filtered by
+// the listen policies, and the Map page.
 func newMap(d mapDeps) *mapfeatures.Module {
 	logger := component(d.logger, "mapfeatures.module")
 	store := d.store
@@ -56,7 +59,10 @@ func newMap(d mapDeps) *mapfeatures.Module {
 		Published: mapChanged(d.broker, d.policies, logger),
 		Visible:   mapDevices(d.features, d.identity),
 		Config:    func() mapfeatures.ConfigSettings { return mapConfig(store.Snapshot()) },
-		Now:       d.now, Logger: logger,
+		SignedIn: func(ctx context.Context) bool {
+			return d.identity.Authorize(ctx, identitydomain.RoleListener) == nil
+		},
+		Render: d.render, Now: d.now, Logger: logger,
 	})
 }
 

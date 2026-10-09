@@ -4,8 +4,9 @@
 // locators and the call lines between located stations), stored in
 // map_features in the ingest transaction and published as
 // map.feature.upsert / map.feature.remove deltas after the commit; the
-// expiry job; the receiver markers; and GET /api/v1/map/features and
-// /api/v1/map/config. Every device has its own features (key
+// expiry job; the receiver markers; GET /api/v1/map/features and
+// /api/v1/map/config; and the Map page (MAP-001), whose island
+// (static/js/map/) draws them. Every device has its own features (key
 // <kind>:<subject>@<device>), with its own track, filters and call cap: a
 // visitor sees the features of the devices they may listen to, and the map
 // merges a subject heard by several devices.
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/db"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // Kind is the kind of a feature (TECHNICAL_SPEC §7.1 map_features.kind).
@@ -178,8 +180,12 @@ type Deps struct {
 	// Config returns the map configuration settings (layers, links,
 	// station).
 	Config func() ConfigSettings
-	Now    func() time.Time
-	Logger *slog.Logger
+	// SignedIn reports whether the visitor of ctx is signed in (the Map
+	// page offers to sign in when no device is listed).
+	SignedIn func(ctx context.Context) bool
+	Render   *render.Renderer
+	Now      func() time.Time
+	Logger   *slog.Logger
 }
 
 // Module is the map features module.
