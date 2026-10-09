@@ -274,7 +274,7 @@ trusted_proxies = []
 # call_retention_s = 300                 # call line lifetime (10..86400 s)
 # ignore_indirect_reports = false        # drop digipeated and third-party positions
 # prefer_recent_reports = true           # drop a report older than the one shown
-# precise_receivers = false              # false: receivers at their 4-character locator (SR-32)
+# precise_receivers = false              # false: station and receivers published at their 4-character locator (map, status; SR-32)
 
 # Lookup links: an http(s) URL with exactly one {} placeholder (the
 # URL-encoded value); empty: no link.

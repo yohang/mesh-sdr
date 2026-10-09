@@ -163,20 +163,26 @@ func Receivers(devices []Device, station *LatLon, stationName string, precise bo
 	return out
 }
 
-// marker places a receiver marker: exactly, or at the centre of its
-// 4-character locator.
+// marker places a receiver marker (Place).
 func marker(key, kind, name string, lat, lon float64, precise bool) Receiver {
-	r := Receiver{Key: key, Kind: kind, Name: name, Lat: lat, Lon: lon, Precise: precise, Devices: []ReceiverDevice{}}
-
-	if precise {
-		r.Locator = Locator(lat, lon, 6)
-
-		return r
-	}
-
-	r.Locator = Locator(lat, lon, 4)
-	sq, _ := ParseLocator(r.Locator)
-	r.Lat, r.Lon = sq.Center()
+	r := Receiver{Key: key, Kind: kind, Name: name, Precise: precise, Devices: []ReceiverDevice{}}
+	r.Lat, r.Lon, r.Locator = Place(lat, lon, precise)
 
 	return r
+}
+
+// Place is the public position of a receiver or of the station (SR-32), the
+// one rule of every public surface (map receivers, GET /api/v1/status):
+// precise, the position itself and its 6-character locator; otherwise the
+// centre of its 4-character locator (about 100 by 200 km) and that locator.
+func Place(lat, lon float64, precise bool) (float64, float64, string) {
+	if precise {
+		return lat, lon, Locator(lat, lon, 6)
+	}
+
+	loc := Locator(lat, lon, 4)
+	sq, _ := ParseLocator(loc)
+	clat, clon := sq.Center()
+
+	return clat, clon, loc
 }

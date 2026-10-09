@@ -7,6 +7,7 @@ import (
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/http/api"
+	"github.com/yohang/mesh-sdr/internal/mapfeatures"
 	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/settings"
 	"github.com/yohang/mesh-sdr/internal/version"
@@ -32,7 +33,12 @@ func (s stationStatus) Status(ctx context.Context) (api.StationStatus, error) {
 		Devices: []api.StatusDeviceInfo{},
 	}
 
-	st.Lat, st.Lon, st.HasPosition = snap.Geo("receiver.gps")
+	// SR-32: the same coarse position as the map receivers, unless
+	// map.precise_receivers.
+	if lat, lon, ok := snap.Geo("receiver.gps"); ok {
+		st.Lat, st.Lon, _ = mapfeatures.Place(lat, lon, snap.Bool("map.precise_receivers"))
+		st.HasPosition = true
+	}
 
 	if e, ok := snap.Get("receiver.altitude_m"); ok && e.Source() != settings.SourceDefault {
 		alt := snap.Int("receiver.altitude_m")

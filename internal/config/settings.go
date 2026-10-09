@@ -56,7 +56,7 @@ type Settings struct {
 type SettingsReceiver struct {
 	Name     string   `toml:"name" env:"NAME" jsonschema:"minLength=1,maxLength=64" jsonschema_extras:"x-public=true,x-label=Station name" jsonschema_description:"Station name, shown in the top bar and the page titles."`
 	Location string   `toml:"location" env:"LOCATION" jsonschema:"maxLength=128" jsonschema_extras:"x-public=true,x-label=Location" jsonschema_description:"Station location, as free text (for example a town and a country)."`
-	GPS      GeoPoint `toml:"gps" env:"GPS" jsonschema_extras:"x-public=true,x-label=Position" jsonschema_description:"Station position in decimal degrees (WGS 84). In the env: \"<lat>,<lon>\"."`
+	GPS      GeoPoint `toml:"gps" env:"GPS" jsonschema_extras:"x-label=Position" jsonschema_description:"Station position in decimal degrees (WGS 84). Published (status, map) at the centre of its 4-character locator unless map.precise_receivers is set. In the env: \"<lat>,<lon>\"."`
 	// AltitudeM is the antenna altitude; it stays at its default (0) until
 	// an admin sets it, and the public status then includes it.
 	AltitudeM int `toml:"altitude_m" env:"ALTITUDE_M" jsonschema:"minimum=-500,maximum=9000" jsonschema_extras:"x-public=true,x-label=Antenna altitude (m)" jsonschema_description:"Antenna altitude above sea level, in metres (optional: published in the public status once set)."`
@@ -208,7 +208,7 @@ type SettingsMap struct {
 	PreferRecentReports   bool `toml:"prefer_recent_reports" env:"PREFER_RECENT_REPORTS" jsonschema_extras:"x-label=Keep the most recent report" jsonschema_description:"A report older than the one the map shows for the same station (a delayed or replayed packet) is dropped. Off: the last report received wins."`
 	// PreciseReceivers shows the receivers at their configured position;
 	// off, at the centre of their 4-character locator (SR-32).
-	PreciseReceivers bool `toml:"precise_receivers" env:"PRECISE_RECEIVERS" jsonschema_extras:"x-label=Show the exact receiver positions" jsonschema_description:"Show the receivers at their exact configured position on the map. Off: at the centre of their 4-character locator (about 100 by 200 km), which keeps the station location private."`
+	PreciseReceivers bool `toml:"precise_receivers" env:"PRECISE_RECEIVERS" jsonschema_extras:"x-label=Show the exact receiver positions" jsonschema_description:"Publish the exact configured positions of the station and the receivers (map, GET /api/v1/status). Off: the centre of their 4-character locator (about 100 by 200 km), which keeps the station location private."`
 }
 
 // SettingsLinks is the [settings.links] table (MAP-015, ADM-032): lookup
