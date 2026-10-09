@@ -111,6 +111,7 @@ func newEnv(t *testing.T) *env {
 		CanListen: func(ctx context.Context, d shared.DeviceID) (bool, error) {
 			return d.String() == "hf" || ctx.Value(signedInKey{}) != nil, nil
 		},
+		User:    func(context.Context) shared.UUID { return shared.UUID{} },
 		Changed: func(_ context.Context, c Change) { e.changes = append(e.changes, c) },
 		Now:     func() time.Time { return t0 },
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -299,7 +300,7 @@ func TestHubBookmarkLifecycle(t *testing.T) {
 	}
 
 	// Pack rows are read-only.
-	if _, err := e.m.Sync(ctx); err != nil {
+	if _, err := Sync(ctx, e.m.d.DB, t0, e.m.d.Logger); err != nil {
 		t.Fatal(err)
 	}
 
@@ -323,22 +324,27 @@ func TestSync(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 
+	packs, err := LoadPacks()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// A hub bookmark that a pack also holds wins over the pack.
 	hub := e.create(t, Draft{Name: "PMR1", Frequency: 446_006_250, Modulation: "nfm", Description: "Our PMR", Scope: AllDevices()})
 	// A hub bookmark scoped to one preset does not hide the pack one.
 	e.create(t, Draft{Name: "PMR2", Frequency: 446_018_750, Modulation: "nfm", Scope: onPreset(t, presetB)})
 
-	res, err := e.m.Sync(ctx)
+	res, err := Sync(ctx, e.m.d.DB, t0, e.m.d.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if res != (SyncResult{Inserted: e.m.Packs().Len() - 1, Skipped: 1}) {
+	if res != (SyncResult{Inserted: packs.Len() - 1, Skipped: 1}) {
 		t.Fatalf("first sync = %+v", res)
 	}
 
-	again, err := e.m.Sync(ctx)
-	if err != nil || again != (SyncResult{Unchanged: e.m.Packs().Len() - 1, Skipped: 1}) {
+	again, err := Sync(ctx, e.m.d.DB, t0, e.m.d.Logger)
+	if err != nil || again != (SyncResult{Unchanged: packs.Len() - 1, Skipped: 1}) {
 		t.Fatalf("second sync = %+v, %v", again, err)
 	}
 
@@ -356,13 +362,13 @@ func TestSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first := e.m.packs.entries[0]
+	first := packs.entries[0]
 	if _, err := e.m.d.DB.Writer(ctx).ExecContext(ctx, "UPDATE bookmarks SET name = name, description = 'edited' WHERE id = ?", first.id().Bytes()); err != nil {
 		t.Fatal(err)
 	}
 
-	res, err = e.m.Sync(ctx)
-	if err != nil || res != (SyncResult{Unchanged: e.m.Packs().Len() - 2, Updated: 1, Deleted: 1, Skipped: 1}) {
+	res, err = Sync(ctx, e.m.d.DB, t0, e.m.d.Logger)
+	if err != nil || res != (SyncResult{Unchanged: packs.Len() - 2, Updated: 1, Deleted: 1, Skipped: 1}) {
 		t.Fatalf("repair sync = %+v, %v", res, err)
 	}
 
@@ -392,7 +398,7 @@ func TestRegionAndScope(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 
-	if _, err := e.m.Sync(ctx); err != nil {
+	if _, err := Sync(ctx, e.m.d.DB, t0, e.m.d.Logger); err != nil {
 		t.Fatal(err)
 	}
 

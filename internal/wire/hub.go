@@ -255,7 +255,7 @@ func (h *hubModules) newFiles() (*files.Gallery, *files.Retention, func() files.
 		fileEvents{
 			ingest: files.NewIngest(files.IngestDeps{
 				Repo: repo, Tx: h.adapter, Processor: files.NewProcessor(), Retention: retention,
-				Published: h.files.published(h.broker), Logger: component(h.logger, "files.app.ingest"),
+				Published: h.files.published(h.broker), Logger: component(h.logger, "files.ingest"),
 			}),
 			devices: h.g.devices, logger: component(h.logger, "wire.files"),
 		}.register(h.g.control)
@@ -266,7 +266,7 @@ func (h *hubModules) newFiles() (*files.Gallery, *files.Retention, func() files.
 		Listener: h.idm.HTTP.Require(identitydomain.RoleListener), Operator: h.idm.HTTP.Require(identitydomain.RoleOperator),
 		Admin: h.idm.HTTP.Require(identitydomain.RoleAdmin), CanDelete: h.operatorGate.Allows, CanBulkDelete: h.adminGate.Allows,
 		Policy: policy, DeviceNames: deviceNames(h.g.deviceRepo),
-		Logger: component(h.logger, "files.http.gallery"),
+		Logger: component(h.logger, "files.gallery"),
 	})
 
 	return gallery, retention, policy
@@ -324,7 +324,7 @@ func (h *hubModules) newRouter(p hubPages) (http.Handler, error) {
 	authz := gridhttp.NewAuthzHandler(access, func(r *http.Request) gridapp.Subject { return subjectOf(idm.Principal(r.Context())) },
 		func(r *http.Request) string { return clientip.From(r.Context()).String() }, component(h.logger, "grid.http.authz"))
 
-	imagesHTTP := files.New(h.images, rd, admin, currentUser, component(h.logger, "files.http"))
+	imagesHTTP := files.New(h.images, rd, admin, currentUser, component(h.logger, "files.images"))
 	schedulesView := deviceSchedules{schedules: h.sch.schedules, presets: h.sch.presets}
 
 	return httpserver.NewRouter(
@@ -337,17 +337,17 @@ func (h *hubModules) newRouter(p hubPages) (http.Handler, error) {
 		idm,
 		settings.New(settings.Deps{
 			Render: rd, Guard: admin, Store: h.settings, Config: p.effective, Retention: retentionRows{r: p.retention},
-			User: currentUser, Images: imagesHTTP, Schedules: schedulesView, Logger: component(h.logger, "settings.http"),
+			User: currentUser, Images: imagesHTTP, Schedules: schedulesView, Logger: component(h.logger, "settings.pages"),
 		}),
 		imagesHTTP,
 		presets.NewPages(presets.PagesDeps{
-			Render: rd, Guard: admin, Service: h.sch.presets, Logger: component(h.logger, "presets.http"),
+			Render: rd, Guard: admin, Service: h.sch.presets, Logger: component(h.logger, "presets.pages"),
 		}),
 		p.bookmarks,
 		p.gallery,
 		schedules.NewPages(schedules.PagesDeps{
 			Render: rd, Guard: admin, Service: h.sch.schedules, PresetName: h.sch.presetName,
-			Logger: component(h.logger, "schedules.http"),
+			Logger: component(h.logger, "schedules.pages"),
 		}),
 		gridhttp.NewAdminModule(gridhttp.AdminDeps{
 			Render: rd, Devices: g.devices, Nodes: g.nodes, History: g.history, Capabilities: g.caps,

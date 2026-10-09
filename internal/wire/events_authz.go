@@ -185,6 +185,6 @@ func newEventsModule(hubURL string, b *events.Broker, id eventsIdentity, policie
 		Presence: eventsPresence{p: presence}, Admission: events.NewAdmission(events.DefaultLimits()),
 		ClientIP: func(r *http.Request) string { return clientip.From(r.Context()).String() },
 		Origin:   hubOrigin(hubURL), Version: version.String(), Now: now,
-		Logger: component(logger, "events.http.ws"),
+		Logger: component(logger, "events.ws"),
 	})
 }

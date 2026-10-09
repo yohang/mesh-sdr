@@ -193,7 +193,7 @@ func TestPurge(t *testing.T) {
 
 	e.ingest(t, "n1", batch...)
 
-	n, err := e.m.Purge().Run(context.Background())
+	n, err := e.m.PurgeOld(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

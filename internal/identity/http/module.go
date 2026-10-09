@@ -43,106 +43,18 @@ const CSRFHeader = "X-CSRF-Token"
 // (/login, /logout, /api/v1/auth/*): they take a login and a password.
 const AuthBodyLimit = 64 << 10
 
-// Authenticator is the identity application service used by the HTTP layer.
-type Authenticator interface {
-	Login(ctx context.Context, in app.LoginInput) (app.LoginResult, error)
-	Resolve(ctx context.Context, cookie string) (app.Resolution, error)
-	// Peek is Resolve without recording activity.
-	Peek(ctx context.Context, cookie string) (app.Resolution, error)
-	Logout(ctx context.Context, cookie string, meta app.RequestMeta) error
-	SessionPolicy() domain.SessionPolicy
-}
-
-// PasswordChanger changes the password of the signed-in user.
-type PasswordChanger interface {
-	Change(ctx context.Context, in app.ChangePasswordInput) (app.ChangePasswordResult, error)
-	// MinLength returns the minimum password length in force, shown on the
-	// forms.
-	MinLength(ctx context.Context) int
-}
-
-// Bootstrapper creates the first admin through the one-time setup link
-// (AUTH-018).
-type Bootstrapper interface {
-	Check(token string, meta app.RequestMeta) error
-	Complete(ctx context.Context, in app.SetupInput) (app.LoginResult, error)
-	MinLength(ctx context.Context) int
-}
-
-// ProfileService runs the account page (ACC-004).
-type ProfileService interface {
-	Me(ctx context.Context, by app.Actor) (*domain.User, error)
-	MailEnabled() bool
-	SetDisplayName(ctx context.Context, by app.Actor, name string) (*domain.User, error)
-	ChangeEmail(ctx context.Context, by app.Actor, email, currentPassword string) (app.EmailChangeResult, error)
-	CheckEmailToken(ctx context.Context, token string) error
-	ConfirmEmail(ctx context.Context, token string, meta app.RequestMeta) error
-}
-
-// AccountService runs session lists and the account administration.
-type AccountService interface {
-	OwnSessions(ctx context.Context, by app.Actor) ([]app.SessionView, error)
-	RevokeOwnSession(ctx context.Context, by app.Actor, ref string) error
-	RevokeOtherSessions(ctx context.Context, by app.Actor) (int, error)
-	RevokeAllOwnSessions(ctx context.Context, by app.Actor) (int, error)
-
-	Search(ctx context.Context, q domain.UserQuery) ([]*domain.User, error)
-	User(ctx context.Context, id domain.UserID) (*domain.User, error)
-	SetRoles(ctx context.Context, by app.Actor, id domain.UserID, grants []domain.RoleGrant) (app.RolesResult, error)
-	SetEnabled(ctx context.Context, by app.Actor, id domain.UserID, enabled bool) (bool, error)
-	SetGeneratedPassword(ctx context.Context, by app.Actor, id domain.UserID) (string, error)
-	UserSessions(ctx context.Context, id domain.UserID) ([]app.SessionView, error)
-	RevokeUserSession(ctx context.Context, by app.Actor, id domain.UserID, ref string) error
-	RevokeUserSessions(ctx context.Context, by app.Actor, id domain.UserID) (int, error)
-	Delete(ctx context.Context, by app.Actor, id domain.UserID) error
-	DeleteOwn(ctx context.Context, by app.Actor, currentPassword string) error
-	ExportUser(ctx context.Context, by app.Actor, id domain.UserID) (app.Export, error)
-	ExportOwn(ctx context.Context, by app.Actor) (app.Export, error)
-}
-
-// InvitationService runs invitations (ACC-002).
-type InvitationService interface {
-	MailEnabled() bool
-	DefaultTTL(ctx context.Context) time.Duration
-	MinLength(ctx context.Context) int
-	Now() time.Time
-	Create(ctx context.Context, by app.Actor, in app.CreateInvitationInput) (app.CreatedInvitation, error)
-	List(ctx context.Context) ([]*domain.Invitation, error)
-	Revoke(ctx context.Context, by app.Actor, id domain.InvitationID) error
-	Check(ctx context.Context, token string, meta app.RequestMeta) (*domain.Invitation, error)
-	Accept(ctx context.Context, in app.AcceptInput) (app.LoginResult, error)
-	TestMail(ctx context.Context, by app.Actor) (domain.Email, error)
-}
-
-// ResetService runs password reset by link (ACC-003).
-type ResetService interface {
-	MailEnabled() bool
-	TTL(ctx context.Context) time.Duration
-	MinLength(ctx context.Context) int
-	Request(ctx context.Context, login string, meta app.RequestMeta) error
-	Check(ctx context.Context, token string, meta app.RequestMeta) error
-	Confirm(ctx context.Context, token, password string, meta app.RequestMeta) error
-	IssueByAdmin(ctx context.Context, by app.Actor, id domain.UserID) (app.AdminResult, error)
-}
-
-// AuditService reads the audit log (ACC-010).
-type AuditService interface {
-	Search(ctx context.Context, f app.AuditFilter) ([]app.AuditRow, int64, error)
-	Each(ctx context.Context, f app.AuditFilter, fn func(app.AuditRow) error) error
-}
-
 // Services are the application services behind the identity pages.
 type Services struct {
 	// Keys publishes the token verification keys (JWKS).
 	Keys        app.KeySource
-	Audit       AuditService
-	Resets      ResetService
-	Invitations InvitationService
-	Auth        Authenticator
-	Passwords   PasswordChanger
-	Setup       Bootstrapper
-	Profile     ProfileService
-	Accounts    AccountService
+	Audit       *app.AuditView
+	Resets      *app.Resets
+	Invitations *app.Invitations
+	Auth        *app.Auth
+	Passwords   *app.Passwords
+	Setup       *app.Setup
+	Profile     *app.Profile
+	Accounts    *app.Accounts
 }
 
 // Config is the HTTP configuration of the identity module.
@@ -159,14 +71,14 @@ type Config struct {
 
 // Module is the identity router module (internal/http.Module).
 type Module struct {
-	auth        Authenticator
-	passwords   PasswordChanger
-	setup       Bootstrapper
-	profile     ProfileService
-	accounts    AccountService
-	invitations InvitationService
-	resets      ResetService
-	audit       AuditService
+	auth        *app.Auth
+	passwords   *app.Passwords
+	setup       *app.Setup
+	profile     *app.Profile
+	accounts    *app.Accounts
+	invitations *app.Invitations
+	resets      *app.Resets
+	audit       *app.AuditView
 	keys        app.KeySource
 	now         func() time.Time
 	pages       *render.Renderer
@@ -625,15 +537,21 @@ func (m *Module) Login(ctx context.Context, login, password string, remember boo
 // sessionCookies are the cookies of a new session: the session cookie
 // (persistent with "remember me") and the cleared pre-session cookie.
 func (m *Module) sessionCookies(res app.LoginResult) []*http.Cookie {
-	maxAge := 0
-	if res.Remember {
-		maxAge = int(res.Session.AbsoluteExpiresAt().Sub(res.Session.CreatedAt()).Seconds())
-	}
-
 	return []*http.Cookie{
-		m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge),
+		m.cookie(m.sessionCookieName(), res.Token.Cookie(), cookieMaxAge(res.Remember, res.Session)),
 		m.cookie(m.presessionCookieName(), "", -1),
 	}
+}
+
+// cookieMaxAge is the Max-Age of a session cookie: the absolute lifetime
+// of the session with "remember me", none (a browser-session cookie)
+// otherwise.
+func cookieMaxAge(remember bool, s *domain.Session) int {
+	if !remember {
+		return 0
+	}
+
+	return max(1, int(s.AbsoluteExpiresAt().Sub(s.CreatedAt()).Seconds()))
 }
 
 // ChangePassword changes the password of the request's user, and returns
@@ -651,12 +569,9 @@ func (m *Module) ChangePassword(ctx context.Context, current, newPassword string
 		return domain.Principal{}, "", nil, false, err
 	}
 
-	maxAge := 0
-	if res.Remember {
-		maxAge = max(1, int(res.Session.AbsoluteExpiresAt().Sub(res.Session.CreatedAt()).Seconds()))
-	}
+	cookie = m.cookie(m.sessionCookieName(), res.Token.Cookie(), cookieMaxAge(res.Remember, res.Session))
 
-	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge), res.Forced, nil
+	return res.Principal, res.Session.CSRFSecret().Token(res.Token), cookie, res.Forced, nil
 }
 
 // CheckSession re-reads the session of a long-lived request (the hub

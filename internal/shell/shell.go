@@ -52,44 +52,35 @@ type Wired struct {
 
 // New builds the shell module.
 func New(d Deps) Wired {
-	component := func(name string) *slog.Logger { return d.Logger.With(slog.String("component", name)) }
-
-	settings := NewStoreSettings(d.Settings)
-	lookAndFeel := NewLookAndFeel(settings, component("shell.app.look_and_feel"))
-	policy := NewPolicy(settings, component("shell.app.policy"))
-	// Receiver, Map and Decodes are open to everyone until their modules
-	// bring their own access policies (FEATURE_SPEC §10.2).
+	// Receiver, Map and Decodes are open to everyone (FEATURE_SPEC §10.2).
 	files := d.FilesGate
 	if files == nil {
 		files = Everyone
 	}
 
-	nav := NewNavigation(map[Section]Gate{
-		SectionReceiver: Everyone,
-		SectionMap:      Everyone,
-		SectionDecodes:  Everyone,
-		SectionFiles:    files,
-		SectionAdmin:    d.AdminGate,
-	})
 	now := d.Now
 	if now == nil {
 		now = time.Now
 	}
 
-	source := NewShellSource(lookAndFeel, nav, d.User, now)
+	m := &Module{
+		settings: NewSettings(d.Settings), static: web.Static(), markdown: newMarkdown(), admin: d.AdminGate,
+		bookmarks: d.Bookmarks, user: d.User, images: d.Images, now: now,
+		logger: d.Logger.With(slog.String("component", "shell.module")),
+		gates: map[string]Gate{
+			layout.SectionReceiver: Everyone, layout.SectionMap: Everyone, layout.SectionDecodes: Everyone,
+			layout.SectionFiles: files, layout.SectionAdmin: d.AdminGate,
+		},
+	}
+
 	var admin func(ctx context.Context) bool
 	if d.AdminGate != nil {
 		admin = d.AdminGate.Allows
 	}
 
-	rd := render.New(source, admin, component("web.render"))
+	m.render = render.New(m, admin, d.Logger.With(slog.String("component", "web.render")))
 
-	station := NewStation(settings, d.Images)
-
-	mod := NewModule(rd, source, policy, station, web.Static(), d.AdminGate, component("shell.http"))
-	mod.bookmarks = d.Bookmarks
-
-	return Wired{Renderer: rd, HTTP: mod}
+	return Wired{Renderer: m.render, HTTP: m}
 }
 
 // BookmarksLink is the Bookmarks › Manage page and who may open it.

@@ -317,20 +317,8 @@ func TestSubscribeDedupAndLimitFirst(t *testing.T) {
 	}
 }
 
-func TestAddressKey(t *testing.T) {
-	for in, want := range map[string]string{
-		"192.0.2.1":            "192.0.2.1",
-		"::ffff:192.0.2.1":     "192.0.2.1",
-		"2001:db8:1:2:3:4:5:6": "2001:db8:1:2::/64",
-		"2001:db8:1:2:ffff::1": "2001:db8:1:2::/64",
-		"not an address":       "not an address",
-	} {
-		if got := events.AddressKey(in); got != want {
-			t.Errorf("AddressKey(%q) = %q, want %q", in, got, want)
-		}
-	}
-
-	// Two addresses of one /64 share the per-address cap.
+// Two addresses of one /64 share the per-address cap.
+func TestAdmissionPer64(t *testing.T) {
 	a := events.NewAdmission(events.Limits{PerSession: 10, PerAddress: 1, Total: 10, UpgradesPerMinute: 100})
 	now := time.Unix(1_800_000_000, 0)
 

@@ -39,12 +39,11 @@ var manifestIcons = []manifestIcon{
 // media-qualified theme-color metas take precedence in browsers that
 // support them).
 func (m *Module) manifest(w http.ResponseWriter, r *http.Request) {
-	s := m.shell.Shell(r)
-	color := s.Theme.ThemeColor()
+	name, color := m.settings.SiteName(), m.settings.Theme().ThemeColor()
 
 	b, err := json.Marshal(webManifest{
-		Name:            s.SiteName,
-		ShortName:       s.SiteName,
+		Name:            name,
+		ShortName:       name,
 		StartURL:        "/",
 		Scope:           "/",
 		Display:         "standalone",

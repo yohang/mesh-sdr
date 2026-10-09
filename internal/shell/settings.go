@@ -1,9 +1,10 @@
 package shell
 
 import (
-	"context"
-	"fmt"
+	_ "embed"
 	"strings"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // Setting keys read by the shell (ADR 0010).
@@ -21,107 +22,102 @@ const (
 	KeyRecorderEnabled = "ui.recorder_enabled"
 )
 
+// Defaults of the settings that may be empty.
+const (
+	// DefaultSiteName is the site name when receiver.name is empty.
+	DefaultSiteName = "MeshSDR"
+	// DefaultPolicyURL is the usage policy link when
+	// receiver.usage_policy_url is empty.
+	DefaultPolicyURL = "/policy"
+)
+
+//go:embed default_policy.md
+var defaultPolicy string
+
+// DefaultPolicy returns the built-in usage policy (Markdown), shown until
+// the admin sets one (receiver.usage_policy_text).
+func DefaultPolicy() string { return defaultPolicy }
+
 // Values reads the current effective settings (the settings store).
 type Values interface {
 	String(key string) string
 	Bool(key string) bool
 }
 
-// StoreSettings reads the shell settings from the settings store: config
-// (locked) > DB > default, read on every request so a saved change applies
-// at once.
-type StoreSettings struct {
-	values Values
-}
+// Settings reads the shell's settings: config (locked) > DB > default,
+// read on every call so a saved change applies at once. The settings
+// catalogue validates every value (enums, URLs, lengths); the getters only
+// fill the defaults of empty values.
+type Settings struct{ values Values }
 
-// NewStoreSettings returns the adapter.
-func NewStoreSettings(values Values) *StoreSettings { return &StoreSettings{values: values} }
+// NewSettings returns the settings read from values.
+func NewSettings(values Values) Settings { return Settings{values: values} }
 
-// ThemeMode returns ui.theme_mode.
-func (s *StoreSettings) ThemeMode(context.Context) (ThemeMode, error) {
-	m, err := NewThemeMode(s.values.String(KeyThemeMode))
-	if err != nil {
-		return ThemeMode{}, fmt.Errorf("%s: %w", KeyThemeMode, err)
+func (s Settings) text(key string) string { return strings.TrimSpace(s.values.String(key)) }
+
+// Theme returns ui.theme_mode (UI-001); auto unless light or dark.
+func (s Settings) Theme() layout.Theme {
+	switch t := layout.Theme(s.values.String(KeyThemeMode)); t {
+	case layout.ThemeLight, layout.ThemeDark:
+		return t
+	default:
+		return layout.ThemeAuto
 	}
-
-	return m, nil
 }
 
 // SiteName returns receiver.name.
-func (s *StoreSettings) SiteName(context.Context) (string, error) {
-	name := strings.TrimSpace(s.values.String(KeySiteName))
-	if name == "" {
-		return "", fmt.Errorf("%s is empty", KeySiteName)
+func (s Settings) SiteName() string {
+	if name := s.text(KeySiteName); name != "" {
+		return name
 	}
 
-	return name, nil
+	return DefaultSiteName
 }
 
 // PolicyURL returns receiver.usage_policy_url.
-func (s *StoreSettings) PolicyURL(context.Context) (string, error) {
-	u := s.values.String(KeyUsagePolicyURL)
-	if u == "" {
-		return "", fmt.Errorf("%s is empty", KeyUsagePolicyURL)
+func (s Settings) PolicyURL() string {
+	if u := s.text(KeyUsagePolicyURL); u != "" {
+		return u
 	}
 
-	return u, nil
+	return DefaultPolicyURL
 }
 
-// HelpLink returns receiver.help_url (zero when unset).
-func (s *StoreSettings) HelpLink(context.Context) (HelpLink, error) {
-	h, err := NewHelpLink(strings.TrimSpace(s.values.String(KeyHelpURL)))
-	if err != nil {
-		return HelpLink{}, fmt.Errorf("%s: %w", KeyHelpURL, err)
+// HelpURL returns receiver.help_url (UI-002); "" hides the help links.
+func (s Settings) HelpURL() string { return s.text(KeyHelpURL) }
+
+// Shortcuts reports whether single-key shortcuts are on (ui.shortcut_set
+// is not off).
+func (s Settings) Shortcuts() bool { return s.values.String(KeyShortcutSet) != "off" }
+
+// Policy returns receiver.usage_policy_text (UI-003, Markdown), or the
+// default policy when it is empty.
+func (s Settings) Policy() string {
+	if p := s.text(KeyUsagePolicyText); p != "" {
+		return p
 	}
 
-	return h, nil
-}
-
-// ShortcutSet returns ui.shortcut_set.
-func (s *StoreSettings) ShortcutSet(context.Context) (ShortcutSet, error) {
-	set, err := NewShortcutSet(s.values.String(KeyShortcutSet))
-	if err != nil {
-		return ShortcutSet{}, fmt.Errorf("%s: %w", KeyShortcutSet, err)
-	}
-
-	return set, nil
-}
-
-// UsagePolicy returns receiver.usage_policy_text; set is false when it is
-// empty.
-func (s *StoreSettings) UsagePolicy(context.Context) (PolicyText, bool, error) {
-	text := s.values.String(KeyUsagePolicyText)
-	if strings.TrimSpace(text) == "" {
-		return PolicyText{}, false, nil
-	}
-
-	p, err := NewPolicyText(text)
-	if err != nil {
-		return PolicyText{}, false, fmt.Errorf("%s: %w", KeyUsagePolicyText, err)
-	}
-
-	return p, true, nil
+	return DefaultPolicy()
 }
 
 // Location returns receiver.location.
-func (s *StoreSettings) Location(context.Context) string {
-	return strings.TrimSpace(s.values.String(KeyLocation))
-}
+func (s Settings) Location() string { return s.text(KeyLocation) }
 
 // PhotoTitle returns receiver.photo_title.
-func (s *StoreSettings) PhotoTitle(context.Context) string {
-	return strings.TrimSpace(s.values.String(KeyPhotoTitle))
-}
+func (s Settings) PhotoTitle() string { return s.text(KeyPhotoTitle) }
 
 // PhotoDesc returns receiver.photo_desc (Markdown).
-func (s *StoreSettings) PhotoDesc(context.Context) string { return s.values.String(KeyPhotoDesc) }
+func (s Settings) PhotoDesc() string { return s.values.String(KeyPhotoDesc) }
 
-// AudioCompression returns audio_compression (adpcm or pcm).
-func (s *StoreSettings) AudioCompression(context.Context) string {
-	return s.values.String(KeyAudioCompress)
+// AudioCodec returns the codec the receiver asks the nodes for
+// (audio_compression): CodecPCM for pcm, else CodecADPCM.
+func (s Settings) AudioCodec() string {
+	if s.values.String(KeyAudioCompress) == "pcm" {
+		return CodecPCM
+	}
+
+	return CodecADPCM
 }
 
 // RecorderEnabled returns ui.recorder_enabled.
-func (s *StoreSettings) RecorderEnabled(context.Context) bool {
-	return s.values.Bool(KeyRecorderEnabled)
-}
+func (s Settings) RecorderEnabled() bool { return s.values.Bool(KeyRecorderEnabled) }

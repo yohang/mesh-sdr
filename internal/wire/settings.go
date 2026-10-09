@@ -25,7 +25,7 @@ func newSettings(ctx context.Context, cfg config.Hub, origins config.Origins, ad
 
 	store := settings.NewStore(settings.StoreDeps{
 		Repo: settings.NewSettings(adapter, config.SchemaVersion), Catalog: catalog, Tx: adapter, Audit: audit, Now: now,
-		Logger: component(logger, "settings.app.store"),
+		Logger: component(logger, "settings.store"),
 	})
 
 	if err := store.Load(ctx); err != nil {

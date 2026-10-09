@@ -14,6 +14,7 @@ import (
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
+	"github.com/yohang/mesh-sdr/internal/jobs"
 	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/schedules"
@@ -28,7 +29,7 @@ type scheduling struct {
 	schedules *schedules.Service
 	guard     *schedules.Guard
 	planner   *schedules.Planner
-	publish   *schedulesPublishJob
+	publish   jobs.Job
 }
 
 // settingsReader reads the effective settings (settings/app.Store).
@@ -107,7 +108,7 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, listen *gr
 
 	sdeps := schedules.Deps{
 		Repo: schedRepo, Tx: adapter, Devices: devices, Audit: audit, IDs: ids, Now: now,
-		Changed: changed, Logger: component(logger, "schedules.app"),
+		Changed: changed, Logger: component(logger, "schedules.service"),
 	}
 
 	// Presets and schedules know each other: the catalogue is filled once
@@ -119,11 +120,20 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, listen *gr
 	s.planner = schedules.NewPlanner(sdeps)
 	s.presets = presets.NewService(presets.Deps{
 		Repo: presetRepo, Tx: adapter, Audit: audit, IDs: ids, Now: now,
-		Usage: s.schedules, Listener: s.guard, Changed: changed, Logger: component(logger, "presets.app"),
+		Usage: s.schedules, Listener: s.guard, Changed: changed, Logger: component(logger, "presets.service"),
 	})
 	catalog.presets = s.presets
 
-	s.publish = &schedulesPublishJob{guard: s.guard, grid: g}
+	// schedules.publish (ADR 0020 Q7): the guard's safety net, then the
+	// desired state of every connected node (the timeline slides hourly).
+	s.publish = jobs.Func(JobSchedulesPublish, func(ctx context.Context) (int64, error) {
+		n, err := s.guard.Reconcile(ctx)
+		if err != nil || g.states == nil {
+			return n, err
+		}
+
+		return n + int64(g.states.PublishAll(ctx)), nil
+	})
 
 	// Grid hooks (GRID-016, ADM-009): the guard joins the registry's
 	// transactions; the desired state reads the planner.
@@ -150,34 +160,11 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, listen *gr
 	return s
 }
 
-// schedulesPublishJob is the schedules.publish job (ADR 0020 Q7): the
-// guard's safety net, then the desired state of every connected node
-// (the timeline slides hourly).
-type schedulesPublishJob struct {
-	guard *schedules.Guard
-	grid  *hubGrid
-}
-
 // JobSchedulesPublish is the name of the job; it runs hourly.
 const (
 	JobSchedulesPublish   = "schedules.publish"
 	SchedulesPublishEvery = time.Hour
 )
-
-func (j *schedulesPublishJob) Name() string { return JobSchedulesPublish }
-
-func (j *schedulesPublishJob) Run(ctx context.Context) (int64, error) {
-	n, err := j.guard.Reconcile(ctx)
-	if err != nil {
-		return n, err
-	}
-
-	if j.grid.states != nil {
-		n += int64(j.grid.states.PublishAll(ctx))
-	}
-
-	return n, nil
-}
 
 // scheduleDevices adapts the grid device registry to schedules/app.Devices.
 type scheduleDevices struct{ repo griddomain.DeviceRepository }

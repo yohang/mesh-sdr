@@ -34,7 +34,7 @@ cmd/meshsdr/            entrypoint (single binary)
 internal/cli/           cobra commands (hub, node, all and their subcommands)
 internal/config/        TOML + env config loading, origin tracking (file name, env var or default), JSON Schema
 internal/log/           slog logger factory
-internal/db/            SQLite database (`*db.DB`: single writer + read pool, WithinTx, goose migrator, DSN), see docs/adr/0006 and 0022
+internal/db/            SQLite database (`*db.DB`: single writer + read pool, WithinTx, Batched deletes, goose migrator, DSN), see docs/adr/0006 and 0022
 internal/db/sqlite/     SQLite schema: sqlc.yaml, go:generate for sqlc
 internal/db/sqlite/migrations/ goose SQL migrations (embedded)
 internal/db/sqlite/queries/    sqlc queries
@@ -108,7 +108,7 @@ Modeling rules (all modules):
 
 Goal: know everything that goes wrong or not as well as expected, plus debug info, filterable by level and by affected component — without cluttering business code.
 
-- Only `log/slog`. Loggers are injected, scoped at wiring: `logger.With(slog.String("component", "<module>.<layer>.<name>"))` (e.g. `radio.infra.engine`, `shared.process`; flat modules keep stable names such as `settings.app.store`). Never `slog.Default()` in business code.
+- Only `log/slog`. Loggers are injected, scoped at wiring: `logger.With(slog.String("component", "<module>.<layer>.<name>"))` (e.g. `radio.infra.engine`, `shared.process`); flat modules use `<module>.<name>` (`settings.store`, `files.gallery`), and messages carry no module prefix. Never `slog.Default()` in business code.
 - Levels:
   - `Debug`: flow details useful for diagnosis (inputs, decisions, external calls).
   - `Info`: lifecycle and significant business events.

@@ -120,35 +120,28 @@ const purgeBatch = 10_000
 // Purge deletes the messages decoded before before, then the oldest beyond
 // the newest maxRows, in batches; it returns the rows deleted.
 func (r *Repository) Purge(ctx context.Context, before time.Time, maxRows int) (int64, error) {
-	q := sqlc.New(r.db.Writer(ctx))
-
-	var total int64
-
-	for {
-		n, err := q.DeleteDecodedBefore(ctx, sqlc.DeleteDecodedBeforeParams{BeforeMs: before.UnixMilli(), MaxRows: purgeBatch})
+	old, err := db.Batched(ctx, purgeBatch, func(ctx context.Context, batch int) (int, error) {
+		n, err := sqlc.New(r.db.Writer(ctx)).DeleteDecodedBefore(ctx, sqlc.DeleteDecodedBeforeParams{BeforeMs: before.UnixMilli(), MaxRows: int64(batch)})
 		if err != nil {
-			return total, fmt.Errorf("purge decoded messages: %w", err)
+			return 0, fmt.Errorf("purge decoded messages: %w", err)
 		}
 
-		total += n
-
-		if n < purgeBatch {
-			break
-		}
+		return int(n), nil
+	})
+	if err != nil {
+		return old, err
 	}
 
-	for {
-		n, err := q.DeleteDecodedBeyond(ctx, sqlc.DeleteDecodedBeyondParams{Keep: int64(maxRows), MaxRows: purgeBatch})
+	beyond, err := db.Batched(ctx, purgeBatch, func(ctx context.Context, batch int) (int, error) {
+		n, err := sqlc.New(r.db.Writer(ctx)).DeleteDecodedBeyond(ctx, sqlc.DeleteDecodedBeyondParams{Keep: int64(maxRows), MaxRows: int64(batch)})
 		if err != nil {
-			return total, fmt.Errorf("cap decoded messages: %w", err)
+			return 0, fmt.Errorf("cap decoded messages: %w", err)
 		}
 
-		total += n
+		return int(n), nil
+	})
 
-		if n < purgeBatch {
-			return total, nil
-		}
-	}
+	return old + beyond, err
 }
 
 func nullString(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }

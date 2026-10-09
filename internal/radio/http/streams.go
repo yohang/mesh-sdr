@@ -21,7 +21,6 @@ import (
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/media"
 	"github.com/yohang/mesh-sdr/internal/radio/app"
-	"github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/shared/ratelimit"
 )
 
@@ -36,14 +35,6 @@ const (
 	defaultMaxDemods = 1
 )
 
-// Devices is the device manager seen by the handler.
-type Devices interface {
-	Attach(id string) (*app.Lease, error)
-	Retune(id string, hz, rate int64) (domain.Snapshot, error)
-	SetActivePreset(id, preset string) error
-	Watch(id string, fn func(domain.Snapshot)) (func(), error)
-}
-
 // DesiredState is the desired state pushed by the hub
 // (grid/infra/agent.DesiredState): the presets of each device and the global
 // settings.
@@ -55,7 +46,7 @@ type DesiredState interface {
 
 // Streams implements media.Streams.
 type Streams struct {
-	devices Devices
+	devices *app.Manager
 	state   DesiredState
 	dec     Decoding
 	log     *slog.Logger
@@ -97,7 +88,7 @@ const (
 // preset, the node defaults apply); a zero dec offers no digital mode;
 // waterfall are the waterfall defaults until the desired state carries
 // them.
-func NewStreams(d Devices, state DesiredState, dec Decoding, waterfall ctl.StateWaterfall, log *slog.Logger) *Streams {
+func NewStreams(d *app.Manager, state DesiredState, dec Decoding, waterfall ctl.StateWaterfall, log *slog.Logger) *Streams {
 	s := &Streams{
 		devices: d, state: state, dec: dec, nodeWaterfall: waterfall, log: log, sessions: map[*session]struct{}{},
 		lastSwitch: map[string]time.Time{}, applied: map[string]activePreset{},

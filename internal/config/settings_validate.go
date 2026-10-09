@@ -30,11 +30,10 @@ const (
 const maxLoginBurst = 100
 
 // maxPolicyText is the maximum length of receiver.usage_policy_text, in
-// characters (the shell's MaxPolicyTextLength, and the schema maxLength).
+// characters (the schema maxLength).
 const maxPolicyText = 20000
 
-// errInvalidPolicyText rejects a usage policy the shell cannot show (its
-// ErrInvalidPolicyText).
+// errInvalidPolicyText rejects a usage policy the shell cannot show.
 var errInvalidPolicyText = shared.NewError(shared.KindInvalid, "invalid_usage_policy",
 	"usage policy must be 1 to "+strconv.Itoa(maxPolicyText)+" characters")
 

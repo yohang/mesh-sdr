@@ -24,12 +24,7 @@ import (
 // SyncBookmarks stores the shipped bookmark packs as the builtin rows of
 // adapter (`meshsdr hub migrate`, after the migrations).
 func SyncBookmarks(ctx context.Context, adapter *db.DB, logger *slog.Logger) (bookmarks.SyncResult, error) {
-	m, err := bookmarks.New(bookmarks.Deps{DB: adapter, Now: time.Now, Logger: component(logger, "bookmarks.app.sync")})
-	if err != nil {
-		return bookmarks.SyncResult{}, err
-	}
-
-	return m.Sync(ctx)
+	return bookmarks.Sync(ctx, adapter, time.Now(), component(logger, "bookmarks.sync"))
 }
 
 // bookmarksDeps are the hub parts the bookmarks module uses.
@@ -56,7 +51,7 @@ func newBookmarks(d bookmarksDeps) (*bookmarks.Module, error) {
 		User:      currentUser,
 		Changed:   bookmarkChanged(d.broker, d.policies, component(d.logger, "wire.bookmarks")),
 		Render:    d.render, Guard: d.idm.Require(identitydomain.RoleOperator),
-		IDs: shared.NewUUIDv7Generator(), Now: d.now, Logger: component(d.logger, "bookmarks.app"),
+		IDs: shared.NewUUIDv7Generator(), Now: d.now, Logger: component(d.logger, "bookmarks.module"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bookmarks: %w", err)

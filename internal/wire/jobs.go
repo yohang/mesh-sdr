@@ -24,7 +24,7 @@ import (
 func newJobs(adapter *db.DB, conns griddomain.ConnectionRepository, idm *identity.Module, sch *scheduling, decoded *decodes.Module, values jobs.RetentionValues,
 	audit audit.Appender, filesRetention *files.Retention, filesPolicy func() files.RetentionPolicy, logger *slog.Logger,
 ) (*jobs.Scheduler, *jobs.Retention, error) {
-	sched := jobs.NewScheduler(jobs.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.app.scheduler"))
+	sched := jobs.NewScheduler(jobs.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.scheduler"))
 	sched.Register(idm.Reaper, identityapp.SessionReapEvery)
 	sched.Register(idm.AuditPurger, identityapp.AuditPurgeEvery)
 	// ADR 0020: the schedules' safety net and hourly push.
@@ -41,7 +41,7 @@ func newJobs(adapter *db.DB, conns griddomain.ConnectionRepository, idm *identit
 	// FIL-004: the files the nodes sent, and the files left incomplete.
 	sched.Register(filesRetention, files.RetentionEvery)
 
-	sched.Register(decoded.Purge(), decodes.PurgeEvery)
+	sched.Register(jobs.Func(decodes.JobPurge, decoded.PurgeOld), decodes.PurgeEvery)
 
 	stats := map[string]*jobs.TableStats{}
 

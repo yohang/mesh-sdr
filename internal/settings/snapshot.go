@@ -109,18 +109,8 @@ func (s *Snapshot) Geo(key string) (lat, lon float64, ok bool) {
 	return v.Lat(), v.Lon(), true
 }
 
-// Values reads typed settings from the current snapshot of a store on
-// every call: consumers hold it to see changes at once. *Store implements
-// it.
-type Values interface {
-	String(key string) string
-	Bool(key string) bool
-	Int(key string) int
-	Duration(key string) time.Duration
-	Rate(key string) (int, time.Duration)
-}
-
-var _ Values = (*Store)(nil)
+// The typed readers of a Store read the current snapshot on every call:
+// consumers hold the store to see changes at once.
 
 // String reads a string setting of the current snapshot.
 func (s *Store) String(key string) string { return s.Snapshot().String(key) }

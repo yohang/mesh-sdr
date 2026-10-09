@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"regexp"
 	"strconv"
 	"time"
@@ -133,10 +132,3 @@ func (r *Run) LastError() string { return r.lastError }
 
 // Rows returns the rows affected by the last finished run.
 func (r *Run) Rows() int64 { return r.rows }
-
-// Repository persists runs. Writes join the caller's transaction.
-type Repository interface {
-	// Get returns the run of name, or nil when the job never ran.
-	Get(ctx context.Context, name string) (*Run, error)
-	Save(ctx context.Context, r *Run) error
-}

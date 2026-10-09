@@ -19,11 +19,6 @@ import (
 
 func b64(der []byte) string { return base64.StdEncoding.EncodeToString(der) }
 
-// Renewer installs a certificate chain renewed by the hub.
-type Renewer interface {
-	Renew(chain [][]byte) error
-}
-
 // Media is the node's media side, driven by the control channel.
 type Media interface {
 	// UpdateKeys installs the access-token keys of ctl.keys.update.
@@ -65,9 +60,11 @@ type NodeOptions struct {
 	// Logs is the device log pushed to the hub; nil sends none.
 	Logs DeviceLogs
 	// HubIdentity is the expected hub id; empty accepts any hub URI SAN.
-	HubIdentity  string
-	Revoked      *pki.RevokedSet
-	Renewer      Renewer
+	HubIdentity string
+	Revoked     *pki.RevokedSet
+	// Renewer installs a certificate chain renewed by the hub; nil
+	// ignores renewals.
+	Renewer      *FileRenewer
 	HelloTimeout time.Duration
 	// QueueBytes bounds the outbound queue of a channel (default
 	// MaxQueueBytes). Event replay is paged to half of it.

@@ -272,7 +272,7 @@ func offers(r *http.Request) bool {
 }
 
 func (m *Module) refuse(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
-	m.d.Logger.WarnContext(r.Context(), "events ws upgrade refused", slog.Int("status", status), slog.String("code", code),
+	m.d.Logger.WarnContext(r.Context(), "upgrade refused", slog.Int("status", status), slog.String("code", code),
 		slog.String("origin", r.Header.Get("Origin")))
 	problem.Write(w, problem.New(status, code, detail))
 }
@@ -309,7 +309,7 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request) {
 
 	id, err := shared.NewUUIDv7(m.d.Now())
 	if err != nil {
-		m.d.Logger.ErrorContext(ctx, "events ws connection id", slog.Any("error", err))
+		m.d.Logger.ErrorContext(ctx, "generate connection id", slog.Any("error", err))
 		problem.Write(w, problem.New(http.StatusInternalServerError, problem.CodeInternal, ""))
 
 		return
@@ -317,7 +317,7 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request) {
 
 	ws, err := wsconn.AcceptOriginChecked(w, r, rxv1.Subprotocol)
 	if err != nil {
-		m.d.Logger.WarnContext(ctx, "events ws upgrade failed", slog.Any("error", err))
+		m.d.Logger.WarnContext(ctx, "upgrade failed", slog.Any("error", err))
 
 		return
 	}
@@ -366,10 +366,10 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request) {
 			cn.logger.ErrorContext(ctx, "close events presence row", slog.Any("error", err))
 		}
 
-		cn.logger.DebugContext(ctx, "events ws closed", slog.String("reason", string(reason)), slog.Any("cause", cn.c.Err()))
+		cn.logger.DebugContext(ctx, "socket closed", slog.String("reason", string(reason)), slog.Any("cause", cn.c.Err()))
 	}()
 
-	cn.logger.DebugContext(ctx, "events ws opened", slog.Bool("anonymous", who.Viewer.Anonymous()))
+	cn.logger.DebugContext(ctx, "socket opened", slog.Bool("anonymous", who.Viewer.Anonymous()))
 
 	hello := time.AfterFunc(m.d.Timings.Hello, func() {
 		if !cn.welcome.Load() {
@@ -414,7 +414,7 @@ func (cn *conn) deliver(ev Event) {
 	}
 
 	if err := cn.c.Send(env); errors.Is(err, wsconn.ErrSlowConsumer) {
-		cn.logger.Warn("events ws slow consumer, closed 4413")
+		cn.logger.Warn("slow consumer, closed 4413")
 	}
 }
 
@@ -527,7 +527,7 @@ func (cn *conn) recheck(ctx context.Context) bool {
 			names[i] = tp.String()
 		}
 
-		cn.logger.DebugContext(ctx, "events ws topics dropped", slog.Any("topics", names))
+		cn.logger.DebugContext(ctx, "topics dropped", slog.Any("topics", names))
 
 		// §6.6 has no "unsubscribed by the server" message: an error frame
 		// with re = null names the dropped topics (ADR 0016 decision 5).
@@ -789,7 +789,7 @@ func (cn *conn) reject(id rxv1.CorrelationID, err error, escalate rxv1.CloseCode
 	var pe *rxv1.Error
 	if !errors.As(err, &pe) {
 		incident = rand.Text()[:12]
-		cn.logger.Error("events ws internal error", slog.String("incident_id", incident), slog.Any("error", err))
+		cn.logger.Error("internal error", slog.String("incident_id", incident), slog.Any("error", err))
 	}
 
 	cn.sendError(&id, rxv1.ErrorPayloadFrom(err, incident))
@@ -851,7 +851,7 @@ func (cn *conn) strike(code rxv1.CloseCode) {
 	}
 
 	if s.add(cn.m.d.Now()) > strikeLimit {
-		cn.logger.Warn("events ws closed after repeated violations", slog.Int("close_code", int(code)))
+		cn.logger.Warn("closed after repeated violations", slog.Int("close_code", int(code)))
 		cn.c.Close(code, code.String())
 	}
 }

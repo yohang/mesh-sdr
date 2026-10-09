@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/db"
 )
 
 // Retention of the other identity rows (§7.1): invitations 30 days after
@@ -49,14 +51,7 @@ func (j *PurgeJob) Name() string { return j.name }
 func (j *PurgeJob) Run(ctx context.Context) (int64, error) {
 	cutoff := j.now().Add(-j.retention)
 
-	var total int64
-
-	for {
-		n, err := j.rows.DeleteEndedBefore(ctx, cutoff, purgeBatch)
-		total += int64(n)
-
-		if err != nil || n < purgeBatch {
-			return total, err
-		}
-	}
+	return db.Batched(ctx, purgeBatch, func(ctx context.Context, batch int) (int, error) {
+		return j.rows.DeleteEndedBefore(ctx, cutoff, batch)
+	})
 }

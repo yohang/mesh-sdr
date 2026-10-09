@@ -41,7 +41,7 @@ type decodesDeps struct {
 // handler of the control channels, decode.new on /api/ws after each
 // commit, and the Decodes page, whose rows follow the listen policy.
 func newDecodes(d decodesDeps) *decodes.Module {
-	logger := component(d.logger, "decodes.app")
+	logger := component(d.logger, "decodes.module")
 
 	m := decodes.New(decodes.Deps{
 		DB:         d.adapter,
