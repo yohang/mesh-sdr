@@ -66,7 +66,36 @@ type DeviceSpec struct {
 	// Config are the reported driver values; nil when the node does not
 	// report them.
 	Config *DeviceConfig
+	// Position is the reported position of the device (MAP-007); nil when
+	// its node config sets none.
+	Position *Position
 }
+
+// Position is the position of a device (MAP-007), in decimal degrees (WGS
+// 84): the device's own (devices.<id>.gps) or its node's (node.gps).
+type Position struct {
+	lat, lon float64
+	own      bool
+}
+
+// NewPosition validates a position; own tells whether it is the device's
+// own position rather than its node's.
+func NewPosition(lat, lon float64, own bool) (Position, error) {
+	if math.IsNaN(lat) || math.IsNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+		return Position{}, ErrInvalidDevice.WithDetail("invalid position")
+	}
+
+	return Position{lat: lat, lon: lon, own: own}, nil
+}
+
+// Lat returns the latitude.
+func (p Position) Lat() float64 { return p.lat }
+
+// Lon returns the longitude.
+func (p Position) Lon() float64 { return p.lon }
+
+// Own reports whether the position is the device's own, not its node's.
+func (p Position) Own() bool { return p.own }
 
 // DeviceConfig are the driver values of a device in its node config
 // (SRC-022: rf_gain, ppm, bias_tee, direct_sampling, iqswap, lfo_offset),
@@ -145,6 +174,7 @@ type Device struct {
 	sampleRates []int64
 	flags       DeviceFlags
 	config      *DeviceConfig
+	position    *Position
 	online      bool
 	state       RuntimeState
 	stateAt     time.Time
@@ -204,6 +234,7 @@ func (d *Device) ApplySpec(node NodeID, spec DeviceSpec, sortOrder int, now time
 		d.config = &c
 	}
 
+	d.position = clonePosition(spec.Position)
 	d.sortOrder = sortOrder
 	d.reportedAt = ms(now)
 
@@ -292,6 +323,15 @@ func (d *Device) Config() (c DeviceConfig, ok bool) {
 	return *d.config, true
 }
 
+// Position returns the reported position of the device (ok false: none).
+func (d *Device) Position() (Position, bool) {
+	if d.position == nil {
+		return Position{}, false
+	}
+
+	return *d.position, true
+}
+
 // Online reports whether the device is running on a connected node.
 func (d *Device) Online() bool { return d.online }
 
@@ -347,6 +387,7 @@ type DeviceSnapshot struct {
 	SampleRates          []int64
 	Flags                DeviceFlags
 	Config               *DeviceConfig
+	Position             *Position
 	Online               bool
 	State                RuntimeState
 	StateAt              time.Time
@@ -361,8 +402,8 @@ type DeviceSnapshot struct {
 func (d *Device) Snapshot() DeviceSnapshot {
 	return DeviceSnapshot{
 		ID: d.id.String(), Node: d.node.String(), Name: d.name, Type: d.typ, FreqMin: d.freqMin, FreqMax: d.freqMax,
-		SampleRates: slices.Clone(d.sampleRates), Flags: d.flags, Config: cloneConfig(d.config), Online: d.online, State: d.state, StateAt: d.stateAt,
-		Reason: d.reason, ActivePreset: d.preset, CenterFreq: d.centerFreq, SortOrder: d.sortOrder, ReportedAt: d.reportedAt,
+		SampleRates: slices.Clone(d.sampleRates), Flags: d.flags, Config: cloneConfig(d.config), Position: clonePosition(d.position), Online: d.online, State: d.state,
+		StateAt: d.stateAt, Reason: d.reason, ActivePreset: d.preset, CenterFreq: d.centerFreq, SortOrder: d.sortOrder, ReportedAt: d.reportedAt,
 	}
 }
 
@@ -384,8 +425,8 @@ func RehydrateDevice(s DeviceSnapshot) (*Device, error) {
 
 	return &Device{
 		id: id, node: node, name: s.Name, typ: s.Type, freqMin: s.FreqMin, freqMax: s.FreqMax,
-		sampleRates: slices.Clone(s.SampleRates), flags: s.Flags, config: cloneConfig(s.Config), online: s.Online, state: s.State, stateAt: s.StateAt,
-		reason: s.Reason, preset: s.ActivePreset, centerFreq: s.CenterFreq, sortOrder: s.SortOrder, reportedAt: s.ReportedAt,
+		sampleRates: slices.Clone(s.SampleRates), flags: s.Flags, config: cloneConfig(s.Config), position: clonePosition(s.Position), online: s.Online, state: s.State,
+		stateAt: s.StateAt, reason: s.Reason, preset: s.ActivePreset, centerFreq: s.CenterFreq, sortOrder: s.SortOrder, reportedAt: s.ReportedAt,
 	}, nil
 }
 
@@ -395,6 +436,16 @@ func cloneConfig(c *DeviceConfig) *DeviceConfig {
 	}
 
 	v := *c
+
+	return &v
+}
+
+func clonePosition(p *Position) *Position {
+	if p == nil {
+		return nil
+	}
+
+	v := *p
 
 	return &v
 }

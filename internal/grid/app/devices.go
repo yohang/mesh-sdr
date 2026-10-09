@@ -69,6 +69,15 @@ func SpecOf(d ctl.Device) (domain.DeviceSpec, error) {
 		}
 	}
 
+	if g := d.GPS; g != nil {
+		p, err := domain.NewPosition(g.Lat, g.Lon, g.Source == ctl.PositionDevice)
+		if err != nil {
+			return domain.DeviceSpec{}, err
+		}
+
+		spec.Position = &p
+	}
+
 	return spec, nil
 }
 

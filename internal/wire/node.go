@@ -538,11 +538,24 @@ func DevicesOf(cfg config.Node) []ctl.Device {
 			ID: id, Name: d.Name, Type: d.Type, Enabled: d.Enabled == nil || *d.Enabled,
 			FreqMin: d.FreqRange.Min.Hz(), FreqMax: d.FreqRange.Max.Hz(), SampleRates: slices.Clone(d.SampleRates),
 			ListenPolicy: d.ListenPolicy, OperatorCanRetune: d.OperatorCanRetune, AlwaysOn: d.AlwaysOn, SchedulerEnabled: d.SchedulerEnabled,
-			Config: deviceConfigOf(d.Driver),
+			Config: deviceConfigOf(d.Driver), GPS: positionOf(cfg.Node.GPS, d.GPS),
 		})
 	}
 
 	return out
+}
+
+// positionOf reports the position of a device (MAP-007): its own, else its
+// node's, else none.
+func positionOf(node, device config.GeoPoint) *ctl.Position {
+	switch {
+	case device.IsSet():
+		return &ctl.Position{Lat: device.Lat(), Lon: device.Lon(), Source: ctl.PositionDevice}
+	case node.IsSet():
+		return &ctl.Position{Lat: node.Lat(), Lon: node.Lon(), Source: ctl.PositionNode}
+	default:
+		return nil
+	}
 }
 
 // deviceConfigOf reports the driver values of a device (SRC-022): the hub

@@ -80,3 +80,61 @@ func TestDeviceConfigStored(t *testing.T) {
 		})
 	}
 }
+
+// TestDevicePositionStored checks that the hub stores the position a node
+// reports with its devices (MAP-007): the device's own or its node's.
+func TestDevicePositionStored(t *testing.T) {
+	tests := []struct {
+		name       string
+		gps        *ctl.Position
+		lat        float64
+		own        bool
+		registered bool
+	}{
+		{name: "own", gps: &ctl.Position{Lat: 48.85, Lon: 2.35, Source: ctl.PositionDevice}, lat: 48.85, own: true, registered: true},
+		{name: "node", gps: &ctl.Position{Lat: 50.63, Lon: 3.06, Source: ctl.PositionNode}, lat: 50.63, registered: true},
+		{name: "none", registered: true},
+		{name: "invalid", gps: &ctl.Position{Lat: 91, Lon: 3, Source: ctl.PositionNode}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			ctx := context.Background()
+			s := app.NewDevices(sqlite.NewDeviceRepository(e.db), e.audit, discard)
+			attic := enrolledNode(t, e)
+
+			d := device("hf", "rtl_sdr")
+			d.GPS = tt.gps
+
+			err := e.db.WithinTx(ctx, func(ctx context.Context) error {
+				return s.Sync(ctx, attic, ctl.Capabilities{Devices: []ctl.Device{d}}, e.clock.now())
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := s.Get(ctx, "hf")
+			if !tt.registered {
+				if !errors.Is(err, domain.ErrDeviceNotFound) {
+					t.Fatalf("device registered: %v", err)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			p, ok := got.Position()
+
+			switch {
+			case tt.gps == nil && ok:
+				t.Errorf("position = %+v, want none", p)
+			case tt.gps != nil && (!ok || p.Lat() != tt.lat || p.Lon() != tt.gps.Lon || p.Own() != tt.own):
+				t.Errorf("position = %+v %v", p, ok)
+			}
+		})
+	}
+}
