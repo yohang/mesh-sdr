@@ -79,7 +79,7 @@ func TestSlotSettingsHubToNode(t *testing.T) {
 	d := stateDecoders(fixedSettings{
 		"decoders.max_restarts": 5, "decoders.wsjt_decoding_depth": 2, "decoders.wsjt_decoding_depths.jt65": 1,
 		"decoders.fst4_enabled_intervals": []string{"60", "1800"}, "decoders.q65_enabled_combinations": []string{"A30"},
-		"decoders.js8_enabled_profiles": []string{"turbo"}, "decoders.js8_decoding_depth": 1,
+		"decoders.js8_enabled_profiles": []string{"turbo"}, "decoders.js8_decoding_depth": 1, "decoders.dsc_show_errors": true,
 	})
 
 	raw, err := json.Marshal(d)
@@ -96,14 +96,14 @@ func TestSlotSettingsHubToNode(t *testing.T) {
 	s := decoderSettings(&got, defaults)
 	if s.WSJTDepths["jt65"] != 1 || s.WSJTDepths["ft8"] != 2 || s.WSJTDepths["q65"] != 2 || len(s.WSJTDepths) != len(wsjtModes) ||
 		!slices.Equal(s.FST4Intervals, []int{60, 1800}) || !slices.Equal(s.Q65Combinations, []string{"A30"}) ||
-		!slices.Equal(s.JS8Profiles, []string{"turbo"}) || s.JS8Depth != 1 {
+		!slices.Equal(s.JS8Profiles, []string{"turbo"}) || s.JS8Depth != 1 || !s.DSCShowErrors {
 		t.Errorf("node settings %+v", s)
 	}
 
 	// Without settings, the enabled lists are the hub defaults.
 	if s := decoderSettings(nil, defaults); s.WSJTDepths != nil || s.WSJTDepth != 0 || !slices.Equal(s.FST4Intervals, []int{15, 30}) ||
 		!slices.Equal(s.FST4WIntervals, []int{120, 300}) || !slices.Equal(s.Q65Combinations, defaults.Q65Combinations) ||
-		!slices.Equal(s.JS8Profiles, defaults.JS8Profiles) {
+		!slices.Equal(s.JS8Profiles, defaults.JS8Profiles) || !s.DSCShowErrors {
 		t.Errorf("no settings: %+v", s)
 	}
 }
