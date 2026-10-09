@@ -23,12 +23,14 @@ ARG RTLSDR_VERSION=2.0.2-2+b1
 ARG LIBUSB_VERSION=2:1.0.28-1
 ARG CA_CERTIFICATES_VERSION=20250419
 # External decoders run by the node (ADR 0017 decision 6): wsjtx (jt9,
-# wsprd), js8call (js8), direwolf, multimon-ng, rtl_433.
+# wsprd), js8call (js8), direwolf, multimon-ng, rtl_433, readsb (ADS-B,
+# ADR 0029).
 ARG WSJTX_VERSION=2.7.0+repack-1
 ARG JS8CALL_VERSION=2.2.0+ds-5+b1
 ARG DIREWOLF_VERSION=1.7+dfsg-2+deb13u1
 ARG MULTIMON_NG_VERSION=1.3.1+dfsg-1
 ARG RTL_433_VERSION=25.02-1+deb13u1
+ARG READSB_VERSION=3.14.1630+git20240609.adc080d-1
 
 # Native components built from source (ADR 0014, ADR 0019). Upstream
 # publishes no release tarballs: the GitHub tag archives are pinned by
@@ -156,13 +158,14 @@ ARG JS8CALL_VERSION
 ARG DIREWOLF_VERSION
 ARG MULTIMON_NG_VERSION
 ARG RTL_433_VERSION
+ARG READSB_VERSION
 
 # External decoders (ADR 0017 decision 6), on PATH for the dev node and the
 # tests, same pins as the runtime.
 RUN apt-get update; \
     apt-get install -y --no-install-recommends \
       "wsjtx=${WSJTX_VERSION}" "js8call=${JS8CALL_VERSION}" "direwolf=${DIREWOLF_VERSION}" \
-      "multimon-ng=${MULTIMON_NG_VERSION}" "rtl-433=${RTL_433_VERSION}"; \
+      "multimon-ng=${MULTIMON_NG_VERSION}" "rtl-433=${RTL_433_VERSION}" "readsb=${READSB_VERSION}"; \
     rm -rf /var/lib/apt/lists/*
 
 # Root-installed binaries, built with throwaway caches so /cache stays empty for the dev user
@@ -237,6 +240,7 @@ ARG JS8CALL_VERSION
 ARG DIREWOLF_VERSION
 ARG MULTIMON_NG_VERSION
 ARG RTL_433_VERSION
+ARG READSB_VERSION
 
 # wsjtx and js8call pull Qt 5 and Boost (accepted).
 RUN apt-get update; \
@@ -244,7 +248,7 @@ RUN apt-get update; \
       "ca-certificates=${CA_CERTIFICATES_VERSION}" "libfftw3-single3=${FFTW_VERSION}" \
       "libsamplerate0=${SAMPLERATE_VERSION}" "librtlsdr0=${RTLSDR_VERSION}" "libusb-1.0-0=${LIBUSB_VERSION}" \
       "wsjtx=${WSJTX_VERSION}" "js8call=${JS8CALL_VERSION}" "direwolf=${DIREWOLF_VERSION}" \
-      "multimon-ng=${MULTIMON_NG_VERSION}" "rtl-433=${RTL_433_VERSION}"; \
+      "multimon-ng=${MULTIMON_NG_VERSION}" "rtl-433=${RTL_433_VERSION}" "readsb=${READSB_VERSION}"; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd -g 65532 nonroot; \
     useradd -u 65532 -g 65532 -d /home/nonroot -m -s /usr/sbin/nologin nonroot; \
@@ -302,6 +306,7 @@ ARG JS8CALL_VERSION
 ARG DIREWOLF_VERSION
 ARG MULTIMON_NG_VERSION
 ARG RTL_433_VERSION
+ARG READSB_VERSION
 
 # Debian source versions are the binary versions without the binNMU suffix.
 RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources; \
@@ -319,7 +324,7 @@ RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.s
     apt-get source --download-only "fftw3=${FFTW_VERSION%+b*}" "rtl-sdr=${RTLSDR_VERSION%+b*}" \
       "libsamplerate=${SAMPLERATE_VERSION%+b*}" "libusb-1.0=${LIBUSB_VERSION%+b*}" \
       "wsjtx=${WSJTX_VERSION%+b*}" "js8call=${JS8CALL_VERSION%+b*}" "direwolf=${DIREWOLF_VERSION%+b*}" \
-      "multimon-ng=${MULTIMON_NG_VERSION%+b*}" "rtl-433=${RTL_433_VERSION%+b*}"; \
+      "multimon-ng=${MULTIMON_NG_VERSION%+b*}" "rtl-433=${RTL_433_VERSION%+b*}" "readsb=${READSB_VERSION%+b*}"; \
     rm -rf /var/lib/apt/lists/*
 
 # The source of MeshSDR itself (the files the binaries are built from),
