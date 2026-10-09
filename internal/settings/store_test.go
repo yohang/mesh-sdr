@@ -124,7 +124,7 @@ func newFixture(t *testing.T, env map[string]string) fixture {
 		origins = meta.Origins
 	}
 
-	cat, err := config.NewSettingsCatalog(cfg, origins)
+	cat, err := settings.NewConfigCatalog(cfg, origins)
 	if err != nil {
 		t.Fatal(err)
 	}

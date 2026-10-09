@@ -18,7 +18,7 @@ import (
 func newSettings(ctx context.Context, cfg config.Hub, origins config.Origins, adapter *db.DB, audit audit.Appender,
 	now func() time.Time, logger *slog.Logger,
 ) (*settings.Store, *settings.EffectiveConfig, error) {
-	catalog, err := config.NewSettingsCatalog(cfg, origins)
+	catalog, err := settings.NewConfigCatalog(cfg, origins)
 	if err != nil {
 		return nil, nil, fmt.Errorf("settings catalog: %w", err)
 	}
@@ -32,7 +32,7 @@ func newSettings(ctx context.Context, cfg config.Hub, origins config.Origins, ad
 		return nil, nil, fmt.Errorf("load settings: %w", err)
 	}
 
-	return store, settings.NewEffectiveConfig(configBootstrap{cfg: cfg, origins: origins}, store, now), nil
+	return store, settings.NewEffectiveConfig(cfg, origins, store, now), nil
 }
 
 // storeListenPolicy reads the raw global listen policy (listen_policy) from
@@ -44,25 +44,4 @@ type storeListenPolicy struct {
 // ListenPolicy implements grid/app.GlobalListenPolicy.
 func (p storeListenPolicy) ListenPolicy(context.Context) (string, error) {
 	return p.store.String("listen_policy"), nil
-}
-
-// configBootstrap lists the config-only keys of the loaded hub config for
-// the effective configuration view.
-type configBootstrap struct {
-	cfg     config.Hub
-	origins config.Origins
-}
-
-func (b configBootstrap) BootstrapEntries() []settings.BootstrapEntry {
-	entries := config.BootstrapEntries(b.cfg, b.origins)
-	out := make([]settings.BootstrapEntry, 0, len(entries))
-
-	for _, e := range entries {
-		out = append(out, settings.BootstrapEntry{
-			Key: e.Key, Value: e.Value, Set: e.Secret && string(e.Value) == "true",
-			Origin: e.Origin.String(), Locked: e.Origin.Locked(), Secret: e.Secret,
-		})
-	}
-
-	return out
 }

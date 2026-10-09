@@ -9,7 +9,7 @@ import (
 
 // Every settings key is editable on exactly one admin page section.
 func TestEverySettingHasASection(t *testing.T) {
-	cat, err := config.NewSettingsCatalog(config.DefaultHub(), config.Origins{})
+	cat, err := settings.NewConfigCatalog(config.DefaultHub(), config.Origins{})
 	if err != nil {
 		t.Fatal(err)
 	}
