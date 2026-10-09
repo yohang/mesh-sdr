@@ -13,6 +13,9 @@ A11Y    := $(COMPOSE) -f .infra/a11y/compose.yaml
 A11Y_HUB := hub
 
 HTMX_VERSION ?= 4.0.0
+# Leaflet (map, ADR 0029): npm tarball version and its SHA-256.
+LEAFLET_VERSION ?= 1.9.4
+LEAFLET_SHA256  ?= 84c65a256e50657896f54c33bd857b6849ebe94c817803be818bf32a3dde0b77
 # Common-password list (ACC-011): SecLists commit and SHA-256 of the list.
 SECLISTS_COMMIT ?= 49c3b2d1d2481572bd7b0cb5af875a73cdf9d08e
 SECLISTS_SHA256 ?= 1472aafa2561df5e3293aee252aee3ca660c12b399a283cf808bb01b39be388b
@@ -83,8 +86,16 @@ migrate-create: ## Create a SQL migration (name=...)
 	$(RUN) go tool goose -dir internal/db/sqlite/migrations -s create $(name) sql
 
 .PHONY: vendor
-vendor: ## Download vendored JS assets (HTMX_VERSION=...)
+vendor: ## Download vendored JS assets (HTMX_VERSION=..., LEAFLET_VERSION=... LEAFLET_SHA256=...)
 	$(RUN) curl -fsSL -o internal/web/static/vendor/htmx.min.js https://cdn.jsdelivr.net/npm/htmx.org@$(HTMX_VERSION)/dist/htmx.min.js
+	$(RUN) sh -euc '\
+		tmp=$$(mktemp -d); trap "rm -rf $$tmp" EXIT; \
+		curl -fsSL -o "$$tmp/leaflet.tgz" https://registry.npmjs.org/leaflet/-/leaflet-$(LEAFLET_VERSION).tgz; \
+		echo "$(LEAFLET_SHA256)  $$tmp/leaflet.tgz" | sha256sum -c -; \
+		tar -xzf "$$tmp/leaflet.tgz" -C "$$tmp"; \
+		out=internal/web/static/vendor/leaflet; rm -rf "$$out"; mkdir -p "$$out/images"; \
+		cp "$$tmp/package/dist/leaflet.js" "$$tmp/package/dist/leaflet.css" "$$tmp/package/LICENSE" "$$out/"; \
+		cp "$$tmp/package/dist/images/"*.png "$$out/images/"'
 
 .PHONY: vendor-passwords
 vendor-passwords: ## Download the common-password list (SECLISTS_COMMIT=..., SECLISTS_SHA256=...)

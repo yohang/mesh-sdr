@@ -119,7 +119,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	// Map features (MAP-002): projected from the decodes at ingest.
 	mapf := newMap(mapDeps{
 		adapter: adapter, broker: h.broker, policies: h.listen, identity: h.idm.HTTP, features: h.features, store: settingsStore,
-		now: now, logger: logger,
+		render: h.shell.Renderer, now: now, logger: logger,
 	})
 
 	decoded := newDecodes(decodesDeps{
@@ -384,6 +384,7 @@ func (h *hubModules) newRouter(p hubPages) (http.Handler, error) {
 		}),
 		p.events,
 		p.decodes,
+		p.mapf,
 		h.shell.HTTP,
 	), nil
 }

@@ -62,8 +62,7 @@ func TestNavigation(t *testing.T) {
 		want  []string
 	}{
 		{"visitor home", false, "/", []string{"/ receiver*", "/map map", "/decodes decodes", "/files files"}},
-		{"visitor map", false, "/map", []string{"/ receiver", "/map map*", "/decodes decodes", "/files files"}},
-		{"admin map", true, "/map", []string{"/ receiver", "/map map*", "/decodes decodes", "/files files", "/admin admin"}},
+		{"admin home", true, "/", []string{"/ receiver*", "/map map", "/decodes decodes", "/files files", "/admin admin"}},
 		{"admin policy", true, "/policy", []string{"/ receiver", "/map map", "/decodes decodes", "/files files", "/admin admin"}},
 	}
 
@@ -81,15 +80,13 @@ func TestNavigation(t *testing.T) {
 	}
 }
 
-// TestSectionPages covers the section entry pages (the receiver island, and
-// the placeholders of the sections whose modules come later): in the shell,
-// in their section, with GET and HEAD.
+// TestSectionPages covers the section entry page of the shell (the receiver
+// island): in the shell, in its section, with GET and HEAD.
 func TestSectionPages(t *testing.T) {
 	h := navRouter(false)
 
 	tests := []struct{ path, title, section, text string }{
 		{"/", "<title>MeshSDR</title>", "receiver", `<script id="msdr-receiver-config" type="application/json"`},
-		{"/map", "<title>Map · MeshSDR</title>", "map", "The live map is not available yet."},
 	}
 
 	for _, tt := range tests {
@@ -229,7 +226,7 @@ func TestAbout(t *testing.T) {
 		}
 	}
 
-	_, home := do(t, h, http.MethodGet, "/map", nil)
+	_, home := do(t, h, http.MethodGet, "/policy", nil)
 	for _, want := range []string{
 		`<li><a href="/about">About</a></li>`, "· AGPL-3.0-or-later</li>",
 		`<li><a href="https://github.com/yohang/mesh-sdr" rel="noopener noreferrer" hx-boost="false">Source code</a></li>`,
@@ -255,7 +252,7 @@ func TestHelp(t *testing.T) {
 		t.Helper()
 
 		m := shell.New(shell.Deps{Settings: v, User: user, Logger: discard})
-		_, body := do(t, httpserver.NewRouter(discard, "", http.NotFoundHandler(), m.HTTP), http.MethodGet, "/map", nil)
+		_, body := do(t, httpserver.NewRouter(discard, "", http.NotFoundHandler(), m.HTTP), http.MethodGet, "/policy", nil)
 
 		return body
 	}

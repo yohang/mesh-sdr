@@ -14,7 +14,7 @@ MeshSDR: Go web application for Software Defined Radio (SDR) with Mesh capabilit
 - Go 1.26, module `github.com/yohang/mesh-sdr`
 - HTTP: `net/http` + `github.com/go-chi/chi/v5`; the hub gateway is `net/http` + `httputil.ReverseProxy` + `golang.org/x/crypto/acme/autocert` (ADR 0021, no Caddy)
 - Templates: `github.com/a-h/templ`
-- Frontend: htmx 4 (vendored in `internal/web/static/vendor/`), Tailwind CSS v4 (standalone CLI, no Node)
+- Frontend: htmx 4 and Leaflet 1.9.4 (map, ADR 0029), vendored in `internal/web/static/vendor/`; Tailwind CSS v4 (standalone CLI, no Node)
 - Database: SQLite via `modernc.org/sqlite` (pure Go)
 - Build: `CGO_ENABLED=1` for every binary (ADR 0014, ADR 0019); cgo only in `internal/dsp/csdr` (libcsdr++ C ABI shim, checked by a test)
 - DSP: libcsdr++ (luarvique/csdr 0.18.41, built from source) through cgo, `gonum.org/v1/gonum/dsp/fourier` for the channelizer; SDR connectors are owrx_connector 0.6.5 processes
@@ -160,7 +160,7 @@ Everything runs in Docker; no local Go toolchain required. Run `make help` for t
 - `make lint` / `make test`
 - `make migrate [cmd=up|down|status]` — `meshsdr hub migrate` against the dev database
 - `make migrate-create name=<name>` — new sequential goose SQL migration in `internal/db/sqlite/migrations/`
-- `make vendor [HTMX_VERSION=x.y.z]` — refresh vendored htmx
+- `make vendor [HTMX_VERSION=x.y.z] [LEAFLET_VERSION=x.y.z LEAFLET_SHA256=…]` — refresh vendored htmx and Leaflet (npm tarball checked against its SHA-256)
 - `make sh` — shell in dev container
 - `make a11y` — axe-core WCAG 2.1 AA checks of the production image, one hub with theme mode auto (CI-only container, nightly CI job; Node never enters the app or dev image)
 - `make build-prod` — the production image (Debian slim with the connectors, nonroot 65532, run with `init: true`; `-f .infra/docker/Dockerfile`; config dir `/etc/meshsdr` with `tls/` linked to the volume `/var/lib/meshsdr`): target `prod` (`meshsdr`, one image for every role: port 443 and `CMD ["all"]` by default, `node` as command for a node, port 8074); CI publishes it on pushes to `main` and tags

@@ -5,6 +5,7 @@
 @source "../../../shell";
 @source "../../../bookmarks/*.templ";
 @source "../../../files/*.templ";
+@source "../../../mapfeatures/*.templ";
 @source "../js";
 
 /*
@@ -607,4 +608,103 @@
   border: 2px solid var(--msdr-color-danger);
   color: var(--msdr-color-danger);
   font-weight: 700;
+}
+
+/*
+ * Map page (MAP-001, FEATURE_SPEC §10.10, static/js/map/). Leaflet's own
+ * stylesheet (vendor/leaflet/leaflet.css) is added by the island after this
+ * one, so these rules are scoped under .map-stage to win over it. Panels
+ * float over the map from 768 px and are sheets at the bottom of it below.
+ * Every feature type has a shape and a color (legend and markers), so color
+ * is never the only cue.
+ */
+.map-stage .leaflet-container {
+  background: var(--msdr-color-surface-raised);
+  color: var(--msdr-color-fg);
+  font: inherit;
+  font-size: var(--msdr-text-sm);
+}
+
+.map-stage .leaflet-container:focus-visible {
+  outline: 3px solid var(--msdr-color-focus);
+  outline-offset: -3px;
+}
+
+.map-panel {
+  position: absolute;
+  z-index: 1001;
+  overflow-y: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--msdr-color-border);
+  border-radius: var(--msdr-radius-md);
+  background: var(--msdr-color-surface);
+  color: var(--msdr-color-fg);
+  inset: auto 0.5rem 0.5rem 0.5rem;
+  max-height: 60%;
+}
+
+@media (width >= 48rem) {
+  .map-panel-start { inset: 0.5rem auto auto 0.5rem; width: 16rem; max-height: calc(100% - 1rem); }
+  .map-legend { inset: auto auto 0.5rem 0.5rem; width: 15rem; max-height: calc(100% - 1rem); }
+}
+
+/* Detail panel (MAP-014): a column next to the map from 768 px, a sheet
+   above the bottom tab bar below. */
+.map-detail {
+  padding: 0.75rem;
+  border: 1px solid var(--msdr-color-border);
+  border-radius: var(--msdr-radius-md);
+  background: var(--msdr-color-surface);
+  overflow-wrap: anywhere;
+}
+
+@media (width < 48rem) {
+  .map-detail {
+    position: fixed;
+    z-index: 20;
+    inset: auto 0 4rem 0;
+    max-height: 50dvh;
+    overflow-y: auto;
+    border-radius: var(--msdr-radius-md) var(--msdr-radius-md) 0 0;
+  }
+}
+
+@media (width >= 48rem) {
+  .map-detail { width: 20rem; flex: none; max-height: calc(100dvh - 17rem); overflow-y: auto; }
+}
+
+/* Feature type symbols of the legend; the markers use the same shapes. */
+.map-sym::before {
+  display: inline-block;
+  width: 1rem;
+  text-align: center;
+}
+
+.map-sym-point::before { content: "●" / ""; color: var(--msdr-color-accent); }
+.map-sym-locator::before { content: "■" / ""; color: var(--msdr-color-bmk-pack); }
+.map-sym-call::before { content: "╌" / ""; color: var(--msdr-color-bmk-dial); font-weight: 700; }
+.map-sym-receiver::before { content: "▲" / ""; color: var(--msdr-color-bmk-hub); }
+.map-sym-other::before { content: "◆" / ""; color: var(--msdr-color-info); }
+
+/* Receiver markers (Leaflet divIcon): a triangle with an outline. */
+.map-stage .map-receiver {
+  display: grid;
+  place-items: center;
+  color: var(--msdr-color-bmk-hub);
+  font-size: 1.25rem;
+  line-height: 1;
+  text-shadow: 0 0 2px var(--msdr-color-surface), 0 0 2px var(--msdr-color-surface);
+
+  &::before { content: "▲" / ""; }
+  &[data-selected]::before { content: "▲" / ""; font-size: 1.6rem; }
+}
+
+/* Tile attribution (MAP-004): plain text set by the island. */
+.map-stage .map-credit {
+  max-width: min(36rem, calc(100vw - 6rem));
+  margin: 0;
+  padding: 0 0.25rem;
+  background: var(--msdr-color-surface);
+  color: var(--msdr-color-fg);
+  font-size: var(--msdr-text-xs);
 }
