@@ -175,7 +175,7 @@ func (h *hubModules) newShell() {
 	}
 
 	// Who sees the files the nodes sent follows the listen policies.
-	filesGate := shell.GateFunc(func(ctx context.Context) bool { return !h.files.visibility(ctx).Denied() })
+	filesGate := shell.GateFunc(func(ctx context.Context) bool { return !h.files.visibility(ctx).SignIn })
 
 	h.shell = shell.New(shell.Deps{
 		Settings: h.settings, AdminGate: h.adminGate, FilesGate: filesGate, User: operatorLinks(userOf, h.operatorGate.Allows),

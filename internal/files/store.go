@@ -359,7 +359,7 @@ func paramsOf(f Filter) filterParams {
 // List returns the complete produced files matching f that v may see,
 // newest reception first: at most limit from offset.
 func (r *Files) List(ctx context.Context, f Filter, v Access, offset, limit int) ([]Entry, error) {
-	if v.Denied() {
+	if !v.All && len(v.Devices) == 0 {
 		return nil, nil
 	}
 

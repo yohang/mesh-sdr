@@ -82,12 +82,13 @@ func (g *Gallery) Routes(r chi.Router) {
 	r.With(g.d.Admin).Post(GalleryPath+"/delete", g.deleteMatching)
 }
 
-// gate sends a visitor who may see no file to the sign-in page.
+// gate sends a visitor to the sign-in page under the registered global
+// policy when no device is open to visitors.
 func (g *Gallery) gate(next http.HandlerFunc) http.HandlerFunc {
 	guarded := g.d.Listener(next)
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		if g.d.Visibility(r.Context()).Denied() {
+		if g.d.Visibility(r.Context()).SignIn {
 			guarded.ServeHTTP(w, r)
 
 			return

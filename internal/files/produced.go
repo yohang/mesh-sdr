@@ -237,10 +237,10 @@ type Access struct {
 	All bool
 	// Devices are the devices whose files the viewer may see otherwise.
 	Devices []string
+	// SignIn sends the visitor to the sign-in page: no device to see under
+	// the registered global policy.
+	SignIn bool
 }
-
-// Denied reports whether the viewer may see no file at all.
-func (v Access) Denied() bool { return !v.All && len(v.Devices) == 0 }
 
 // Allows reports whether the viewer may see a file of device.
 func (v Access) Allows(device string) bool { return v.All || slices.Contains(v.Devices, device) }

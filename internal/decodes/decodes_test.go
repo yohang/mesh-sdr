@@ -246,6 +246,12 @@ func TestListPage(t *testing.T) {
 		t.Errorf("page 2: %s", body)
 	}
 
+	// A page past the end keeps the way back.
+	_, body = get(t, e, Path+"?page=3")
+	if !strings.Contains(body, "No decoded message matches.") || !strings.Contains(body, `<a href="/decodes?page=2">Newer messages</a>`) {
+		t.Errorf("page 3: %s", body)
+	}
+
 	_, body = get(t, e, Path+"?to=2026-10-08T12:00&mode=selcall")
 	if !strings.Contains(body, "No decoded message matches.") {
 		t.Errorf("time filter: %s", body)

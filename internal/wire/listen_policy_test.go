@@ -186,6 +186,12 @@ func TestListenPolicySingleSource(t *testing.T) {
 				}.visibility(ctx)
 				topics := topicAuthz{id: caller, policies: listen}
 
+				// The open device is anonymous-listenable: nobody is sent to
+				// sign in.
+				if files.SignIn {
+					t.Error("files send the caller to sign in")
+				}
+
 				for id, dv := range devices {
 					policy := dv.override
 					if policy == "" {
@@ -220,5 +226,62 @@ func TestListenPolicySingleSource(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestFilesSignInOnlyUnderRegistered: the Files gate sends a visitor to sign
+// in only under the registered global policy (also when it is missing,
+// invalid or unreadable) and when no device is open to visitors; under
+// the anonymous policy a visitor gets the gallery, possibly empty.
+func TestFilesSignInOnlyUnderRegistered(t *testing.T) {
+	ctx := context.Background()
+	a := dbtest.NewSQLite(t)
+	now := time.Now()
+
+	nodes, repo := gridsqlite.NewNodeRepository(a), gridsqlite.NewDeviceRepository(a)
+	if err := nodes.Create(ctx, domain.NewNode(domain.MustNodeID("attic"), domain.MustNodeName("attic"), domain.MustNodeURL("https://attic:8074"), now)); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err := domain.NewReportedDevice(domain.MustNodeID("attic"), domain.DeviceSpec{
+		ID: shared.MustDeviceID("closed"), Name: "closed", Type: "rtl_sdr", Enabled: true, FreqMin: 1, FreqMax: 2,
+		SampleRates: []int64{1}, ListenPolicy: domain.ListenRegistered,
+	}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.Save(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct {
+		name   string
+		global listenGlobal
+		signIn bool
+	}{
+		{"anonymous", listenGlobal{v: domain.ListenAnonymous}, false},
+		{"registered", listenGlobal{v: domain.ListenRegistered}, true},
+		{"missing", listenGlobal{}, true},
+		{"garbage", listenGlobal{v: "everyone"}, true},
+		{"unreadable", listenGlobal{v: domain.ListenAnonymous, err: errors.New("settings down")}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			listen := gridapp.NewListenPolicies(repo, tt.global, quiet)
+
+			for cname, signedIn := range map[string]bool{"anonymous": false, "listener": true} {
+				vis := fileAccess{
+					signedIn: func(context.Context) bool { return signedIn }, policies: listen, logger: quiet,
+				}.visibility(ctx)
+
+				if want := tt.signIn && !signedIn; vis.SignIn != want {
+					t.Errorf("%s: sign in = %v, want %v", cname, vis.SignIn, want)
+				}
+
+				if vis.Allows("closed") != signedIn {
+					t.Errorf("%s: files of closed = %v, want %v", cname, vis.Allows("closed"), signedIn)
+				}
+			}
+		})
 	}
 }

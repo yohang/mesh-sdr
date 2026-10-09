@@ -99,7 +99,9 @@ func deviceNames(repo griddomain.DeviceRepository) func(ctx context.Context) (ma
 
 // fileAccess decides who sees the files the nodes sent (ADR 0026: the
 // listen policy, no files policy): signed-in users see every file,
-// visitors the files of the devices they may listen to.
+// visitors the files of the devices they may listen to. Visitors are sent
+// to sign in only under the registered global policy, when no device is
+// open to them.
 type fileAccess struct {
 	signedIn func(ctx context.Context) bool
 	policies *gridapp.ListenPolicies
@@ -121,10 +123,12 @@ func (a fileAccess) anonymous(ctx context.Context) files.Access {
 	if err != nil {
 		a.logger.ErrorContext(ctx, "listen policies for the files", slog.Any("error", err))
 
-		return files.Access{}
+		return files.Access{SignIn: true}
 	}
 
-	return files.Access{Devices: view.Listenable(true)}
+	devices := view.Listenable(true)
+
+	return files.Access{Devices: devices, SignIn: len(devices) == 0 && a.policies.Global(ctx) == griddomain.ListenRegistered}
 }
 
 // published announces a new file on /api/ws (files.new) to the viewers who
