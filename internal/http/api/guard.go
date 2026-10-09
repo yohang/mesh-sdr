@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -12,15 +13,19 @@ import (
 // (x-meshsdr-access) before any body is read, so an unauthorised request
 // never gets its body decoded, and bounds every body to maxBody. It is the
 // one access check of the API and fails closed: a request that matches no
-// operation is answered 404 (405 for a known path) before routing, and
-// parseSpec refuses an operation without an access level.
+// operation is answered 404 (405 with an Allow header for a known path)
+// before routing, and parseSpec refuses an operation without an access
+// level.
 func (s spec) guard(authz Authorizer, maxBody int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			op, known := s.match(routeMethod(r), r)
+			op, allowed := s.match(routeMethod(r), r)
 
 			switch {
-			case op == nil && known:
+			case op == nil && len(allowed) > 0:
+				// RFC 9110 §15.5.6: a 405 lists the methods the path
+				// accepts.
+				w.Header().Set("Allow", strings.Join(allowed, ", "))
 				problem.MethodNotAllowed(w, r)
 
 				return

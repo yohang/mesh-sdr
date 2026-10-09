@@ -178,6 +178,11 @@ func TestGuardEscapedPathsFailClosed(t *testing.T) {
 			if rec.Code != tt.status || checked != tt.checked {
 				t.Errorf("status = %d, authorizer called %v; want %d, %v", rec.Code, checked, tt.status, tt.checked)
 			}
+
+			// RFC 9110: a 405 lists the methods of the path.
+			if allow := rec.Header().Get("Allow"); tt.status == http.StatusMethodNotAllowed && allow != "GET, HEAD" {
+				t.Errorf("Allow = %q, want GET, HEAD", allow)
+			}
 		})
 	}
 }

@@ -174,25 +174,39 @@ func goName(id string) string {
 	return string(unicode.ToUpper(r)) + id[n:]
 }
 
-// match returns the operation of r, routed as method, and whether its
-// path is the path of some operation. It reads the escaped path, as the
-// router does (an encoded slash stays inside its segment), with or without
-// the /api/v1 prefix: the handler is mounted under it.
-func (s spec) match(method string, r *http.Request) (*operation, bool) {
+// match returns the operation of r, routed as method, and the methods the
+// path of r accepts (empty when no operation has this path). It reads the
+// escaped path, as the router does (an encoded slash stays inside its
+// segment), with or without the /api/v1 prefix: the handler is mounted
+// under it. A path with a GET operation also accepts HEAD (chi
+// middleware.GetHead).
+func (s spec) match(method string, r *http.Request) (*operation, []string) {
 	path := strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1")
-	known := false
+
+	var (
+		found   *operation
+		allowed []string
+	)
 
 	for i, op := range s.operations {
 		if !op.path.MatchString(path) {
 			continue
 		}
 
-		if op.method == method {
-			return &s.operations[i], true
+		if op.method == method && found == nil {
+			found = &s.operations[i]
 		}
 
-		known = true
+		if !slices.Contains(allowed, op.method) {
+			allowed = append(allowed, op.method)
+		}
 	}
 
-	return nil, known
+	if slices.Contains(allowed, http.MethodGet) && !slices.Contains(allowed, http.MethodHead) {
+		allowed = append(allowed, http.MethodHead)
+	}
+
+	slices.Sort(allowed)
+
+	return found, allowed
 }
