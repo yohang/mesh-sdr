@@ -109,6 +109,23 @@ var formPages = []formPage{
 			{ID: "ism", Title: "ISM", Keys: []string{"decoders.ism_report_levels"}},
 		},
 	},
+	{
+		Section: "map", Title: "Map", Path: "/admin/map",
+		Intro: "Base layers, lifetimes and report filtering of the map, the receiver markers, and the lookup links of the map and the decoder panels.",
+		Forms: []sectionSpec{
+			{ID: "layers", Title: "Base layers", Description: "Keyless tile providers the browser loads directly. Visitors may pick another offered layer; their choice stays in their browser.",
+				Keys: []string{"map.base_layers", "map.default_base_layer"}},
+			{ID: "lifetimes", Title: "Lifetimes", Description: "Positions, locators and call lines leave the map when their lifetime ends; the hub removes them every 30 seconds.",
+				Keys: []string{"map.position_retention_s", "map.max_calls", "map.call_retention_s"}},
+			{ID: "reports", Title: "Report filtering", Description: "Applied by the hub before a report reaches the map.",
+				Keys: []string{"map.ignore_indirect_reports", "map.prefer_recent_reports"}},
+			{ID: "receivers", Title: "Receiver positions", Description: "Receivers are placed at the node or device position of their node config, else at the station position (Site). " +
+				"The same rule applies to the station position of the public status (GET /api/v1/status).",
+				Keys: []string{"map.precise_receivers"}},
+			{ID: "links", Title: "Lookup links", Description: "Each link is an http or https URL with exactly one {} placeholder, replaced by the URL-encoded callsign, MMSI, flight, address or serial. Empty: no link.",
+				Keys: []string{"links.callsign_url", "links.vessel_url", "links.flight_url", "links.modes_url", "links.sonde_url", "links.geoip_url"}},
+		},
+	},
 }
 
 // formPageOf returns the form page of an admin section.

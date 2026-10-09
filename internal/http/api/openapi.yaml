@@ -382,6 +382,61 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /map/features:
+    get:
+      operationId: getMapFeatures
+      x-meshsdr-access: anonymous
+      summary: Current map features (MAP-002)
+      description: |
+        The features on the map that are not expired: APRS stations and
+        objects, WSJT and JS8 locators, call lines. Every device has its
+        own features (a station heard by two devices is two features with
+        the same `kind` and `subject`, which the map merges); the caller
+        gets the features of the enabled devices they may listen to
+        (effective listen policy), and nothing else: the newest 5000 by
+        `updated_at`, newest first, with `truncated` set when older ones
+        were left out. The map island loads them once, then follows the
+        `map.feature.upsert` and `map.feature.remove` events of the `map`
+        topic of `/api/ws`, and loads them again after a reconnection.
+        Times are Unix milliseconds. Every text value is untrusted radio
+        data: plain text, to be inserted as text, never as HTML.
+      tags: [map]
+      responses:
+        "200":
+          description: Map features
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapFeatures"
+        default:
+          $ref: "#/components/responses/Problem"
+  /map/config:
+    get:
+      operationId: getMapConfig
+      x-meshsdr-access: anonymous
+      summary: Map configuration (MAP-004, MAP-007, MAP-011, MAP-012, MAP-015)
+      description: |
+        What the map island needs besides the features: the offered base
+        layers (keyless tile URLs the browser loads directly) and the
+        default one, the lifetimes of positions and call lines, the most
+        call lines shown, the lookup link templates (one `{}` placeholder,
+        to be replaced by the URL-encoded value), and the receivers: one
+        marker per node position, per device with a position of its own,
+        and the station position (`receiver.gps`) for the devices of nodes
+        without a position. Receivers list only the devices the caller may
+        listen to; unless `map.precise_receivers` is set, their position is
+        the centre of their 4-character locator (SR-32). It never carries an
+        API key.
+      tags: [map]
+      responses:
+        "200":
+          description: Map configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapConfig"
+        default:
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
     FileID:
@@ -589,7 +644,11 @@ components:
       type: object
       additionalProperties: false
       required: [lat, lon]
-      description: Station position in decimal degrees (WGS 84); absent when unset.
+      description: |
+        Station position (`receiver.gps`) in decimal degrees (WGS 84);
+        absent when unset. Unless `map.precise_receivers` is set, it is the
+        centre of its 4-character Maidenhead locator, like the receivers of
+        `GET /map/config` (SR-32).
       properties:
         lat:
           type: number
@@ -822,6 +881,173 @@ components:
           type: boolean
         secret:
           type: boolean
+    MapFeatures:
+      type: object
+      additionalProperties: false
+      required: [features, truncated]
+      properties:
+        features:
+          type: array
+          items:
+            $ref: "#/components/schemas/MapFeature"
+        truncated:
+          type: boolean
+          description: More features matched; only the newest 5000 are listed.
+    MapFeature:
+      type: object
+      additionalProperties: false
+      required: [key, kind, subject, source, geometry, details, updated_at]
+      description: The map.feature.upsert payload of `/api/ws` has the same shape.
+      properties:
+        key:
+          type: string
+          description: Key `<kind>:<subject>@<device_id>` (aprs:F4ABC-9@vhf, locator:DL1ABC@hf, call:DL1ABC>F4ABC@hf).
+        kind:
+          type: string
+          enum: [aircraft, vessel, aprs, sonde, meshtastic, lora, locator, call, station, repeater, receiver, static, node, other]
+        subject:
+          type: string
+          description: |
+            What the feature shows, the same across devices: a callsign,
+            an APRS object or item name, or a call (`DL1ABC>F4ABC`, the two
+            stations in order). The map merges the features of the same
+            kind and subject.
+        source:
+          type: string
+          enum: [decode, mqtt, web_cache, config, gps]
+        device_id:
+          type: string
+          description: The device that reported the feature.
+        lat:
+          type: number
+          format: double
+          description: Position (centre of a locator square); absent for call lines.
+        lon:
+          type: number
+          format: double
+        geometry:
+          type: object
+          description: |
+            `{type: "point", lat, lon, track?: [{lat, lon}]}` (the previous
+            positions of a moving station, oldest first, at most 100),
+            `{type: "locator", locator}` or `{type: "line", from, to}` with
+            `from` and `to` as `{lat, lon, callsign, locator}`.
+          x-go-type: json.RawMessage
+        details:
+          type: object
+          description: Plain-text attributes by kind (label, mode, freq_hz, callsign, locator, symbol, comment, course, speed_kmh, altitude_m, hops, weather…).
+          x-go-type: json.RawMessage
+        updated_at:
+          type: integer
+          format: int64
+          description: Time of the last report, Unix milliseconds.
+        expires_at:
+          type: integer
+          format: int64
+          description: Absolute expiry, Unix milliseconds; absent for a permanent feature.
+    MapConfig:
+      type: object
+      additionalProperties: false
+      required: [station_name, base_layers, default_base_layer, position_retention_s, max_calls, call_retention_s, links, receivers]
+      properties:
+        station_name:
+          type: string
+        base_layers:
+          type: array
+          items:
+            $ref: "#/components/schemas/MapLayer"
+        default_base_layer:
+          type: string
+          description: Id of the base layer the map opens with.
+        position_retention_s:
+          type: integer
+          description: Default lifetime of positions and locators, seconds.
+        max_calls:
+          type: integer
+          description: Most call lines kept.
+        call_retention_s:
+          type: integer
+          description: Lifetime of call lines, seconds.
+        links:
+          $ref: "#/components/schemas/MapLinks"
+        receivers:
+          type: array
+          items:
+            $ref: "#/components/schemas/MapReceiver"
+    MapLayer:
+      type: object
+      additionalProperties: false
+      required: [id, name, url, attribution, max_zoom]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+          description: Tile URL template ({z}, {x}, {y}, {s} for a subdomain, {r} for the retina suffix).
+        subdomains:
+          type: string
+          description: Subdomain letters of {s}.
+        attribution:
+          type: string
+          description: Plain-text attribution.
+        max_zoom:
+          type: integer
+    MapLinks:
+      type: object
+      additionalProperties: false
+      description: Lookup link templates with one `{}` placeholder; absent when disabled.
+      properties:
+        callsign_url:
+          type: string
+        vessel_url:
+          type: string
+        flight_url:
+          type: string
+        modes_url:
+          type: string
+        sonde_url:
+          type: string
+    MapReceiver:
+      type: object
+      additionalProperties: false
+      required: [key, kind, name, lat, lon, locator, precise, devices]
+      properties:
+        key:
+          type: string
+          description: receiver:node:<id>, receiver:device:<id> or receiver:station.
+        kind:
+          type: string
+          enum: [node, device, station]
+        name:
+          type: string
+          description: The node, device or station name.
+        lat:
+          type: number
+          format: double
+        lon:
+          type: number
+          format: double
+        locator:
+          type: string
+          description: 4-character locator, or 6 when precise.
+        precise:
+          type: boolean
+          description: False when the position is the centre of the locator.
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/MapReceiverDevice"
+    MapReceiverDevice:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
   responses:
     Problem:
       description: Error

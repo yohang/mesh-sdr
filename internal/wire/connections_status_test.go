@@ -168,3 +168,35 @@ func TestPublicStatus(t *testing.T) {
 		})
 	}
 }
+
+// SR-32: the public status publishes the station position at the centre of
+// its 4-character locator, like the map receivers, unless
+// map.precise_receivers is set.
+func TestStatusPositionCoarse(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		precise  string
+		lat, lon float64
+	}{
+		{"coarse by default", "", 50.5, 3},
+		{"precise", "true", 50.63, 3.06},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			env := map[string]string{"MESHSDR_SETTINGS__RECEIVER__GPS": "50.63,3.06"}
+			if tt.precise != "" {
+				env["MESHSDR_SETTINGS__MAP__PRECISE_RECEIVERS"] = tt.precise
+			}
+
+			h := newAdminHub(t, env)
+
+			for _, path := range []string{"/api/v1/status", "/status.json"} {
+				code, st, _ := h.browser("").json(http.MethodGet, path, "")
+				pos, _ := st["position"].(map[string]any)
+
+				if code != http.StatusOK || pos == nil || pos["lat"] != tt.lat || pos["lon"] != tt.lon {
+					t.Errorf("%s = %d position %v, want %g,%g", path, code, pos, tt.lat, tt.lon)
+				}
+			}
+		})
+	}
+}

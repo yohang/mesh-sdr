@@ -100,6 +100,12 @@ func (m *Module) Ingest(ctx context.Context, node string, payload json.RawMessag
 
 		r.ID = id
 
+		if m.d.Stored != nil {
+			if err := m.d.Stored(ctx, r.Message); err != nil {
+				return err
+			}
+		}
+
 		m.mu.Lock()
 		m.pending[node] = append(m.pending[node], r.Message)
 		m.mu.Unlock()
