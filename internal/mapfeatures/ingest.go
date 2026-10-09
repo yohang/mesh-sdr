@@ -64,7 +64,14 @@ func (m *Module) report(ctx context.Context, node string, r report, s Settings, 
 			return nil
 		}
 
-		f.Geometry.Track = track(prev, f)
+		// The track carries positions only from the same device: the
+		// viewers of this device may not see the previous one. Those
+		// viewers get the removal of the feature, which leaves their device.
+		if prev.DeviceID == f.DeviceID {
+			f.Geometry.Track = track(prev, f)
+		} else {
+			m.queue(node, Change{Remove: &Removal{Key: f.Key, Reason: ReasonDeleted, DeviceID: prev.DeviceID}})
+		}
 	}
 
 	return m.upsert(ctx, node, f)
@@ -95,12 +102,12 @@ func (m *Module) call(ctx context.Context, d Decode, c call, s Settings, now tim
 		return nil
 	}
 
-	from, ok1, err := m.located(ctx, c.from, now)
+	from, ok1, err := m.located(ctx, c.from, d.DeviceID, now)
 	if err != nil || !ok1 {
 		return err
 	}
 
-	to, ok2, err := m.located(ctx, c.to, now)
+	to, ok2, err := m.located(ctx, c.to, d.DeviceID, now)
 	if err != nil || !ok2 {
 		return err
 	}
@@ -123,10 +130,11 @@ func (m *Module) call(ctx context.Context, d Decode, c call, s Settings, now tim
 	return m.capCalls(ctx, d.NodeID, s.MaxCalls)
 }
 
-// located returns the locator of a station still on the map.
-func (m *Module) located(ctx context.Context, station string, now time.Time) (Endpoint, bool, error) {
+// located returns the locator of a station still on the map, reported by
+// device: a line shows only what the viewers of its device may see.
+func (m *Module) located(ctx context.Context, station, device string, now time.Time) (Endpoint, bool, error) {
 	f, ok, err := m.repo.Get(ctx, string(KindLocator)+":"+station)
-	if err != nil || !ok || f.Lat == nil || f.Lon == nil || (!f.ExpiresAt.IsZero() && !f.ExpiresAt.After(now)) {
+	if err != nil || !ok || f.DeviceID != device || f.Lat == nil || f.Lon == nil || (!f.ExpiresAt.IsZero() && !f.ExpiresAt.After(now)) {
 		return Endpoint{}, false, err
 	}
 
