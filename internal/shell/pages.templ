@@ -1,8 +1,6 @@
 package shell
 
-import (
-	"github.com/yohang/mesh-sdr/internal/web/layout"
-)
+import "github.com/yohang/mesh-sdr/internal/web/layout"
 
 // receiverPage is the Receiver section: the station, then the receiver
 // island (static/js/receiver/island.js, ADR 0015) with its initial state and
@@ -16,7 +14,9 @@ templ receiverPage(siteName string, st StationView, descHTML string, rx receiver
 			<img src="/api/v1/branding/avatar" alt="" width="48" height="48" class="size-12 rounded-md object-cover"/>
 		}
 		<div>
-			<h1 class="text-2xl font-semibold">{ siteName }</h1>
+			@layout.Title("") {
+				{ siteName }
+			}
 			if st.Location != "" {
 				<p class="text-fg-muted">{ st.Location }</p>
 			}
@@ -58,7 +58,9 @@ templ receiverPage(siteName string, st StationView, descHTML string, rx receiver
 
 // placeholderPage is a section whose module does not exist yet.
 templ placeholderPage(title, notice string) {
-	<h1 class="text-2xl font-semibold">{ title }</h1>
+	@layout.Title("") {
+		{ title }
+	}
 	<p class="mt-2 text-fg-muted">{ notice }</p>
 }
 

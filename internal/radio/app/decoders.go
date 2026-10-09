@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -132,10 +131,6 @@ type DecoderEvents struct {
 	File func(ProducedFile)
 	// Spectrum receives the secondary FFT lines while it is on (DEC-004).
 	Spectrum func(SpectrumFrame)
-	// Dial returns the current dial frequency of the demodulator (0:
-	// unknown): slot decoders stamp each slot with the dial at its start
-	// (DecodeRecord.DialHz). It must not block.
-	Dial func() int64
 }
 
 // DecoderSpec describes a decoder session to start.
@@ -148,9 +143,11 @@ type DecoderSpec struct {
 	// OffsetHz is the secondary offset of a text decoder (DEC-005): the
 	// frequency of the signal relative to the dial.
 	OffsetHz float64
-	// DialHz returns the dial frequency of the demodulator (the skimmers
-	// clear their text when it changes); nil in tests. It never blocks.
-	DialHz func() int64
+	// Dial returns the current dial frequency of the demodulator (0:
+	// unknown; nil in tests): the skimmers clear their text when it
+	// changes, slot decoders stamp each slot with the dial at its start
+	// (DecodeRecord.DialHz). It never blocks.
+	Dial func() int64
 }
 
 // DecoderRun is a running decoder session.
@@ -286,13 +283,10 @@ func (d *Decoders) Check(name string) (domain.DigitalMode, error) {
 	return m, nil
 }
 
-// ErrNodeBusy refuses a decoder session beyond decoders.max_sessions.
-var ErrNodeBusy = errors.New("node busy")
-
 // Start starts a new session of spec: its mode and variant (already
 // checked), the secondary offset of a text decoder; the session id is set
 // here. events builds the receivers of its output for its session id.
-// Beyond the node's session cap it returns ErrNodeBusy.
+// Beyond the node's session cap it returns domain.ErrNodeBusy.
 func (d *Decoders) Start(spec DecoderSpec, events func(id shared.UUID) DecoderEvents) (shared.UUID, DecoderRun, error) {
 	m := spec.Mode
 
@@ -304,7 +298,7 @@ func (d *Decoders) Start(spec DecoderSpec, events func(id shared.UUID) DecoderEv
 	d.mu.Unlock()
 
 	if busy {
-		return shared.UUID{}, nil, ErrNodeBusy
+		return shared.UUID{}, nil, domain.ErrNodeBusy
 	}
 
 	id, err := d.ids.New(d.now())

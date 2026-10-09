@@ -2,11 +2,13 @@ package shell
 
 import (
 	"context"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // Gate decides whether the visitor of a request may open a section. Gates
 // are supplied at wiring by the modules that own the sections' policies
-// (identity for Admin; the files, decodes and map modules later).
+// (identity for Admin, files for Files).
 type Gate interface {
 	Allows(ctx context.Context) bool
 }
@@ -20,32 +22,35 @@ func (f GateFunc) Allows(ctx context.Context) bool { return f(ctx) }
 // Everyone is the gate of a section open to every visitor.
 var Everyone Gate = GateFunc(func(context.Context) bool { return true })
 
-// Navigation lists the sections a visitor may open (UI-006). A section
-// without a gate is never shown, so the navigation fails closed.
-type Navigation struct {
-	gates map[Section]Gate
+// sections are the top-level sections of the navigation (UI-006,
+// FEATURE_SPEC §10.2), in order.
+var sections = []layout.Link{
+	{Section: layout.SectionReceiver, Label: "Receiver", Href: "/"},
+	{Section: layout.SectionMap, Label: "Map", Href: "/map"},
+	{Section: layout.SectionDecodes, Label: "Decodes", Href: "/decodes"},
+	{Section: layout.SectionFiles, Label: "Files", Href: "/files"},
+	{Section: layout.SectionAdmin, Label: "Admin", Href: "/admin"},
 }
 
-// NewNavigation returns the use case. gates holds the gate of each section.
-func NewNavigation(gates map[Section]Gate) *Navigation {
-	g := make(map[Section]Gate, len(gates))
-	for s, gate := range gates {
-		if gate != nil {
-			g[s] = gate
+// sectionLink returns the navigation link of a section.
+func sectionLink(id string) layout.Link {
+	for _, l := range sections {
+		if l.Section == id {
+			return l
 		}
 	}
 
-	return &Navigation{gates: g}
+	return layout.Link{}
 }
 
-// Sections returns the sections the visitor of ctx may open, in navigation
-// order.
-func (n *Navigation) Sections(ctx context.Context) []Section {
-	var out []Section
+// nav returns the sections the visitor of ctx may open, in order. A section
+// without a gate is never shown, so the navigation fails closed.
+func nav(ctx context.Context, gates map[string]Gate) []layout.Link {
+	var out []layout.Link
 
-	for _, s := range Sections() {
-		if g, ok := n.gates[s]; ok && g.Allows(ctx) {
-			out = append(out, s)
+	for _, l := range sections {
+		if g := gates[l.Section]; g != nil && g.Allows(ctx) {
+			out = append(out, l)
 		}
 	}
 

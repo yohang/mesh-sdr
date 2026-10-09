@@ -20,9 +20,7 @@ import (
 const EASSchema = "eas.v1"
 
 // easArgs runs multimon-ng with the EAS decoder.
-func easArgs(sessionConfig) []string {
-	return []string{"-c", "-v", "0", "-t", "raw", "-a", "EAS", "-"}
-}
+func easArgs(sessionConfig) []string { return multimon(nil, "EAS") }
 
 // EASRecord is the eas.v1 payload.
 type EASRecord struct {
@@ -175,7 +173,7 @@ func sameTime(s string, at time.Time) (time.Time, bool) {
 			continue
 		}
 
-		if !found || absDur(t.Sub(at)) < absDur(best.Sub(at)) {
+		if !found || t.Sub(at).Abs() < best.Sub(at).Abs() {
 			best, found = t, true
 		}
 	}

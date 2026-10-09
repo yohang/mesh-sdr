@@ -44,6 +44,13 @@ func ParseRuntimeState(s string) (RuntimeState, error) {
 	return "", ErrInvalidDevice.WithDetail("unknown device state " + strconv.Quote(s))
 }
 
+// Listen policies (§7.4 listen_policy): who may listen to a device,
+// globally or as a device's node config override.
+const (
+	ListenAnonymous  = "anonymous"
+	ListenRegistered = "registered"
+)
+
 // DeviceSpec is the device definition reported from the node config.
 type DeviceSpec struct {
 	ID                shared.DeviceID
@@ -115,7 +122,7 @@ func (s DeviceSpec) validate() error {
 		return ErrInvalidDevice.WithDetail("invalid definition of device " + strconv.Quote(s.ID.String()))
 	}
 
-	if s.ListenPolicy != "" && s.ListenPolicy != "anonymous" && s.ListenPolicy != "registered" {
+	if s.ListenPolicy != "" && s.ListenPolicy != ListenAnonymous && s.ListenPolicy != ListenRegistered {
 		return ErrInvalidDevice.WithDetail("invalid listen_policy of device " + strconv.Quote(s.ID.String()))
 	}
 
@@ -253,9 +260,6 @@ func (d *Device) ApplyState(state RuntimeState, reason string, centerFreq *int64
 	d.preset = preset
 	d.reportedAt = ms(now)
 }
-
-// SetOffline marks the device offline (its node is offline).
-func (d *Device) SetOffline() { d.online = false }
 
 // ID returns the device id.
 func (d *Device) ID() shared.DeviceID { return d.id }

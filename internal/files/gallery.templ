@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // kindLabels name the kinds for people.
@@ -71,11 +73,11 @@ func metadataRows(e Entry) [][2]string {
 
 // galleryPage is the Files section (FIL-001): filters, tiles, pages.
 templ galleryPage(v galleryView) {
-	<h1 class="text-2xl font-semibold">Files</h1>
-	<p class="text-fg-muted">Images and logs the decoders received, newest first. Times are in UTC. Files are kept: { v.Policy }.</p>
-	if v.Notice != "" {
-		<p class="font-semibold text-success" role="status">{ v.Notice }</p>
+	@layout.Title("") {
+		Files
 	}
+	<p class="text-fg-muted">Images and logs the decoders received, newest first. Times are in UTC. Files are kept: { v.Policy }.</p>
+	@layout.Notice("", v.Notice)
 	@filtersForm(v)
 	<section id="files-results" class="mt-4 flex flex-col gap-4" aria-labelledby="title-results">
 		<h2 id="title-results" class="sr-only">Files</h2>
@@ -99,7 +101,7 @@ templ galleryPage(v galleryView) {
 							if m, ok := f.Metadata["sstv_mode"].(string); ok && m != "" {
 								({ m })
 							}
-							· { HumanSize(f.Size) }
+							· { layout.HumanBytes(f.Size) }
 							if f.DeviceID != "" {
 								· { f.DeviceID }
 							}
@@ -108,17 +110,7 @@ templ galleryPage(v galleryView) {
 				}
 			</ul>
 		}
-		if v.Page > 1 || v.More {
-			<nav aria-label="Pages of files" class="flex flex-wrap gap-4">
-				if v.Page > 1 {
-					<a href={ templ.SafeURL(v.pageURL(v.Page - 1)) }>Newer files</a>
-				}
-				<span class="text-fg-muted">Page { strconv.Itoa(v.Page) }</span>
-				if v.More {
-					<a href={ templ.SafeURL(v.pageURL(v.Page + 1)) }>Older files</a>
-				}
-			</nav>
-		}
+		@layout.Pager(v.Paging)
 	</section>
 	if v.CanBulkDelete {
 		@bulkDeleteForm(v)
@@ -162,10 +154,10 @@ templ filtersForm(v galleryView) {
 				}
 			</select>
 		</div>
-		@filterInput("from", "Received from (UTC)", "datetime-local", v.Filter.From, v.Filter.Errors["from"])
-		@filterInput("to", "Received before (UTC)", "datetime-local", v.Filter.To, v.Filter.Errors["to"])
-		@filterInput("freq_min", "Lowest frequency (kHz)", "number", v.Filter.FreqMin, v.Filter.Errors["freq_min"])
-		@filterInput("freq_max", "Highest frequency (kHz)", "number", v.Filter.FreqMax, v.Filter.Errors["freq_max"])
+		@layout.FilterInput("from", "Received from (UTC)", "datetime-local", v.Filter.From, v.Filter.Errors["from"])
+		@layout.FilterInput("to", "Received before (UTC)", "datetime-local", v.Filter.To, v.Filter.Errors["to"])
+		@layout.FilterInput("freq_min", "Lowest frequency (kHz)", "number", v.Filter.FreqMin, v.Filter.Errors["freq_min"])
+		@layout.FilterInput("freq_max", "Highest frequency (kHz)", "number", v.Filter.FreqMax, v.Filter.Errors["freq_max"])
 		<div class="flex items-center gap-4">
 			<button type="submit" class="rounded border border-border px-3 py-1 font-semibold">Filter</button>
 			if v.Filter.active() {
@@ -173,42 +165,6 @@ templ filtersForm(v galleryView) {
 			}
 		</div>
 	</form>
-}
-
-templ filterInput(name, label, kind, value, failure string) {
-	<div class="flex flex-col gap-1">
-		<label for={ "filter-" + name } class="font-medium">{ label }</label>
-		if kind == "number" {
-			<input
-				id={ "filter-" + name }
-				name={ name }
-				value={ value }
-				type="number"
-				min="0"
-				step="any"
-				class="w-40 rounded border border-border px-2 py-1"
-				if failure != "" {
-					aria-invalid="true"
-					aria-describedby={ "filter-" + name + "-error" }
-				}
-			/>
-		} else {
-			<input
-				id={ "filter-" + name }
-				name={ name }
-				value={ value }
-				type="datetime-local"
-				class="rounded border border-border px-2 py-1"
-				if failure != "" {
-					aria-invalid="true"
-					aria-describedby={ "filter-" + name + "-error" }
-				}
-			/>
-		}
-		if failure != "" {
-			<p id={ "filter-" + name + "-error" } class="text-sm text-danger">{ failure }</p>
-		}
-	</div>
 }
 
 // bulkDeleteForm deletes every file matching the filters (FIL-003,
@@ -245,7 +201,11 @@ func bulkQuestion(v galleryView) string {
 // detailPage is the detail view of a file (FIL-007).
 templ detailPage(v detailView) {
 	<p><a href={ templ.SafeURL(GalleryPath) }>Files</a></p>
-	<h1 class="break-all text-2xl font-semibold">{ v.File.Name }</h1>
+	<div class="break-all">
+		@layout.Title("") {
+			{ v.File.Name }
+		}
+	</div>
 	<div class="flex flex-col gap-4 lg:flex-row">
 		<section class="min-w-0 flex-1" aria-labelledby="title-preview">
 			<h2 id="title-preview" class="sr-only">Preview</h2>
@@ -286,7 +246,7 @@ templ detailPage(v detailView) {
 				if !v.File.PresetID.IsZero() {
 					@detailRow("Preset", v.File.PresetID.String())
 				}
-				@detailRow("Size", HumanSize(v.File.Size))
+				@detailRow("Size", layout.HumanBytes(v.File.Size))
 				if v.File.Width > 0 {
 					@detailRow("Dimensions", strconv.Itoa(v.File.Width)+" × "+strconv.Itoa(v.File.Height)+" pixels")
 				}

@@ -71,10 +71,6 @@ func (w Window) Minutes() (int, int) { return w.start, w.end }
 // Phase returns the daylight phase.
 func (w Window) Phase() Phase { return w.phase }
 
-// Wraps reports whether a static slot wraps over midnight (a whole-day
-// slot included).
-func (w Window) Wraps() bool { return w.kind == KindStatic && w.end <= w.start }
-
 // WholeDay reports whether a static slot lasts 24 h (start = end).
 func (w Window) WholeDay() bool { return w.kind == KindStatic && w.end == w.start }
 

@@ -9,7 +9,9 @@ import (
 // formPageView is a page of form sections. extra is a page-specific block
 // (images, read-only access keys, the retention stores).
 templ formPageView(p formPage, views []sectionView, extra templ.Component) {
-	<h1 class="text-2xl font-semibold">{ p.Title }</h1>
+	@layout.Title("") {
+		{ p.Title }
+	}
 	if p.Intro != "" {
 		<p class="text-fg-muted">{ p.Intro }</p>
 	}
@@ -47,31 +49,8 @@ templ sectionForm(v sectionView) {
 		if v.Spec.Description != "" {
 			<p class="text-sm text-fg-muted">{ v.Spec.Description }</p>
 		}
-		if len(v.Problems) > 0 {
-			<div class="rounded border border-danger p-3" role="alert" tabindex="-1">
-				<p class="font-semibold text-danger">
-					if len(v.Problems) == 1 {
-						The settings were not saved: 1 problem.
-					} else {
-						The settings were not saved: { strconv.Itoa(len(v.Problems)) } problems.
-					}
-				</p>
-				<ul class="mt-1 list-disc pl-5">
-					for _, p := range v.Problems {
-						<li>
-							if p.FieldID != "" {
-								<a href={ templ.SafeURL("#" + p.FieldID) }>{ p.Text }</a>
-							} else {
-								{ p.Text }
-							}
-						</li>
-					}
-				</ul>
-			</div>
-		}
-		if v.Notice != "" {
-			<p class="font-semibold text-success" role="status">{ v.Notice }</p>
-		}
+		@layout.ErrorSummary("The settings were not saved: "+layout.Count(len(v.Problems), "problem", "problems")+".", v.Problems)
+		@layout.Notice("", v.Notice)
 		for _, f := range v.Fields {
 			@fieldView(f)
 		}
@@ -150,7 +129,7 @@ templ fieldView(f field) {
 		switch {
 			case f.Locked:
 				<label for={ f.ID } class="font-medium">{ f.Label } <span class="text-sm text-fg-muted">(locked)</span></label>
-				<input id={ f.ID } type="text" class="rounded border border-border bg-surface-raised px-2 py-1" readonly aria-readonly="true" value={ displayValue(f.Kind, lockedValue(f)) } aria-describedby={ describedBy(f) } { invalid(f)... }/>
+				<input id={ f.ID } type="text" class="rounded border border-border bg-surface-raised px-2 py-1" readonly aria-readonly="true" value={ displayValue(f.Kind, f.Current) } aria-describedby={ describedBy(f) } { invalid(f)... }/>
 			case f.Kind == InputBoolean:
 				<div class="flex items-center gap-2">
 					<input type="hidden" name={ f.Key } value="false"/>
@@ -188,7 +167,8 @@ templ fieldView(f field) {
 					if f.MaxLen > 0 {
 						maxlength={ strconv.Itoa(f.MaxLen) }
 					}
-					aria-describedby={ describedBy(f) } { invalid(f)... }
+					aria-describedby={ describedBy(f) }
+					{ invalid(f)... }
 				>{ f.Value }</textarea>
 			default:
 				<label for={ f.ID } class="font-medium">{ f.Label }</label>
@@ -215,7 +195,8 @@ templ fieldView(f field) {
 					}
 					autocomplete="off"
 					spellcheck="false"
-					aria-describedby={ describedBy(f) } { invalid(f)... }
+					aria-describedby={ describedBy(f) }
+					{ invalid(f)... }
 				/>
 		}
 		@fieldHelp(f)
@@ -228,36 +209,6 @@ func textareaRows(f field) string {
 	}
 
 	return "4"
-}
-
-// lockedValue rebuilds the effective value of a locked field for display.
-func lockedValue(f field) Value {
-	switch f.Kind {
-	case InputBoolean:
-		if f.Checked {
-			return MustValue("true")
-		}
-
-		return MustValue("false")
-	case InputGeo:
-		if f.Lat == "" {
-			return MustValue("null")
-		}
-
-		v, err := NewValue([]byte(`{"lat":` + f.Lat + `,"lon":` + f.Lon + `}`))
-		if err != nil {
-			return MustValue("null")
-		}
-
-		return v
-	default:
-		v, err := ValueOf(f.Value)
-		if err != nil {
-			return MustValue("null")
-		}
-
-		return v
-	}
 }
 
 // adminNetworks shows admin.allowed_networks, a config-only key (ADM-005).
@@ -284,12 +235,8 @@ templ adminNetworks(e ConfigEntry) {
 templ storesView(rows []RetentionRow, notice, failure string) {
 	<section id="retention-stores" class="flex flex-col gap-2" aria-labelledby="title-stores">
 		<h2 id="title-stores" class="text-lg font-semibold">Stores</h2>
-		if notice != "" {
-			<p class="font-semibold text-success" role="status">{ notice }</p>
-		}
-		if failure != "" {
-			<p class="font-semibold text-danger" role="alert">{ failure }</p>
-		}
+		@layout.Notice("", notice)
+		@layout.Failure("", failure)
 		@layout.TableScroll("Stores") {
 			<table class="w-full text-left">
 				<caption class="sr-only">Row count, size and last purge of each store</caption>
@@ -311,7 +258,7 @@ templ storesView(rows []RetentionRow, notice, failure string) {
 							<td class="py-1 pr-4">{ strconv.FormatInt(r.Rows, 10) }</td>
 							<td class="py-1 pr-4">
 								if r.Sized {
-									{ humanBytes(r.Bytes) }
+									{ layout.HumanBytes(r.Bytes) }
 								} else {
 									unknown
 								}
@@ -333,7 +280,9 @@ templ storesView(rows []RetentionRow, notice, failure string) {
 
 // overviewPage is the admin landing page (ADM-001).
 templ overviewPage(s overviewSummary) {
-	<h1 class="text-2xl font-semibold">Administration</h1>
+	@layout.Title("") {
+		Administration
+	}
 	<section class="flex flex-col gap-2 rounded border border-border bg-surface p-4" aria-labelledby="title-health">
 		<h2 id="title-health" class="text-lg font-semibold">Health</h2>
 		<ul class="list-disc pl-5">
@@ -383,7 +332,9 @@ templ overviewPage(s overviewSummary) {
 
 // systemPage is the effective configuration view (ADM-010).
 templ systemPage(v ConfigView) {
-	<h1 class="text-2xl font-semibold">System</h1>
+	@layout.Title("") {
+		System
+	}
 	<section class="flex flex-col gap-2" aria-labelledby="title-config">
 		<div class="flex flex-wrap items-baseline justify-between gap-2">
 			<h2 id="title-config" class="text-lg font-semibold">Effective configuration</h2>

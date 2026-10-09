@@ -9,6 +9,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // writeExport sends an account export as a JSON download.
@@ -52,9 +53,7 @@ func (m *Module) userExportAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) deleteOwnAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -67,7 +66,7 @@ func (m *Module) deleteOwnAction(w http.ResponseWriter, r *http.Request) {
 
 	if err == nil {
 		http.SetCookie(w, m.cookie(m.sessionCookieName(), "", -1))
-		m.redirect(w, r, "/")
+		render.Redirect(w, r, "/")
 
 		return
 	}
@@ -86,9 +85,7 @@ func (m *Module) deleteOwnAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) userDeleteAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -103,12 +100,12 @@ func (m *Module) userDeleteAction(w http.ResponseWriter, r *http.Request) {
 		if err = m.accounts.Delete(r.Context(), m.Actor(r.Context()), id); err == nil {
 			if m.Principal(r.Context()).UserID() == id {
 				http.SetCookie(w, m.cookie(m.sessionCookieName(), "", -1))
-				m.redirect(w, r, "/")
+				render.Redirect(w, r, "/")
 
 				return
 			}
 
-			m.redirect(w, r, UsersPath)
+			render.Redirect(w, r, UsersPath)
 
 			return
 		}

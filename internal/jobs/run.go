@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"regexp"
 	"strconv"
 	"time"
@@ -91,7 +90,7 @@ func (r *Run) Finish(now time.Time, rows int64, err error) {
 
 	if err != nil {
 		r.status = StatusError
-		r.lastError = truncate(err.Error(), maxErrorLength)
+		r.lastError = shared.Truncate(err.Error(), maxErrorLength)
 	}
 }
 
@@ -108,18 +107,6 @@ func (r *Run) Abandon(now time.Time) bool {
 	r.runningSince, r.lastFinished, r.status, r.lastError = time.Time{}, now.UTC(), StatusError, Interrupted
 
 	return true
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-
-	for n > 0 && s[n]&0xC0 == 0x80 { // do not cut a UTF-8 sequence
-		n--
-	}
-
-	return s[:n]
 }
 
 // Name returns the job name.
@@ -145,10 +132,3 @@ func (r *Run) LastError() string { return r.lastError }
 
 // Rows returns the rows affected by the last finished run.
 func (r *Run) Rows() int64 { return r.rows }
-
-// Repository persists runs. Writes join the caller's transaction.
-type Repository interface {
-	// Get returns the run of name, or nil when the job never ran.
-	Get(ctx context.Context, name string) (*Run, error)
-	Save(ctx context.Context, r *Run) error
-}

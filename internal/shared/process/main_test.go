@@ -51,19 +51,17 @@ func TestMain(m *testing.M) {
 func fakeNode() {
 	var mu sync.Mutex
 	say := func(s string) { mu.Lock(); fmt.Println(s); mu.Unlock() }
-	sup, err := New(Options{
-		RuntimeDir: os.Getenv("PROCESS_TEST_RUNTIME"),
-		Sink: func(e Event) {
-			if e.State == StateRunning && e.PID != 0 {
-				say(fmt.Sprintf("pid %d", e.PID))
-			}
-		},
-	})
+	sup, err := New(Options{RuntimeDir: os.Getenv("PROCESS_TEST_RUNTIME")})
 	if err != nil {
 		panic(err)
 	}
 	in, err := sup.NewInstance(Spec{
 		ID: "node-conn", Kind: "connector", Path: os.Getenv("PROCESS_TEST_TOOL"),
+		Sink: func(e Event) {
+			if e.State == StateRunning && e.PID != 0 {
+				say(fmt.Sprintf("pid %d", e.PID))
+			}
+		},
 		Args: []string{"-interval", "5ms", "-spawn-child"},
 		OnLine: func(l Line) {
 			if strings.HasPrefix(l.Text, "child ") {
@@ -153,15 +151,25 @@ func logger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-func newSup(t *testing.T, rec *recorder) (*Supervisor, string) {
+// testSup is a supervisor whose instances report to a recorder.
+type testSup struct {
+	*Supervisor
+	sink Sink
+}
+
+func (s testSup) NewInstance(spec Spec) (*Instance, error) {
+	spec.Sink = s.sink
+	return s.Supervisor.NewInstance(spec)
+}
+
+func newSup(t *testing.T, rec *recorder) (testSup, string) {
 	t.Helper()
 	rt := filepath.Join(t.TempDir(), "run")
-	self, _ := filepath.Abs(os.Args[0])
-	sup, err := New(Options{RuntimeDir: rt, Logger: logger(), Sink: rec.sink, HelperPath: self})
+	sup, err := New(Options{RuntimeDir: rt, Logger: logger()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sup, rt
+	return testSup{Supervisor: sup, sink: rec.sink}, rt
 }
 
 type runHandle struct {

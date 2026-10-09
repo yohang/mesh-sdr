@@ -10,7 +10,9 @@ import (
 // nodesPage lists the nodes (GRID-009). Operators read it; admins also add
 // nodes and reach the heartbeat settings.
 templ nodesPage(v nodesView) {
-	<h1 class="text-2xl font-semibold">Nodes</h1>
+	@layout.Title("") {
+		Nodes
+	}
 	<p class="text-fg-muted">Nodes run the receivers. The hub connects to each enrolled node and follows its health.</p>
 	if v.CanAdmin {
 		<p class="flex flex-wrap gap-x-4 gap-y-1">
@@ -123,7 +125,9 @@ templ certExpiry(n *domain.Node, warn bool) {
 // (GRID-005, GRID-015). The status part is the live fragment; the forms are
 // outside it, so a refresh never touches what an admin is typing.
 templ nodePage(v nodeView) {
-	<h1 class="text-2xl font-semibold">{ v.Node.Name().String() }</h1>
+	@layout.Title("") {
+		{ v.Node.Name().String() }
+	}
 	<p class="text-fg-muted">
 		Node <span class="font-mono">{ v.Node.ID().String() }</span>,
 		if v.Node.Origin() == domain.OriginConfig {
@@ -133,12 +137,8 @@ templ nodePage(v nodeView) {
 		}
 		<a href="/admin/nodes">All nodes</a>
 	</p>
-	if v.Notice != "" {
-		<p class="rounded border border-success p-3" role="status">{ v.Notice }</p>
-	}
-	if v.Failure != "" {
-		<p class="rounded border border-danger p-3 font-semibold text-danger" role="alert">{ v.Failure }</p>
-	}
+	@layout.Notice("", v.Notice)
+	@layout.Failure("", v.Failure)
 	@nodeLive(v)
 	if v.CanAdmin {
 		@nodeActions(v)
@@ -474,11 +474,11 @@ templ nodeActions(v nodeView) {
 
 // newNodePage is the form that adds a node (GRID-005).
 templ newNodePage(f nodeForm, failure string) {
-	<h1 class="text-2xl font-semibold">Add a node</h1>
-	<p class="text-fg-muted">The hub declares the node and shows a one-time enrollment token. Run the enrollment on the node with it: the hub then connects to the node.</p>
-	if failure != "" {
-		<p class="rounded border border-danger p-3 font-semibold text-danger" role="alert">{ failure }</p>
+	@layout.Title("") {
+		Add a node
 	}
+	<p class="text-fg-muted">The hub declares the node and shows a one-time enrollment token. Run the enrollment on the node with it: the hub then connects to the node.</p>
+	@layout.Failure("", failure)
 	<form class="flex max-w-xl flex-col gap-3" method="post" action="/admin/nodes">
 		<label class="flex flex-col gap-1">
 			<span class="font-medium">Node id</span>
@@ -501,13 +501,13 @@ templ newNodePage(f nodeForm, failure string) {
 
 // tokenPage shows an enrollment token once (GRID-006).
 templ tokenPage(v tokenView) {
-	<h1 class="text-2xl font-semibold">
+	@layout.Title("") {
 		if v.Added {
 			Node added
 		} else {
 			New enrollment token
 		}
-	</h1>
+	}
 	<p class="rounded border border-warning p-3" role="status">
 		{ "The enrollment token of " + v.Node.Name().String() + " is shown once: copy it now. It can be used once, until " + utc(v.ExpiresAt) + "." }
 	</p>

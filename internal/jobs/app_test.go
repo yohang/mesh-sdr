@@ -206,20 +206,6 @@ func TestSchedulerRunsAtStart(t *testing.T) {
 	}
 }
 
-func TestBatched(t *testing.T) {
-	left := 25
-
-	n, err := jobs.Batched(context.Background(), 10, func(_ context.Context, batch int) (int, error) {
-		k := min(batch, left)
-		left -= k
-
-		return k, nil
-	})
-	if err != nil || n != 25 || left != 0 {
-		t.Errorf("batched = %d, %v, left %d", n, err, left)
-	}
-}
-
 type stats struct{ rows int64 }
 
 func (s stats) Stats(context.Context) (int64, int64, bool, error) { return s.rows, 4096, true, nil }
@@ -252,5 +238,14 @@ func TestRetention(t *testing.T) {
 
 	if _, err := r.Purge(ctx, "files"); !errors.Is(err, jobs.ErrUnknownStore) {
 		t.Errorf("unknown store: %v", err)
+	}
+}
+
+func TestFunc(t *testing.T) {
+	s, _ := newScheduler(t)
+	s.Register(jobs.Func("test.func", func(context.Context) (int64, error) { return 7, nil }), time.Hour)
+
+	if n, err := s.RunNow(context.Background(), "test.func"); n != 7 || err != nil {
+		t.Errorf("RunNow = %d, %v", n, err)
 	}
 }

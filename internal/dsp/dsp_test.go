@@ -382,7 +382,7 @@ func TestFramerCodecs(t *testing.T) {
 
 		switch codec {
 		case rxv1.CodecPCMS16LE:
-			if len(frames[0].Payload) != 480 || int16(binary.LittleEndian.Uint16(frames[0].Payload[2:])) != toS16(audio[1]) {
+			if len(frames[0].Payload) != 480 || int16(binary.LittleEndian.Uint16(frames[0].Payload[2:])) != ToS16(audio[1]) {
 				t.Fatal("pcm payload")
 			}
 		case rxv1.CodecADPCMIMA:
@@ -392,8 +392,8 @@ func TestFramerCodecs(t *testing.T) {
 			}
 
 			dec := DecodeADPCM(st.Predictor, st.StepIndex, nib)
-			if math.Abs(float64(dec[100])-float64(toS16(audio[340]))) > 2000 {
-				t.Fatalf("adpcm frame 1 does not decode on its own: %d vs %d", dec[100], toS16(audio[340]))
+			if math.Abs(float64(dec[100])-float64(ToS16(audio[340]))) > 2000 {
+				t.Fatalf("adpcm frame 1 does not decode on its own: %d vs %d", dec[100], ToS16(audio[340]))
 			}
 		}
 	}

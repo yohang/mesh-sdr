@@ -30,6 +30,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 //go:generate go tool templ generate
@@ -41,118 +43,18 @@ const CSRFHeader = "X-CSRF-Token"
 // (/login, /logout, /api/v1/auth/*): they take a login and a password.
 const AuthBodyLimit = 64 << 10
 
-// Authenticator is the identity application service used by the HTTP layer.
-type Authenticator interface {
-	Login(ctx context.Context, in app.LoginInput) (app.LoginResult, error)
-	Resolve(ctx context.Context, cookie string) (app.Resolution, error)
-	// Peek is Resolve without recording activity.
-	Peek(ctx context.Context, cookie string) (app.Resolution, error)
-	Logout(ctx context.Context, cookie string, meta app.RequestMeta) error
-	SessionPolicy() domain.SessionPolicy
-}
-
-// PasswordChanger changes the password of the signed-in user.
-type PasswordChanger interface {
-	Change(ctx context.Context, in app.ChangePasswordInput) (app.ChangePasswordResult, error)
-	// MinLength returns the minimum password length in force, shown on the
-	// forms.
-	MinLength(ctx context.Context) int
-}
-
-// Bootstrapper creates the first admin through the one-time setup link
-// (AUTH-018).
-type Bootstrapper interface {
-	Check(token string, meta app.RequestMeta) error
-	Complete(ctx context.Context, in app.SetupInput) (app.LoginResult, error)
-	MinLength(ctx context.Context) int
-}
-
-// ProfileService runs the account page (ACC-004).
-type ProfileService interface {
-	Me(ctx context.Context, by app.Actor) (*domain.User, error)
-	MailEnabled() bool
-	SetDisplayName(ctx context.Context, by app.Actor, name string) (*domain.User, error)
-	ChangeEmail(ctx context.Context, by app.Actor, email, currentPassword string) (app.EmailChangeResult, error)
-	CheckEmailToken(ctx context.Context, token string) error
-	ConfirmEmail(ctx context.Context, token string, meta app.RequestMeta) error
-}
-
-// AccountService runs session lists and the account administration.
-type AccountService interface {
-	OwnSessions(ctx context.Context, by app.Actor) ([]app.SessionView, error)
-	RevokeOwnSession(ctx context.Context, by app.Actor, ref string) error
-	RevokeOtherSessions(ctx context.Context, by app.Actor) (int, error)
-	RevokeAllOwnSessions(ctx context.Context, by app.Actor) (int, error)
-
-	Search(ctx context.Context, q domain.UserQuery) ([]*domain.User, error)
-	User(ctx context.Context, id domain.UserID) (*domain.User, error)
-	SetRoles(ctx context.Context, by app.Actor, id domain.UserID, grants []domain.RoleGrant) (app.RolesResult, error)
-	SetEnabled(ctx context.Context, by app.Actor, id domain.UserID, enabled bool) (bool, error)
-	SetGeneratedPassword(ctx context.Context, by app.Actor, id domain.UserID) (string, error)
-	UserSessions(ctx context.Context, id domain.UserID) ([]app.SessionView, error)
-	RevokeUserSession(ctx context.Context, by app.Actor, id domain.UserID, ref string) error
-	RevokeUserSessions(ctx context.Context, by app.Actor, id domain.UserID) (int, error)
-	Delete(ctx context.Context, by app.Actor, id domain.UserID) error
-	DeleteOwn(ctx context.Context, by app.Actor, currentPassword string) error
-	ExportUser(ctx context.Context, by app.Actor, id domain.UserID) (app.Export, error)
-	ExportOwn(ctx context.Context, by app.Actor) (app.Export, error)
-}
-
-// InvitationService runs invitations (ACC-002).
-type InvitationService interface {
-	MailEnabled() bool
-	DefaultTTL(ctx context.Context) time.Duration
-	MinLength(ctx context.Context) int
-	Now() time.Time
-	Create(ctx context.Context, by app.Actor, in app.CreateInvitationInput) (app.CreatedInvitation, error)
-	List(ctx context.Context) ([]*domain.Invitation, error)
-	Revoke(ctx context.Context, by app.Actor, id domain.InvitationID) error
-	Check(ctx context.Context, token string, meta app.RequestMeta) (*domain.Invitation, error)
-	Accept(ctx context.Context, in app.AcceptInput) (app.LoginResult, error)
-	TestMail(ctx context.Context, by app.Actor) (domain.Email, error)
-}
-
-// ResetService runs password reset by link (ACC-003).
-type ResetService interface {
-	MailEnabled() bool
-	TTL(ctx context.Context) time.Duration
-	MinLength(ctx context.Context) int
-	Request(ctx context.Context, login string, meta app.RequestMeta) error
-	Check(ctx context.Context, token string, meta app.RequestMeta) error
-	Confirm(ctx context.Context, token, password string, meta app.RequestMeta) error
-	IssueByAdmin(ctx context.Context, by app.Actor, id domain.UserID) (app.AdminResult, error)
-}
-
-// AuditService reads the audit log (ACC-010).
-type AuditService interface {
-	Search(ctx context.Context, f app.AuditFilter) ([]app.AuditRow, int64, error)
-	Each(ctx context.Context, f app.AuditFilter, fn func(app.AuditRow) error) error
-}
-
 // Services are the application services behind the identity pages.
 type Services struct {
 	// Keys publishes the token verification keys (JWKS).
 	Keys        app.KeySource
-	Audit       AuditService
-	Resets      ResetService
-	Invitations InvitationService
-	Auth        Authenticator
-	Passwords   PasswordChanger
-	Setup       Bootstrapper
-	Profile     ProfileService
-	Accounts    AccountService
-}
-
-// Pages renders HTML pages in the app shell.
-type Pages interface {
-	// Page writes a page; fragment, when not nil, is written alone for htmx
-	// fragment requests.
-	Page(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component)
-	// AdminPage writes a page of the admin area: content is shown in the
-	// admin layout, with section (layout.AdminSections) as the current one.
-	AdminPage(w http.ResponseWriter, r *http.Request, status int, title, section string, content, fragment templ.Component)
-	// Error writes the shell error page for status.
-	Error(w http.ResponseWriter, r *http.Request, status int)
+	Audit       *app.AuditView
+	Resets      *app.Resets
+	Invitations *app.Invitations
+	Auth        *app.Auth
+	Passwords   *app.Passwords
+	Setup       *app.Setup
+	Profile     *app.Profile
+	Accounts    *app.Accounts
 }
 
 // Config is the HTTP configuration of the identity module.
@@ -169,17 +71,17 @@ type Config struct {
 
 // Module is the identity router module (internal/http.Module).
 type Module struct {
-	auth        Authenticator
-	passwords   PasswordChanger
-	setup       Bootstrapper
-	profile     ProfileService
-	accounts    AccountService
-	invitations InvitationService
-	resets      ResetService
-	audit       AuditService
+	auth        *app.Auth
+	passwords   *app.Passwords
+	setup       *app.Setup
+	profile     *app.Profile
+	accounts    *app.Accounts
+	invitations *app.Invitations
+	resets      *app.Resets
+	audit       *app.AuditView
 	keys        app.KeySource
 	now         func() time.Time
-	pages       Pages
+	pages       *render.Renderer
 	logger      *slog.Logger
 	resolver    *clientip.Resolver
 	cop         *http.CrossOriginProtection
@@ -189,8 +91,8 @@ type Module struct {
 	routes      chi.Routes
 }
 
-// New returns the module.
-func New(svc Services, pages Pages, cfg Config, logger *slog.Logger) (*Module, error) {
+// New returns the module. pages renders its pages in the app shell.
+func New(svc Services, pages *render.Renderer, cfg Config, logger *slog.Logger) (*Module, error) {
 	u, err := url.Parse(cfg.HubURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("hub.url %q: not an absolute URL", cfg.HubURL)
@@ -234,25 +136,36 @@ func (m *Module) Middlewares() []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{m.resolver.Middleware, limitAuthBodies, m.session, m.csrf, m.requireJSON, m.passwordGate}
 }
 
-// Routes implements internal/http.Module.
+// Routes implements internal/http.Module. Every page is per visitor:
+// never indexed nor stored (render.NoIndex).
 func (m *Module) Routes(r chi.Router) {
 	m.routes = r
 
-	// Read-only pages answer GET and HEAD, like the shell's.
+	r.Get(JWKSPath, m.jwks)
+	r.Group(func(r chi.Router) {
+		r.Use(render.NoIndex)
+		m.pageRoutes(r)
+	})
+}
+
+// page writes a page in the app shell; fragment, when not nil, is written
+// alone for htmx fragment requests.
+func (m *Module) page(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component) {
+	m.pages.Page(w, r, status, layout.Page{Title: title}, content, fragment)
+}
+
+func (m *Module) pageRoutes(r chi.Router) {
+	// Read-only pages also answer HEAD, like the shell's.
 	r.Get("/login", m.loginPage)
-	r.Head("/login", m.loginPage)
 	r.Post("/login", m.loginAction)
 	r.Post("/logout", m.logoutAction)
 
 	r.Get(app.SetupPath+"/{token}", m.setupPage)
-	r.Head(app.SetupPath+"/{token}", m.setupPage)
 	r.Get(app.SetupPath, m.setupLanding)
-	r.Head(app.SetupPath, m.setupLanding)
 	r.Post(app.SetupPath, m.setupAction)
 
 	listener := r.With(m.Require(domain.RoleListener))
 	listener.Get(AccountPath, m.accountPage)
-	listener.Head(AccountPath, m.accountPage)
 	listener.Post(AccountPath+"/profile", m.profileAction)
 	listener.Post(AccountPath+"/email", m.emailAction)
 	listener.Post(AccountPath+"/sessions/revoke-others", m.revokeOthersAction)
@@ -262,18 +175,14 @@ func (m *Module) Routes(r chi.Router) {
 	listener.Post(AccountPath+"/delete", m.deleteOwnAction)
 
 	r.Get(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
-	r.Head(AccountPath+"/email/verify/{token}", m.emailVerifyPage)
 	r.Get(AccountPath+"/email/verify", m.emailVerifyLanding)
 	r.Post(AccountPath+"/email/verify", m.emailVerifyAction)
 
 	admin := r.With(m.Require(domain.RoleAdmin))
 	admin.Get(AuditPath, m.auditPage)
-	admin.Head(AuditPath, m.auditPage)
 	admin.Post(AuditPath+"/export", m.auditExport)
 	admin.Get(UsersPath, m.usersPage)
-	admin.Head(UsersPath, m.usersPage)
 	admin.Get(UsersPath+"/{id}", m.userPage)
-	admin.Head(UsersPath+"/{id}", m.userPage)
 	admin.Post(UsersPath+"/{id}/roles", m.userRolesAction)
 	admin.Post(UsersPath+"/{id}/enable", m.userEnableAction(true))
 	admin.Post(UsersPath+"/{id}/disable", m.userEnableAction(false))
@@ -284,29 +193,21 @@ func (m *Module) Routes(r chi.Router) {
 	admin.Post(UsersPath+"/{id}/export", m.userExportAction)
 	admin.Post(UsersPath+"/{id}/delete", m.userDeleteAction)
 	admin.Get(InvitationsPath, m.invitationsPage)
-	admin.Head(InvitationsPath, m.invitationsPage)
 	admin.Post(InvitationsPath, m.createInvitationAction)
 	admin.Post(InvitationsPath+"/test-mail", m.testMailAction)
 	admin.Post(InvitationsPath+"/{id}/revoke", m.revokeInvitationAction)
 
-	r.Get(JWKSPath, m.jwks)
-	r.Head(JWKSPath, m.jwks)
-
 	r.Get(ForgotPath, m.forgotPage)
-	r.Head(ForgotPath, m.forgotPage)
 	r.Post(ForgotPath, m.forgotAction)
 	r.Get(ResetPath+"/{token}", m.resetPage)
-	r.Head(ResetPath+"/{token}", m.resetPage)
 	r.Get(ResetPath, m.resetLanding)
 	r.Post(ResetPath, m.resetAction)
 
 	r.Get("/invite/{token}", m.invitePage)
-	r.Head("/invite/{token}", m.invitePage)
 	r.Get("/invite", m.inviteLanding)
 	r.Post("/invite", m.acceptAction)
 
 	r.With(m.Require(domain.RoleListener)).Get(PasswordChangePath, m.passwordPage)
-	r.With(m.Require(domain.RoleListener)).Head(PasswordChangePath, m.passwordPage)
 	r.With(m.Require(domain.RoleListener)).Post(PasswordChangePath, m.passwordAction)
 }
 
@@ -362,9 +263,6 @@ func WithState(ctx context.Context, p domain.Principal) context.Context {
 
 // Principal returns who makes the request.
 func (s *State) Principal() domain.Principal { return s.principal }
-
-// HasSession reports whether the request carries a valid session.
-func (s *State) HasSession() bool { return s.session != nil }
 
 // BackgroundHeader marks a request the page made on its own (a live
 // fragment refreshed by a hub event, ADR 0016): it does not count as
@@ -583,26 +481,13 @@ func (m *Module) Require(role domain.Role) func(http.Handler) http.Handler {
 			case err == nil:
 				next.ServeHTTP(w, r)
 			case errors.Is(err, domain.ErrUnauthenticated):
-				m.redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()))
+				render.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()))
 			default:
 				m.logger.WarnContext(r.Context(), "access denied", slog.String("path", redact.Path(r.URL.Path)), slog.Any("error", err))
 				m.pages.Error(w, r, http.StatusForbidden)
 			}
 		})
 	}
-}
-
-// redirect sends a full-page redirect, for htmx (HX-Redirect) and plain
-// requests (303).
-func (m *Module) redirect(w http.ResponseWriter, r *http.Request, to string) {
-	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Redirect", to)
-		w.WriteHeader(http.StatusNoContent)
-
-		return
-	}
-
-	http.Redirect(w, r, to, http.StatusSeeOther)
 }
 
 func (m *Module) deny(w http.ResponseWriter, r *http.Request, status int, err *shared.Error) {
@@ -652,15 +537,21 @@ func (m *Module) Login(ctx context.Context, login, password string, remember boo
 // sessionCookies are the cookies of a new session: the session cookie
 // (persistent with "remember me") and the cleared pre-session cookie.
 func (m *Module) sessionCookies(res app.LoginResult) []*http.Cookie {
-	maxAge := 0
-	if res.Remember {
-		maxAge = int(res.Session.AbsoluteExpiresAt().Sub(res.Session.CreatedAt()).Seconds())
-	}
-
 	return []*http.Cookie{
-		m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge),
+		m.cookie(m.sessionCookieName(), res.Token.Cookie(), cookieMaxAge(res.Remember, res.Session)),
 		m.cookie(m.presessionCookieName(), "", -1),
 	}
+}
+
+// cookieMaxAge is the Max-Age of a session cookie: the absolute lifetime
+// of the session with "remember me", none (a browser-session cookie)
+// otherwise.
+func cookieMaxAge(remember bool, s *domain.Session) int {
+	if !remember {
+		return 0
+	}
+
+	return max(1, int(s.AbsoluteExpiresAt().Sub(s.CreatedAt()).Seconds()))
 }
 
 // ChangePassword changes the password of the request's user, and returns
@@ -678,12 +569,9 @@ func (m *Module) ChangePassword(ctx context.Context, current, newPassword string
 		return domain.Principal{}, "", nil, false, err
 	}
 
-	maxAge := 0
-	if res.Remember {
-		maxAge = max(1, int(res.Session.AbsoluteExpiresAt().Sub(res.Session.CreatedAt()).Seconds()))
-	}
+	cookie = m.cookie(m.sessionCookieName(), res.Token.Cookie(), cookieMaxAge(res.Remember, res.Session))
 
-	return res.Principal, res.Session.CSRFSecret().Token(res.Token), m.cookie(m.sessionCookieName(), res.Token.Cookie(), maxAge), res.Forced, nil
+	return res.Principal, res.Session.CSRFSecret().Token(res.Token), cookie, res.Forced, nil
 }
 
 // CheckSession re-reads the session of a long-lived request (the hub

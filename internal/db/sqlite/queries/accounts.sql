@@ -7,9 +7,8 @@ WHERE (CAST(sqlc.arg(text) AS TEXT) = '' OR instr(lower(u.username), lower(CAST(
   AND (CAST(sqlc.arg(never_logged_in) AS INTEGER) = 0 OR u.last_login_at IS NULL)
   AND (CAST(sqlc.arg(role_id) AS INTEGER) = 0 OR coalesce(
         (SELECT max(r.role_id) FROM user_roles r WHERE r.user_id = u.id AND r.device_id IS NULL), 10) = CAST(sqlc.arg(role_id) AS INTEGER))
-  AND lower(u.username) > sqlc.arg(after)
 ORDER BY lower(u.username)
-LIMIT sqlc.arg(max_rows);
+LIMIT sqlc.arg(max_rows) OFFSET sqlc.arg(skip_rows);
 
 -- name: DeleteUser :execrows
 DELETE FROM users WHERE id = sqlc.arg(id);
@@ -117,7 +116,7 @@ WHERE (CAST(sqlc.arg(before_id) AS INTEGER) = 0 OR id < CAST(sqlc.arg(before_id)
   AND (CAST(sqlc.arg(from_ms) AS INTEGER) = 0 OR at >= CAST(sqlc.arg(from_ms) AS INTEGER))
   AND (CAST(sqlc.arg(to_ms) AS INTEGER) = 0 OR at < CAST(sqlc.arg(to_ms) AS INTEGER))
 ORDER BY id DESC
-LIMIT sqlc.arg(max_rows);
+LIMIT sqlc.arg(max_rows) OFFSET sqlc.arg(skip_rows);
 
 -- name: ListUsernames :many
 SELECT id, username FROM users WHERE id IN (sqlc.slice(ids));

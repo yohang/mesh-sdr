@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"time"
@@ -221,12 +220,7 @@ func (s *Status) sweepEvery() time.Duration {
 
 // HeartbeatHandler applies node.heartbeat events (control ingestion).
 func (s *Status) HeartbeatHandler() EventHandler {
-	return func(_ context.Context, n *domain.Node, ev Event, now time.Time) error {
-		hb, err := decodeEvent[ctl.Heartbeat](ev)
-		if err != nil {
-			return nil //nolint:nilerr // a malformed heartbeat is skipped, not fatal for the batch
-		}
-
+	return On(s.logger, func(_ context.Context, n *domain.Node, hb ctl.Heartbeat, now time.Time) error {
 		n.RecordHeartbeat(now, hb.ClockOffsetMS, "", 0)
 		s.tracker.Heartbeat(n.ID(), now, hb.ClockOffsetMS, hb.NTPSynced)
 		s.history.Add(n.ID(), LoadSample{
@@ -235,15 +229,5 @@ func (s *Status) HeartbeatHandler() EventHandler {
 		})
 
 		return nil
-	}
-}
-
-// decodeEvent decodes an event payload, tolerating unknown fields
-// (newer-minor nodes, §4.8).
-func decodeEvent[T any](ev Event) (T, error) {
-	var v T
-
-	err := json.Unmarshal(ev.Payload, &v)
-
-	return v, err
+	})
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"math"
 	"slices"
 	"strconv"
 	"sync"
@@ -117,8 +116,6 @@ func modeOf(name string) (Mode, bool) {
 	return modes[i], true
 }
 
-func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
-
 // normalize validates p and applies the mode rules (§8.3 rule 4, DEM-006,
 // DEM-008): the default pass band when none is given (LowHz == HighHz ==
 // 0), edges clamped to the mode limits, squelch forced open for modes
@@ -135,7 +132,7 @@ func normalize(p app.DemodParams) (app.DemodParams, Mode, error) {
 		return p, m, domain.ErrOutOfRange.WithDetail("mode " + m.Name + " needs 44100 or 48000 Hz audio (audio.configure)")
 	case p.Codec != app.CodecPCM && p.Codec != app.CodecADPCM:
 		return p, m, domain.ErrOutOfRange.WithDetail("audio codec " + strconv.Quote(string(p.Codec)) + " is not supported")
-	case !finite(p.LowHz) || !finite(p.HighHz):
+	case !dsp.Finite(p.LowHz) || !dsp.Finite(p.HighHz):
 		return p, m, domain.ErrOutOfRange.WithDetail("bandpass: want finite edges")
 	}
 
@@ -160,21 +157,13 @@ func normalize(p app.DemodParams) (app.DemodParams, Mode, error) {
 	}
 
 	switch {
-	case p.SquelchDB != nil && (!finite(*p.SquelchDB) || *p.SquelchDB < dsp.SquelchMin || *p.SquelchDB > dsp.SquelchMax):
+	case p.SquelchDB != nil && (!dsp.Finite(*p.SquelchDB) || *p.SquelchDB < dsp.SquelchMin || *p.SquelchDB > dsp.SquelchMax):
 		return p, m, domain.ErrOutOfRange.WithDetail("squelch: want -150..0 dBFS")
-	case !finite(p.NR.ThresholdDB) || p.NR.ThresholdDB < dsp.NRThresholdMin || p.NR.ThresholdDB > dsp.NRThresholdMax:
+	case !dsp.Finite(p.NR.ThresholdDB) || p.NR.ThresholdDB < dsp.NRThresholdMin || p.NR.ThresholdDB > dsp.NRThresholdMax:
 		return p, m, domain.ErrOutOfRange.WithDetail("nr threshold: want -20..20 dB")
 	}
 
 	return p, m, nil
-}
-
-func appCodec(c rxv1.Codec) app.AudioCodec {
-	if c == rxv1.CodecADPCMIMA {
-		return app.CodecADPCM
-	}
-
-	return app.CodecPCM
 }
 
 func codecOf(c app.AudioCodec) rxv1.Codec {
@@ -502,6 +491,8 @@ func (d *demod) run() {
 		builtFor  *binding
 		lastMeter time.Time
 		gap       bool
+		// failing: the chain failed on the last block (logged once).
+		failing bool
 	)
 
 	defer func() {
@@ -562,10 +553,16 @@ func (d *demod) run() {
 
 		res, err := chain.Process(iq)
 		if err != nil {
-			d.e.log.Error("demodulator failed", slog.Any("error", err))
+			if !failing {
+				d.e.log.Error("demodulator failed", slog.Any("error", err))
+			}
+
+			failing = true
 
 			continue
 		}
+
+		failing = false
 
 		if len(res.Selector) > 0 {
 			d.tapIQ(app.IQBlock{Samples: res.Selector, Rate: b.ch.Rate(), Time: meta.Time, Discontinuity: g != nil})
@@ -577,7 +574,7 @@ func (d *demod) run() {
 
 		framer.Push(res.Audio, meta.Time, !res.Open, func(f dsp.AudioFrame) {
 			d.audio(app.AudioOut{
-				Codec:   appCodec(f.Codec),
+				Codec:   key.codec,
 				Payload: f.Payload, Samples: f.Samples, Duration: f.Duration(framer.Rate()),
 				TimestampUS: uint64(max(f.Time.UnixMicro(), 0)), Squelched: f.Squelched, Reset: f.Reset, Discontinuity: gap,
 			})

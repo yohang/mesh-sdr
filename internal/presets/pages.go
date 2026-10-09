@@ -11,20 +11,14 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
-	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 //go:generate go tool templ generate
 
-// Renderer renders pages in the app shell (internal/web/render).
-type Renderer interface {
-	Page(w http.ResponseWriter, r *http.Request, status int, page layout.Page, content, fragment templ.Component)
-	Error(w http.ResponseWriter, r *http.Request, status int)
-}
-
 // PagesDeps are the dependencies of the admin pages.
 type PagesDeps struct {
-	Render  Renderer
+	Render  *render.Renderer
 	Guard   func(http.Handler) http.Handler // admin role and network (identity)
 	Service *Service
 	Logger  *slog.Logger
@@ -43,14 +37,13 @@ func (m *Pages) Middlewares() []func(http.Handler) http.Handler { return nil }
 // Routes implements internal/http.Module.
 func (m *Pages) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
-		r.Use(m.d.Guard, noIndex)
+		r.Use(m.d.Guard, render.NoIndex)
 
 		for path, h := range map[string]http.HandlerFunc{
 			"/admin/presets": m.list, "/admin/presets/new": m.newPage, "/admin/presets/{id}": m.editPage,
 			"/admin/presets/{id}/delete": m.deletePage,
 		} {
 			r.Get(path, h)
-			r.Head(path, h)
 		}
 
 		r.Post("/admin/presets", m.create)
@@ -61,19 +54,12 @@ func (m *Pages) Routes(r chi.Router) {
 	})
 }
 
-func noIndex(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Robots-Tag", "noindex")
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (m *Pages) page(w http.ResponseWriter, r *http.Request, status int, title string, content templ.Component) {
 	m.pageWith(w, r, status, title, content, nil)
 }
 
 func (m *Pages) pageWith(w http.ResponseWriter, r *http.Request, status int, title string, content, fragment templ.Component) {
-	m.d.Render.Page(w, r, status, layout.Page{Title: title, Section: layout.SectionAdmin}, layout.AdminPage("presets", content), fragment)
+	m.d.Render.AdminPage(w, r, status, title, "presets", content, fragment)
 }
 
 // Notices shown after a redirect (?done=…).
@@ -100,7 +86,7 @@ func movePath(p *Preset) string { return "/admin/presets/" + p.ID().String() + "
 
 // clone stores a copy of a preset and opens it (ADM-019).
 func (m *Pages) clone(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r, m.d.Render) {
+	if !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
@@ -108,7 +94,7 @@ func (m *Pages) clone(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case err == nil:
-		redirect(w, r, "/admin/presets/"+p.ID().String()+"?done=cloned")
+		render.Redirect(w, r, "/admin/presets/"+p.ID().String()+"?done=cloned")
 	case errors.Is(err, ErrPresetNotFound):
 		m.d.Render.Error(w, r, http.StatusNotFound)
 	default:
@@ -121,7 +107,7 @@ func (m *Pages) clone(w http.ResponseWriter, r *http.Request) {
 // position=<1-based position> (drag and drop). It answers the list. It
 // never retunes a device.
 func (m *Pages) move(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r, m.d.Render) {
+	if !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
@@ -180,7 +166,7 @@ func (m *Pages) move(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Pages) newPage(w http.ResponseWriter, r *http.Request) {
-	m.page(w, r, http.StatusOK, "New preset", formPage(presetForm{Values: map[string]string{"start_mod": DefaultStartMod}}))
+	m.page(w, r, http.StatusOK, "New preset", formPage(presetForm{Form: render.Form{Values: map[string]string{"start_mod": DefaultStartMod}}}))
 }
 
 // preset returns the preset of the path, or answers 404 (or 500).
@@ -221,17 +207,17 @@ func (m *Pages) deletePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Pages) create(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r, m.d.Render) {
+	if !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
-	f := presetForm{Values: formValues(r)}
+	f := presetForm{Form: render.Form{Values: formValues(r)}}
 
 	d, ok := draftOf(&f)
 	if ok {
 		p, err := m.d.Service.Create(r.Context(), d)
 		if err == nil {
-			redirect(w, r, "/admin/presets/"+p.ID().String()+"?done=created")
+			render.Redirect(w, r, "/admin/presets/"+p.ID().String()+"?done=created")
 
 			return
 		}
@@ -239,16 +225,16 @@ func (m *Pages) create(w http.ResponseWriter, r *http.Request) {
 		m.formError(r, &f, err)
 	}
 
-	m.page(w, r, f.status(), "New preset", formPage(f))
+	m.page(w, r, f.Status(), "New preset", formPage(f))
 }
 
 func (m *Pages) replace(w http.ResponseWriter, r *http.Request) {
 	cur, ok := m.preset(w, r)
-	if !ok || !parseForm(w, r, m.d.Render) {
+	if !ok || !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
-	f := presetForm{ID: cur.ID().String(), Name: cur.Name(), Values: formValues(r)}
+	f := presetForm{ID: cur.ID().String(), Name: cur.Name(), Form: render.Form{Values: formValues(r)}}
 
 	version, err := strconv.Atoi(r.PostForm.Get("version"))
 	if err != nil {
@@ -269,7 +255,7 @@ func (m *Pages) replace(w http.ResponseWriter, r *http.Request) {
 
 		res, err := m.d.Service.Replace(r.Context(), f.ID, version, d)
 		if err == nil {
-			redirect(w, r, "/admin/presets/"+res.Preset.ID().String()+"?done=saved")
+			render.Redirect(w, r, "/admin/presets/"+res.Preset.ID().String()+"?done=saved")
 
 			return
 		}
@@ -277,12 +263,12 @@ func (m *Pages) replace(w http.ResponseWriter, r *http.Request) {
 		m.formError(r, &f, err)
 	}
 
-	m.page(w, r, f.status(), "Preset "+cur.Name(), formPage(f))
+	m.page(w, r, f.Status(), "Preset "+cur.Name(), formPage(f))
 }
 
 func (m *Pages) delete(w http.ResponseWriter, r *http.Request) {
 	p, ok := m.preset(w, r)
-	if !ok || !parseForm(w, r, m.d.Render) {
+	if !ok || !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
@@ -295,7 +281,7 @@ func (m *Pages) delete(w http.ResponseWriter, r *http.Request) {
 
 	err := m.d.Service.Delete(r.Context(), p.ID().String(), version)
 	if err == nil {
-		redirect(w, r, "/admin/presets?done=deleted")
+		render.Redirect(w, r, "/admin/presets?done=deleted")
 
 		return
 	}
@@ -306,7 +292,7 @@ func (m *Pages) delete(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case errors.Is(err, ErrPresetInUse) && errors.As(err, &de):
-		msg = sentence(de.Message())
+		msg = render.Sentence(de.Message())
 	case errors.Is(err, ErrVersionConflict):
 		msg = "This preset was changed meanwhile: check it before deleting it."
 	case errors.Is(err, ErrPresetNotFound):
@@ -323,19 +309,10 @@ func (m *Pages) delete(w http.ResponseWriter, r *http.Request) {
 
 // formError records a refused save on the form.
 func (m *Pages) formError(r *http.Request, f *presetForm, err error) {
-	var de *shared.Error
-
 	switch {
-	case errors.Is(err, ErrInvalidPreset) && errors.As(err, &de):
-		for _, v := range de.Violations() {
-			f.setError(v.Path(), sentence(v.Message()))
-		}
-
-		if len(f.Errors) == 0 {
-			f.Failure = sentence(de.Message())
-		}
+	case errors.Is(err, ErrInvalidPreset) && f.AddViolations(err):
 	case errors.Is(err, ErrSlugTaken):
-		f.setError("slug", "Another preset has this slug.")
+		f.SetError("slug", "Another preset has this slug.")
 	case errors.Is(err, ErrVersionConflict):
 		f.Failure, f.Conflict = "This preset was changed meanwhile: reload the page to edit the current version.", true
 	case errors.Is(err, ErrPresetNotFound):
@@ -348,40 +325,11 @@ func (m *Pages) formError(r *http.Request, f *presetForm, err error) {
 
 // presetForm is the state of the preset form.
 type presetForm struct {
+	render.Form
 	ID      string // empty: a new preset
 	Name    string // current name of an edited preset
 	Version int
-	Values  map[string]string
-	Errors  map[string]string
 	Notice  string
-	Failure string
-	// Conflict and Broken select the status of a failed save.
-	Conflict, Broken bool
-}
-
-func (f *presetForm) setError(field, msg string) {
-	if f.Errors == nil {
-		f.Errors = map[string]string{}
-	}
-
-	if strings.HasPrefix(field, "tags.") {
-		field = "tags"
-	}
-
-	if _, ok := f.Errors[field]; !ok {
-		f.Errors[field] = msg
-	}
-}
-
-func (f *presetForm) status() int {
-	switch {
-	case f.Broken:
-		return http.StatusInternalServerError
-	case f.Conflict:
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
 }
 
 // formField is one input of the preset form.
@@ -434,7 +382,7 @@ func draftOf(f *presetForm) (Draft, bool) {
 
 		n, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
-			f.setError(name, "Enter a whole number.")
+			f.SetError(name, "Enter a whole number.")
 
 			return nil
 		}
@@ -484,64 +432,8 @@ func formOf(p *Preset, notice string) presetForm {
 		v["initial_nr_level"] = strconv.Itoa(n)
 	}
 
-	return presetForm{ID: p.ID().String(), Name: p.Name(), Version: p.Version(), Values: v, Notice: notice}
-}
-
-// sentence capitalises a message and ends it with a full stop.
-func sentence(s string) string {
-	if s == "" {
-		return s
-	}
-
-	s = strings.ToUpper(s[:1]) + s[1:]
-	if !strings.HasSuffix(s, ".") {
-		s += "."
-	}
-
-	return s
+	return presetForm{ID: p.ID().String(), Name: p.Name(), Version: p.Version(), Form: render.Form{Values: v}, Notice: notice}
 }
 
 // formBodyLimit bounds the preset forms.
 const formBodyLimit = 16 << 10
-
-func parseForm(w http.ResponseWriter, r *http.Request, render Renderer) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, formBodyLimit)
-	if err := r.ParseForm(); err != nil {
-		status := http.StatusBadRequest
-
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			status = http.StatusRequestEntityTooLarge
-		}
-
-		render.Error(w, r, status)
-
-		return false
-	}
-
-	return true
-}
-
-// redirect answers a successful form: 303, or HX-Redirect for htmx.
-func redirect(w http.ResponseWriter, r *http.Request, path string) {
-	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Redirect", path)
-		w.WriteHeader(http.StatusNoContent)
-
-		return
-	}
-
-	http.Redirect(w, r, path, http.StatusSeeOther)
-}
-
-// formatHz formats a frequency in Hz for people (kHz or MHz).
-func formatHz(hz int64) string {
-	switch {
-	case hz >= 1_000_000:
-		return strconv.FormatFloat(float64(hz)/1e6, 'f', -1, 64) + " MHz"
-	case hz >= 1_000:
-		return strconv.FormatFloat(float64(hz)/1e3, 'f', -1, 64) + " kHz"
-	default:
-		return strconv.FormatInt(hz, 10) + " Hz"
-	}
-}

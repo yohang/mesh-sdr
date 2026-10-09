@@ -14,7 +14,7 @@ import (
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
-	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+	"github.com/yohang/mesh-sdr/internal/jobs"
 	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/schedules"
@@ -29,7 +29,7 @@ type scheduling struct {
 	schedules *schedules.Service
 	guard     *schedules.Guard
 	planner   *schedules.Planner
-	publish   *schedulesPublishJob
+	publish   jobs.Job
 }
 
 // settingsReader reads the effective settings (settings/app.Store).
@@ -68,28 +68,30 @@ func stateDecoders(s settingsReader) *ctl.StateDecoders {
 		}
 	}
 
-	seconds := func(list []string) []int {
-		var out []int
-
-		for _, v := range list {
-			if n, err := strconv.Atoi(v); err == nil {
-				out = append(out, n)
-			}
-		}
-
-		return out
-	}
-
 	d.FST4Intervals = seconds(s.Strings("decoders.fst4_enabled_intervals"))
 	d.FST4WIntervals = seconds(s.Strings("decoders.fst4w_enabled_intervals"))
 
 	return d
 }
 
+// seconds parses the periods of a decoders setting ("15"), skipping the
+// invalid ones.
+func seconds(list []string) []int {
+	var out []int
+
+	for _, v := range list {
+		if n, err := strconv.Atoi(v); err == nil {
+			out = append(out, n)
+		}
+	}
+
+	return out
+}
+
 // newScheduling builds the modules. g.states may be nil (grid disabled):
 // nothing is pushed then.
-func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audit.Appender, now func() time.Time,
-	logger *slog.Logger,
+func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, listen *gridapp.ListenPolicies, audit audit.Appender,
+	now func() time.Time, logger *slog.Logger,
 ) *scheduling {
 	ids := shared.NewUUIDv7Generator()
 	devices := scheduleDevices{repo: g.deviceRepo}
@@ -106,7 +108,7 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 
 	sdeps := schedules.Deps{
 		Repo: schedRepo, Tx: adapter, Devices: devices, Audit: audit, IDs: ids, Now: now,
-		Changed: changed, Logger: component(logger, "schedules.app"),
+		Changed: changed, Logger: component(logger, "schedules.service"),
 	}
 
 	// Presets and schedules know each other: the catalogue is filled once
@@ -118,11 +120,20 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 	s.planner = schedules.NewPlanner(sdeps)
 	s.presets = presets.NewService(presets.Deps{
 		Repo: presetRepo, Tx: adapter, Audit: audit, IDs: ids, Now: now,
-		Usage: s.schedules, Listener: s.guard, Changed: changed, Logger: component(logger, "presets.app"),
+		Usage: s.schedules, Listener: s.guard, Changed: changed, Logger: component(logger, "presets.service"),
 	})
 	catalog.presets = s.presets
 
-	s.publish = &schedulesPublishJob{guard: s.guard, grid: g}
+	// schedules.publish (ADR 0020 Q7): the guard's safety net, then the
+	// desired state of every connected node (the timeline slides hourly).
+	s.publish = jobs.Func(JobSchedulesPublish, func(ctx context.Context) (int64, error) {
+		n, err := s.guard.Reconcile(ctx)
+		if err != nil || g.states == nil {
+			return n, err
+		}
+
+		return n + int64(g.states.PublishAll(ctx)), nil
+	})
 
 	// Grid hooks (GRID-016, ADM-009): the guard joins the registry's
 	// transactions; the desired state reads the planner.
@@ -143,18 +154,10 @@ func newScheduling(adapter *db.DB, g *hubGrid, values settingsReader, audit audi
 	})
 
 	if g.desired != nil {
-		g.desired.source = desiredStates{planner: s.planner, presets: s.presets, settings: values, now: now}
+		g.desired.source = desiredStates{planner: s.planner, presets: s.presets, settings: values, listen: listen, now: now}
 	}
 
 	return s
-}
-
-// schedulesPublishJob is the schedules.publish job (ADR 0020 Q7): the
-// guard's safety net, then the desired state of every connected node
-// (the timeline slides hourly).
-type schedulesPublishJob struct {
-	guard *schedules.Guard
-	grid  *hubGrid
 }
 
 // JobSchedulesPublish is the name of the job; it runs hourly.
@@ -162,21 +165,6 @@ const (
 	JobSchedulesPublish   = "schedules.publish"
 	SchedulesPublishEvery = time.Hour
 )
-
-func (j *schedulesPublishJob) Name() string { return JobSchedulesPublish }
-
-func (j *schedulesPublishJob) Run(ctx context.Context) (int64, error) {
-	n, err := j.guard.Reconcile(ctx)
-	if err != nil {
-		return n, err
-	}
-
-	if j.grid.states != nil {
-		n += int64(j.grid.states.PublishAll(ctx))
-	}
-
-	return n, nil
-}
 
 // scheduleDevices adapts the grid device registry to schedules/app.Devices.
 type scheduleDevices struct{ repo griddomain.DeviceRepository }
@@ -215,21 +203,15 @@ func (a scheduleDevices) NodeDevices(ctx context.Context, node string) ([]schedu
 		return nil, err
 	}
 
-	list, err := a.repo.ListByNode(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]schedules.Device, len(list))
-	for i, d := range list {
-		out[i] = scheduleDevice(d)
-	}
-
-	return out, nil
+	return scheduleDeviceList(a.repo.ListByNode(ctx, id))
 }
 
 func (a scheduleDevices) All(ctx context.Context) ([]schedules.Device, error) {
-	list, err := a.repo.List(ctx)
+	return scheduleDeviceList(a.repo.List(ctx))
+}
+
+// scheduleDeviceList converts a registry listing.
+func scheduleDeviceList(list []*griddomain.Device, err error) ([]schedules.Device, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -305,6 +287,7 @@ type desiredStates struct {
 	planner  *schedules.Planner
 	presets  *presets.Service
 	settings settingsReader
+	listen   *gridapp.ListenPolicies
 	now      func() time.Time
 }
 
@@ -324,15 +307,10 @@ func (s desiredStates) Desired(ctx context.Context, node griddomain.NodeID) (ctl
 		byID[p.ID()] = p
 	}
 
-	policy := s.settings.String("listen_policy")
-	if policy == "" {
-		policy = string(identitydomain.ListenRegistered)
-	}
-
 	st := ctl.StateApply{
 		Presets: map[string]ctl.Preset{}, Devices: map[string]ctl.DesiredDevice{},
 		Policy: ctl.StatePolicy{
-			ListenPolicy: policy, WFMDeemphasis: s.settings.Int("wfm_deemphasis"),
+			ListenPolicy: s.listen.Global(ctx), WFMDeemphasis: s.settings.Int("wfm_deemphasis"),
 			Waterfall: &ctl.StateWaterfall{
 				MinDB: s.settings.Int("waterfall.min_db"), MaxDB: s.settings.Int("waterfall.max_db"), Palette: s.settings.String("waterfall.palette"),
 			},

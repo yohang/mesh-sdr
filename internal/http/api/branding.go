@@ -1,9 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -44,7 +44,7 @@ func (h BrandingHandlers) GetReceiverImage(ctx context.Context, req GetReceiverI
 	etag := strconv.Quote(hex.EncodeToString(sum[:]))
 
 	if req.Params.IfNoneMatch != nil && *req.Params.IfNoneMatch == etag {
-		return imageResponse{file: f, etag: etag, notModified: true}, nil
+		return imageResponse{fileResponse{etag: etag, public: true, notModified: true}}, nil
 	}
 
 	f, data, err := h.branding.Content(ctx, slot)
@@ -54,34 +54,17 @@ func (h BrandingHandlers) GetReceiverImage(ctx context.Context, req GetReceiverI
 
 	sum = f.SHA256()
 
-	return imageResponse{file: f, data: data, etag: strconv.Quote(hex.EncodeToString(sum[:]))}, nil
+	return imageResponse{fileResponse{
+		etag: strconv.Quote(hex.EncodeToString(sum[:])), mime: string(f.MIME()), name: f.Name(), disposition: "inline",
+		public: true, size: int64(len(data)), stream: func(w io.Writer) error {
+			_, err := w.Write(data)
+
+			return err
+		},
+	}}, nil
 }
 
-type imageResponse struct {
-	file        *files.File
-	data        []byte
-	etag        string
-	notModified bool
-}
+// imageResponse is a receiver image, shown inline.
+type imageResponse struct{ fileResponse }
 
-func (r imageResponse) VisitGetReceiverImageResponse(w http.ResponseWriter) error {
-	h := w.Header()
-	h.Set("ETag", r.etag)
-	h.Set("Cache-Control", "no-cache")
-	h.Set("X-Content-Type-Options", "nosniff")
-
-	if r.notModified {
-		w.WriteHeader(http.StatusNotModified)
-
-		return nil
-	}
-
-	h.Set("Content-Type", string(r.file.MIME()))
-	h.Set("Content-Length", strconv.Itoa(len(r.data)))
-	h.Set("Content-Disposition", `inline; filename="`+r.file.Name()+`"`)
-	w.WriteHeader(http.StatusOK)
-
-	_, err := bytes.NewReader(r.data).WriteTo(w)
-
-	return err
-}
+func (r imageResponse) VisitGetReceiverImageResponse(w http.ResponseWriter) error { return r.write(w) }

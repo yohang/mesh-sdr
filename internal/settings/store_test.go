@@ -124,7 +124,7 @@ func newFixture(t *testing.T, env map[string]string) fixture {
 		origins = meta.Origins
 	}
 
-	cat, err := config.NewSettingsCatalog(cfg, origins)
+	cat, err := settings.NewConfigCatalog(cfg, origins)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,8 +399,8 @@ func TestStoreLoadIgnoresInvalidRows(t *testing.T) {
 	}
 
 	theme := effective(t, s, "ui.theme_mode")
-	if v, ok := theme.Shadowed(); !ok || v.String() != `"dark"` || theme.Value().String() != `"light"` {
-		t.Errorf("shadowed = %s %v", v, ok)
+	if theme.Value().String() != `"light"` || theme.Version() == 0 {
+		t.Errorf("theme = %s v%d, want the config value over the DB row", theme.Value(), theme.Version())
 	}
 
 	if len(f.audit.records) != 1 || f.audit.records[0].Action != settings.ActionIgnored || f.audit.records[0].TargetID != "ui.shortcut_set" || f.audit.records[0].Actor != audit.System {

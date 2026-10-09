@@ -14,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
 	"github.com/yohang/mesh-sdr/internal/http/problem"
@@ -72,27 +70,12 @@ func NewNodeEnroller(o NodeOptions) *NodeEnroller {
 // Done delivers the result of the first successful enrollment.
 func (e *NodeEnroller) Done() <-chan Result { return e.done }
 
-// Handler serves POST /enroll; every other path answers 403 (§4.2 step 3).
-func (e *NodeEnroller) Handler() http.Handler {
-	r := chi.NewRouter()
-	r.Use(problem.Recoverer(e.o.Logger))
-
-	forbidden := func(w http.ResponseWriter, _ *http.Request) {
-		problem.Write(w, problem.New(http.StatusForbidden, problem.CodeForbidden, "node is not enrolled"))
-	}
-
-	r.NotFound(forbidden)
-	r.MethodNotAllowed(forbidden)
-	r.Post("/enroll", e.serveEnroll)
-
-	return r
-}
-
 func reject(w http.ResponseWriter) {
 	problem.Write(w, problem.New(http.StatusForbidden, "enrollment_rejected", "enrollment rejected"))
 }
 
-func (e *NodeEnroller) serveEnroll(w http.ResponseWriter, r *http.Request) {
+// ServeEnroll serves POST /enroll (§4.2 step 3).
+func (e *NodeEnroller) ServeEnroll(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxBody))
 	dec.DisallowUnknownFields()
 

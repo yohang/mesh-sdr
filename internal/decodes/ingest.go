@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -269,14 +268,5 @@ func cleanText(s string) string {
 		return -1
 	}, s)
 
-	if len(s) <= MaxText {
-		return s
-	}
-
-	n := MaxText
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-
-	return s[:n]
+	return shared.Truncate(s, MaxText)
 }

@@ -11,12 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/dsp"
 	"github.com/yohang/mesh-sdr/internal/radio/app"
+	"github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
@@ -43,26 +43,22 @@ type slotChunk struct {
 // cut into slot files in the session workdir and each slot is decoded by
 // a job of the node queue per profile (DEC-025, DEC-026).
 type slotSession struct {
+	sessionBase
+
 	r    *Runner
 	spec app.DecoderSpec
-	ev   app.DecoderEvents
 	dir  string
-	log  *slog.Logger
-	in   chan slotChunk
+	in   *dropQueue[slotChunk]
 	jobs atomic.Int64
-	// lost counts the audio blocks dropped on a full input buffer.
-	lost atomic.Int64
 	// resyncs counts the audio clock resets on the sample timestamps.
 	resyncs atomic.Int64
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu     sync.Mutex
-	conv   *dsp.S16Converter
-	next   time.Time
-	closed bool
-	last   app.DecoderStatus
+	// Guarded by mu.
+	conv *dsp.S16Converter
+	next time.Time
 	// users counts the users of the workdir: the recorder and the jobs
 	// running; the last one removes it.
 	users int
@@ -70,6 +66,10 @@ type slotSession struct {
 
 // startSlots starts a slot decoder session in its own workdir.
 func (r *Runner) startSlots(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderRun, error) {
+	if r.o.Supervisor == nil {
+		return nil, process.ErrNoRuntimeDir
+	}
+
 	if r.o.Queue == nil {
 		return nil, errors.New("no batch decoder queue")
 	}
@@ -81,8 +81,9 @@ func (r *Runner) startSlots(spec app.DecoderSpec, ev app.DecoderEvents) (app.Dec
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &slotSession{
-		r: r, spec: spec, ev: ev, dir: dir, in: make(chan slotChunk, slotInput), ctx: ctx, cancel: cancel, users: 1,
-		log: r.o.Logger.With(slog.String("session_id", spec.Session.String()), slog.String("mode", spec.Mode.Name)),
+		sessionBase: sessionBase{ev: ev, log: r.sessionLog(spec)},
+		r:           r, spec: spec, dir: dir, in: newDropQueue(slotInput, one[slotChunk]), ctx: ctx, cancel: cancel, users: 1,
+		conv: dsp.NewS16Converter(domain.SlotRate),
 	}
 
 	go s.loop()
@@ -90,20 +91,11 @@ func (r *Runner) startSlots(spec app.DecoderSpec, ev app.DecoderEvents) (app.Dec
 	return s, nil
 }
 
-// settings returns the decoding settings pushed by the hub.
-func (s *slotSession) settings() Settings {
-	if s.r.o.Settings == nil {
-		return Settings{}
-	}
-
-	return s.r.o.Settings()
-}
-
 // periods returns the distinct slot periods of the session's profiles.
 func (s *slotSession) periods() []time.Duration {
 	var out []time.Duration
 
-	for _, p := range profiles(s.spec.Mode.Name, s.settings()) {
+	for _, p := range profiles(s.spec.Mode.Name, s.r.o.Settings()) {
 		if !slices.Contains(out, p.period) {
 			out = append(out, p.period)
 		}
@@ -114,7 +106,7 @@ func (s *slotSession) periods() []time.Duration {
 
 // Audio implements app.DecoderRun: the audio is converted to 12 kHz s16le,
 // stamped from the sample timestamps and handed to the recorder (never
-// blocking: a full buffer leaves a hole in the slot).
+// blocking: a full buffer drops the oldest audio, a hole in the slot).
 func (s *slotSession) Audio(b app.AudioBlock) {
 	s.mu.Lock()
 
@@ -124,30 +116,9 @@ func (s *slotSession) Audio(b app.AudioBlock) {
 		return
 	}
 
-	if s.conv == nil || s.conv.InRate() != b.Rate {
-		if s.conv != nil {
-			s.conv.Close()
-		}
-
-		c, err := dsp.NewS16Converter(b.Rate, slotRate)
-		if err != nil {
-			s.conv = nil
-			s.mu.Unlock()
-			s.log.Warn("decoder input not converted", slog.Int("rate", b.Rate), slog.Any("error", err))
-
-			return
-		}
-
-		s.conv = c
-	}
-
-	out, err := s.conv.Convert(b.Samples)
-	if err != nil || len(out) < 2 {
+	out := s.convert(s.conv, b)
+	if len(out) < 2 {
 		s.mu.Unlock()
-
-		if err != nil {
-			s.log.Warn("decoder input not converted", slog.Any("error", err))
-		}
 
 		return
 	}
@@ -165,34 +136,14 @@ func (s *slotSession) Audio(b app.AudioBlock) {
 	c := slotChunk{t: t, pcm: bytes.Clone(out)}
 	s.mu.Unlock()
 
-	select {
-	case s.in <- c:
-	default:
-		s.lost.Add(1)
-	}
+	s.in.push(c, false)
 }
-
-// IQ implements app.DecoderRun: slot decoders read audio only.
-func (s *slotSession) IQ(app.IQBlock) {}
-
-// WideIQ implements app.DecoderRun: slot decoders read audio.
-func (s *slotSession) WideIQ(app.WideIQBlock) {}
-
-// Retune implements app.DecoderRun: slot decoders have no secondary
-// selector; each slot keeps the dial of its start.
-func (s *slotSession) Retune(float64) {}
-
-// SpectrumSize implements app.DecoderRun: no secondary FFT.
-func (s *slotSession) SpectrumSize() int { return 0 }
-
-// Spectrum implements app.DecoderRun: no secondary FFT.
-func (s *slotSession) Spectrum(int) {}
 
 // loop records the audio until the session closes. The session is running
 // from its first audio (never from Start: the caller may hold the lock its
 // status callback takes).
 func (s *slotSession) loop() {
-	rec := newRecorder(s.dir, s.ev.Dial, s.log)
+	rec := newRecorder(s.dir, s.spec.Dial, s.log)
 	periods := s.periods()
 	first := true
 
@@ -205,13 +156,17 @@ func (s *slotSession) loop() {
 		select {
 		case <-s.ctx.Done():
 			return
-		case c := <-s.in:
+		case <-s.in.wake:
+		}
+
+		items, _ := s.in.take()
+		for _, c := range items {
 			if first {
 				first = false
 				s.status(app.DecoderStatus{State: app.DecoderRunning})
 			}
 
-			done := rec.write(c.t, c.pcm, periods)
+			done := rec.write(c.v.t, c.v.pcm, periods)
 			for _, f := range done {
 				s.slotDone(f)
 			}
@@ -230,13 +185,13 @@ func (s *slotSession) loop() {
 func (s *slotSession) slotDone(f *slotFile) {
 	var ps []profile
 
-	for _, p := range profiles(s.spec.Mode.Name, s.settings()) {
+	for _, p := range profiles(s.spec.Mode.Name, s.r.o.Settings()) {
 		if p.period == f.period {
 			ps = append(ps, p)
 		}
 	}
 
-	if len(ps) == 0 || f.real < samplesIn(SlotGuard) || s.ctx.Err() != nil {
+	if len(ps) == 0 || f.real < samplesIn(slotGuard) || s.ctx.Err() != nil {
 		f.remove(s.log)
 
 		return
@@ -245,7 +200,7 @@ func (s *slotSession) slotDone(f *slotFile) {
 	partial := f.partial()
 	if partial {
 		s.log.Debug("partial slot", slog.Time("slot", f.start), slog.Int64("samples", f.real), slog.Int64("full", f.full()),
-			slog.Int64("lost_blocks", s.lost.Load()), slog.Int64("resyncs", s.resyncs.Load()))
+			slog.Int64("lost_blocks", s.in.drops()), slog.Int64("resyncs", s.resyncs.Load()))
 	}
 
 	f.refs.Store(int32(len(ps)))
@@ -312,10 +267,7 @@ func (s *slotSession) runJob(ctx context.Context, budget time.Duration, p profil
 	if err != nil {
 		s.log.Error("slot decoder not run", slog.Any("error", err))
 		s.status(app.DecoderStatus{State: app.DecoderUnavailable, Reason: "tool_missing"})
-
-		if s.r.o.Reprobe != nil {
-			s.r.o.Reprobe()
-		}
+		s.r.o.Reprobe()
 
 		return
 	}
@@ -362,8 +314,8 @@ func (s *slotSession) runJob(ctx context.Context, budget time.Duration, p profil
 			return nil
 		},
 		StderrRules: wsjtRules,
-		Sink:        s.jobEvent,
-		Timeouts:    process.Timeouts{Job: budget, Stop: StopGrace},
+		Sink:        s.r.sink(true, s.status),
+		Timeouts:    process.Timeouts{Job: budget, Stop: stopGrace},
 		Limits:      s.r.o.Limits,
 	})
 	if err != nil {
@@ -392,63 +344,15 @@ func (s *slotSession) removeWSPRLogs() {
 	}
 }
 
-// jobEvent maps the end of a job to the session status: running after a
-// completed job, unavailable when the tool is missing or refuses its
-// options, error on a failure or a job past its deadline.
-func (s *slotSession) jobEvent(e process.Event) {
-	var st app.DecoderStatus
-
-	switch e.State {
-	case process.StateStopped:
-		if e.Reason != "completed" {
-			return
-		}
-
-		st = app.DecoderStatus{State: app.DecoderRunning}
-	case process.StateUnavailable:
-		st = app.DecoderStatus{State: app.DecoderUnavailable, Reason: e.Reason}
-	case process.StateErrored, process.StateTimedOut:
-		st = app.DecoderStatus{State: app.DecoderError, Reason: e.Reason}
-	default:
-		return
-	}
-
-	if e.Reprobe && s.r.o.Reprobe != nil {
-		s.r.o.Reprobe()
-	}
-
-	s.status(st)
-}
-
-// decode reports a record unless the session is closed.
-func (s *slotSession) decode(rec app.DecodeRecord) {
-	s.mu.Lock()
-	closed := s.closed
-	s.mu.Unlock()
-
-	if !closed {
-		s.ev.Decode(rec)
-	}
-}
-
 // status reports a status change unless the session is closed. A running
 // session carries the clock warning while the node clock is not
 // synchronised (DEC-026).
 func (s *slotSession) status(st app.DecoderStatus) {
-	if st.State == app.DecoderRunning && s.r.o.ClockSynced != nil && !s.r.o.ClockSynced() {
+	if st.State == app.DecoderRunning && !s.r.o.ClockSynced() {
 		st.Warning = app.WarningClock
 	}
 
-	s.mu.Lock()
-	changed := !s.closed && st != s.last
-	if changed {
-		s.last = st
-	}
-	s.mu.Unlock()
-
-	if changed {
-		s.ev.Status(st)
-	}
+	s.sessionBase.status(st)
 }
 
 // Close implements app.DecoderRun: the slot in progress is dropped, the
@@ -462,14 +366,11 @@ func (s *slotSession) Close() {
 	}
 
 	s.closed = true
-
-	if s.conv != nil {
-		s.conv.Close()
-		s.conv = nil
-	}
+	s.conv.Close()
 	s.mu.Unlock()
 
 	s.cancel()
+	s.in.discard()
 
 	// The jobs still waiting are dropped (off the caller's goroutine: they
 	// remove their slot files).

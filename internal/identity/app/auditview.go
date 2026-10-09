@@ -30,7 +30,9 @@ type AuditFilter struct {
 	TargetID     string
 	From, To     time.Time
 	BeforeID     int64
-	Limit        int
+	// Offset skips the newest matching entries (the previous pages).
+	Offset int
+	Limit  int
 }
 
 // AuditRow is an audit entry with the names of its actor and target user.
@@ -55,7 +57,7 @@ var errNoActor = errors.New("no such actor")
 func (s *AuditView) query(ctx context.Context, f AuditFilter) (domain.AuditQuery, error) {
 	q := domain.AuditQuery{
 		ActionPrefix: f.ActionPrefix, TargetType: f.TargetType, TargetID: f.TargetID, From: f.From, To: f.To,
-		BeforeID: f.BeforeID, Limit: f.Limit,
+		BeforeID: f.BeforeID, Offset: f.Offset, Limit: f.Limit,
 	}
 
 	if q.Limit <= 0 || q.Limit > 1000 {

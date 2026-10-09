@@ -34,7 +34,7 @@ cmd/meshsdr/            entrypoint (single binary)
 internal/cli/           cobra commands (hub, node, all and their subcommands)
 internal/config/        TOML + env config loading, origin tracking (file name, env var or default), JSON Schema
 internal/log/           slog logger factory
-internal/db/            SQLite database (`*db.DB`: single writer + read pool, WithinTx, goose migrator, DSN), see docs/adr/0006 and 0022
+internal/db/            SQLite database (`*db.DB`: single writer + read pool, WithinTx, Batched deletes, goose migrator, DSN), see docs/adr/0006 and 0022
 internal/db/sqlite/     SQLite schema: sqlc.yaml, go:generate for sqlc
 internal/db/sqlite/migrations/ goose SQL migrations (embedded)
 internal/db/sqlite/queries/    sqlc queries
@@ -65,7 +65,7 @@ docs/adr/               architecture decision records
 
 Modules (bounded contexts):
 
-- `grid` (layered): nodes, enrollment, internal CA / mTLS, control channel, heartbeat, capabilities, device registry, gateway (`infra/gateway`, net/http: TLS, hub router, node media proxy) and its forward auth, node media WebSocket and access-token verification
+- `grid` (layered): nodes, enrollment, internal CA / mTLS, control channel, heartbeat, capabilities, device registry, gateway (`infra/gateway`, net/http: TLS, hub router, node media proxy) and its forward auth, node media WebSocket and access-token verification, node agent (`infra/agent`: event buffer, file outbox, desired state)
 - `identity` (layered): users, roles, sessions, passwords, invitations, access tokens, CSRF, audit log; wired by `internal/identity/wire.go`
 - `radio` (layered): node devices (ADR 0019): device lifecycle and manager, owrx connectors under the process supervisor (`internal/shared/process`, ADR 0017), DSP engine (`infra/engine`), media stream handler (`http`)
 - `settings`: DB settings store, config locking/precedence, effective configuration, admin settings pages
@@ -108,7 +108,7 @@ Modeling rules (all modules):
 
 Goal: know everything that goes wrong or not as well as expected, plus debug info, filterable by level and by affected component — without cluttering business code.
 
-- Only `log/slog`. Loggers are injected, scoped at wiring: `logger.With(slog.String("component", "<module>.<layer>.<name>"))` (e.g. `radio.infra.engine`, `shared.process`; flat modules keep stable names such as `settings.app.store`). Never `slog.Default()` in business code.
+- Only `log/slog`. Loggers are injected, scoped at wiring: `logger.With(slog.String("component", "<module>.<layer>.<name>"))` (e.g. `radio.infra.engine`, `shared.process`); flat modules use `<module>.<name>` (`settings.store`, `files.gallery`), and messages carry no module prefix. Never `slog.Default()` in business code.
 - Levels:
   - `Debug`: flow details useful for diagnosis (inputs, decisions, external calls).
   - `Info`: lifecycle and significant business events.
@@ -190,6 +190,7 @@ Dev containers are rootless: the `dev` stage creates an `app` user with the host
 ADR 0003 and ADR 0007 are binding. In short:
 
 - Pages render through `render.Renderer` (`Page` with an optional fragment, `Error`); handlers never write the layout themselves. A page URL returns its fragment for non-boosted htmx requests, the full page otherwise. Actions live on page-scoped paths; JSON only under `/api/v1`.
+- Shared helpers, no module copies: `render` (`Redirect`, `NoIndex` route-group middleware, `(*Renderer).ParseForm` with 413, `AdminPage`, `Sentence`, `Form` state) and `layout` (`Title`, `Notice`, `Failure`, `ErrorSummary`, `DeleteConfirm`, `Pager`, `FilterInput`, `FormatHz`, `HumanBytes`, `DateTimeLocal`). Lists filter frequencies in kHz, name ranges `from`/`to`, and page with `?page=N` (offset, `layout.Pager`).
 - CSP is nonce-only. In templates: no inline `<script>` (except `templ.JSONScript`), no `style=""`/`<style>`, no `hx-on`/`js:`, no templ `css`/`script` components (`web.TestTemplateRules`). Behaviour lives in ES modules under `static/js/` and custom elements (islands); untrusted text goes through `textContent`.
 - Colors, type, spacing come from `--msdr-*` tokens (`static/css/input.css`, Tailwind utilities `bg-surface`, `text-fg-muted`…). New color tokens get both light and dark values and a contrast pair in `web.TestTokenContrast`. Long-lived resources (audio, WebSockets) live outside `#main`.
 - Accessibility (UI-009, WCAG 2.1 AA) is part of every page's definition of done: one `h1`, labelled controls, visible focus, color never the only cue, text equivalents for canvases, throttled `aria-live` for status, usable at 200 % zoom and 320 px width. Add the page to `.infra/a11y/urls.txt`; `make a11y` (CI job `a11y`) must pass.

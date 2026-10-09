@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,10 +19,10 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/config"
-	"github.com/yohang/mesh-sdr/internal/grid/agent"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridhttp "github.com/yohang/mesh-sdr/internal/grid/http"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/agent"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/control"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/enroll"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/media"
@@ -45,7 +46,6 @@ type NodeOption func(*nodeOptions)
 
 type nodeOptions struct {
 	prober         agent.Prober
-	devices        func() []ctl.Device
 	mediaHeartbeat time.Duration
 	// outbox is told the file outbox (tests send files through it).
 	outbox        func(*agent.Outbox)
@@ -70,18 +70,45 @@ func (p decoderProber) Capabilities(ctx context.Context) ctl.Capabilities {
 	return c
 }
 
-// slotSettings are the slot decoder settings of the desired state (none
-// from a hub that predates them: the node defaults).
-func slotSettings(d *ctl.StateDecoders) decoder.Settings {
-	if d == nil {
-		return decoder.Settings{}
+// decoderSettings are the decoding settings of the desired state. The
+// enabled FST4, FST4W, Q65 and JS8 lists it lacks (no state yet, a hub
+// that predates them) take the defaults of the hub settings; the other
+// zero values take the node defaults (decoder.Settings).
+func decoderSettings(d *ctl.StateDecoders, def config.SettingsDecoders) decoder.Settings {
+	s := decoder.Settings{
+		FST4Intervals: seconds(def.FST4Intervals), FST4WIntervals: seconds(def.FST4WIntervals),
+		Q65Combinations: def.Q65Combinations, JS8Profiles: def.JS8Profiles,
 	}
 
-	return decoder.Settings{
-		WSJTDepth: d.WSJTDepth, WSJTDepths: d.WSJTDepths, FST4Intervals: d.FST4Intervals, FST4WIntervals: d.FST4WIntervals,
-		Q65Combinations: d.Q65Combinations, JS8Profiles: d.JS8Profiles, JS8Depth: d.JS8Depth,
-		PagingFilter: d.PagingFilter, PagingCharset: d.PagingCharset, ISMReportLevels: d.ISMReportLevels,
+	if d == nil {
+		return s
 	}
+
+	s.MaxRestarts, s.FFTSize, s.ShowCW = d.MaxRestarts, d.DigimodesFFTSize, d.ShowCW
+	s.WSJTDepth, s.WSJTDepths, s.JS8Depth = d.WSJTDepth, d.WSJTDepths, d.JS8Depth
+	s.PagingFilter, s.PagingCharset, s.ISMReportLevels = d.PagingFilter, d.PagingCharset, d.ISMReportLevels
+
+	if f := d.FAX; f != nil {
+		s.FAX = decoder.FAXSettings{LPM: f.LPM, MinLength: f.MinLength, MaxLength: f.MaxLength, PostProcess: f.PostProcess, Color: f.Color, AM: f.AM}
+	}
+
+	if len(d.FST4Intervals) > 0 {
+		s.FST4Intervals = d.FST4Intervals
+	}
+
+	if len(d.FST4WIntervals) > 0 {
+		s.FST4WIntervals = d.FST4WIntervals
+	}
+
+	if len(d.Q65Combinations) > 0 {
+		s.Q65Combinations = d.Q65Combinations
+	}
+
+	if len(d.JS8Profiles) > 0 {
+		s.JS8Profiles = d.JS8Profiles
+	}
+
+	return s
 }
 
 // queueProber adds the depth of the batch decoder queue to the heartbeats
@@ -149,10 +176,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 		return nil, errors.New("tls.key: unsupported key type")
 	}
 
-	if o.devices == nil {
-		devices := DevicesOf(cfg)
-		o.devices = func() []ctl.Device { return devices }
-	}
+	devices := DevicesOf(cfg)
 
 	// The capability report probes the drivers and the decoder tools of the
 	// radio built below.
@@ -171,7 +195,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 			return out
 		}
 		decoders := func(ctx context.Context) []ctl.Decoder { return decoderCapabilities(ctx, toolbox) }
-		o.prober = probe.New(version.String(), o.devices, drivers, decoders, time.Now())
+		o.prober = probe.New(version.String(), func() []ctl.Device { return devices }, drivers, decoders, time.Now())
 	} else if o.probeDecoders {
 		o.prober = decoderProber{Prober: o.prober, decoders: func(ctx context.Context) []ctl.Decoder { return decoderCapabilities(ctx, toolbox) }}
 	}
@@ -185,7 +209,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	ag, err := agent.New(agent.Options{
 		NodeID: id.String(), Version: version.String(),
 		Buffer: agent.NewBuffer(cfg.Node.EventBuffer.MaxEvents, int(cfg.Node.EventBuffer.MaxBytes.Bytes())),
-		Prober: o.prober, Now: time.Now, Logger: component(logger, "grid.agent"),
+		Prober: o.prober, Now: time.Now, Logger: component(logger, "grid.infra.agent"),
 	})
 	if err != nil {
 		return nil, err
@@ -193,7 +217,7 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 
 	// The files the decoders produce go to the hub through the outbox
 	// (FIL-005), under the node's runtime directory.
-	outbox := agent.NewOutbox(filepath.Join(cfg.Node.RuntimeDir, "outbox"), ag, time.Now, component(logger, "grid.agent.outbox"))
+	outbox := agent.NewOutbox(filepath.Join(cfg.Node.RuntimeDir, "outbox"), ag, time.Now, component(logger, "grid.infra.agent.outbox"))
 	if o.outbox != nil {
 		o.outbox(outbox)
 	}
@@ -204,49 +228,24 @@ func enrolledNode(cfg config.Node, id griddomain.NodeID, logger *slog.Logger, op
 	// The desired state pushed by the hub carries the presets, the WFM
 	// de-emphasis and waterfall defaults the radio applies and the listen
 	// policy the media server enforces.
-	state := agent.NewDesiredState(o.devices())
+	state := agent.NewDesiredState(devices)
 
 	// The device logs (SRC-005): connector lines and lifecycle records,
 	// pushed to the hub over the control channel.
 	deviceLog := devlog.New(slices.Collect(maps.Keys(cfg.Devices)), devlog.DefaultSize, time.Now)
 
-	// Decoders: decoded messages and images go to the hub, the crash-loop
-	// threshold and the FAX settings come with the desired state, and a
-	// missing tool re-probes the node.
+	// Decoders: decoded messages and images go to the hub, the decoding
+	// settings come with the desired state, and a missing tool re-probes
+	// the node.
+	defaults := config.DefaultSettings().Decoders
 	dec := radioDecoding{
 		publisher: decodePublisher{ag: ag},
 		files: filePublisher{
-			outbox: outbox, dir: filepath.Join(cfg.Node.RuntimeDir, "produced"), logger: component(logger, "radio.infra.files"),
+			outbox: outbox, dir: filepath.Join(cfg.Node.RuntimeDir, "produced"), logger: component(logger, "wire.file_publisher"),
 		},
-		maxRestarts: func() int {
-			if d := state.Policy().Decoders; d != nil {
-				return d.MaxRestarts
-			}
-
-			return 0
-		},
-		fax: func() decoder.FAXSettings {
-			if d := state.Policy().Decoders; d != nil && d.FAX != nil {
-				f := d.FAX
-
-				return decoder.FAXSettings{
-					LPM: f.LPM, MinLength: f.MinLength, MaxLength: f.MaxLength, PostProcess: f.PostProcess, Color: f.Color, AM: f.AM,
-				}
-			}
-
-			return decoder.DefaultFAX
-
-		},
-		text: func() decoder.TextSettings {
-			if d := state.Policy().Decoders; d != nil {
-				return decoder.TextSettings{FFTSize: d.DigimodesFFTSize, ShowCW: d.ShowCW}
-			}
-
-			return decoder.TextSettings{}
-		},
+		settings: func() decoder.Settings { return decoderSettings(state.Policy().Decoders, defaults) },
 		reprobe:  (&coalesced{run: func() { ag.EmitCapabilities(context.Background()) }}).trigger,
 		queue:    queue,
-		settings: func() decoder.Settings { return slotSettings(state.Policy().Decoders) },
 		// Slot decoders need the node clock synchronised and within the
 		// offset beyond which the hub marks the node degraded (DEC-026,
 		// §4.5).
@@ -430,13 +429,13 @@ func (p filePublisher) Produced(f radioapp.ProducedFile) {
 
 		err := p.send(meta, f.Data)
 		if err != nil {
-			p.logger.Warn("decoded file not sent to the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
+			p.logger.WarnContext(context.Background(), "decoded file not sent to the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
 				slog.Int("bytes", len(f.Data)), slog.Any("error", err))
 
 			return
 		}
 
-		p.logger.Debug("decoded file queued for the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
+		p.logger.DebugContext(context.Background(), "decoded file queued for the hub", slog.String("kind", f.Kind), slog.String("device_id", f.DeviceID),
 			slog.Int("bytes", len(f.Data)))
 	}()
 }
@@ -482,12 +481,7 @@ func NodeEnrollment(cfg config.Node, logger *slog.Logger, token griddomain.Enrol
 		return nil, fmt.Errorf("node.id: %w", err)
 	}
 
-	key, err := pki.GenerateKey()
-	if err != nil {
-		return nil, err
-	}
-
-	self, err := pki.SelfSigned(key, id.String(), cfg.Node.Listen, now())
+	key, self, err := selfSigned(cfg, id, now())
 	if err != nil {
 		return nil, err
 	}
@@ -497,16 +491,40 @@ func NodeEnrollment(cfg config.Node, logger *slog.Logger, token griddomain.Enrol
 		CAFingerprint: caFingerprint, Now: now, Logger: component(logger, "grid.infra.enroll"),
 	})
 
-	srv := httpserver.NewServer(cfg.Node.Listen, e.Handler())
-	srv.ErrorLog = slog.NewLogLogger(component(logger, "grid.http.server").Handler(), slog.LevelDebug)
-	srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{self}}
-
 	return &Enrollment{
-		Process:  &Process{addr: cfg.Node.Listen, server: srv, logger: component(logger, "grid.http.server")},
+		Process:  preEnrollment(cfg.Node.Listen, self, e.ServeEnroll, logger),
 		Enroller: e,
 		Key:      key,
 		Paths:    enroll.Paths{Key: cfg.TLS.Key, Cert: cfg.TLS.Cert, CA: cfg.HubTrust.CACert},
 	}, nil
+}
+
+// selfSigned returns a fresh node key and its self-signed certificate, the
+// identity of a node before its enrollment (§4.2 step 3).
+func selfSigned(cfg config.Node, id griddomain.NodeID, now time.Time) (*ecdsa.PrivateKey, tls.Certificate, error) {
+	key, err := pki.GenerateKey()
+	if err != nil {
+		return nil, tls.Certificate{}, err
+	}
+
+	cert, err := pki.SelfSigned(key, id.String(), cfg.Node.Listen, now)
+	if err != nil {
+		return nil, tls.Certificate{}, err
+	}
+
+	return key, cert, nil
+}
+
+// preEnrollment is the process of a node that is not enrolled: the
+// pre-enrollment API (enroll serves POST /enroll, nil answers 501) on
+// listen, over TLS 1.3 with the self-signed certificate cert.
+func preEnrollment(listen string, cert tls.Certificate, enroll http.HandlerFunc, logger *slog.Logger) *Process {
+	srv := httpserver.NewServer(listen, gridhttp.NewPreEnrollmentRouter(enroll, component(logger, "grid.http.enrollment")))
+	// Refused handshakes are expected noise.
+	srv.ErrorLog = slog.NewLogLogger(component(logger, "grid.http.server").Handler(), slog.LevelDebug)
+	srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}
+
+	return &Process{addr: listen, server: srv, logger: component(logger, "grid.http.server")}
 }
 
 // DevicesOf lists the [devices.<id>] of the node config, ordered by id

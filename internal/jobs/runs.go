@@ -11,10 +11,9 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db/sqlite/sqlc"
 )
 
-// Runs is the SQLite job_runs repository.
+// Runs is the SQLite job_runs repository. Writes join the caller's
+// transaction.
 type Runs struct{ db *db.DB }
-
-var _ Repository = (*Runs)(nil)
 
 // NewRuns returns the repository.
 func NewRuns(a *db.DB) *Runs { return &Runs{db: a} }
@@ -37,8 +36,9 @@ func nullMS(t time.Time) sql.NullInt64 {
 
 func nullString(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
 
-// Get implements Repository. It reads through the writer inside a
-// transaction (the start of a run is a read-modify-write).
+// Get returns the run of name, or nil when the job never ran. It reads
+// through the writer inside a transaction (the start of a run is a
+// read-modify-write).
 func (r *Runs) Get(ctx context.Context, name string) (*Run, error) {
 	row, err := sqlc.New(r.db.Reader(ctx)).GetJobRun(ctx, name)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -60,7 +60,7 @@ func (r *Runs) Get(ctx context.Context, name string) (*Run, error) {
 	return run, nil
 }
 
-// Save implements Repository.
+// Save stores a run.
 func (r *Runs) Save(ctx context.Context, run *Run) error {
 	err := sqlc.New(r.db.Writer(ctx)).UpsertJobRun(ctx, sqlc.UpsertJobRunParams{
 		Job:            run.Name(),

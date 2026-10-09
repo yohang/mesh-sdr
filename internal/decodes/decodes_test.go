@@ -5,30 +5,26 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/a-h/templ"
-
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 var t0 = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
 
-type renderer struct{}
+// shell is a stub shell of the renderer.
+type shell struct{}
 
-func (renderer) Page(w http.ResponseWriter, r *http.Request, status int, _ layout.Page, content, _ templ.Component) {
-	w.WriteHeader(status)
-	_ = content.Render(r.Context(), w)
-}
-
-func (renderer) Error(w http.ResponseWriter, _ *http.Request, status int) { w.WriteHeader(status) }
+func (shell) Shell(*http.Request) layout.Shell { return layout.Shell{SiteName: "Test"} }
 
 type env struct {
 	m         *Module
@@ -63,7 +59,7 @@ func newEnv(t *testing.T) *env {
 
 			return 0, 0
 		},
-		Render: renderer{}, Now: func() time.Time { return e.now },
+		Render: render.New(shell{}, nil, slog.New(slog.DiscardHandler)), Now: func() time.Time { return e.now },
 	})
 
 	return e
@@ -197,7 +193,7 @@ func TestPurge(t *testing.T) {
 
 	e.ingest(t, "n1", batch...)
 
-	n, err := e.m.Purge().Run(context.Background())
+	n, err := e.m.PurgeOld(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +240,19 @@ func TestListPage(t *testing.T) {
 		t.Errorf("rows %d", strings.Count(body, "align-top"))
 	}
 
-	_, body = get(t, e, Path+"?until=2026-10-08T12:00&mode=selcall")
+	// The next page holds the rest, newest first.
+	_, body = get(t, e, Path+"?page=2")
+	if strings.Count(body, "align-top") != 3 || !strings.Contains(body, `<a href="/decodes">Newer messages</a>`) || strings.Contains(body, "Older messages") {
+		t.Errorf("page 2: %s", body)
+	}
+
+	// A page past the end keeps the way back.
+	_, body = get(t, e, Path+"?page=3")
+	if !strings.Contains(body, "No decoded message matches.") || !strings.Contains(body, `<a href="/decodes?page=2">Newer messages</a>`) {
+		t.Errorf("page 3: %s", body)
+	}
+
+	_, body = get(t, e, Path+"?to=2026-10-08T12:00&mode=selcall")
 	if !strings.Contains(body, "No decoded message matches.") {
 		t.Errorf("time filter: %s", body)
 	}

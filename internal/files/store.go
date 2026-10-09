@@ -317,21 +317,6 @@ func (r *Files) Thumbnail(ctx context.Context, id shared.UUID) ([]byte, error) {
 	return b, nil
 }
 
-// EntryContent returns the content of a complete file, checked against
-// its size.
-func (r *Files) EntryContent(ctx context.Context, e Entry) ([]byte, error) {
-	data, err := r.contentOf(ctx, e.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	if int64(len(data)) != e.Size {
-		return nil, fmt.Errorf("read file %s: %d bytes, want %d", e.ID, len(data), e.Size)
-	}
-
-	return data, nil
-}
-
 // filterParams are the SQL parameters of a filter.
 type filterParams struct {
 	mimeLike, device, mode, from, to, freqMin, freqMax any
@@ -374,20 +359,25 @@ func paramsOf(f Filter) filterParams {
 // List returns the complete produced files matching f that v may see,
 // newest reception first: at most limit from offset.
 func (r *Files) List(ctx context.Context, f Filter, v Access, offset, limit int) ([]Entry, error) {
-	if v.Denied {
+	if !v.All && len(v.Devices) == 0 {
 		return nil, nil
 	}
 
-	hidden, err := json.Marshal(append([]string{}, v.HiddenDevices...))
-	if err != nil {
-		return nil, fmt.Errorf("hidden devices: %w", err)
+	var visible any
+	if !v.All {
+		b, err := json.Marshal(v.Devices)
+		if err != nil {
+			return nil, fmt.Errorf("visible devices: %w", err)
+		}
+
+		visible = string(b)
 	}
 
 	p := paramsOf(f)
 
 	rows, err := sqlc.New(r.db.Reader(ctx)).ListProducedFiles(ctx, sqlc.ListProducedFilesParams{
 		MimeLike: p.mimeLike, DeviceID: p.device, Mode: p.mode, FromUtc: p.from, ToUtc: p.to, FreqMin: p.freqMin,
-		FreqMax: p.freqMax, HiddenDevices: string(hidden), OffsetRows: int64(offset), LimitRows: int64(limit),
+		FreqMax: p.freqMax, VisibleDevices: visible, OffsetRows: int64(offset), LimitRows: int64(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list files: %w", err)

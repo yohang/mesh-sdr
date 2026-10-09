@@ -10,6 +10,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/sqlite/sqlc"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
 )
 
 // JobRetention is the periodic job of the files retention (FIL-004).
@@ -38,7 +39,7 @@ func (p RetentionPolicy) String() string {
 	}
 
 	if p.MaxBytes > 0 {
-		s += ", " + HumanSize(p.MaxBytes)
+		s += ", " + layout.HumanBytes(p.MaxBytes)
 	}
 
 	return s
@@ -170,21 +171,4 @@ func (r *Retention) Stats(ctx context.Context) (rows, bytes int64, sized bool, e
 	}
 
 	return st.Files, st.Bytes, true, nil
-}
-
-// HumanSize formats a size in bytes for people (KiB, MiB, GiB).
-func HumanSize(n int64) string {
-	const unit = 1024
-
-	if n < unit {
-		return strconv.FormatInt(n, 10) + " B"
-	}
-
-	div, exp := int64(unit), 0
-	for m := n / unit; m >= unit && exp < 4; m /= unit {
-		div *= unit
-		exp++
-	}
-
-	return strconv.FormatFloat(float64(n)/float64(div), 'f', 1, 64) + " " + string("KMGTP"[exp]) + "iB"
 }

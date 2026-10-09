@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/db"
 )
 
 // StaleAfter is how long a run recorded by another process may last before
@@ -22,16 +24,24 @@ import (
 const StaleAfter = time.Hour
 
 // Job is a periodic unit of work. Run deletes or updates in bounded batches
-// and returns the rows affected.
+// (db.Batched) and returns the rows affected.
 type Job interface {
 	Name() string
 	Run(ctx context.Context) (int64, error)
 }
 
-// Transactor runs a unit of work in one write transaction.
-type Transactor interface {
-	WithinTx(ctx context.Context, fn func(ctx context.Context) error) error
+// Func is a Job made of a name and a function.
+func Func(name string, run func(ctx context.Context) (int64, error)) Job {
+	return funcJob{name: name, run: run}
 }
+
+type funcJob struct {
+	name string
+	run  func(ctx context.Context) (int64, error)
+}
+
+func (j funcJob) Name() string                           { return j.name }
+func (j funcJob) Run(ctx context.Context) (int64, error) { return j.run(ctx) }
 
 // Clock returns the current time.
 type Clock func() time.Time
@@ -47,8 +57,8 @@ type scheduled struct {
 // of one job at once (across processes too, through job_runs). It is the
 // boundary of the jobs: it logs their outcome once.
 type Scheduler struct {
-	repo   Repository
-	tx     Transactor
+	repo   *Runs
+	tx     *db.DB
 	now    Clock
 	logger *slog.Logger
 
@@ -57,7 +67,7 @@ type Scheduler struct {
 }
 
 // NewScheduler returns a scheduler without jobs.
-func NewScheduler(repo Repository, tx Transactor, now Clock, logger *slog.Logger) *Scheduler {
+func NewScheduler(repo *Runs, tx *db.DB, now Clock, logger *slog.Logger) *Scheduler {
 	return &Scheduler{repo: repo, tx: tx, now: now, logger: logger, jobs: map[string]scheduled{}}
 }
 
@@ -229,24 +239,4 @@ func (s *Scheduler) run(ctx context.Context, j scheduled) (int64, error) {
 		slog.Int64("rows", rows), slog.Duration("duration", s.now().Sub(start)))
 
 	return rows, nil
-}
-
-// Batched calls fn with batch until it affects fewer rows, and returns the
-// total: deletes in bounded batches keep each write transaction short
-// (TECHNICAL_SPEC §7.3: at most 10 000 rows per transaction).
-func Batched(ctx context.Context, batch int, fn func(ctx context.Context, batch int) (int, error)) (int64, error) {
-	var total int64
-
-	for {
-		n, err := fn(ctx, batch)
-		total += int64(n)
-
-		if err != nil || n < batch {
-			return total, err
-		}
-
-		if err := ctx.Err(); err != nil {
-			return total, err
-		}
-	}
 }

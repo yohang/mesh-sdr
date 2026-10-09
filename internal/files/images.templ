@@ -1,6 +1,20 @@
 package files
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+)
+
+// imagesPage is the images section alone in the Site page, after an
+// action that failed without JavaScript.
+templ imagesPage(section templ.Component) {
+	@layout.Title("") {
+		Site
+	}
+	<p><a href="/admin/site">All the settings of the site</a></p>
+	@section
+}
 
 // imagesSection is the receiver images section of the admin Site page
 // (ADM-004), also returned alone (htmx fragment) after an action.
@@ -8,12 +22,8 @@ templ imagesSection(slots []slotView, notice, failure string) {
 	<section id="receiver-images" class="flex flex-col gap-4 rounded border border-border bg-surface p-4" aria-labelledby="title-images">
 		<h2 id="title-images" class="text-lg font-semibold">Images</h2>
 		<p class="text-sm text-fg-muted">PNG, JPEG or WebP, at most 8192 × 8192 pixels. Images are re-encoded (avatar as PNG, panorama as JPEG), which removes their metadata.</p>
-		if notice != "" {
-			<p class="font-semibold text-success" role="status">{ notice }</p>
-		}
-		if failure != "" {
-			<p class="font-semibold text-danger" role="alert">{ failure }</p>
-		}
+		@layout.Notice("", notice)
+		@layout.Failure("", failure)
 		for _, s := range slots {
 			<div class="flex flex-col gap-2">
 				<h3 class="font-semibold">{ s.Label }</h3>
@@ -29,12 +39,12 @@ templ imagesSection(slots []slotView, notice, failure string) {
 						<span>New { s.Label } (at most { s.Limit })</span>
 						<input type="file" name="file" accept="image/png,image/jpeg,image/webp" required class="max-w-full"/>
 					</label>
-					<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">Upload<span class="sr-only"> { s.Label }</span></button>
+					<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">Upload<span class="sr-only">{ s.Label }</span></button>
 				</form>
 				if s.Set {
 					<form method="post" action="/admin/site/images/remove" hx-post="/admin/site/images/remove" hx-target="#receiver-images" hx-swap="outerHTML" hx-confirm={ "Remove the " + s.Slot.Name() + " and restore the default?" } data-confirm-action="Restore default">
 						<input type="hidden" name="slot" value={ s.Slot.Name() }/>
-						<button type="submit" class="rounded border border-border px-3 py-1">Restore default<span class="sr-only"> { s.Label }</span></button>
+						<button type="submit" class="rounded border border-border px-3 py-1">Restore default<span class="sr-only">{ s.Label }</span></button>
 					</form>
 				}
 			</div>

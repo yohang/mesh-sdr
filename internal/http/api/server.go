@@ -48,35 +48,33 @@ type BookmarkHandlers interface {
 var _ StrictServerInterface = Server{}
 
 // NewHandler returns the /api/v1 handler: generated routes, the access
-// policy of openapi.yaml (x-meshsdr-access) checked by authz, problem+json
-// errors (including 404, 405 and panics). It panics when an operation of
-// the embedded document has no access level (a build defect, caught by
-// tests).
-func NewHandler(srv StrictServerInterface, authz Authorizer, logger *slog.Logger) http.Handler {
-	policy, err := LoadPolicy(specJSON)
-	if err != nil {
-		panic(err)
-	}
+// policy of openapi.yaml (x-meshsdr-access) checked by authz, request bodies
+// capped at maxBody, problem+json errors (including 404, 405 and panics).
+// It fails when an operation of the embedded document has no access level.
+func NewHandler(srv StrictServerInterface, authz Authorizer, maxBody int64, logger *slog.Logger) (http.Handler, error) {
+	return newHandler(specJSON, srv, authz, maxBody, logger)
+}
 
-	fields, err := loadBodyFields(specJSON)
+func newHandler(doc []byte, srv StrictServerInterface, authz Authorizer, maxBody int64, logger *slog.Logger) (http.Handler, error) {
+	s, err := parseSpec(doc)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	r := chi.NewRouter()
-	r.Use(problem.Recoverer(logger), guard(authz))
+	r.Use(problem.Recoverer(logger), s.guard(authz, maxBody))
 	r.NotFound(problem.NotFound)
 	r.MethodNotAllowed(problem.MethodNotAllowed)
 
-	strict := NewStrictHandlerWithOptions(srv, []StrictMiddlewareFunc{policy.Middleware(authz)}, StrictHTTPServerOptions{
+	strict := NewStrictHandlerWithOptions(srv, nil, StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  problem.BadRequest,
 		ResponseErrorHandlerFunc: problem.ErrorHandler(logger),
 	})
 
 	return HandlerWithOptions(strict, ChiServerOptions{
 		BaseRouter: r, ErrorHandlerFunc: problem.BadRequest,
-		Middlewares: []MiddlewareFunc{fields.rejectUnknownFields(policy, authz)},
-	})
+		Middlewares: []MiddlewareFunc{s.bodies.rejectUnknownFields},
+	}), nil
 }
 
 // MetaHandlers serve the API description.

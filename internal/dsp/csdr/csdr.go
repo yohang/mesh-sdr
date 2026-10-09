@@ -108,7 +108,6 @@ type Window int
 const (
 	Blackman Window = C.MSDR_WINDOW_BLACKMAN
 	Hamming  Window = C.MSDR_WINDOW_HAMMING
-	Boxcar   Window = C.MSDR_WINDOW_BOXCAR
 )
 
 // NewFFT returns Csdr::Fft: one size-point FFT of the windowed input every

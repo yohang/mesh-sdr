@@ -5,6 +5,7 @@ package render
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -26,12 +27,15 @@ type ShellSource interface {
 // Renderer renders pages and error pages in the app shell.
 type Renderer struct {
 	shell  ShellSource
+	admin  func(ctx context.Context) bool
 	logger *slog.Logger
 }
 
-// New returns a Renderer.
-func New(shell ShellSource, logger *slog.Logger) *Renderer {
-	return &Renderer{shell: shell, logger: logger}
+// New returns a Renderer. admin tells whether the visitor of a request is
+// an admin, for the admin section list (AdminPage); nil shows every
+// section.
+func New(shell ShellSource, admin func(ctx context.Context) bool, logger *slog.Logger) *Renderer {
+	return &Renderer{shell: shell, admin: admin, logger: logger}
 }
 
 // WantsFragment reports whether r asks for a fragment rather than the full

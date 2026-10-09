@@ -12,7 +12,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 //go:generate go tool templ generate
@@ -44,15 +44,9 @@ type Retention interface {
 	Purge(ctx context.Context, store string) (int64, error)
 }
 
-// Renderer renders pages in the app shell (internal/web/render).
-type Renderer interface {
-	Page(w http.ResponseWriter, r *http.Request, status int, page layout.Page, content, fragment templ.Component)
-	Error(w http.ResponseWriter, r *http.Request, status int)
-}
-
 // Deps are the dependencies of the module.
 type Deps struct {
-	Render    Renderer
+	Render    *render.Renderer
 	Guard     func(http.Handler) http.Handler // admin role and network (identity)
 	Store     *Store
 	Config    *EffectiveConfig
@@ -88,28 +82,16 @@ func (m *Module) Middlewares() []func(http.Handler) http.Handler { return nil }
 // Routes implements internal/http.Module.
 func (m *Module) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
-		r.Use(m.d.Guard, noIndex)
+		r.Use(m.d.Guard, render.NoIndex)
 
-		get := func(pattern string, h http.HandlerFunc) {
-			r.Get(pattern, h)
-			r.Head(pattern, h)
-		}
-
-		get("/admin", m.overview)
-		get("/admin/system", m.system)
+		r.Get("/admin", m.overview)
+		r.Get("/admin/system", m.system)
 		r.Post("/admin/retention/purge", m.purge)
 
 		for _, p := range formPages {
-			get(p.Path, m.formPage(p))
+			r.Get(p.Path, m.formPage(p))
 			r.Post(p.Path, m.save(p))
 		}
-	})
-}
-
-func noIndex(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Robots-Tag", "noindex")
-		next.ServeHTTP(w, r)
 	})
 }
 
@@ -123,8 +105,7 @@ type formPage struct {
 }
 
 func (m *Module) page(w http.ResponseWriter, r *http.Request, status int, title, section string, content, fragment templ.Component) {
-	m.d.Render.Page(w, r, status, layout.Page{Title: title, Section: layout.SectionAdmin},
-		layout.AdminPage(section, content), fragment)
+	m.d.Render.AdminPage(w, r, status, title, section, content, fragment)
 }
 
 // formPage serves a page of form sections.
@@ -177,17 +158,7 @@ func configEntry(v ConfigView, key string) ConfigEntry {
 // save handles the submission of one section of a page.
 func (m *Module) save(p formPage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, FormBodyLimit)
-		if err := r.ParseForm(); err != nil {
-			status := http.StatusBadRequest
-
-			var tooLarge *http.MaxBytesError
-			if errors.As(err, &tooLarge) {
-				status = http.StatusRequestEntityTooLarge
-			}
-
-			m.d.Render.Error(w, r, status)
-
+		if !m.d.Render.ParseForm(w, r, FormBodyLimit) {
 			return
 		}
 

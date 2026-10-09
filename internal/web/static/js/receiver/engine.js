@@ -63,6 +63,7 @@
 // net: received bit rate, round-trip time and its jitter.
 
 import { apiFetch } from "../csrf.js";
+import { backoff } from "../events.js";
 import { decodeADPCM } from "./adpcm.js";
 import { AudioPlayer } from "./audio.js";
 import { savedBandpass, saveBandpass } from "./bandpasses.js";
@@ -381,7 +382,7 @@ class Engine extends EventTarget {
       return;
     }
     if (welcomed) this.retry = 0;
-    const delay = Math.min(MAX_RETRY_MS, MIN_RETRY_MS * 2 ** this.retry++) * (0.5 + Math.random() / 2);
+    const delay = backoff(this.retry++, MIN_RETRY_MS, MAX_RETRY_MS) * (0.5 + Math.random() / 2);
     this.setState("reconnecting");
     this.retryTimer = setTimeout(() => {
       this.retryTimer = 0;

@@ -67,7 +67,7 @@ func TestWorkdirFailure(t *testing.T) {
 	}
 
 	// A closed session reports nothing more.
-	s := run.(*session)
+	s := run.(*toolSession)
 	run.Close()
 	s.decode(app.DecodeRecord{Text: "late"})
 	s.status(app.DecoderStatus{State: app.DecoderRunning})

@@ -152,16 +152,6 @@ func (r *ConnectionRepository) ListOpen(ctx context.Context) ([]*domain.Connecti
 	return out, nil
 }
 
-// CountOpen implements domain.ConnectionRepository.
-func (r *ConnectionRepository) CountOpen(ctx context.Context) (int, error) {
-	n, err := sqlc.New(r.db.Reader(ctx)).CountOpenConnections(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("count connections: %w", err)
-	}
-
-	return int(n), nil
-}
-
 // CountOpenKind implements domain.ConnectionRepository.
 func (r *ConnectionRepository) CountOpenKind(ctx context.Context, kind domain.ConnectionKind) (int, error) {
 	n, err := sqlc.New(r.db.Reader(ctx)).CountOpenKindConnections(ctx, string(kind))

@@ -16,8 +16,6 @@ type DropOldest struct {
 	chunks   [][]byte
 	size     int
 	capBytes int
-	dropped  int64 // bytes dropped (input_overruns)
-	gaps     int64 // drop events (gap markers)
 	closed   bool
 }
 
@@ -37,15 +35,9 @@ func (b *DropOldest) Write(p []byte) (int, error) {
 	c := append([]byte(nil), p...)
 	b.chunks = append(b.chunks, c)
 	b.size += len(c)
-	dropped := false
 	for b.size > b.capBytes && len(b.chunks) > 1 {
 		b.size -= len(b.chunks[0])
-		b.dropped += int64(len(b.chunks[0]))
 		b.chunks = b.chunks[1:]
-		dropped = true
-	}
-	if dropped {
-		b.gaps++
 	}
 	b.cond.Signal()
 	return len(p), nil
@@ -57,13 +49,6 @@ func (b *DropOldest) Close() {
 	b.closed = true
 	b.cond.Broadcast()
 	b.mu.Unlock()
-}
-
-// Overruns returns dropped bytes and drop events.
-func (b *DropOldest) Overruns() (bytes, gaps int64) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.dropped, b.gaps
 }
 
 // Feed copies buffered chunks to w until ctx is done, the buffer is closed and

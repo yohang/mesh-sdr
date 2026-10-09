@@ -1,12 +1,18 @@
 package http
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+)
 
 // forgotPage is the forgot-password page (ACC-003): one answer whatever the
 // account (SR-06). Without mail it says to ask an administrator.
 templ forgotPage(v forgotView) {
 	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="forgot-title">
-		<h1 id="forgot-title" class="text-2xl font-bold">Forgot password</h1>
+		@layout.Title("forgot-title") {
+			Forgot password
+		}
 		if v.MailEnabled {
 			@forgotFormView(v)
 		} else {
@@ -19,11 +25,9 @@ templ forgotPage(v forgotView) {
 templ forgotFormView(v forgotView) {
 	<form id="forgot-form" class="flex flex-col gap-3" method="post" action="/password/forgot" hx-post="/password/forgot" hx-target="this" hx-swap="outerHTML">
 		if v.Sent {
-			<p class="font-semibold" role="status">If an account matches, we sent a link. It is valid for { strconv.Itoa(v.Minutes) } minutes.</p>
+			@layout.Notice("", "If an account matches, we sent a link. It is valid for "+strconv.Itoa(v.Minutes)+" minutes.")
 		}
-		if v.Error != "" {
-			<p class="font-semibold" role="alert">{ v.Error }</p>
-		}
+		@layout.Failure("", v.Error)
 		<label class="flex flex-col gap-1">
 			<span>Username or e-mail</span>
 			<input class="rounded border px-2 py-1" type="text" name="login" autocomplete="username" autocapitalize="none" spellcheck="false" required/>
@@ -36,16 +40,16 @@ templ forgotFormView(v forgotView) {
 // hidden field (token-url.js, SR-07).
 templ resetPage(f resetForm) {
 	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="reset-title" data-replace-url="/password/reset">
-		<h1 id="reset-title" class="text-2xl font-bold">Choose a new password</h1>
+		@layout.Title("reset-title") {
+			Choose a new password
+		}
 		@resetFormView(f)
 	</section>
 }
 
 templ resetFormView(f resetForm) {
 	<form id="reset-form" class="flex flex-col gap-3" method="post" action="/password/reset" hx-post="/password/reset" hx-target="this" hx-swap="outerHTML">
-		if f.Error != "" {
-			<p id="reset-error" class="font-semibold" role="alert">{ f.Error }</p>
-		}
+		@layout.Failure("reset-error", f.Error)
 		<input type="hidden" name="token" value={ f.Token }/>
 		<label class="flex flex-col gap-1">
 			<span>New password</span>
@@ -76,8 +80,10 @@ templ resetFormView(f resetForm) {
 
 templ resetInvalid(msg string) {
 	<section class="mx-auto flex w-full max-w-prose flex-col gap-4 p-4" aria-labelledby="reset-title">
-		<h1 id="reset-title" class="text-2xl font-bold">Reset password</h1>
-		<p role="alert">{ msg }</p>
+		@layout.Title("reset-title") {
+			Reset password
+		}
+		@layout.Failure("", msg)
 		<p><a href="/password/forgot">Ask for a new link</a></p>
 	</section>
 }

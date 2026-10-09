@@ -19,6 +19,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/wire"
@@ -319,7 +320,7 @@ func TestRemoveErasesConnections(t *testing.T) {
 	cfg := config.DefaultHub()
 	cfg.Auth.Argon2 = config.Argon2{MemoryKiB: 64, Iterations: 1, Parallelism: 1}
 	a := dbtest.NewSQLite(t)
-	admin := wire.UserAdmin(cfg, discard, a)
+	admin := identity.UserAdmin(wire.IdentityDeps(cfg, discard, a))
 
 	res, err := admin.Add(ctx, identityapp.AddUserInput{Username: "alice", Password: "a long passphrase here"})
 	if err != nil {

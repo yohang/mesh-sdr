@@ -24,7 +24,7 @@ func TestPresenceFromNodeEvents(t *testing.T) {
 	p := app.NewPresence(repo, sqlite.NewDeviceRepository(e.db), tr, app.DefaultTimings(), e.clock.now, discard)
 
 	for _, typ := range []rxv1.MessageType{rxv1.TypeConnectionOpened, rxv1.TypeConnectionHeart, rxv1.TypeConnectionClosed} {
-		c.Handle(typ, p.Handler())
+		c.Handle(typ, p.Handler(typ))
 	}
 
 	c.OnBoot(p.NodeRestarted)
@@ -65,8 +65,8 @@ func TestPresenceFromNodeEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if count, _ := p.Count(ctx); count != 1 {
-		t.Fatalf("open = %d, want 1", count)
+	if open, _ := p.List(ctx); len(open) != 1 {
+		t.Fatalf("open = %d, want 1", len(open))
 	}
 
 	open, _ := p.List(ctx)
@@ -117,8 +117,8 @@ func TestPresenceFromNodeEvents(t *testing.T) {
 	e.clock.advance(40 * time.Second)
 	p.Reap(ctx)
 
-	if count, _ := p.Count(ctx); count != 1 {
-		t.Fatalf("open after a heartbeat = %d, want 1 (the silent stolen row was reaped)", count)
+	if open, _ := p.List(ctx); len(open) != 1 {
+		t.Fatalf("open after a heartbeat = %d, want 1 (the silent stolen row was reaped)", len(open))
 	}
 
 	e.clock.advance(10 * time.Second)
@@ -137,7 +137,7 @@ func TestPresenceCapsOpenRowsPerNode(t *testing.T) {
 	c, tr := newControl(e, "1.0.0")
 	repo := sqlite.NewConnectionRepository(e.db)
 	p := app.NewPresence(repo, sqlite.NewDeviceRepository(e.db), tr, app.DefaultTimings(), e.clock.now, discard)
-	c.Handle(rxv1.TypeConnectionOpened, p.Handler())
+	c.Handle(rxv1.TypeConnectionOpened, p.Handler(rxv1.TypeConnectionOpened))
 
 	boot := welcome(t, c, n.ID(), "1.0.0")
 	gen := shared.NewUUIDv7Generator()
@@ -154,8 +154,8 @@ func TestPresenceCapsOpenRowsPerNode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if count, _ := p.Count(ctx); count != app.MaxOpenConnectionsPerNode {
-		t.Errorf("open = %d, want the cap %d", count, app.MaxOpenConnectionsPerNode)
+	if open, _ := p.List(ctx); len(open) != app.MaxOpenConnectionsPerNode {
+		t.Errorf("open = %d, want the cap %d", len(open), app.MaxOpenConnectionsPerNode)
 	}
 }
 

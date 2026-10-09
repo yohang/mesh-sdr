@@ -78,11 +78,7 @@ func (a *app) runAll(ctx context.Context) error {
 	defer stop()
 
 	opts := a.configOptions()
-	dir := opts.Dir
-
-	if dir == "" {
-		dir = config.DefaultDir
-	}
+	dir := opts.ResolvedDir()
 
 	// First start: the paths of the files to create, before the secrets
 	// they hold are read.

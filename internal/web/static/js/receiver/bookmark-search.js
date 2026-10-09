@@ -12,7 +12,9 @@
 // bookmark links its analog underlying mode as m and keeps its modulation
 // as m2. A bookmark shown on several devices gets one link per device.
 
-import { formatMHz, originText, tuneMode } from "./marks.js";
+import { getJSON } from "../csrf.js";
+import { formatMHz } from "./dom.js";
+import { originText, tuneMode } from "./marks.js";
 
 const MAX_RESULTS = 50;
 const INPUT_DELAY_MS = 200;
@@ -139,12 +141,7 @@ export class BookmarkSearch {
       await Promise.all(
         devices.map(async (d) => {
           try {
-            const res = await fetch(`/api/v1/bookmarks?device_id=${encodeURIComponent(d.id)}`, {
-              credentials: "same-origin",
-              headers: { Accept: "application/json" },
-            });
-            if (!res.ok) return;
-            const body = await res.json();
+            const body = await getJSON(`/api/v1/bookmarks?device_id=${encodeURIComponent(d.id)}`);
             lists.set(d.id, Array.isArray(body?.bookmarks) ? body.bookmarks : []);
           } catch {
             // That device's bookmarks are left out.
@@ -192,8 +189,8 @@ export class BookmarkSearch {
           a.href = linkOf(b, d);
           const shape = document.createElement("span");
           shape.className = `bmk-shape bmk-shape-${origin}`;
-          a.append(shape, `${b.name} · ${formatMHz(b.frequency)} · ${(b.modulation || "").toUpperCase()}${several ? ` · ${d.name}` : ""}`);
-          a.setAttribute("aria-label", `${b.name}, ${formatMHz(b.frequency)}, ${b.modulation.toUpperCase()}, ${originText(origin)}${several ? `, on ${d.name}` : ""}`);
+          a.append(shape, `${b.name} · ${formatMHz(b.frequency, { trim: true })} · ${(b.modulation || "").toUpperCase()}${several ? ` · ${d.name}` : ""}`);
+          a.setAttribute("aria-label", `${b.name}, ${formatMHz(b.frequency, { trim: true })}, ${b.modulation.toUpperCase()}, ${originText(origin)}${several ? `, on ${d.name}` : ""}`);
           li.append(a);
         }
         return li;

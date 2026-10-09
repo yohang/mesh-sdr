@@ -5,6 +5,7 @@
 // per-session state).
 
 import { helpRows, setSingleKeys, singleKeys } from "../shortcuts.js";
+import { el } from "./dom.js";
 
 // Mouse and touch equivalents of the receiver.
 const POINTER_ROWS = [
@@ -17,32 +18,21 @@ const POINTER_ROWS = [
 ];
 
 /**
- * el creates an element with a class and optional text.
- * @param {string} tag @param {string} [cls] @param {string} [text]
- */
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
-  return e;
-}
-
-/**
  * section is a heading and a list of key and action pairs.
  * @param {string} title @param {[string, string, string?][]} rows keys, action, note
  * @param {boolean} [keys] the first column holds keys (else a gesture)
  */
 function section(title, rows, keys = true) {
-  const s = el("section", "flex flex-col gap-1");
-  s.append(el("h3", "font-semibold", title));
-  const dl = el("dl", "grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm");
+  const s = el("section", { class: "flex flex-col gap-1" });
+  s.append(el("h3", { class: "font-semibold" }, title));
+  const dl = el("dl", { class: "grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm" });
   for (const [what, action, note] of rows) {
-    const dt = el("dt", "flex min-w-0 flex-wrap items-start gap-1");
+    const dt = el("dt", { class: "flex min-w-0 flex-wrap items-start gap-1" });
     // One key per alternative ("M, Space").
-    if (keys) for (const k of what.split(", ")) dt.append(el("kbd", "kbd", k));
+    if (keys) for (const k of what.split(", ")) dt.append(el("kbd", { class: "kbd" }, k));
     else dt.textContent = what;
-    const dd = el("dd", "min-w-0 break-words", action);
-    if (note) dd.append(el("span", "block text-fg-muted", note));
+    const dd = el("dd", { class: "min-w-0 break-words" }, action);
+    if (note) dd.append(el("span", { class: "block text-fg-muted" }, note));
     dl.append(dt, dd);
   }
   s.append(dl);
@@ -51,15 +41,15 @@ function section(title, rows, keys = true) {
 
 /** @returns {HTMLElement} the help's content */
 export function shortcutsHelp() {
-  const root = el("div", "flex flex-col gap-4");
-  root.append(el("p", "text-sm text-fg-muted", "Shortcuts work anywhere on the page except while typing in a text field."));
+  const root = el("div", { class: "flex flex-col gap-4" });
+  root.append(el("p", { class: "text-sm text-fg-muted" }, "Shortcuts work anywhere on the page except while typing in a text field."));
 
-  const box = /** @type {HTMLInputElement} */ (el("input", "accent-accent"));
+  const box = /** @type {HTMLInputElement} */ (el("input", { class: "accent-accent" }));
   box.type = "checkbox";
   box.id = "rx-single-keys";
   box.checked = singleKeys();
   box.addEventListener("change", () => setSingleKeys(box.checked));
-  const label = el("label", "flex items-center gap-2 text-sm max-md:min-h-11 pointer-coarse:min-h-11");
+  const label = el("label", { class: "flex items-center gap-2 text-sm max-md:min-h-11 pointer-coarse:min-h-11" });
   label.htmlFor = box.id;
   label.append(box, document.createTextNode("Single-key shortcuts (letters, digits and symbols)"));
   root.append(label);

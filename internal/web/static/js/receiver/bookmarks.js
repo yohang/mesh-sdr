@@ -31,9 +31,11 @@
 // its shortcut registry (keys.js), which clicks these controls, so the
 // keys work and are listed whether or not a control is on screen.
 
+import { getJSON } from "../csrf.js";
 import { BookmarkSearch } from "./bookmark-search.js";
 import { BandplanRibbon, rememberedVisible, rememberVisible } from "./bandplan.js";
-import { compareMarks, dialOf, formatMHz, markOf, originText, tuneMode } from "./marks.js";
+import { BUTTON, el, formatMHz, SMALL_BUTTON } from "./dom.js";
+import { compareMarks, dialOf, markOf, originText, tuneMode } from "./marks.js";
 import { Scanner } from "./scanner.js";
 
 const BOOKMARKS_URL = "/api/v1/bookmarks";
@@ -51,29 +53,15 @@ const CHAR_PX = 6.5;
 const LABEL_MAX_PX = 192;
 const GAP_PX = 4;
 
-const BUTTON = "rounded border border-border px-3 py-1 text-sm";
-const SMALL_BUTTON = "rounded border border-border px-2 py-1 text-sm";
-
 /**
  * @typedef {import("./marks.js").Mark} Mark
  * @typedef {import("./bandplan.js").Band} Band
  */
 
-/**
- * el creates an element with attributes and optional text content.
- * @param {string} tag @param {Record<string, string>} [attrs] @param {string} [text]
- */
-function el(tag, attrs = {}, text) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-  if (text !== undefined) e.textContent = text;
-  return e;
-}
-
 /** @param {Mark} m the accessible name of a mark */
 function markLabel(m) {
   const mode = m.modulation.toUpperCase();
-  return `${m.name}, ${formatMHz(m.frequency)}${mode && mode !== m.name ? `, ${mode}` : ""}, ${originText(m.origin)}`;
+  return `${m.name}, ${formatMHz(m.frequency, { trim: true })}${mode && mode !== m.name ? `, ${mode}` : ""}, ${originText(m.origin)}`;
 }
 
 /** @param {Mark} m */
@@ -237,7 +225,7 @@ export class ReceiverBookmarks {
     // The squelch level is the hit threshold: no squelch, no scan.
     const ready = s.running || (!!this.engine.demod && s.squelched());
     this.scanBtn.toggleAttribute("disabled", !ready);
-    const what = s.current ? `${s.current.name} (${formatMHz(s.current.frequency)})` : "";
+    const what = s.current ? `${s.current.name} (${formatMHz(s.current.frequency, { trim: true })})` : "";
     const text = s.running ? (s.phase === "dwell" ? `On: signal on ${what}` : `On: ${what}`) : ready ? "Off" : "Off. Set the squelch to scan";
     if (this.scanState.textContent !== text) this.scanState.textContent = text;
   }
@@ -272,11 +260,7 @@ export class ReceiverBookmarks {
     }
     const abort = new AbortController();
     this.abort = abort;
-    const get = async (/** @type {string} */ url) => {
-      const res = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" }, signal: abort.signal });
-      if (!res.ok) throw new Error(`${url} answered ${res.status}`);
-      return res.json();
-    };
+    const get = (/** @type {string} */ url) => getJSON(url, { signal: abort.signal });
     const range = `from=${Math.max(0, lo)}&to=${hi}`;
     Promise.allSettled([get(`${BOOKMARKS_URL}?device_id=${encodeURIComponent(t.device_id)}&${range}`), get(`${BANDPLAN_URL}?${range}`)]).then(
       ([b, p]) => {
@@ -355,7 +339,7 @@ export class ReceiverBookmarks {
       ...this.marks.map((m) => {
         const li = el("li", { class: "flex flex-col" });
         const b = el("button", { type: "button", class: "flex items-center gap-1 rounded px-1 text-left hover:bg-surface-raised", "aria-label": markLabel(m) });
-        b.append(shape(m), el("span", { class: "min-w-0 break-words" }, `${m.name} · ${formatMHz(m.frequency)} · ${m.modulation.toUpperCase()}`));
+        b.append(shape(m), el("span", { class: "min-w-0 break-words" }, `${m.name} · ${formatMHz(m.frequency, { trim: true })} · ${m.modulation.toUpperCase()}`));
         b.addEventListener("click", () => this.pick(m));
         li.append(b);
         if (m.description) li.append(el("p", { class: "ml-5 break-words text-fg-muted" }, m.description));

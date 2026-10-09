@@ -2,6 +2,8 @@
 // §10.18): display toggles and saved pass bands. A convenience only: one
 // namespaced localStorage key, never sent to the hub, and every value
 // falls back to its default when storage is blocked or holds junk.
+// loadPref and savePref keep the preferences that have their own
+// localStorage key (last device, bandplan ribbon, single-key shortcuts).
 
 const KEY = "msdr.v1.session";
 
@@ -44,5 +46,31 @@ export function setState(name, value) {
   } catch {
     // Storage blocked: remembered for this page only.
     memory = all;
+  }
+}
+
+/**
+ * loadPref reads a preference kept under its own key; null when there is
+ * none or storage is blocked.
+ * @param {string} key @returns {string | null}
+ */
+export function loadPref(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * savePref keeps a preference under its own key; with storage blocked it is
+ * not remembered.
+ * @param {string} key @param {string} value
+ */
+export function savePref(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage blocked: not remembered.
   }
 }

@@ -90,6 +90,14 @@ export function apiFetch(input, init = {}) {
   });
 }
 
+// getJSON reads a JSON resource with the same-origin credentials; it throws
+// when the server answers an error status.
+export async function getJSON(url, { signal } = {}) {
+  const res = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`${url} answered ${res.status}`);
+  return res.json();
+}
+
 // installCSRF hooks htmx 4 requests. htmx events cannot be awaited, so the
 // hook wraps the request's fetch function (ctx.fetch), which htmx awaits.
 function installCSRF() {

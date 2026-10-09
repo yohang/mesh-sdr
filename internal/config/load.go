@@ -40,6 +40,15 @@ type Options struct {
 	CADefaults bool
 }
 
+// ResolvedDir returns the config directory: Dir, else DefaultDir.
+func (o Options) ResolvedDir() string {
+	if o.Dir == "" {
+		return DefaultDir
+	}
+
+	return o.Dir
+}
+
 // Meta describes a loaded configuration.
 type Meta struct {
 	// Files lists the files read, relative to the config dir, in merge order.
@@ -112,12 +121,8 @@ func LoadHub(opts Options) (Hub, Meta, error) {
 	cfg := DefaultHub()
 
 	if opts.CADefaults {
-		dir := opts.Dir
-		if dir == "" {
-			dir = DefaultDir
-		}
-
-		if fileExists(filepath.Join(dir, allCACert)) && fileExists(filepath.Join(dir, allCAKey)) {
+		dir := opts.ResolvedDir()
+		if fileExists(filepath.Join(dir, CACertFile)) && fileExists(filepath.Join(dir, CAKeyFile)) {
 			cfg.TLS = allHubTLS()
 		}
 	}
@@ -159,14 +164,15 @@ func LoadAll(opts Options) (Hub, Meta, Node, Meta, error) {
 	return hub, hubMeta, node, nodeMeta, nil
 }
 
-// CA files of the all role, relative to the config dir.
+// CA files of the all role and of `meshsdr hub ca init`, relative to the
+// config dir.
 const (
-	allCACert = "tls/ca.pem"
-	allCAKey  = "tls/ca.key"
+	CACertFile = "tls/ca.pem"
+	CAKeyFile  = "tls/ca.key"
 )
 
 func allHubTLS() HubTLS {
-	return HubTLS{CACert: allCACert, CAKey: Secret{source: secretFile, ref: allCAKey}}
+	return HubTLS{CACert: CACertFile, CAKey: Secret{source: secretFile, ref: CAKeyFile}}
 }
 
 func fileExists(path string) bool {
@@ -209,10 +215,7 @@ func load[T any, PT interface {
 	*T
 	validator
 }](role Role, cfg PT, opts Options) (Meta, error) {
-	l := &loader{role: role, dir: opts.Dir, env: opts.Env, origins: Origins{}}
-	if l.dir == "" {
-		l.dir = DefaultDir
-	}
+	l := &loader{role: role, dir: opts.ResolvedDir(), env: opts.Env, origins: Origins{}}
 
 	if l.env == nil {
 		l.env = environ()

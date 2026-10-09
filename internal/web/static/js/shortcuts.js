@@ -30,6 +30,8 @@
 // visitor's choice is per-session state the browser remembers
 // (setSingleKeys). Named keys and combinations with Ctrl or Alt stay on.
 
+import { loadPref, savePref } from "./receiver/session.js";
+
 const EDITABLE = "input, textarea, select, [contenteditable]:not([contenteditable='false'])";
 const INTERACTIVE = "a[href], button, input, select, textarea, summary, [role='button'], [role='tab'], [role='link'], [role='checkbox'], [role='menuitem'], [tabindex]:not([tabindex='-1'])";
 // The visitor's single-key shortcut choice, "on" or "off" (UI-014, rt).
@@ -126,12 +128,8 @@ export function registerShortcuts(shortcuts) {
 
 /** @returns {boolean} whether single-key shortcuts are on */
 export function singleKeys() {
-  let mine = null;
-  try {
-    mine = localStorage.getItem(SINGLE_KEYS_KEY);
-  } catch {
-    // Storage blocked: the admin default applies.
-  }
+  // No choice, or storage blocked: the admin default applies.
+  const mine = loadPref(SINGLE_KEYS_KEY);
   if (mine === "on" || mine === "off") return mine === "on";
   return document.body.dataset.shortcuts !== "off";
 }
@@ -142,11 +140,8 @@ export function singleKeys() {
  * @param {boolean} on
  */
 export function setSingleKeys(on) {
-  try {
-    localStorage.setItem(SINGLE_KEYS_KEY, on ? "on" : "off");
-  } catch {
-    // Storage blocked: the choice lasts for this page.
-  }
+  // With storage blocked, the choice lasts for this page.
+  savePref(SINGLE_KEYS_KEY, on ? "on" : "off");
   document.body.dataset.shortcutsMine = on ? "on" : "off";
 }
 

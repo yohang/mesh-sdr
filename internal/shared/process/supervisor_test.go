@@ -218,7 +218,7 @@ func TestCrashLoopDetectionAndKick(t *testing.T) {
 	if cl.Diag != DiagDecoderError || cl.Reason != "crash_loop" || cl.Delay != time.Hour {
 		t.Fatalf("crash loop event %+v", cl)
 	}
-	if cl.Exit == nil || cl.Exit.Code != 2 || !slices.Contains(cl.Exit.LastErr, "segfault-ish trouble") {
+	if cl.Exit == nil || cl.Exit.Code != 2 {
 		t.Fatalf("crash loop evidence %+v", cl.Exit)
 	}
 	if n := rec.count(StateStarting); n != 3 {
@@ -553,9 +553,6 @@ func TestStderrClassification(t *testing.T) {
 			t.Fatalf("line %q: got %+v ok=%v, want class %s", text, l, ok, class)
 		}
 	}
-	if tail := in.Tail(20); len(tail) != 5 {
-		t.Fatalf("ring tail = %d lines", len(tail))
-	}
 }
 
 func TestStderrTerminalClasses(t *testing.T) {
@@ -595,7 +592,7 @@ func TestStderrTerminalClasses(t *testing.T) {
 				}
 			}
 			e := rec.waitFor(t, 5*time.Second, func(e Event) bool { return e.State == tc.state })
-			if e.Diag != tc.diag || e.Reason != tc.reason || !slices.Contains(e.Exit.LastErr, tc.line) {
+			if e.Diag != tc.diag || e.Reason != tc.reason {
 				t.Fatalf("event %+v exit %+v", e, e.Exit)
 			}
 		})
@@ -608,11 +605,10 @@ func TestStderrRateLimitAndLineCap(t *testing.T) {
 	var lines lineLog
 	in, err := sup.NewInstance(Spec{
 		ID: "sess-noisy", Kind: "decoder", Path: fakeDecoder,
-		Args:          []string{"-status-every", "1s", "-flood", "500", "-long-line", "10000", "-stderr", "banner"},
-		StderrRules:   []Rule{{regexp.MustCompile(`^(banner|after long line|x)`), ClassInfo}},
-		OnLine:        lines.add,
-		UnknownPerSec: 10,
-		Timeouts:      Timeouts{Stop: time.Second},
+		Args:        []string{"-status-every", "1s", "-flood", "500", "-long-line", "10000", "-stderr", "banner"},
+		StderrRules: []Rule{{regexp.MustCompile(`^(banner|after long line|x)`), ClassInfo}},
+		OnLine:      lines.add,
+		Timeouts:    Timeouts{Stop: time.Second},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -694,7 +690,6 @@ func TestEnvironmentScrubbedAndWorkdirIsCwd(t *testing.T) {
 		ID: "sess-env", Kind: "decoder", Path: fakeConnector,
 		Args:     []string{"-dump-env", "-interval", "10ms"},
 		ToolDirs: []string{"/opt/meshsdr/tools", "/usr/bin"},
-		Env:      []string{"DIREWOLF_X=1"},
 		OnLine:   lines.add,
 	})
 	if err != nil {
@@ -709,7 +704,7 @@ func TestEnvironmentScrubbedAndWorkdirIsCwd(t *testing.T) {
 	wd := filepath.Join(rt, "sessions", "sess-env")
 	env := lines.all("env ")
 	slices.Sort(env)
-	want := []string{"DIREWOLF_X=1", "HOME=" + wd, "LANG=C.UTF-8", "PATH=/opt/meshsdr/tools:/usr/bin", "TMPDIR=" + wd, "TZ=UTC"}
+	want := []string{"HOME=" + wd, "LANG=C.UTF-8", "PATH=/opt/meshsdr/tools:/usr/bin", "TMPDIR=" + wd, "TZ=UTC"}
 	if !slices.Equal(env, want) {
 		t.Fatalf("child env %v, want %v", env, want)
 	}
@@ -730,8 +725,6 @@ func TestSpecValidation(t *testing.T) {
 		{ID: "ok", Path: "fakedecoder"},
 		{ID: "ok", Path: "/usr/bin/../bin/x"},
 		{ID: "ok", Path: fakeDecoder, Args: []string{"a\nb"}},
-		{ID: "ok", Path: fakeDecoder, Env: []string{"PATH=/tmp"}},
-		{ID: "ok", Path: fakeDecoder, Env: []string{"lower=1"}},
 		{ID: "ok", Path: fakeDecoder, ToolDirs: []string{"rel/dir"}},
 	}
 	for _, s := range bad {
@@ -837,7 +830,7 @@ func TestLimitsViaExecHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	if running.State != StateRunning {
-		t.Fatalf("tool did not start under limits: %v; stderr %v", rec.summary(), lineTexts(in.Tail(20)))
+		t.Fatalf("tool did not start under limits: %v; stderr %v", rec.summary(), lines.all(""))
 	}
 	got := strings.Join(lines.all("limit "), "\n")
 	for _, w := range []string{"Max address space 1073741824 1073741824 bytes", "Max open files 64 64 files", "NoNewPrivs: 1", "nice 5"} {
@@ -863,7 +856,7 @@ func TestGoToolUnder512MiBAddressSpace(t *testing.T) {
 	}
 	h := start(t, in)
 	e := rec.waitFor(t, 5*time.Second, func(e Event) bool { return e.State == StateRunning || e.State == StateFailed })
-	t.Logf("Go tool under RLIMIT_AS=512MiB: %s %v", e.State, lineTexts(in.Tail(3)))
+	t.Logf("Go tool under RLIMIT_AS=512MiB: %s", e.State)
 	_ = h.stop(t)
 }
 
@@ -889,9 +882,6 @@ func TestDropOldestBuffer(t *testing.T) {
 	b := NewDropOldest(10)
 	for _, s := range []string{"aaaa", "bbbb", "cccc"} {
 		_, _ = b.Write([]byte(s))
-	}
-	if n, g := b.Overruns(); n != 4 || g != 1 {
-		t.Fatalf("overruns = %d bytes, %d gaps", n, g)
 	}
 	b.Close()
 	var out bytes.Buffer
@@ -946,8 +936,7 @@ func BenchmarkSpawn(b *testing.B) {
 		limits Limits
 	}{{"direct", Limits{}}, {"helper", Limits{NoNewPrivs: true, OpenFiles: 256}}} {
 		b.Run(tc.name, func(b *testing.B) {
-			self, _ := filepath.Abs(os.Args[0])
-			sup, err := New(Options{RuntimeDir: filepath.Join(b.TempDir(), "run"), HelperPath: self})
+			sup, err := New(Options{RuntimeDir: filepath.Join(b.TempDir(), "run")})
 			if err != nil {
 				b.Fatal(err)
 			}

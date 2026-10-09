@@ -58,7 +58,45 @@ func (a *app) runHub(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, meta, logger, err := a.loadHub(ctx, false)
+	return a.withHubDB(ctx, false, false, func(h hubEnv) error {
+		if err := h.db.Migrator().Check(ctx); err != nil {
+			return fmt.Errorf("refusing to start: %w", err)
+		}
+
+		h.logger.InfoContext(ctx, "hub starting", slog.String("url", h.cfg.Hub.URL), slog.String("tls_mode", h.cfg.Gateway.TLSMode))
+
+		hub, err := wire.Hub(ctx, h.cfg, h.meta.Origins, h.logger, h.db)
+		if err != nil {
+			return err
+		}
+
+		if u := hub.SetupURL(); u != "" {
+			a.printSetupURL(u)
+		}
+
+		if err := hub.Run(ctx); err != nil {
+			return err
+		}
+
+		h.logger.InfoContext(ctx, "hub stopped")
+
+		return nil
+	})
+}
+
+// hubEnv is the loaded hub config, its logger and the open database.
+type hubEnv struct {
+	cfg    config.Hub
+	meta   config.Meta
+	logger *slog.Logger
+	db     *db.DB
+}
+
+// withHubDB loads the hub config (caDefaults: see loadHub), opens the hub
+// database and calls fn; checkSchema refuses a schema that is not current
+// (db.Migrator.Check) first.
+func (a *app) withHubDB(ctx context.Context, caDefaults, checkSchema bool, fn func(hubEnv) error) error {
+	cfg, meta, logger, err := a.loadHub(ctx, caDefaults)
 	if err != nil {
 		return err
 	}
@@ -70,28 +108,13 @@ func (a *app) runHub(ctx context.Context) error {
 
 	defer func() { _ = adapter.Close() }()
 
-	if err := adapter.Migrator().Check(ctx); err != nil {
-		return fmt.Errorf("refusing to start: %w", err)
+	if checkSchema {
+		if err := adapter.Migrator().Check(ctx); err != nil {
+			return fmt.Errorf("schema is not current: %w", err)
+		}
 	}
 
-	logger.InfoContext(ctx, "hub starting", slog.String("url", cfg.Hub.URL), slog.String("tls_mode", cfg.Gateway.TLSMode))
-
-	hub, err := wire.Hub(ctx, cfg, meta.Origins, logger, adapter)
-	if err != nil {
-		return err
-	}
-
-	if u := hub.SetupURL(); u != "" {
-		a.printSetupURL(u)
-	}
-
-	if err := hub.Run(ctx); err != nil {
-		return err
-	}
-
-	logger.InfoContext(ctx, "hub stopped")
-
-	return nil
+	return fn(hubEnv{cfg: cfg, meta: meta, logger: logger, db: adapter})
 }
 
 // printSetupURL prints the first-admin setup URL, not through the logger:
@@ -136,23 +159,6 @@ func (a *app) newMigrateCmd() *cobra.Command {
 	return cmd
 }
 
-// withMigrator opens the hub database and calls fn with its migrator.
-func (a *app) withMigrator(ctx context.Context, fn func(*db.DB, *slog.Logger) error) error {
-	cfg, _, logger, err := a.loadHub(ctx, true)
-	if err != nil {
-		return err
-	}
-
-	adapter, err := wire.OpenDB(ctx, cfg.DB, logger)
-	if err != nil {
-		return err
-	}
-
-	defer func() { _ = adapter.Close() }()
-
-	return fn(adapter, logger)
-}
-
 type migrationJSON struct {
 	Version    int64     `json:"version"`
 	Name       string    `json:"name"`
@@ -162,7 +168,8 @@ type migrationJSON struct {
 }
 
 func (a *app) migrateUp(ctx context.Context) error {
-	return a.withMigrator(ctx, func(adapter *db.DB, logger *slog.Logger) error {
+	return a.withHubDB(ctx, true, false, func(h hubEnv) error {
+		adapter, logger := h.db, h.logger
 		results, err := adapter.Migrator().Up(ctx)
 
 		out := make([]migrationJSON, 0, len(results))
@@ -202,8 +209,8 @@ func (a *app) migrateUp(ctx context.Context) error {
 }
 
 func (a *app) migrateDown(ctx context.Context) error {
-	return a.withMigrator(ctx, func(adapter *db.DB, logger *slog.Logger) error {
-		r, err := adapter.Migrator().Down(ctx)
+	return a.withHubDB(ctx, true, false, func(h hubEnv) error {
+		r, err := h.db.Migrator().Down(ctx)
 		if errors.Is(err, db.ErrNoMigration) {
 			a.print("no migration to roll back")
 
@@ -214,7 +221,7 @@ func (a *app) migrateDown(ctx context.Context) error {
 			return err
 		}
 
-		logger.InfoContext(ctx, "migration rolled back", slog.String("migration", r.Name), slog.Duration("duration", r.Duration))
+		h.logger.InfoContext(ctx, "migration rolled back", slog.String("migration", r.Name), slog.Duration("duration", r.Duration))
 
 		if a.json {
 			return a.printJSON(migrationJSON{Version: r.Version, Name: r.Name, DurationMS: r.Duration.Milliseconds()})
@@ -227,8 +234,8 @@ func (a *app) migrateDown(ctx context.Context) error {
 }
 
 func (a *app) migrateStatus(ctx context.Context) error {
-	return a.withMigrator(ctx, func(adapter *db.DB, _ *slog.Logger) error {
-		m := adapter.Migrator()
+	return a.withHubDB(ctx, true, false, func(h hubEnv) error {
+		m := h.db.Migrator()
 
 		statuses, err := m.Status(ctx)
 		if err != nil {

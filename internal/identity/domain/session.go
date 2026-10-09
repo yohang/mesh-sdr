@@ -9,7 +9,8 @@ import (
 	"net/netip"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // tokenBytes is the entropy of session tokens and CSRF secrets (256 bits).
@@ -255,16 +256,7 @@ func canonicalIP(a netip.Addr) netip.Addr {
 }
 
 func truncateUTF8(s string, n int) string {
-	s = strings.ToValidUTF8(s, "�")
-	if len(s) <= n {
-		return s
-	}
-
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-
-	return s[:n]
+	return shared.Truncate(strings.ToValidUTF8(s, "�"), n)
 }
 
 // SessionState is the persisted state of a session, for rehydration.

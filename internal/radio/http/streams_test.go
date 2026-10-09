@@ -23,6 +23,10 @@ import (
 
 type idleSource struct{}
 
+// nodeWaterfall are the waterfall defaults of the node (the hub settings
+// defaults).
+var nodeWaterfall = ctl.StateWaterfall{MinDB: -88, MaxDB: -20, Palette: "turbo"}
+
 func (idleSource) Run(ctx context.Context, _ domain.Tuning, _ app.IQSink, report func(app.SourceEvent)) error {
 	report(app.SourceEvent{State: domain.StateStarting})
 	report(app.SourceEvent{State: domain.StateRunning})
@@ -183,7 +187,7 @@ func TestStreamSessionErrors(t *testing.T) {
 	ctx := context.Background()
 
 	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen, token.PermDemod)}
-	ss := radiohttp.NewStreams(m, nil, radiohttp.Decoding{}, slog.New(slog.DiscardHandler)).Open(p)
+	ss := radiohttp.NewStreams(m, nil, radiohttp.Decoding{}, nodeWaterfall, slog.New(slog.DiscardHandler)).Open(p)
 
 	defer ss.Close()
 
@@ -265,7 +269,7 @@ func TestReauthorizeAfterRefresh(t *testing.T) {
 	ctx := context.Background()
 
 	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(2, token.PermListen, token.PermDemod)}
-	ss := radiohttp.NewStreams(m, nil, radiohttp.Decoding{}, slog.New(slog.DiscardHandler)).Open(p)
+	ss := radiohttp.NewStreams(m, nil, radiohttp.Decoding{}, nodeWaterfall, slog.New(slog.DiscardHandler)).Open(p)
 
 	defer ss.Close()
 
@@ -364,7 +368,7 @@ func TestPresetSelect(t *testing.T) {
 		},
 		policy: ctl.StatePolicy{ListenPolicy: "anonymous", Waterfall: &ctl.StateWaterfall{MinDB: -100, MaxDB: -30, Palette: "default"}},
 	}
-	streams := radiohttp.NewStreams(m, state, radiohttp.Decoding{}, slog.New(slog.DiscardHandler))
+	streams := radiohttp.NewStreams(m, state, radiohttp.Decoding{}, nodeWaterfall, slog.New(slog.DiscardHandler))
 	now := time.Now()
 	streams.SetNow(func() time.Time { return now })
 
@@ -531,7 +535,7 @@ func TestPresetSelectRace(t *testing.T) {
 		},
 		policy: ctl.StatePolicy{ListenPolicy: "anonymous"},
 	}
-	streams := radiohttp.NewStreams(m, state, radiohttp.Decoding{}, slog.New(slog.DiscardHandler))
+	streams := radiohttp.NewStreams(m, state, radiohttp.Decoding{}, nodeWaterfall, slog.New(slog.DiscardHandler))
 
 	all := []string{token.PermListen, token.PermDemod, token.PermPreset, token.PermRetune}
 	peers := make([]*peer, 3)
@@ -602,7 +606,7 @@ func TestPresetSelectUnknownMode(t *testing.T) {
 	}
 
 	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen, token.PermDemod, token.PermPreset)}
-	ss := radiohttp.NewStreams(m, state, radiohttp.Decoding{}, slog.New(slog.DiscardHandler)).Open(p)
+	ss := radiohttp.NewStreams(m, state, radiohttp.Decoding{}, nodeWaterfall, slog.New(slog.DiscardHandler)).Open(p)
 
 	defer ss.Close()
 
@@ -628,7 +632,7 @@ func TestPCMHello(t *testing.T) {
 
 	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen, token.PermDemod)}
 	p.hello.Capabilities.AudioCodecs = []string{media.CodecPCM}
-	ss := radiohttp.NewStreams(m, nil, radiohttp.Decoding{}, slog.New(slog.DiscardHandler)).Open(p)
+	ss := radiohttp.NewStreams(m, nil, radiohttp.Decoding{}, nodeWaterfall, slog.New(slog.DiscardHandler)).Open(p)
 
 	defer ss.Close()
 
@@ -648,7 +652,7 @@ func TestWaterfallLive(t *testing.T) {
 	ctx := context.Background()
 
 	state := &desired{policy: ctl.StatePolicy{Waterfall: &ctl.StateWaterfall{MinDB: -100, MaxDB: -30, Palette: "default"}}}
-	streams := radiohttp.NewStreams(m, state, radiohttp.Decoding{}, slog.New(slog.DiscardHandler))
+	streams := radiohttp.NewStreams(m, state, radiohttp.Decoding{}, nodeWaterfall, slog.New(slog.DiscardHandler))
 
 	p := &peer{q: sendq.New(sendq.DefaultConfig(), time.Now, nil), claims: scoped(1, token.PermListen)}
 	ss := streams.Open(p)

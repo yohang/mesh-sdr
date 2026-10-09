@@ -32,18 +32,18 @@ func (h FeatureHandlers) GetFeatures(ctx context.Context, _ GetFeaturesRequestOb
 		return nil, err
 	}
 
-	signedIn := h.authz.Authorize(ctx, domain.RoleListener) == nil
+	anonymous := h.authz.Authorize(ctx, domain.RoleListener) != nil
 	out := GetFeatures200JSONResponse{Devices: []DeviceFeatures{}, Nodes: []NodeFeatures{}}
 	listed := map[string]bool{}
 
 	for _, d := range all.Devices {
-		if d.ListenPolicy != gridapp.ListenAnonymous && !signedIn {
+		if !d.CanListen(anonymous) {
 			continue
 		}
 
 		df := DeviceFeatures{
 			Id: d.ID.String(), NodeId: d.Node.String(), Name: d.Name, Online: d.Online, NodeOnline: d.NodeOnline,
-			State: DeviceFeaturesState(d.State), Modes: d.Modes, LoginRequired: d.ListenPolicy != gridapp.ListenAnonymous,
+			State: DeviceFeaturesState(d.State), Modes: d.Modes, LoginRequired: !d.CanListen(true),
 			Listeners: d.Listeners,
 		}
 

@@ -19,23 +19,21 @@ import (
 
 // Slot recording (DEC-026, §8.4 "Batch slot decoders").
 const (
-	// slotRate is the rate of the slot WAV files (12 kHz mono, 16 bit).
-	slotRate = domain.SlotRate
 	// wavHeader is the size of the canonical WAV header.
 	wavHeader = 44
-	// SlotGuard: a slot with less audio than this is not decoded (the
+	// slotGuard: a slot with less audio than this is not decoded (the
 	// first slot of a session usually starts late).
-	SlotGuard = time.Second
+	slotGuard = time.Second
 )
 
 // samplesIn returns the number of slot samples in d (rounded).
 func samplesIn(d time.Duration) int64 {
-	return int64(math.Round(d.Seconds() * slotRate))
+	return int64(math.Round(d.Seconds() * domain.SlotRate))
 }
 
 // durationOf returns the duration of n slot samples.
 func durationOf(n int) time.Duration {
-	return time.Duration(int64(n) * int64(time.Second) / slotRate)
+	return time.Duration(int64(n) * int64(time.Second) / domain.SlotRate)
 }
 
 // slotStart returns the UTC multiple of period that contains t.
@@ -104,8 +102,8 @@ func (f *slotFile) finish() error {
 	h = binary.LittleEndian.AppendUint32(h, 16)
 	h = binary.LittleEndian.AppendUint16(h, 1) // PCM
 	h = binary.LittleEndian.AppendUint16(h, 1) // mono
-	h = binary.LittleEndian.AppendUint32(h, slotRate)
-	h = binary.LittleEndian.AppendUint32(h, 2*slotRate)
+	h = binary.LittleEndian.AppendUint32(h, domain.SlotRate)
+	h = binary.LittleEndian.AppendUint32(h, 2*domain.SlotRate)
 	h = binary.LittleEndian.AppendUint16(h, 2)
 	h = binary.LittleEndian.AppendUint16(h, 16)
 	h = append(h, "data"...)
@@ -214,7 +212,7 @@ func (r *recorder) writePeriod(p time.Duration, t time.Time, pcm []byte) []*slot
 		}
 
 		n := int64(len(pcm) / 2)
-		k := min(n, max(1, int64(math.Ceil(end.Sub(t).Seconds()*slotRate))))
+		k := min(n, max(1, int64(math.Ceil(end.Sub(t).Seconds()*domain.SlotRate))))
 
 		if idx := samplesIn(t.Sub(f.start)); idx >= 0 {
 			if err := f.write(pcm[:2*k], idx); err != nil {

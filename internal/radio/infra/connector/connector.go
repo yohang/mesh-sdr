@@ -6,7 +6,6 @@
 package connector
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -34,15 +33,11 @@ const (
 	StartTimeout = 15 * time.Second
 	StallTimeout = 3 * time.Second
 	StopGrace    = 5 * time.Second
-	ProbeTimeout = 5 * time.Second
 	// MaxBlock is the largest IQ block delivered to the sink.
 	MaxBlock = 16384
 	// dialInterval paces the connection attempts to a starting connector.
 	dialInterval = 50 * time.Millisecond
 )
-
-// Tools resolves the external programs (ADR 0017 decision 10).
-type Tools = process.Tools
 
 // connectorRules classify connector stderr lines (§8.2 rule 5).
 var connectorRules = []process.Rule{
@@ -74,7 +69,7 @@ func instanceID(prefix, id string) string {
 // Options configure the sources.
 type Options struct {
 	Supervisor *process.Supervisor
-	Tools      Tools
+	Tools      process.Tools
 	Ports      *Ports
 	Logger     *slog.Logger
 	// DeviceLog, when set, receives every accepted stderr line of the
@@ -117,7 +112,7 @@ func (s *Sources) tool(t domain.DeviceType) (string, error) {
 }
 
 // Probe implements app.Sources: the connector must start (--version) within
-// ProbeTimeout (§8.4 capability probing: a batch instance).
+// process.ProbeTimeout (§8.4 capability probing: a batch instance).
 func (s *Sources) Probe(ctx context.Context, p domain.DeviceParams) error {
 	return s.probe(ctx, instanceID("probe", p.ID.String()), p.Type)
 }
@@ -186,32 +181,12 @@ func (s *Sources) probe(ctx context.Context, id string, t domain.DeviceType) err
 		return err
 	}
 
-	if s.o.Supervisor == nil {
-		return errors.New("node.runtime_dir is not set: no tool can run")
-	}
-
 	// The connectors may exit non-zero after printing their version: the
 	// probe succeeds when a version line was printed, on stdout or stderr.
 	var v versionLines
 
-	in, err := s.o.Supervisor.NewInstance(process.Spec{
-		ID: id, Kind: "probe", Mode: process.Batch, Probe: true, Path: path, Args: []string{"--version"},
-		ToolDirs: s.o.Tools.Dirs, Timeouts: process.Timeouts{Job: ProbeTimeout, Stop: time.Second},
-		Stdout: func(_ context.Context, r io.Reader) error {
-			sc := bufio.NewScanner(r)
-			for sc.Scan() {
-				v.add(sc.Text())
-			}
-
-			return sc.Err()
-		},
-		OnLine: func(l process.Line) { v.add(l.Text) },
-	})
-	if err != nil {
-		return err
-	}
-
-	if err := in.Run(ctx); err != nil {
+	spec := process.Spec{ID: id, Path: path, Args: []string{"--version"}, ToolDirs: s.o.Tools.Dirs}
+	if err := process.Probe(ctx, s.o.Supervisor, spec, v.add); err != nil {
 		return err
 	}
 

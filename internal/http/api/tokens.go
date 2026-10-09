@@ -46,7 +46,7 @@ func (h TokenHandlers) MintAccessToken(ctx context.Context, req MintAccessTokenR
 		return nil, err
 	}
 
-	return jsonOK{AccessToken{Token: m.Raw, ExpiresAt: m.ExpiresAt.UTC()}}, nil
+	return jsonOK{v: AccessToken{Token: m.Raw, ExpiresAt: m.ExpiresAt.UTC()}}, nil
 }
 
 func (j jsonOK) VisitMintAccessTokenResponse(w http.ResponseWriter) error { return j.write(w) }

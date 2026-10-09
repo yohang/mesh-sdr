@@ -168,9 +168,8 @@ func newHarness(t *testing.T, policy *process.RestartPolicy, devices ...*domain.
 	t.Helper()
 
 	rt := filepath.Join(t.TempDir(), "run")
-	self, _ := filepath.Abs(os.Args[0])
 
-	sup, err := process.New(process.Options{RuntimeDir: rt, Logger: logger(), HelperPath: self})
+	sup, err := process.New(process.Options{RuntimeDir: rt, Logger: logger()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +181,7 @@ func newHarness(t *testing.T, policy *process.RestartPolicy, devices ...*domain.
 
 	lines := &lineLog{lines: map[string][]string{}}
 	src := connector.NewSources(connector.Options{
-		Supervisor: sup, Tools: connector.Tools{Dirs: []string{toolDir}}, Ports: ports, Logger: logger(),
+		Supervisor: sup, Tools: process.Tools{Dirs: []string{toolDir}}, Ports: ports, Logger: logger(),
 		Policy: policy, StartTimeout: 2 * time.Second, StallTimeout: 500 * time.Millisecond, DeviceLog: lines.add,
 	})
 
@@ -384,13 +383,13 @@ func TestStartTimeoutAndMissingTool(t *testing.T) {
 	// A device whose tool is missing is unavailable.
 	sup, _ := process.New(process.Options{RuntimeDir: filepath.Join(t.TempDir(), "run"), Logger: logger()})
 	ports, _ := connector.NewPorts(43000, 43010)
-	src := connector.NewSources(connector.Options{Supervisor: sup, Tools: connector.Tools{Dirs: []string{t.TempDir()}}, Ports: ports, Logger: logger()})
+	src := connector.NewSources(connector.Options{Supervisor: sup, Tools: process.Tools{Dirs: []string{t.TempDir()}}, Ports: ports, Logger: logger()})
 
 	if err := src.Probe(context.Background(), dev.Params()); err == nil {
 		t.Fatal("probe of a missing tool succeeded")
 	}
 
-	srcOK := connector.NewSources(connector.Options{Supervisor: sup, Tools: connector.Tools{Dirs: []string{toolDir}}, Ports: ports, Logger: logger()})
+	srcOK := connector.NewSources(connector.Options{Supervisor: sup, Tools: process.Tools{Dirs: []string{toolDir}}, Ports: ports, Logger: logger()})
 	if err := srcOK.Probe(context.Background(), dev.Params()); err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +407,7 @@ func TestStartTimeoutAndMissingTool(t *testing.T) {
 }
 
 func TestToolsAndPorts(t *testing.T) {
-	tools := connector.Tools{Paths: map[string]string{"rtl_connector": "/opt/x/rtl_connector"}, Dirs: []string{toolDir}}
+	tools := process.Tools{Paths: map[string]string{"rtl_connector": "/opt/x/rtl_connector"}, Dirs: []string{toolDir}}
 
 	if p, err := tools.Resolve("rtl_connector"); err != nil || p != "/opt/x/rtl_connector" {
 		t.Fatal(p, err)
@@ -418,7 +417,7 @@ func TestToolsAndPorts(t *testing.T) {
 		t.Fatal(p, err)
 	}
 
-	if _, err := (connector.Tools{Paths: map[string]string{"x": "rel"}}).Resolve("x"); err == nil {
+	if _, err := (process.Tools{Paths: map[string]string{"x": "rel"}}).Resolve("x"); err == nil {
 		t.Fatal("relative tool path accepted")
 	}
 
@@ -486,7 +485,7 @@ func TestVersionProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ok := connector.NewSources(connector.Options{Supervisor: sup, Tools: connector.Tools{Dirs: []string{toolDir}}, Logger: log})
+	ok := connector.NewSources(connector.Options{Supervisor: sup, Tools: process.Tools{Dirs: []string{toolDir}}, Logger: log})
 	for _, d := range ok.Drivers(ctx) {
 		if !d.Available {
 			t.Errorf("driver %+v", d)
@@ -504,7 +503,7 @@ func TestVersionProbe(t *testing.T) {
 		}
 	}
 
-	bad := connector.NewSources(connector.Options{Supervisor: sup, Tools: connector.Tools{Dirs: []string{broken}}, Logger: log})
+	bad := connector.NewSources(connector.Options{Supervisor: sup, Tools: process.Tools{Dirs: []string{broken}}, Logger: log})
 	for range 2 {
 		for _, d := range bad.Drivers(ctx) {
 			if d.Available || d.Reason == "" {

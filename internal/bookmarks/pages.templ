@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // regionLabel is a region as shown to people (R1, R2, R3).
@@ -70,12 +71,14 @@ func rowID(id string) string { return "bookmark-" + id }
 // listPage is Bookmarks › Manage (BMK-005): the filters, the table of hub
 // and pack bookmarks, and the add form.
 templ listPage(v listView) {
-	<h1 class="text-2xl font-semibold">Bookmarks</h1>
+	@layout.Title("") {
+		Bookmarks
+	}
 	<p class="text-fg-muted">
 		Hub bookmarks show to every listener of the devices their scope names. Pack bookmarks are shipped with the hub (the general pack and the { regionLabel(v.Region) } region pack, from the band plan region) and are read-only.
 	</p>
-	if v.Notice != "" && !v.rowNotice() {
-		<p class="font-semibold text-success" role="status">{ v.Notice }</p>
+	if !v.rowNotice() {
+		@layout.Notice("", v.Notice)
 	}
 	@filtersForm(v)
 	@bookmarksTable(v)
@@ -115,13 +118,13 @@ templ filtersForm(v listView) {
 			<select id="filter-band" name="band" class="max-w-full rounded border border-border px-2 py-1" aria-describedby="filter-band-help">
 				<option value="" selected?={ v.Filter.Band == "" }>Any</option>
 				for _, b := range v.Bands {
-					<option value={ b.Name } selected?={ v.Filter.Band == b.Name }>{ b.Name } ({ FormatHz(b.Low) } to { FormatHz(b.High) })</option>
+					<option value={ b.Name } selected?={ v.Filter.Band == b.Name }>{ b.Name } ({ layout.FormatHz(b.Low) } to { layout.FormatHz(b.High) })</option>
 				}
 			</select>
 			<p id="filter-band-help" class="text-sm text-fg-muted">A band replaces the frequencies below.</p>
 		</div>
-		@rangeInput("from", "Lowest frequency (Hz)", v.Filter.From, v.Filter.Errors["from"])
-		@rangeInput("to", "Highest frequency (Hz)", v.Filter.To, v.Filter.Errors["to"])
+		@layout.FilterInput("from", "Lowest frequency (kHz)", "number", v.Filter.From, v.Filter.Errors["from"])
+		@layout.FilterInput("to", "Highest frequency (kHz)", "number", v.Filter.To, v.Filter.Errors["to"])
 		<div class="flex items-center gap-4">
 			<button type="submit" class="rounded border border-border px-3 py-1 font-semibold">Filter</button>
 			if v.Filter.active() {
@@ -131,38 +134,10 @@ templ filtersForm(v listView) {
 	</form>
 }
 
-templ rangeInput(name, label, value, failure string) {
-	<div class="flex flex-col gap-1">
-		<label for={ "filter-" + name } class="font-medium">{ label }</label>
-		<input
-			id={ "filter-" + name }
-			name={ name }
-			value={ value }
-			type="number"
-			min="0"
-			step="1"
-			inputmode="numeric"
-			class="rounded border border-border px-2 py-1"
-			if failure != "" {
-				aria-invalid="true"
-				aria-describedby={ "filter-" + name + "-error" }
-			}
-		/>
-		if failure != "" {
-			<p id={ "filter-" + name + "-error" } class="text-sm font-semibold text-danger">{ failure }</p>
-		}
-	</div>
-}
-
 templ bookmarksTable(v listView) {
 	<section aria-labelledby="bookmarks-table-title" class="flex flex-col gap-2">
 		<h2 id="bookmarks-table-title" class="text-xl font-semibold">Bookmarks by frequency</h2>
-		<p class="text-fg-muted" role="status">
-			{ strconv.Itoa(len(v.Rows)) } bookmarks
-			if v.Truncated {
-				(the first { strconv.Itoa(maxRows) }: filter to see the others)
-			}
-		</p>
+		<p class="text-fg-muted" role="status">{ layout.Count(v.Total, "bookmark", "bookmarks") }</p>
 		if len(v.Rows) > 0 {
 			@layout.TableScroll("Bookmarks, by frequency") {
 				<table class="w-full text-left">
@@ -185,6 +160,7 @@ templ bookmarksTable(v listView) {
 				</table>
 			}
 		}
+		@layout.Pager(v.Paging)
 	</section>
 }
 
@@ -194,7 +170,7 @@ templ bookmarksTable(v listView) {
 // scrolled to (#bookmark-…) clear the sticky top bar.
 templ viewRow(b *Bookmark, n names, notice string) {
 	<tr id={ rowID(b.ID().String()) } class="scroll-mt-20 border-b border-border align-top">
-		<td class="py-1 pr-4 whitespace-nowrap">{ FormatHz(b.Frequency()) }</td>
+		<td class="py-1 pr-4 whitespace-nowrap">{ layout.FormatHz(b.Frequency()) }</td>
 		<th scope="row" class="py-1 pr-4 font-medium">
 			{ b.Name() }
 			if b.Description() != "" {
@@ -217,21 +193,18 @@ templ viewRow(b *Bookmark, n names, notice string) {
 						hx-get={ ManagePath + "/" + b.ID().String() }
 						hx-target="closest tr"
 						hx-swap="outerHTML"
-					>Edit<span class="sr-only"> { b.Name() }</span></a>
-					<a href={ templ.URL(ManagePath + "/" + b.ID().String() + "/delete") }>Delete<span class="sr-only"> { b.Name() }</span></a>
+					>Edit<span class="sr-only">{ b.Name() }</span></a>
+					<a href={ templ.URL(ManagePath + "/" + b.ID().String() + "/delete") }>Delete<span class="sr-only">{ b.Name() }</span></a>
 				</span>
 			}
 		</td>
 	</tr>
 }
 
-// problem is one entry of the error summary of a form.
-type problem struct{ ID, Text string }
-
 // fieldLabels are the labels of the form fields, in form order.
-var fieldLabels = []struct{ Key, Label string }{
-	{"name", "Name"}, {"frequency", "Frequency (Hz)"}, {"modulation", "Mode"}, {"underlying", "Underlying mode"},
-	{"description", "Description"}, {"scannable", "Scannable"}, {"scope", "Shown on"}, {"device", "Device"}, {"preset", "Preset"},
+var fieldLabels = []render.Field{
+	{Key: "name", Label: "Name"}, {Key: "frequency", Label: "Frequency (Hz)"}, {Key: "modulation", Label: "Mode"}, {Key: "underlying", Label: "Underlying mode"},
+	{Key: "description", Label: "Description"}, {Key: "scannable", Label: "Scannable"}, {Key: "scope", Label: "Shown on"}, {Key: "device", Label: "Device"}, {Key: "preset", Label: "Preset"},
 }
 
 func (f bookmarkForm) prefix() string {
@@ -248,28 +221,6 @@ func (f bookmarkForm) action() string {
 	}
 
 	return ManagePath + "/" + f.ID
-}
-
-// problems lists the field errors in form order, then the others.
-func (f bookmarkForm) problems() []problem {
-	var out []problem
-
-	seen := map[string]bool{}
-
-	for _, fl := range fieldLabels {
-		if msg, ok := f.Errors[fl.Key]; ok {
-			out = append(out, problem{ID: f.prefix() + fl.Key, Text: fl.Label + ": " + msg})
-			seen[fl.Key] = true
-		}
-	}
-
-	for name, msg := range f.Errors {
-		if !seen[name] {
-			out = append(out, problem{Text: msg})
-		}
-	}
-
-	return out
 }
 
 func (f bookmarkForm) describedBy(key string) string {
@@ -290,25 +241,8 @@ func (f bookmarkForm) invalid(key string) templ.Attributes {
 }
 
 templ formErrors(f bookmarkForm) {
-	if f.Failure != "" {
-		<p class="rounded border border-danger p-3 font-semibold text-danger" role="alert">{ f.Failure }</p>
-	}
-	if ps := f.problems(); len(ps) > 0 {
-		<div class="rounded border border-danger p-3" role="alert" tabindex="-1">
-			<p class="font-semibold text-danger">The bookmark was not saved:</p>
-			<ul class="mt-1 list-disc pl-5">
-				for _, p := range ps {
-					<li>
-						if p.ID != "" {
-							<a href={ templ.SafeURL("#" + p.ID) }>{ p.Text }</a>
-						} else {
-							{ p.Text }
-						}
-					</li>
-				}
-			</ul>
-		</div>
-	}
+	@layout.Failure("", f.Failure)
+	@layout.ErrorSummary("The bookmark was not saved:", f.Problems(f.prefix(), fieldLabels))
 }
 
 templ fieldHelp(f bookmarkForm, key, help string) {
@@ -443,7 +377,7 @@ templ editRow(f bookmarkForm, n names) {
 					@bookmarkFields(f, n)
 				</div>
 				<div class="flex flex-wrap items-center gap-4">
-					<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">Save<span class="sr-only"> { f.Name }</span></button>
+					<button type="submit" class="rounded bg-accent px-3 py-1 font-semibold text-accent-fg">Save<span class="sr-only">{ f.Name }</span></button>
 					<a
 						href={ templ.SafeURL(ManagePath) }
 						hx-get={ f.action() + "/row" }
@@ -458,7 +392,9 @@ templ editRow(f bookmarkForm, n names) {
 
 // editPage is the edit of a hub bookmark on its own page (without htmx).
 templ editPage(f bookmarkForm, n names) {
-	<h1 class="text-2xl font-semibold">Edit { f.Name }</h1>
+	@layout.Title("") {
+		Edit { f.Name }
+	}
 	<p><a href={ templ.SafeURL(ManagePath) }>All bookmarks</a></p>
 	@formErrors(f)
 	<form class="flex max-w-xl flex-col gap-4" method="post" action={ templ.SafeURL(f.action()) } novalidate>
@@ -473,12 +409,14 @@ templ editPage(f bookmarkForm, n names) {
 
 // packPage shows a pack bookmark: read-only.
 templ packPage(b *Bookmark) {
-	<h1 class="text-2xl font-semibold">{ b.Name() }</h1>
+	@layout.Title("") {
+		{ b.Name() }
+	}
 	<p><a href={ templ.SafeURL(ManagePath) }>All bookmarks</a></p>
 	<p>This bookmark comes from a pack shipped with the hub: it is read-only.</p>
 	<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
 		<dt class="font-medium">Frequency</dt>
-		<dd>{ FormatHz(b.Frequency()) }</dd>
+		<dd>{ layout.FormatHz(b.Frequency()) }</dd>
 		<dt class="font-medium">Mode</dt>
 		<dd>{ modeLabel(b) }</dd>
 		<dt class="font-medium">Origin</dt>
@@ -492,14 +430,7 @@ templ packPage(b *Bookmark) {
 
 // deletePage asks to confirm the deletion of a hub bookmark (ADM-025).
 templ deletePage(b *Bookmark, failure string) {
-	<h1 class="text-2xl font-semibold">Delete { b.Name() }</h1>
-	if failure != "" {
-		<p class="rounded border border-danger p-3 font-semibold text-danger" role="alert">{ failure }</p>
+	@layout.DeleteConfirm(b.Name(), failure, ManagePath+"/"+b.ID().String()+"/delete", b.Version(), "Delete the bookmark", ManagePath) {
+		<p>The bookmark { b.Name() } on { layout.FormatHz(b.Frequency()) } is removed for every listener.</p>
 	}
-	<p>The bookmark { b.Name() } on { FormatHz(b.Frequency()) } is removed for every listener.</p>
-	<form class="flex flex-wrap items-center gap-4" method="post" action={ templ.SafeURL(ManagePath + "/" + b.ID().String() + "/delete") }>
-		<input type="hidden" name="version" value={ strconv.Itoa(b.Version()) }/>
-		<button type="submit" class="rounded border border-danger px-3 py-1 font-semibold text-danger">Delete the bookmark</button>
-		<a href={ templ.SafeURL(ManagePath) }>Cancel</a>
-	</form>
 }

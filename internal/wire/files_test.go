@@ -20,8 +20,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
 	"github.com/yohang/mesh-sdr/internal/files"
-	"github.com/yohang/mesh-sdr/internal/grid/agent"
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	"github.com/yohang/mesh-sdr/internal/grid/infra/agent"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/http/api"
 	"github.com/yohang/mesh-sdr/internal/http/api/apitest"
@@ -158,7 +158,7 @@ func TestFilesFromNode(t *testing.T) {
 	eventually(t, "file stored", 15*time.Second, func() bool {
 		var err error
 
-		list, err = repo.List(ctx, files.Filter{}, files.Access{}, 0, 10)
+		list, err = repo.List(ctx, files.Filter{}, files.Access{All: true}, 0, 10)
 
 		return err == nil && len(list) == 1
 	})
@@ -192,7 +192,7 @@ func TestFilesFromNode(t *testing.T) {
 		return n == 0
 	})
 
-	if list, _ := repo.List(ctx, files.Filter{}, files.Access{}, 0, 10); len(list) != 1 {
+	if list, _ := repo.List(ctx, files.Filter{}, files.Access{All: true}, 0, 10); len(list) != 1 {
 		t.Errorf("files = %d, want the first one only", len(list))
 	}
 }

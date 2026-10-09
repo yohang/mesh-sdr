@@ -6,7 +6,9 @@ import "github.com/yohang/mesh-sdr/internal/web/layout"
 // first, paging and CSV/JSON export. Read-only.
 templ auditPage(v auditView) {
 	<section class="flex w-full max-w-6xl flex-col gap-6" aria-labelledby="audit-title">
-		<h1 id="audit-title" class="text-2xl font-bold">Audit log</h1>
+		@layout.Title("audit-title") {
+			Audit log
+		}
 		<form id="audit-filters" class="flex flex-wrap items-end gap-3" method="get" action="/admin/audit" role="search">
 			<label class="flex flex-col gap-1">
 				<span>Actor (username)</span>
@@ -73,8 +75,6 @@ templ auditPage(v auditView) {
 				</table>
 			}
 		}
-		if v.NextQS != "" {
-			<p><a href={ templ.SafeURL("/admin/audit?" + v.NextQS) }>Older entries</a></p>
-		}
+		@layout.Pager(v.Paging)
 	</section>
 }

@@ -76,11 +76,5 @@ func newAuditAppender(adapter *db.DB, now func() time.Time) auditAppender {
 
 // currentUser returns the signed-in user of a request (zero when anonymous).
 func currentUser(ctx context.Context) shared.UUID {
-	if p := identityhttp.FromContext(ctx).Principal(); !p.IsAnonymous() {
-		if u, err := shared.UUIDFromBytes(p.UserID().Bytes()); err == nil {
-			return u
-		}
-	}
-
-	return shared.UUID{}
+	return identityhttp.FromContext(ctx).Principal().UserID().UUID()
 }

@@ -39,7 +39,7 @@ func (h FileHandlers) GetFileContent(ctx context.Context, req GetFileContentRequ
 	}
 
 	etag := strconv.Quote(hex.EncodeToString(e.SHA256))
-	res := fileResponse{etag: etag, mime: string(e.MIME), name: e.Name, size: e.Size}
+	res := fileResponse{etag: etag, mime: string(e.MIME), name: e.Name, disposition: "attachment", size: e.Size}
 
 	if req.Params.IfNoneMatch != nil && *req.Params.IfNoneMatch == etag {
 		res.notModified = true
@@ -61,7 +61,7 @@ func (h FileHandlers) GetFileThumbnail(ctx context.Context, req GetFileThumbnail
 	}
 
 	etag := strconv.Quote("t-" + hex.EncodeToString(e.SHA256))
-	res := fileResponse{etag: etag, mime: string(files.MIMEJPEG), inline: true}
+	res := fileResponse{etag: etag, mime: string(files.MIMEJPEG)}
 
 	if req.Params.IfNoneMatch != nil && *req.Params.IfNoneMatch == etag {
 		res.notModified = true
@@ -85,15 +85,18 @@ func (h FileHandlers) GetFileThumbnail(ctx context.Context, req GetFileThumbnail
 }
 
 // fileResponse writes a file with its stored type (SR-30): never sniffed,
-// revalidated on every use (rights may change), the content as an
-// attachment with the name the hub generated.
+// revalidated on every use, with the name the hub generated in its
+// Content-Disposition (attachment, inline or none).
 type fileResponse struct {
 	stream      func(w io.Writer) error
 	size        int64
 	etag        string
 	mime        string
 	name        string
-	inline      bool
+	disposition string
+	// public lets shared caches keep the file (receiver images); the files
+	// the nodes sent are private (rights may change).
+	public      bool
 	notModified bool
 }
 
@@ -102,6 +105,10 @@ func (r fileResponse) write(w http.ResponseWriter) error {
 	h.Set("ETag", r.etag)
 	h.Set("Cache-Control", "private, no-cache")
 	h.Set("X-Content-Type-Options", "nosniff")
+
+	if r.public {
+		h.Set("Cache-Control", "no-cache")
+	}
 
 	if r.notModified {
 		w.WriteHeader(http.StatusNotModified)
@@ -117,8 +124,8 @@ func (r fileResponse) write(w http.ResponseWriter) error {
 	h.Set("Content-Type", ctype)
 	h.Set("Content-Length", strconv.FormatInt(r.size, 10))
 
-	if !r.inline {
-		h.Set("Content-Disposition", `attachment; filename="`+SafeFileName(r.name)+`"`)
+	if r.disposition != "" {
+		h.Set("Content-Disposition", r.disposition+`; filename="`+SafeFileName(r.name)+`"`)
 	}
 
 	w.WriteHeader(http.StatusOK)

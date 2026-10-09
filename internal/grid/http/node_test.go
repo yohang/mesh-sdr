@@ -11,7 +11,7 @@ import (
 )
 
 func TestPreEnrollmentRouter(t *testing.T) {
-	h := gridhttp.NewPreEnrollmentRouter(slog.New(slog.DiscardHandler))
+	h := gridhttp.NewPreEnrollmentRouter(nil, slog.New(slog.DiscardHandler))
 
 	tests := []struct {
 		method, path string

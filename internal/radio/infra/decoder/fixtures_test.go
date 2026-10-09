@@ -60,7 +60,7 @@ func (f fixtureRun) run(t *testing.T, tool string) ([]app.DecodeRecord, app.Deco
 
 	var ev events
 
-	spec := app.DecoderSpec{Session: shared.MustParseUUID("0190c8a4-0000-7000-8000-0000000000e4"), Mode: mode, Variant: f.variant, DialHz: f.dial}
+	spec := app.DecoderSpec{Session: shared.MustParseUUID("0190c8a4-0000-7000-8000-0000000000e4"), Mode: mode, Variant: f.variant, Dial: f.dial}
 
 	run, err := r.Start(spec, ev.sink())
 	if err != nil {

@@ -34,6 +34,7 @@ func (t tools) Available(c string) (bool, string) {
 type fakeRun struct {
 	mu      sync.Mutex
 	ev      app.DecoderEvents
+	dial    func() int64
 	mode    string
 	variant string
 	closed  bool
@@ -85,7 +86,7 @@ type runner struct {
 }
 
 func (r *runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderRun, error) {
-	run := &fakeRun{ev: ev, mode: spec.Mode.Name, variant: spec.Variant, offsets: []float64{spec.OffsetHz}}
+	run := &fakeRun{ev: ev, dial: spec.Dial, mode: spec.Mode.Name, variant: spec.Variant, offsets: []float64{spec.OffsetHz}}
 	if spec.Mode.Cap == domain.CapNativeDSP {
 		run.size = 2048
 	}
@@ -200,7 +201,7 @@ func newDecoderEnv(t *testing.T, ok bool, maxSessions int, step time.Duration, r
 	e.p.claims.ConnectionID = "c1"
 	e.p.claims.Roles = roles
 
-	streams := radiohttp.NewStreams(m, nil, dec, slog.New(slog.DiscardHandler))
+	streams := radiohttp.NewStreams(m, nil, dec, nodeWaterfall, slog.New(slog.DiscardHandler))
 	streams.SetNow(clock(step))
 
 	ss := streams.Open(e.p)
@@ -383,9 +384,9 @@ func TestDecoderSetWSJT(t *testing.T) {
 		t.Errorf("decode %+v", d)
 	}
 
-	// A slot decode carries the dial of its slot start; the events give
+	// A slot decode carries the dial of its slot start; the spec gives
 	// the current dial.
-	if dial := r.ev.Dial(); dial != 144_000_000+125_000+12_500 {
+	if dial := r.dial(); dial != 144_000_000+125_000+12_500 {
 		t.Errorf("dial %d", dial)
 	}
 

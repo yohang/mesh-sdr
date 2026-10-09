@@ -1,14 +1,9 @@
 package layout
 
-// AdminPage is the admin area layout (FEATURE_SPEC §10.13): the section list
-// (left on wide screens, above the content on narrow ones) and the section
-// content. The content starts with the page's h1.
-templ AdminPage(current string, content templ.Component) {
-	@AdminPageWith(current, AdminSections, content)
-}
-
-// AdminPageWith is AdminPage with the sections the visitor may open.
-templ AdminPageWith(current string, sections []AdminSection, content templ.Component) {
+// AdminPage is the admin area layout (FEATURE_SPEC §10.13): the sections
+// the visitor may open (left on wide screens, above the content on narrow
+// ones) and the section content. The content starts with the page's h1.
+templ AdminPage(current string, sections []AdminSection, content templ.Component) {
 	<div class="flex flex-col gap-6 md:flex-row">
 		<nav aria-label="Admin sections" class="shrink-0 md:w-52">
 			<ul class="flex flex-wrap gap-x-4 gap-y-2 md:flex-col md:gap-1">

@@ -16,6 +16,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
@@ -166,7 +167,7 @@ func expectWSClose(t *testing.T, ws *websocket.Conn, want rxv1.CloseCode) {
 func newMediaUser(t *testing.T, e *gridEnv) {
 	t.Helper()
 
-	if _, err := UserAdmin(e.hubCfg, quiet, e.adapter).Add(context.Background(), identityapp.AddUserInput{
+	if _, err := identity.UserAdmin(IdentityDeps(e.hubCfg, quiet, e.adapter)).Add(context.Background(), identityapp.AddUserInput{
 		Username: "lis", Role: identitydomain.RoleListener, Password: mediaPassword,
 	}); err != nil {
 		t.Fatal(err)
@@ -252,7 +253,7 @@ func newMediaEnv(t *testing.T) *gridEnv {
 func TestTokenRefreshFollowsListenPolicy(t *testing.T) {
 	e := newMediaEnv(t)
 
-	if _, err := UserAdmin(e.hubCfg, quiet, e.adapter).Add(context.Background(), identityapp.AddUserInput{
+	if _, err := identity.UserAdmin(IdentityDeps(e.hubCfg, quiet, e.adapter)).Add(context.Background(), identityapp.AddUserInput{
 		Username: "root", Role: identitydomain.RoleAdmin, Password: mediaPassword,
 	}); err != nil {
 		t.Fatal(err)

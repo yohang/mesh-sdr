@@ -46,6 +46,9 @@ type States struct {
 	tracker *Tracker
 	logger  *slog.Logger
 
+	// changed coalesces the global changes (settings) pushed by Run.
+	changed chan struct{}
+
 	mu       sync.Mutex
 	locks    map[domain.NodeID]*sync.Mutex
 	dirty    map[domain.NodeID]bool
@@ -55,7 +58,7 @@ type States struct {
 // NewStates returns the service.
 func NewStates(desired DesiredStates, sender StateSender, tracker *Tracker, logger *slog.Logger) *States {
 	return &States{
-		desired: desired, sender: sender, tracker: tracker, logger: logger,
+		desired: desired, sender: sender, tracker: tracker, logger: logger, changed: make(chan struct{}, 1),
 		locks: map[domain.NodeID]*sync.Mutex{}, dirty: map[domain.NodeID]bool{}, tooLarge: map[domain.NodeID]int64{},
 	}
 }
@@ -245,6 +248,30 @@ func (s *States) PublishAll(ctx context.Context) int {
 	}
 
 	return sent
+}
+
+// Changed asks Run to push the desired state of every connected node: a
+// global input (the settings) changed. Changes coalesce while a push runs.
+func (s *States) Changed() {
+	select {
+	case s.changed <- struct{}{}:
+	default:
+	}
+}
+
+// Run pushes the desired states after each Changed until ctx is done (a
+// process worker).
+func (s *States) Run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.changed:
+			if n := s.PublishAll(ctx); n > 0 {
+				s.logger.DebugContext(ctx, "desired state pushed after a settings change", slog.Int("nodes", n))
+			}
+		}
+	}
 }
 
 // Applied records a node's ctl.state.applied.

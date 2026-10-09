@@ -8,6 +8,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // Password form messages.
@@ -34,8 +35,6 @@ type passwordForm struct {
 const pageTitlePassword = "Change password"
 
 func (m *Module) passwordPage(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	f := passwordForm{
 		Forced:    m.Principal(r.Context()).MustChangePassword(),
 		Changed:   r.URL.Query().Get(passwordChangedParam) == "1",
@@ -43,22 +42,11 @@ func (m *Module) passwordPage(w http.ResponseWriter, r *http.Request) {
 		MinLength: m.passwords.MinLength(r.Context()),
 	}
 
-	m.pages.Page(w, r, http.StatusOK, pageTitlePassword, passwordPage(f), nil)
+	m.page(w, r, http.StatusOK, pageTitlePassword, passwordPage(f), nil)
 }
 
 func (m *Module) passwordAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
-	if err := r.ParseForm(); err != nil {
-		status := http.StatusBadRequest
-
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			status = http.StatusRequestEntityTooLarge
-		}
-
-		m.pages.Error(w, r, status)
-
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -71,7 +59,7 @@ func (m *Module) passwordAction(w http.ResponseWriter, r *http.Request) {
 	newPassword := r.PostForm.Get("new_password")
 	if newPassword != r.PostForm.Get("confirm_password") {
 		f.Error, f.Field = msgPasswordMismatch, "new"
-		m.pages.Page(w, r, http.StatusUnprocessableEntity, pageTitlePassword, passwordPage(f), passwordFormView(f))
+		m.page(w, r, http.StatusUnprocessableEntity, pageTitlePassword, passwordPage(f), passwordFormView(f))
 
 		return
 	}
@@ -83,9 +71,9 @@ func (m *Module) passwordAction(w http.ResponseWriter, r *http.Request) {
 		// Full page load: the next page fetches the new session's CSRF
 		// token.
 		if forced {
-			m.redirect(w, r, f.Next)
+			render.Redirect(w, r, f.Next)
 		} else {
-			m.redirect(w, r, PasswordChangePath+"?"+passwordChangedParam+"=1")
+			render.Redirect(w, r, PasswordChangePath+"?"+passwordChangedParam+"=1")
 		}
 
 		return
@@ -106,7 +94,7 @@ func (m *Module) passwordAction(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, domain.ErrInvalidCurrentPassword):
 		f.Error, f.Field = msgCurrentIncorrect, "current"
 	case errors.Is(err, domain.ErrInvalidPassword) && errors.As(err, &de):
-		f.Error, f.Field = sentence(de.Message()), "new"
+		f.Error, f.Field = render.Sentence(de.Message()), "new"
 	default:
 		status = http.StatusInternalServerError
 		f.Error = msgPasswordFailed
@@ -114,23 +102,5 @@ func (m *Module) passwordAction(w http.ResponseWriter, r *http.Request) {
 		m.logger.ErrorContext(r.Context(), "password change failed", slog.Any("error", err))
 	}
 
-	m.pages.Page(w, r, status, pageTitlePassword, passwordPage(f), passwordFormView(f))
-}
-
-// sentence capitalises a domain message and ends it with a period.
-func sentence(s string) string {
-	if s == "" {
-		return s
-	}
-
-	b := []byte(s)
-	if b[0] >= 'a' && b[0] <= 'z' {
-		b[0] -= 'a' - 'A'
-	}
-
-	if b[len(b)-1] != '.' {
-		b = append(b, '.')
-	}
-
-	return string(b)
+	m.page(w, r, status, pageTitlePassword, passwordPage(f), passwordFormView(f))
 }

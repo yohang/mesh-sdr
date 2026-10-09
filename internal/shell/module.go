@@ -17,83 +17,42 @@ import (
 
 //go:generate go tool templ generate
 
-// ShellSource builds the per-request shell data from the look and feel and
-// the sections the visitor may open.
-type ShellSource struct {
-	lookAndFeel *LookAndFeel
-	nav         *Navigation
-	user        func(r *http.Request) *layout.User
-	now         func() time.Time
-}
-
-// NewShellSource returns a ShellSource. user returns the signed-in visitor
-// of a request for the user menu (nil: anonymous); it may be nil. now is
-// the clock of the top bar.
-func NewShellSource(lookAndFeel *LookAndFeel, nav *Navigation, user func(r *http.Request) *layout.User,
-	now func() time.Time,
-) *ShellSource {
-	return &ShellSource{lookAndFeel: lookAndFeel, nav: nav, user: user, now: now}
+// Module is the shell's router module (internal/http.Module) and the
+// shell data of every page (render.ShellSource).
+type Module struct {
+	render   *render.Renderer
+	settings Settings
+	gates    map[string]Gate
+	user     func(r *http.Request) *layout.User
+	images   StationImages
+	static   fs.FS
+	markdown *markdown
+	// admin tells whether the visitor is an admin, who always gets the
+	// browser recorder (REC-001); nil: nobody.
+	admin Gate
+	// bookmarks is the Bookmarks › Manage link of the receiver (nil: none).
+	bookmarks *BookmarksLink
+	now       func() time.Time
+	logger    *slog.Logger
 }
 
 // Shell implements render.ShellSource.
-func (s *ShellSource) Shell(r *http.Request) layout.Shell {
-	v := s.lookAndFeel.View(r.Context())
-
-	theme := layout.ThemeAuto
-
-	switch {
-	case v.ThemeMode.IsLight():
-		theme = layout.ThemeLight
-	case v.ThemeMode.IsDark():
-		theme = layout.ThemeDark
-	}
-
-	var nav []layout.Link
-	for _, sec := range s.nav.Sections(r.Context()) {
-		nav = append(nav, layout.Link{Label: sec.Label(), Href: sec.Path(), Section: sec.ID()})
-	}
-
+func (m *Module) Shell(r *http.Request) layout.Shell {
 	var user *layout.User
-	if s.user != nil {
-		user = s.user(r)
+	if m.user != nil {
+		user = m.user(r)
 	}
 
 	return layout.Shell{
 		User:        user,
-		SiteName:    v.SiteName,
-		Theme:       theme,
-		FooterLinks: footerLinks(v),
-		HelpURL:     v.Help.String(),
-		Shortcuts:   v.Shortcuts.Enabled(),
+		SiteName:    m.settings.SiteName(),
+		Theme:       m.settings.Theme(),
+		FooterLinks: m.footerLinks(),
+		HelpURL:     m.settings.HelpURL(),
+		Shortcuts:   m.settings.Shortcuts(),
 		Product:     product(),
-		Nav:         nav,
-		Now:         s.now(),
-	}
-}
-
-// Module is the shell's router module (internal/http.Module).
-type Module struct {
-	render   *render.Renderer
-	shell    render.ShellSource
-	policy   *Policy
-	station  *Station
-	static   fs.FS
-	markdown *markdown
-	admin    Gate
-	logger   *slog.Logger
-	// bookmarks is the Bookmarks › Manage link of the receiver (nil: none).
-	bookmarks *BookmarksLink
-}
-
-// NewModule returns the shell router module. static is the embedded static
-// assets filesystem (web.Static). admin tells whether the visitor is an
-// admin, who always gets the browser recorder (REC-001); nil: nobody.
-func NewModule(rd *render.Renderer, shell render.ShellSource, policy *Policy, station *Station, static fs.FS,
-	admin Gate, logger *slog.Logger,
-) *Module {
-	return &Module{
-		render: rd, shell: shell, policy: policy, station: station, static: static, markdown: newMarkdown(), admin: admin,
-		logger: logger,
+		Nav:         nav(r.Context(), m.gates),
+		Now:         m.now(),
 	}
 }
 
@@ -106,20 +65,16 @@ func (m *Module) Routes(r chi.Router) {
 	r.NotFound(m.render.NotFound)
 	r.MethodNotAllowed(m.methodNotAllowed)
 
-	// Read-only pages answer GET and HEAD (net/http drops HEAD bodies).
-	get := func(pattern string, h http.HandlerFunc) {
-		r.Get(pattern, h)
-		r.Head(pattern, h)
-	}
-
-	get("/", m.receiver)
-	get(ReceiverLinkPattern, m.receiverLink)
-	get(SectionMap.Path(), m.placeholder(SectionMap, "The live map is not available yet."))
-	get("/robots.txt", robots)
-	get("/policy", m.policyPage)
-	get(AboutPath, m.aboutPage)
-	get("/manifest.webmanifest", m.manifest)
-	get("/favicon.ico", favicon(m.static))
+	// Read-only pages also answer HEAD: the router serves it with the GET
+	// route (chi middleware.GetHead; net/http drops HEAD bodies).
+	r.Get("/", m.receiver)
+	r.Get(ReceiverLinkPattern, m.receiverLink)
+	r.Get(sectionLink(layout.SectionMap).Href, m.placeholder(layout.SectionMap, "The live map is not available yet."))
+	r.Get("/robots.txt", robots)
+	r.Get("/policy", m.policyPage)
+	r.Get(AboutPath, m.aboutPage)
+	r.Get("/manifest.webmanifest", m.manifest)
+	r.Get("/favicon.ico", favicon(m.static))
 }
 
 // allowCandidates are the methods probed for the Allow header of a 405.
@@ -135,7 +90,13 @@ func (m *Module) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 		var allowed []string
 
 		for _, method := range allowCandidates {
-			if rctx.Routes.Match(chi.NewRouteContext(), method, r.URL.Path) {
+			// HEAD is served by the GET route (middleware.GetHead).
+			probe := method
+			if method == http.MethodHead {
+				probe = http.MethodGet
+			}
+
+			if rctx.Routes.Match(chi.NewRouteContext(), probe, r.URL.Path) {
 				allowed = append(allowed, method)
 			}
 		}
@@ -169,7 +130,7 @@ type receiverConfig struct {
 // receiver is the Receiver section's entry page: the station (name,
 // location, images, description) and the receiver island.
 func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
-	st := m.station.View(r.Context())
+	st := m.station(r.Context())
 
 	desc, err := m.markdown.HTML(st.PhotoDesc)
 	if err != nil {
@@ -178,17 +139,16 @@ func (m *Module) receiver(w http.ResponseWriter, r *http.Request) {
 		desc = ""
 	}
 
-	sh := m.shell.Shell(r)
 	rx := receiverConfig{
-		SignedIn: sh.User != nil, LoginURL: "/login", AudioCodec: st.AudioCodec,
+		SignedIn: m.user != nil && m.user(r) != nil, LoginURL: "/login", AudioCodec: st.AudioCodec,
 		Recorder: st.RecorderEnabled || (m.admin != nil && m.admin.Allows(r.Context())),
 	}
 	if b := m.bookmarks; b != nil && b.Gate != nil && b.Gate.Allows(r.Context()) {
 		rx.BookmarksURL = b.Path
 	}
 
-	page := layout.Page{Section: SectionReceiver.ID()}
-	m.render.Page(w, r, http.StatusOK, page, receiverPage(sh.SiteName, st, desc, rx), nil)
+	page := layout.Page{Section: layout.SectionReceiver}
+	m.render.Page(w, r, http.StatusOK, page, receiverPage(m.settings.SiteName(), st, desc, rx), nil)
 }
 
 // ReceiverLinkPattern is the deep link of a device (RX-028):
@@ -218,16 +178,18 @@ func (m *Module) receiverLink(w http.ResponseWriter, r *http.Request) {
 // placeholder serves the entry page of a section whose module does not
 // exist yet (Map, Decodes): its heading and a short notice. The
 // section's module takes the route over when it lands.
-func (m *Module) placeholder(sec Section, notice string) http.HandlerFunc {
+func (m *Module) placeholder(section, notice string) http.HandlerFunc {
+	l := sectionLink(section)
+
 	return func(w http.ResponseWriter, r *http.Request) {
-		page := layout.Page{Title: sec.Label(), Section: sec.ID()}
-		m.render.Page(w, r, http.StatusOK, page, placeholderPage(sec.Label(), notice), nil)
+		page := layout.Page{Title: l.Label, Section: section}
+		m.render.Page(w, r, http.StatusOK, page, placeholderPage(l.Label, notice), nil)
 	}
 }
 
 // policyPage serves the usage policy (UI-003), public.
 func (m *Module) policyPage(w http.ResponseWriter, r *http.Request) {
-	html, err := m.markdown.HTML(m.policy.Text(r.Context()).Markdown())
+	html, err := m.markdown.HTML(m.settings.Policy())
 	if err != nil {
 		m.logger.ErrorContext(r.Context(), "render usage policy", slog.Any("error", err))
 		m.render.Error(w, r, http.StatusInternalServerError)
@@ -249,16 +211,16 @@ func product() layout.Product {
 // aboutPage serves the About page: product, version, licence and the link
 // to the source code of this build (AGPL-3.0 section 13), public.
 func (m *Module) aboutPage(w http.ResponseWriter, r *http.Request) {
-	m.render.Page(w, r, http.StatusOK, layout.Page{Title: "About"}, aboutPage(product(), m.shell.Shell(r).HelpURL), nil)
+	m.render.Page(w, r, http.StatusOK, layout.Page{Title: "About"}, aboutPage(product(), m.settings.HelpURL()), nil)
 }
 
 // footerLinks are the information links of the footer and the user menu:
 // help (when set), the usage policy and About.
-func footerLinks(v View) []layout.Link {
+func (m *Module) footerLinks() []layout.Link {
 	var links []layout.Link
-	if !v.Help.IsZero() {
-		links = append(links, layout.Link{Label: "Help", Href: v.Help.String(), External: true})
+	if help := m.settings.HelpURL(); help != "" {
+		links = append(links, layout.Link{Label: "Help", Href: help, External: true})
 	}
 
-	return append(links, layout.Link{Label: "Usage policy", Href: v.PolicyURL}, layout.Link{Label: "About", Href: AboutPath})
+	return append(links, layout.Link{Label: "Usage policy", Href: m.settings.PolicyURL()}, layout.Link{Label: "About", Href: AboutPath})
 }

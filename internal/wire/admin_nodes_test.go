@@ -12,6 +12,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/grid/infra/pki"
+	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 )
@@ -64,7 +65,7 @@ var (
 // with a real node (GRID-005, GRID-009, GRID-015).
 func TestAdminNodesPages(t *testing.T) {
 	e := newGridEnvWith(t, true, fastTimings())
-	admin := UserAdmin(e.hubCfg, quiet, e.adapter)
+	admin := identity.UserAdmin(IdentityDeps(e.hubCfg, quiet, e.adapter))
 
 	for name, role := range map[string]identitydomain.Role{
 		"root": identitydomain.RoleAdmin, "op": identitydomain.RoleOperator, "lis": identitydomain.RoleListener,

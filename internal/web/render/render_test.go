@@ -26,7 +26,7 @@ func newRenderer(theme layout.Theme) *render.Renderer {
 		SiteName:    "TestSDR",
 		Theme:       theme,
 		FooterLinks: []layout.Link{{Label: "Usage policy", Href: "/policy"}},
-	}, slog.New(slog.DiscardHandler))
+	}, nil, slog.New(slog.DiscardHandler))
 }
 
 func text(s string) templ.Component {
@@ -181,7 +181,7 @@ func TestFooterLinkSanitized(t *testing.T) {
 		SiteName:    "TestSDR",
 		Theme:       layout.ThemeAuto,
 		FooterLinks: []layout.Link{{Label: "Policy", Href: "javascript:alert(1)"}},
-	}, slog.New(slog.DiscardHandler))
+	}, nil, slog.New(slog.DiscardHandler))
 
 	rec := httptest.NewRecorder()
 	rd.Page(rec, httptest.NewRequest(http.MethodGet, "/", nil), http.StatusOK, layout.Page{}, text("<h1>x</h1>"), nil)

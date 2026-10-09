@@ -54,17 +54,10 @@ func (a *app) runEnroll(ctx context.Context, f enrollFlags) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, meta, err := config.LoadNode(a.configOptions())
+	cfg, logger, err := a.loadNode(ctx)
 	if err != nil {
 		return err
 	}
-
-	logger, err := a.newLogger(cfg.Log)
-	if err != nil {
-		return err
-	}
-
-	logConfig(ctx, logger, config.RoleNode, meta)
 
 	if cfg.TLS.Cert == "" || cfg.TLS.Key == "" || cfg.HubTrust.CACert == "" {
 		return errors.New("node enroll needs tls.cert, tls.key and hub_trust.ca_cert in the node config")
@@ -116,7 +109,7 @@ func (a *app) runEnroll(ctx context.Context, f enrollFlags) error {
 
 	select {
 	case res := <-e.Enroller.Done():
-		werr := enroll.WriteFiles(e.Paths, e.Key, res)
+		werr := enroll.WriteFiles(e.Paths, e.Key, res.CA.Raw, res.Chain...)
 
 		cancel()
 		<-runErr

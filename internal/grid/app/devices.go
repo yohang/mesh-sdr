@@ -155,12 +155,7 @@ func (s *Devices) reject(ctx context.Context, n *domain.Node, id string, err err
 
 // StateHandler applies device.state events (control ingestion).
 func (s *Devices) StateHandler() EventHandler {
-	return func(ctx context.Context, n *domain.Node, ev Event, now time.Time) error {
-		st, err := decodeEvent[ctl.DeviceState](ev)
-		if err != nil {
-			return nil //nolint:nilerr // a malformed event is skipped
-		}
-
+	return On(s.logger, func(ctx context.Context, n *domain.Node, st ctl.DeviceState, now time.Time) error {
 		id, err := shared.NewDeviceID(st.DeviceID)
 		if err != nil {
 			return nil //nolint:nilerr // a malformed event is skipped
@@ -192,7 +187,7 @@ func (s *Devices) StateHandler() EventHandler {
 		d.ApplyState(state, st.Reason, st.CenterFreq, preset, now)
 
 		return s.repo.Save(ctx, d)
-	}
+	})
 }
 
 // NodeStatusChanged marks the devices of a node offline when the node is
@@ -276,4 +271,18 @@ func (s *Devices) Get(ctx context.Context, id string) (*domain.Device, error) {
 	}
 
 	return s.repo.Get(ctx, did)
+}
+
+// OwnedBy reports whether device is a device of node in the registry.
+func (s *Devices) OwnedBy(ctx context.Context, node domain.NodeID, device shared.DeviceID) (bool, error) {
+	d, err := s.repo.Get(ctx, device)
+
+	switch {
+	case errors.Is(err, domain.ErrDeviceNotFound):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+
+	return d.Node() == node, nil
 }

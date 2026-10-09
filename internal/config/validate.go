@@ -82,9 +82,10 @@ func (c *checker) log(l Log) {
 func (h *Hub) validate(o Origins) []Problem {
 	c := &checker{origins: o}
 
-	c.gateway(h)
+	u, err := url.Parse(h.Hub.URL)
+	c.gateway(h, u, err)
 
-	switch u, err := url.Parse(h.Hub.URL); {
+	switch {
 	case h.Hub.URL == "":
 		c.fail("hub.url", CodeRequired, "hub.url is required")
 	case err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http"):
@@ -207,7 +208,7 @@ func (c *checker) smtp(s SMTP) {
 }
 
 // gateway checks the [gateway] table.
-func (c *checker) gateway(h *Hub) {
+func (c *checker) gateway(h *Hub, hubURL *url.URL, hubURLErr error) {
 	g := h.Gateway
 
 	c.enum("gateway.tls_mode", g.TLSMode, TLSModeACME, TLSModeFiles, TLSModeOff)
@@ -245,8 +246,8 @@ func (c *checker) gateway(h *Hub) {
 	}
 
 	if g.TLSMode == TLSModeACME {
-		if u, err := url.Parse(h.Hub.URL); err == nil && u.Hostname() != "" {
-			if host := u.Hostname(); net.ParseIP(host) != nil || !strings.Contains(host, ".") {
+		if hubURLErr == nil && hubURL.Hostname() != "" {
+			if host := hubURL.Hostname(); net.ParseIP(host) != nil || !strings.Contains(host, ".") {
 				c.fail("gateway.tls_mode", CodeInvalidValue, fmt.Sprintf("ACME needs a public DNS name in hub.url, not %q: use files or internal", host))
 			}
 		}
@@ -412,7 +413,7 @@ func (n *Node) validate(o Origins) []Problem {
 		}
 
 		if d.ListenPolicy != "" {
-			c.enum(key+".listen_policy", d.ListenPolicy, "anonymous", "registered")
+			c.enum(key+".listen_policy", d.ListenPolicy, griddomain.ListenAnonymous, griddomain.ListenRegistered)
 		}
 
 		if d.MaxDemods < 0 || d.MaxDemods > 1000 {
@@ -432,15 +433,6 @@ func (n *Node) validate(o Origins) []Problem {
 	c.log(n.Log)
 
 	return c.problems
-}
-
-func validFingerprint(s string) bool {
-	s = strings.ReplaceAll(s, ":", "")
-	if len(s) != 64 {
-		return false
-	}
-
-	return strings.Trim(strings.ToLower(s), "0123456789abcdef") == ""
 }
 
 // settings validates the [settings] keys set in a file or the env with the
@@ -482,4 +474,15 @@ func (c *checker) settings(h *Hub) {
 	for _, vi := range CheckSettings(func(k string) (any, bool) { v, ok := values[k]; return v, ok }) {
 		c.fail(settingsPrefix+vi.Path(), string(vi.Code()), vi.Message())
 	}
+}
+
+// validFingerprint reports whether s is a SHA-256 fingerprint: 64 hex
+// digits, colons optional.
+func validFingerprint(s string) bool {
+	s = strings.ReplaceAll(s, ":", "")
+	if len(s) != 64 {
+		return false
+	}
+
+	return strings.Trim(strings.ToLower(s), "0123456789abcdef") == ""
 }

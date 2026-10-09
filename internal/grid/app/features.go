@@ -11,18 +11,6 @@ import (
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
-// Listen policies of a device (§7.4 listen_policy).
-const (
-	ListenAnonymous  = "anonymous"
-	ListenRegistered = "registered"
-)
-
-// GlobalListenPolicy reads the hub-wide listen policy (the listen_policy
-// setting), which a device's node config may override.
-type GlobalListenPolicy interface {
-	ListenPolicy(ctx context.Context) (string, error)
-}
-
 // DeviceFeatures is the public feature summary of one device (API-001,
 // UI-021): what it is, whether it can be listened to, which modes it
 // offers, its active preset and its listeners.
@@ -30,6 +18,7 @@ type DeviceFeatures struct {
 	ID     shared.DeviceID
 	Node   domain.NodeID
 	Name   string
+	Type   string
 	Online bool
 	// NodeOnline reports whether the device's node has its control channel
 	// up (hub presence): Online is false for an idle device, which only
@@ -37,6 +26,9 @@ type DeviceFeatures struct {
 	NodeOnline bool
 	// State is the device's runtime state in the registry (SRC-025).
 	State domain.RuntimeState
+	// Status is the admin summary of the device (domain.Device.Status):
+	// ready or busy while its node is up and it can run, unlike Online.
+	Status domain.DeviceStatus
 	// Modes are the modes the device's node reports available (mode:*
 	// capabilities), sorted; empty when the node has not reported or the
 	// device's driver is missing.
@@ -119,7 +111,7 @@ type PresetNamer func(ctx context.Context, id shared.UUID) string
 type FeaturesDeps struct {
 	Devices    DeviceLister
 	Caps       CapabilityReader
-	Policy     GlobalListenPolicy
+	Listen     *ListenPolicies
 	Links      NodeLinks
 	Nodes      NodeLister
 	Listeners  DeviceListeners
@@ -145,10 +137,7 @@ func (f *Features) Summary(ctx context.Context) (Summary, error) {
 		return Summary{}, fmt.Errorf("list devices: %w", err)
 	}
 
-	global, err := f.d.Policy.ListenPolicy(ctx)
-	if err != nil || (global != ListenAnonymous && global != ListenRegistered) {
-		global = ListenRegistered
-	}
+	global := f.d.Listen.Global(ctx)
 
 	connected := map[domain.NodeID]bool{}
 	if f.d.Links != nil {
@@ -191,16 +180,12 @@ func (f *Features) Summary(ctx context.Context) (Summary, error) {
 			out.Nodes = append(out.Nodes, f.node(d.Node(), names, connected[d.Node()]))
 		}
 
-		policy := global
-		if flags.ListenPolicy == ListenAnonymous || flags.ListenPolicy == ListenRegistered {
-			policy = flags.ListenPolicy
-		}
-
 		state, _, _ := d.State()
+		n := listeners[d.ID().String()]
 		df := DeviceFeatures{
-			ID: d.ID(), Node: d.Node(), Name: d.Name(), Online: d.Online(), NodeOnline: connected[d.Node()], State: state,
-			Modes: modes(caps, d.Type()), ListenPolicy: policy, Listeners: listeners[d.ID().String()],
-			ActivePreset: d.ActivePreset(),
+			ID: d.ID(), Node: d.Node(), Name: d.Name(), Type: d.Type(), Online: d.Online(), NodeOnline: connected[d.Node()], State: state,
+			Status: d.Status(connected[d.Node()], n), Modes: modes(caps, d.Type()), ListenPolicy: effective(d, global),
+			Listeners: n, ActivePreset: d.ActivePreset(),
 		}
 
 		if !df.ActivePreset.IsZero() && f.d.PresetName != nil {
@@ -266,92 +251,4 @@ func modes(caps []domain.Capability, deviceType string) []string {
 	slices.Sort(out)
 
 	return out
-}
-
-// ListenPolicies tells who may listen to the devices of the registry: the
-// effective listen policy of a device (its node config override, else the
-// global listen_policy), and whether anonymous visitors may listen to any
-// device (TECHNICAL_SPEC §5.9, §6.6 "Topic access").
-type ListenPolicies struct {
-	devices DeviceLister
-	policy  GlobalListenPolicy
-}
-
-// NewListenPolicies returns the use case.
-func NewListenPolicies(devices DeviceLister, policy GlobalListenPolicy) *ListenPolicies {
-	return &ListenPolicies{devices: devices, policy: policy}
-}
-
-// global returns the global policy; one that cannot be read counts as
-// registered (fail closed).
-func (p *ListenPolicies) global(ctx context.Context) string {
-	g, err := p.policy.ListenPolicy(ctx)
-	if err != nil || (g != ListenAnonymous && g != ListenRegistered) {
-		return ListenRegistered
-	}
-
-	return g
-}
-
-func effective(d *domain.Device, global string) string {
-	if lp := d.Flags().ListenPolicy; lp == ListenAnonymous || lp == ListenRegistered {
-		return lp
-	}
-
-	return global
-}
-
-// Device returns the effective listen policy of an enabled device; ok is
-// false for an unknown or disabled device, which nobody listens to.
-func (p *ListenPolicies) Device(ctx context.Context, id string) (policy string, ok bool, err error) {
-	devices, err := p.devices.List(ctx)
-	if err != nil {
-		return "", false, fmt.Errorf("list devices: %w", err)
-	}
-
-	for _, d := range devices {
-		if d.ID().String() == id && d.Flags().Enabled {
-			return effective(d, p.global(ctx)), true, nil
-		}
-	}
-
-	return "", false, nil
-}
-
-// AnyAnonymous reports whether some enabled device is anonymous-listenable.
-func (p *ListenPolicies) AnyAnonymous(ctx context.Context) (bool, error) {
-	devices, err := p.devices.List(ctx)
-	if err != nil {
-		return false, fmt.Errorf("list devices: %w", err)
-	}
-
-	global := p.global(ctx)
-
-	for _, d := range devices {
-		if d.Flags().Enabled && effective(d, global) == ListenAnonymous {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-// Effective returns the effective listen policy of every enabled device, by
-// device id: one consistent view for many checks.
-func (p *ListenPolicies) Effective(ctx context.Context) (map[string]string, error) {
-	devices, err := p.devices.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list devices: %w", err)
-	}
-
-	global := p.global(ctx)
-	out := make(map[string]string, len(devices))
-
-	for _, d := range devices {
-		if d.Flags().Enabled {
-			out[d.ID().String()] = effective(d, global)
-		}
-	}
-
-	return out, nil
 }

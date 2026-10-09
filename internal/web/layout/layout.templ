@@ -86,7 +86,7 @@ templ Document(s Shell, p Page, content templ.Component) {
 					Live updates stopped: the hub could not be reached. <a href="" hx-boost="false">Reload the page</a> to resume them.
 				</p>
 			</div>
-			@Main(p, content)
+			@mainRegion(p, content)
 			<footer class="border-t border-border bg-surface px-4 py-3 text-sm text-fg-muted">
 				<ul class="mx-auto flex max-w-screen-2xl flex-wrap gap-x-4 gap-y-1">
 					for _, l := range s.FooterLinks {
@@ -269,10 +269,10 @@ templ link(l Link, class string) {
 	}
 }
 
-// Main is the region swapped by boosted navigation. It carries the page
+// mainRegion is the region swapped by boosted navigation. It carries the page
 // section for the nav's aria-current, and is focused after navigation
 // (static/js/navigation.js).
-templ Main(p Page, content templ.Component) {
+templ mainRegion(p Page, content templ.Component) {
 	<main
 		id="main"
 		tabindex="-1"
@@ -287,7 +287,9 @@ templ Main(p Page, content templ.Component) {
 // Error is the content of an error page (403, 404, 500…), rendered inside the
 // shell: htmx swaps error responses into #main too.
 templ Error(status int, title, message string) {
-	<h1 class="text-2xl font-semibold">{ title }</h1>
+	@Title("") {
+		{ title }
+	}
 	<p class="mt-2 text-fg-muted">{ message }</p>
 	<p class="mt-4 text-sm text-fg-muted">HTTP { strconv.Itoa(status) } · <a href="/">Back to the home page</a></p>
 }

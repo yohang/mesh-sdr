@@ -22,7 +22,7 @@ type FileRenewer struct {
 	Now      func() time.Time
 }
 
-// Renew implements Renewer.
+// Renew installs a certificate chain renewed by the hub.
 func (r *FileRenewer) Renew(chain [][]byte) error {
 	leaf, err := x509.ParseCertificate(chain[0])
 	if err != nil {

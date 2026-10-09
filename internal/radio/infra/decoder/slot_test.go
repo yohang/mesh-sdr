@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/dsp"
 	"github.com/yohang/mesh-sdr/internal/radio/app"
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
@@ -176,11 +177,11 @@ func TestProfiles(t *testing.T) {
 		{"jt9", Settings{WSJTDepths: map[string]int{"jt9": 1}}, []string{"jt9 --jt9 -a J -t J -d 1 f.wav @1m0s/50s"}},
 		{"wspr", Settings{}, []string{"wsprd -d f.wav @2m0s/1m40s"}},
 		{"wspr", Settings{WSJTDepth: 1}, []string{"wsprd f.wav @2m0s/1m40s"}},
-		{"fst4", Settings{}, []string{"jt9 --fst4 -p 15 -a J -t J -d 3 f.wav @15s/12s", "jt9 --fst4 -p 30 -a J -t J -d 3 f.wav @30s/24s"}},
+		{"fst4", Settings{FST4Intervals: []int{15, 30}}, []string{"jt9 --fst4 -p 15 -a J -t J -d 3 f.wav @15s/12s", "jt9 --fst4 -p 30 -a J -t J -d 3 f.wav @30s/24s"}},
 		{"fst4", Settings{FST4Intervals: []int{1800, 7, 60}}, []string{"jt9 --fst4 -p 60 -a J -t J -d 3 f.wav @1m0s/48s", "jt9 --fst4 -p 1800 -a J -t J -d 3 f.wav @30m0s/24m0s"}},
-		{"fst4w", Settings{}, []string{"jt9 --fst4w -p 120 -a J -t J -d 3 f.wav @2m0s/1m36s", "jt9 --fst4w -p 300 -a J -t J -d 3 f.wav @5m0s/4m0s"}},
+		{"fst4w", Settings{FST4WIntervals: []int{120, 300}}, []string{"jt9 --fst4w -p 120 -a J -t J -d 3 f.wav @2m0s/1m36s", "jt9 --fst4w -p 300 -a J -t J -d 3 f.wav @5m0s/4m0s"}},
 		{"q65", Settings{Q65Combinations: []string{"A30", "E15", "C60"}}, []string{"jt9 --q65 -p 30 -b A -a J -t J -d 3 f.wav @30s/24s", "jt9 --q65 -p 60 -b C -a J -t J -d 3 f.wav @1m0s/48s"}},
-		{"js8", Settings{}, []string{"js8 --js8 -b A -a J -t J -d 3 f.wav @15s/12s", "js8 --js8 -b E -a J -t J -d 3 f.wav @30s/24s"}},
+		{"js8", Settings{JS8Profiles: []string{"normal", "slow"}}, []string{"js8 --js8 -b A -a J -t J -d 3 f.wav @15s/12s", "js8 --js8 -b E -a J -t J -d 3 f.wav @30s/24s"}},
 		{"js8", Settings{JS8Profiles: []string{"turbo", "fast"}, JS8Depth: 1}, []string{"js8 --js8 -b B -a J -t J -d 1 f.wav @10s/8s", "js8 --js8 -b C -a J -t J -d 1 f.wav @6s/4.8s"}},
 		{"selcall", Settings{}, nil},
 	} {
@@ -192,17 +193,41 @@ func TestProfiles(t *testing.T) {
 
 func TestQ65Combinations(t *testing.T) {
 	want := "A15 B15 C15 A30 B30 C30 D30 A60 B60 C60 D60 E60 A120 B120 C120 D120 E120 A300 B300 C300 D300 E300"
-	if got := strings.Join(Q65Combinations(), " "); got != want {
+	if got := strings.Join(q65Combinations(), " "); got != want {
 		t.Errorf("got %s", got)
 	}
 }
 
-// Every slot mode of the catalogue has slot profiles.
-func TestCatalogueSlotModes(t *testing.T) {
+// Every mode of the catalogue has a decoder: the image and text decoders
+// of the node, slot profiles or a tool reading its input.
+func TestCatalogueDecoders(t *testing.T) {
+	all := Settings{
+		FST4Intervals: fst4Periods, FST4WIntervals: fst4wPeriods, Q65Combinations: q65Combinations(), JS8Profiles: js8SpeedOrder,
+	}
+
 	for _, m := range domain.DigitalModes() {
-		if m.Slot > 0 && len(profiles(m.Name, Settings{})) == 0 {
-			t.Errorf("%s has no profile", m.Name)
+		var ok bool
+
+		switch m.Family {
+		case domain.FamilyImage:
+			ok = m.Name == app.FileSSTV || m.Name == app.FileFAX
+		case domain.FamilyTextModes:
+			_, ok = textModes[m.Name]
+		case domain.FamilyWSJT, domain.FamilyJS8:
+			ok = m.Slot > 0 && m.Input == domain.InputAudio && len(profiles(m.Name, all)) > 0
+		default:
+			ts, found := toolSpecs[m.Name]
+			ok = found && (ts.iq == iqNone) == (m.Input == domain.InputAudio)
 		}
+
+		if !ok {
+			t.Errorf("%s (%s) has no decoder", m.Name, m.Family)
+		}
+	}
+
+	// The text decoders and their secondary FFT run at one rate.
+	if domain.TextRate != dsp.TextRate {
+		t.Errorf("domain.TextRate %d, dsp.TextRate %d", domain.TextRate, dsp.TextRate)
 	}
 }
 
@@ -324,7 +349,7 @@ func TestRecorder(t *testing.T) {
 	start := time.Date(2026, 10, 8, 12, 0, 30, 0, time.UTC)
 	periods := []time.Duration{15 * time.Second, 30 * time.Second}
 
-	block := make([]byte, 2*slotRate/10) // 100 ms
+	block := make([]byte, 2*domain.SlotRate/10) // 100 ms
 	for i := range len(block) / 2 {
 		binary.LittleEndian.PutUint16(block[2*i:], 1000)
 	}
@@ -345,7 +370,7 @@ func TestRecorder(t *testing.T) {
 	}
 
 	f := done[0]
-	if filepath.Base(f.path) != "p15000_261008_120030.wav" || f.real != 11*slotRate || !f.partial() || f.dial != 14_074_000 {
+	if filepath.Base(f.path) != "p15000_261008_120030.wav" || f.real != 11*domain.SlotRate || !f.partial() || f.dial != 14_074_000 {
 		t.Errorf("slot %s real %d partial %v", filepath.Base(f.path), f.real, f.partial())
 	}
 
@@ -355,13 +380,13 @@ func TestRecorder(t *testing.T) {
 	}
 
 	data := binary.LittleEndian.Uint32(b[40:44])
-	if string(b[0:4]) != "RIFF" || string(b[8:16]) != "WAVEfmt " || binary.LittleEndian.Uint32(b[24:28]) != slotRate || int(data) != len(b)-wavHeader ||
-		data != 2*15*slotRate {
+	if string(b[0:4]) != "RIFF" || string(b[8:16]) != "WAVEfmt " || binary.LittleEndian.Uint32(b[24:28]) != domain.SlotRate || int(data) != len(b)-wavHeader ||
+		data != 2*15*domain.SlotRate {
 		t.Errorf("header %x, %d bytes", b[:44], len(b))
 	}
 
 	// The first second and the hole read as silence, the rest as audio.
-	at := func(sec float64) uint16 { return binary.LittleEndian.Uint16(b[wavHeader+2*int(sec*slotRate):]) }
+	at := func(sec float64) uint16 { return binary.LittleEndian.Uint16(b[wavHeader+2*int(sec*domain.SlotRate):]) }
 	if at(0.5) != 0 || at(1.5) != 1000 || at(6) != 0 || at(9) != 1000 {
 		t.Errorf("samples %d %d %d %d", at(0.5), at(1.5), at(6), at(9))
 	}
@@ -400,12 +425,12 @@ func TestRecorderBackwards(t *testing.T) {
 	r := newRecorder(dir, nil, discard())
 	start := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
 	periods := []time.Duration{15 * time.Second}
-	block := make([]byte, 2*slotRate) // 1 s
+	block := make([]byte, 2*domain.SlotRate) // 1 s
 
 	r.write(start, block, periods)
 	r.write(start, block, periods) // the same second again
 
-	if f := r.open[15*time.Second]; f == nil || f.real != slotRate {
+	if f := r.open[15*time.Second]; f == nil || f.real != domain.SlotRate {
 		t.Fatalf("open %+v", r.open)
 	}
 
@@ -498,10 +523,9 @@ func TestFT8SlotEndToEnd(t *testing.T) {
 	statuses := make(chan app.DecoderStatus, 16)
 	id := shared.MustParseUUID("01890000-0000-7000-8000-000000000001")
 
-	run, err := r.Start(app.DecoderSpec{Session: id, Mode: mode}, app.DecoderEvents{
+	run, err := r.Start(app.DecoderSpec{Session: id, Mode: mode, Dial: func() int64 { return 14_074_000 }}, app.DecoderEvents{
 		Decode: func(rec app.DecodeRecord) { decodes <- rec },
 		Status: func(st app.DecoderStatus) { statuses <- st },
-		Dial:   func() int64 { return 14_074_000 },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -512,13 +536,13 @@ func TestFT8SlotEndToEnd(t *testing.T) {
 	// The current slot: its deadline (end + 13 s) is ahead.
 	start := slotStart(time.Now(), 15*time.Second)
 
-	const step = slotRate / 50
+	const step = domain.SlotRate / 50
 	for i := 0; i < len(audio); i += step {
-		run.Audio(app.AudioBlock{Samples: audio[i:min(i+step, len(audio))], Rate: slotRate, Time: start.Add(durationOf(i))})
+		run.Audio(app.AudioBlock{Samples: audio[i:min(i+step, len(audio))], Rate: domain.SlotRate, Time: start.Add(durationOf(i))})
 		time.Sleep(200 * time.Microsecond)
 	}
 
-	run.Audio(app.AudioBlock{Samples: make([]float32, step), Rate: slotRate, Time: start.Add(15 * time.Second)})
+	run.Audio(app.AudioBlock{Samples: make([]float32, step), Rate: domain.SlotRate, Time: start.Add(15 * time.Second)})
 
 	// Running from the first audio, with the clock warning.
 	if st := <-statuses; st.State != app.DecoderRunning || st.Warning != app.WarningClock {

@@ -1,13 +1,19 @@
 package http
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+)
 
 // setupPage is the first-admin form of the one-time setup link (AUTH-018).
 // The token moves from the address bar into a hidden field:
 // static/js/token-url.js replaces the URL with data-replace-url (SR-07).
 templ setupPage(f setupForm) {
 	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="setup-title" data-replace-url="/setup">
-		<h1 id="setup-title" class="text-2xl font-bold">Create the first admin</h1>
+		@layout.Title("setup-title") {
+			Create the first admin
+		}
 		<p>No admin account exists yet. This account gets the admin role.</p>
 		@setupFormView(f)
 	</section>
@@ -17,9 +23,7 @@ templ setupPage(f setupForm) {
 // error after a failed attempt.
 templ setupFormView(f setupForm) {
 	<form id="setup-form" class="flex flex-col gap-3" method="post" action="/setup" hx-post="/setup" hx-target="this" hx-swap="outerHTML">
-		if f.Error != "" {
-			<p id="setup-error" class="font-semibold" role="alert">{ f.Error }</p>
-		}
+		@layout.Failure("setup-error", f.Error)
 		<input type="hidden" name="token" value={ f.Token }/>
 		<label class="flex flex-col gap-1">
 			<span>Username</span>
@@ -99,9 +103,11 @@ templ setupFormView(f setupForm) {
 // too many setup requests came from the client (msg).
 templ setupInvalid(msg string) {
 	<section class="mx-auto flex w-full max-w-prose flex-col gap-4 p-4" aria-labelledby="setup-title">
-		<h1 id="setup-title" class="text-2xl font-bold">Setup link not valid</h1>
+		@layout.Title("setup-title") {
+			Setup link not valid
+		}
 		if msg != "" {
-			<p role="alert">{ msg }</p>
+			@layout.Failure("", msg)
 		} else {
 			<p>This setup link is not valid: it has expired, was already used, or an admin account exists.</p>
 			<p>Restart the hub to get a new link, or create an admin on the hub host with <code>meshsdr hub user add --role admin</code>.</p>

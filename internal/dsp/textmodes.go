@@ -62,7 +62,7 @@ func (c TextConfig) Validate() error {
 	half := float64(TextRate) / 2
 
 	switch {
-	case !finite(c.Baud) || !finite(c.BandwidthHz) || !finite(c.OffsetHz):
+	case !Finite(c.Baud) || !Finite(c.BandwidthHz) || !Finite(c.OffsetHz):
 		return fmt.Errorf("%w: non-finite text decoder parameters", ErrChain)
 	case c.BandwidthHz <= 0 || c.BandwidthHz >= half/2:
 		return fmt.Errorf("%w: text decoder bandwidth %g Hz", ErrChain, c.BandwidthHz)
@@ -209,7 +209,7 @@ func (d *TextDecoder) Config() TextConfig { return d.cfg }
 // SetOffset moves the secondary selector to hz (DEC-005) and resets the CW
 // timing (a dial change, DEC-012).
 func (d *TextDecoder) SetOffset(hz float64) error {
-	if !finite(hz) || math.Abs(hz) > TextRate/2 {
+	if !Finite(hz) || math.Abs(hz) > TextRate/2 {
 		return fmt.Errorf("%w: text decoder offset %g Hz", ErrChain, hz)
 	}
 
@@ -233,7 +233,7 @@ func (d *TextDecoder) Reset() error {
 
 // complexStep runs a complex stage into buf.
 func complexStep(s *csdr.Stage[complex64, complex64], in []complex64, buf *[]complex64) ([]complex64, error) {
-	*buf = grow(*buf, len(in)+s.Pending()+stepMargin)
+	*buf = Grow(*buf, len(in)+s.Pending()+stepMargin)
 
 	n, err := s.Process(in, *buf)
 	if err != nil {
@@ -245,7 +245,7 @@ func complexStep(s *csdr.Stage[complex64, complex64], in []complex64, buf *[]com
 
 // floatStep runs a float stage into buf.
 func floatStep(s *csdr.Stage[float32, float32], in []float32, buf *[]float32) ([]float32, error) {
-	*buf = grow(*buf, len(in)+s.Pending()+stepMargin)
+	*buf = Grow(*buf, len(in)+s.Pending()+stepMargin)
 
 	n, err := s.Process(in, *buf)
 	if err != nil {
@@ -257,7 +257,7 @@ func floatStep(s *csdr.Stage[float32, float32], in []float32, buf *[]float32) ([
 
 // byteStep runs a byte stage into buf.
 func byteStep[T csdr.Symbol](s *csdr.ByteStage[T], in []T, buf *[]byte) ([]byte, error) {
-	*buf = grow(*buf, len(in)+s.Pending()+stepMargin)
+	*buf = Grow(*buf, len(in)+s.Pending()+stepMargin)
 
 	n, err := s.Process(in, *buf)
 	if err != nil {
@@ -300,7 +300,7 @@ func (d *TextDecoder) Process(iq []complex64) ([]byte, error) {
 
 		return byteStep(d.chars, bits, &d.out)
 	default:
-		d.f1 = grow(d.f1, len(sel)+d.fm.Pending()+stepMargin)
+		d.f1 = Grow(d.f1, len(sel)+d.fm.Pending()+stepMargin)
 
 		n, err := d.fm.Process(sel, d.f1)
 		if err != nil {
@@ -350,75 +350,6 @@ func (d *TextDecoder) Close() {
 	if d.cw != nil {
 		d.cw.Close()
 	}
-}
-
-// IQResampler resamples complex IQ (the selector of a demodulator at its
-// channel rate) to an integer rate: libsamplerate on I and Q.
-type IQResampler struct {
-	in   float64
-	out  int
-	i, q *csdr.Stage[float32, float32]
-
-	ri, rq, oi, oq []float32
-	iq             []complex64
-}
-
-// NewIQResampler resamples from in to out Hz. Close releases it.
-func NewIQResampler(in float64, out int) (*IQResampler, error) {
-	r := &IQResampler{in: in, out: out}
-
-	var err error
-	if r.i, err = csdr.NewResampler(in, out); err != nil {
-		return nil, err
-	}
-
-	if r.q, err = csdr.NewResampler(in, out); err != nil {
-		r.i.Close()
-
-		return nil, err
-	}
-
-	return r, nil
-}
-
-// InRate returns the input rate.
-func (r *IQResampler) InRate() float64 { return r.in }
-
-// Process returns iq at the output rate, valid until the next call.
-func (r *IQResampler) Process(iq []complex64) ([]complex64, error) {
-	r.ri, r.rq = grow(r.ri, len(iq)), grow(r.rq, len(iq))
-	for k, v := range iq {
-		r.ri[k], r.rq[k] = real(v), imag(v)
-	}
-
-	n := int(float64(len(iq)+r.i.Pending())*float64(r.out)/r.in) + stepMargin
-	r.oi, r.oq = grow(r.oi, n), grow(r.oq, n)
-
-	ni, err := r.i.Process(r.ri, r.oi)
-	if err != nil {
-		return nil, err
-	}
-
-	nq, err := r.q.Process(r.rq, r.oq)
-	if err != nil {
-		return nil, err
-	}
-
-	// Both resamplers see the same lengths: they release the same count.
-	m := min(ni, nq)
-	r.iq = grow(r.iq, m)
-
-	for k := range m {
-		r.iq[k] = complex(r.oi[k], r.oq[k])
-	}
-
-	return r.iq, nil
-}
-
-// Close releases the resamplers.
-func (r *IQResampler) Close() {
-	r.i.Close()
-	r.q.Close()
 }
 
 // SecondarySpectrum returns the configuration of the secondary FFT of a

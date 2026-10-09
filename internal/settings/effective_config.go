@@ -3,6 +3,8 @@ package settings
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/yohang/mesh-sdr/internal/config"
 )
 
 // Classes of keys in the effective configuration (FEATURE_SPEC §9.1).
@@ -21,9 +23,20 @@ type BootstrapEntry struct {
 	Secret bool
 }
 
-// Bootstrap lists the config-only keys of the hub config.
-type Bootstrap interface {
-	BootstrapEntries() []BootstrapEntry
+// bootstrapEntries lists the config-only keys of a loaded hub config, cfg
+// with the origins of its keys.
+func bootstrapEntries(cfg config.Hub, origins config.Origins) []BootstrapEntry {
+	entries := config.BootstrapEntries(cfg, origins)
+	out := make([]BootstrapEntry, 0, len(entries))
+
+	for _, e := range entries {
+		out = append(out, BootstrapEntry{
+			Key: e.Key, Value: e.Value, Set: e.Secret && string(e.Value) == "true",
+			Origin: e.Origin.String(), Locked: e.Origin.Locked(), Secret: e.Secret,
+		})
+	}
+
+	return out
 }
 
 // ConfigEntry is one key of the effective configuration.
@@ -42,14 +55,15 @@ type ConfigEntry struct {
 // config-only key and every setting, with its value (secrets masked), its
 // source and its lock.
 type EffectiveConfig struct {
-	bootstrap Bootstrap
+	bootstrap []BootstrapEntry
 	store     *Store
 	now       Clock
 }
 
-// NewEffectiveConfig returns the use case.
-func NewEffectiveConfig(bootstrap Bootstrap, store *Store, now Clock) *EffectiveConfig {
-	return &EffectiveConfig{bootstrap: bootstrap, store: store, now: now}
+// NewEffectiveConfig returns the use case of a loaded hub config, cfg with
+// the origins of its keys (config.Meta.Origins).
+func NewEffectiveConfig(cfg config.Hub, origins config.Origins, store *Store, now Clock) *EffectiveConfig {
+	return &EffectiveConfig{bootstrap: bootstrapEntries(cfg, origins), store: store, now: now}
 }
 
 // ConfigView is the effective configuration at one time.
@@ -65,7 +79,7 @@ func (c *EffectiveConfig) View() ConfigView {
 	snap := c.store.Snapshot()
 	v := ConfigView{GeneratedAt: c.now().UTC(), Revision: snap.Revision()}
 
-	for _, b := range c.bootstrap.BootstrapEntries() {
+	for _, b := range c.bootstrap {
 		e := ConfigEntry{Key: b.Key, Class: ClassConfig, Origin: b.Origin, Locked: b.Locked, Secret: b.Secret, Set: b.Set,
 			Source: SourceDefault}
 		if b.Locked {

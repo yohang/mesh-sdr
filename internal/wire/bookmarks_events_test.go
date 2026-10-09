@@ -41,7 +41,7 @@ func TestBookmarkChangedEvent(t *testing.T) {
 	}
 
 	rec := &recordedEvents{}
-	cache := &policyCache{policies: gridapp.NewListenPolicies(devices, &fixedGlobal{v: "anonymous"}), broker: events.NewBroker(), logger: quiet}
+	cache := gridapp.NewListenPolicies(devices, &fixedGlobal{v: "anonymous"}, quiet)
 	publish := bookmarkChanged(rec, cache, quiet)
 
 	scoped, err := bookmarks.OnDevice(shared.MustDeviceID("members"))

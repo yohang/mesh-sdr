@@ -13,7 +13,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/decodes"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
-	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
+	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/settings"
@@ -21,16 +21,16 @@ import (
 
 // newJobs builds the hub's jobs scheduler with the retention jobs, and the
 // retention view (ADM-011, ADR 0010).
-func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, decoded *decodes.Module, values jobs.RetentionValues,
+func newJobs(adapter *db.DB, conns griddomain.ConnectionRepository, idm *identity.Module, sch *scheduling, decoded *decodes.Module, values jobs.RetentionValues,
 	audit audit.Appender, filesRetention *files.Retention, filesPolicy func() files.RetentionPolicy, logger *slog.Logger,
 ) (*jobs.Scheduler, *jobs.Retention, error) {
-	sched := jobs.NewScheduler(jobs.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.app.scheduler"))
+	sched := jobs.NewScheduler(jobs.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.scheduler"))
 	sched.Register(idm.Reaper, identityapp.SessionReapEvery)
 	sched.Register(idm.AuditPurger, identityapp.AuditPurgeEvery)
 	// ADR 0020: the schedules' safety net and hourly push.
 	sched.Register(sch.publish, SchedulesPublishEvery)
 
-	connectionsPurge := gridapp.NewConnectionsPurge(gridsqlite.NewConnectionRepository(adapter),
+	connectionsPurge := gridapp.NewConnectionsPurge(conns,
 		func() time.Duration { return values.Duration("retention.connections") }, time.Now)
 	sched.Register(connectionsPurge, gridapp.ConnectionsPurgeEvery)
 
@@ -41,39 +41,30 @@ func newJobs(adapter *db.DB, idm *identity.Module, sch *scheduling, decoded *dec
 	// FIL-004: the files the nodes sent, and the files left incomplete.
 	sched.Register(filesRetention, files.RetentionEvery)
 
-	sched.Register(decoded.Purge(), decodes.PurgeEvery)
+	sched.Register(jobs.Func(decodes.JobPurge, decoded.PurgeOld), decodes.PurgeEvery)
 
-	sessions, err := jobs.NewTableStats(adapter, "sessions")
-	if err != nil {
-		return nil, nil, err
-	}
+	stats := map[string]*jobs.TableStats{}
 
-	auditLog, err := jobs.NewTableStats(adapter, "audit_log")
-	if err != nil {
-		return nil, nil, err
-	}
+	for _, table := range []string{"sessions", "audit_log", "connections", "decoded_messages"} {
+		st, err := jobs.NewTableStats(adapter, table)
+		if err != nil {
+			return nil, nil, err
+		}
 
-	connections, err := jobs.NewTableStats(adapter, "connections")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	decodedMessages, err := jobs.NewTableStats(adapter, "decoded_messages")
-	if err != nil {
-		return nil, nil, err
+		stats[table] = st
 	}
 
 	stores := []jobs.Store{
-		{Name: "sessions", Label: "Ended sessions", SettingKey: "retention.sessions", Job: identityapp.JobSessionsReap, Stats: sessions},
-		{Name: "audit_log", Label: "Audit log", SettingKey: "retention.audit_log", Job: identityapp.JobAuditPurge, Stats: auditLog},
-		{Name: "connections", Label: "Connections", SettingKey: "retention.connections", Job: gridapp.JobConnectionsPurge, Stats: connections},
+		{Name: "sessions", Label: "Ended sessions", SettingKey: "retention.sessions", Job: identityapp.JobSessionsReap, Stats: stats["sessions"]},
+		{Name: "audit_log", Label: "Audit log", SettingKey: "retention.audit_log", Job: identityapp.JobAuditPurge, Stats: stats["audit_log"]},
+		{Name: "connections", Label: "Connections", SettingKey: "retention.connections", Job: gridapp.JobConnectionsPurge, Stats: stats["connections"]},
 		{
 			Name: "files", Label: "Files", Job: files.JobRetention, Stats: filesRetention,
 			Policy: func() string { return filesPolicy().String() },
 		},
 		{
 			Name: "decoded_messages", Label: "Decoded messages", SettingKey: "retention.decoded_messages.max_age", Job: decodes.JobPurge,
-			Stats: decodedMessages,
+			Stats: stats["decoded_messages"],
 		},
 	}
 

@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // sectionSpec is a form section of an admin page: the keys it edits, saved
@@ -33,6 +35,7 @@ type field struct {
 	MaxLen   int
 	MinText  string
 	Value    string // text form of the value
+	Current  Value  // effective value (a locked field shows it)
 	Checked  bool   // InputBoolean
 	Lat, Lon string // InputGeo
 	Version  int64
@@ -45,18 +48,12 @@ type field struct {
 	Error    string
 }
 
-// problem is an error of the form, shown in the summary.
-type problem struct {
-	FieldID string // empty when not tied to a field
-	Text    string
-}
-
 // sectionView is a form section with its fields and outcome.
 type sectionView struct {
 	Spec     sectionSpec
 	Action   string
 	Fields   []field
-	Problems []problem
+	Problems []layout.Problem
 	Notice   string // success or neutral notice
 }
 
@@ -105,7 +102,7 @@ func newField(e Effective) field {
 		Key: e.Key(), ID: fieldID(e.Key()), Label: d.Label(), Help: d.Description(),
 		Kind: in.Kind, Options: in.Options, Labels: in.OptionLabels, MaxLen: in.MaxLength, MinText: in.MinText,
 		Version: e.Version(), Locked: e.Locked(), Origin: e.Origin(), Source: e.Source(),
-		Secret: d.Secret(), Set: e.IsSet(),
+		Secret: d.Secret(), Set: e.IsSet(), Current: e.Value(),
 	}
 
 	if in.Min != nil {
@@ -329,16 +326,16 @@ func parseSection(view sectionView, snap *Snapshot, form url.Values) (sectionVie
 func applyErrors(view *sectionView, err error) {
 	var de *shared.Error
 	if !errors.As(err, &de) {
-		view.Problems = append(view.Problems, problem{Text: "The settings could not be saved. Try again later."})
+		view.Problems = append(view.Problems, layout.Problem{Text: "The settings could not be saved. Try again later."})
 
 		return
 	}
 
 	switch {
 	case errors.Is(err, ErrVersionConflict):
-		view.Problems = append(view.Problems, problem{Text: "These settings were changed meanwhile. Reload the page to see the current values, then save again."})
+		view.Problems = append(view.Problems, layout.Problem{Text: "These settings were changed meanwhile. Reload the page to see the current values, then save again."})
 	case errors.Is(err, ErrSettingLocked):
-		view.Problems = append(view.Problems, problem{Text: "Some settings are now locked by the hub configuration: " + de.Message() + "."})
+		view.Problems = append(view.Problems, layout.Problem{Text: "Some settings are now locked by the hub configuration: " + de.Message() + "."})
 	}
 
 	for _, vi := range de.Violations() {
@@ -348,7 +345,7 @@ func applyErrors(view *sectionView, err error) {
 			f := &view.Fields[i]
 			if vi.Path() == f.Key || strings.HasPrefix(vi.Path(), f.Key+".") {
 				if f.Error == "" {
-					f.Error = sentence(vi.Message())
+					f.Error = render.Sentence(vi.Message())
 				}
 
 				placed = true
@@ -356,7 +353,7 @@ func applyErrors(view *sectionView, err error) {
 		}
 
 		if !placed && !errors.Is(err, ErrVersionConflict) {
-			view.Problems = append(view.Problems, problem{Text: vi.Path() + ": " + sentence(vi.Message())})
+			view.Problems = append(view.Problems, layout.Problem{Text: vi.Path() + ": " + render.Sentence(vi.Message())})
 		}
 	}
 }
@@ -365,20 +362,7 @@ func applyErrors(view *sectionView, err error) {
 func fieldProblems(view *sectionView) {
 	for _, f := range view.Fields {
 		if f.Error != "" {
-			view.Problems = append(view.Problems, problem{FieldID: f.ID, Text: f.Label + ": " + f.Error})
+			view.Problems = append(view.Problems, layout.Problem{ID: f.ID, Text: f.Label + ": " + f.Error})
 		}
 	}
-}
-
-func sentence(s string) string {
-	if s == "" {
-		return s
-	}
-
-	s = strings.ToUpper(s[:1]) + s[1:]
-	if !strings.HasSuffix(s, ".") {
-		s += "."
-	}
-
-	return s
 }

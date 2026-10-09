@@ -12,12 +12,12 @@ import (
 	"github.com/yohang/mesh-sdr/internal/events"
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
-	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // decodesDeps are the hub parts the decodes module uses.
@@ -25,15 +25,14 @@ type decodesDeps struct {
 	adapter  *db.DB
 	grid     *hubGrid
 	broker   events.Publisher
-	policies *policyCache
 	identity interface {
 		Principal(ctx context.Context) identitydomain.Principal
 		Authorize(ctx context.Context, role identitydomain.Role) error
 	}
-	// features gives the enabled devices (set once built).
-	features func() *gridapp.Features
+	// features gives the enabled devices.
+	features *gridapp.Features
 	store    *settings.Store
-	render   decodes.Renderer
+	render   *render.Renderer
 	now      func() time.Time
 	logger   *slog.Logger
 }
@@ -42,7 +41,7 @@ type decodesDeps struct {
 // handler of the control channels, decode.new on /api/ws after each
 // commit, and the Decodes page, whose rows follow the listen policy.
 func newDecodes(d decodesDeps) *decodes.Module {
-	logger := component(d.logger, "decodes.app")
+	logger := component(d.logger, "decodes.module")
 
 	m := decodes.New(decodes.Deps{
 		DB:         d.adapter,
@@ -51,7 +50,7 @@ func newDecodes(d decodesDeps) *decodes.Module {
 		Retention:  func() time.Duration { return d.store.Duration("retention.decoded_messages.max_age") },
 		MaxRows:    func() int { return d.store.Int("retention.decoded_messages.max_rows") },
 		Published:  decodeNew(d.broker, logger),
-		DeviceNode: deviceNode(gridsqlite.NewDeviceRepository(d.adapter)),
+		DeviceNode: deviceNode(d.grid.deviceRepo),
 		Modes:      catalogueModes(),
 		Dedup:      dedupOf,
 		Render:     d.render, Now: d.now, Logger: logger,
@@ -121,22 +120,17 @@ func dedupOf(mode string) (int64, time.Duration) {
 // (ADR 0026: the Decodes page follows the listen policy).
 func visibleDevices(d decodesDeps) func(ctx context.Context) ([]decodes.Device, error) {
 	return func(ctx context.Context) ([]decodes.Device, error) {
-		summary, err := d.features().Summary(ctx)
+		summary, err := d.features.Summary(ctx)
 		if err != nil {
 			return nil, err
 		}
 
-		snap, err := d.policies.get(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		p := d.identity.Principal(ctx)
+		anonymous := d.identity.Principal(ctx).IsAnonymous()
 		out := []decodes.Device{}
 
 		for _, dev := range summary.Devices {
-			if id := dev.ID.String(); snap.canListen(p, id) {
-				out = append(out, decodes.Device{ID: id, Name: dev.Name})
+			if dev.CanListen(anonymous) {
+				out = append(out, decodes.Device{ID: dev.ID.String(), Name: dev.Name})
 			}
 		}
 

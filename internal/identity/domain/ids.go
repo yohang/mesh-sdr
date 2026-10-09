@@ -45,6 +45,9 @@ func (u UserID) Bytes() []byte { return u.v.Bytes() }
 // IsZero reports whether u is the zero value.
 func (u UserID) IsZero() bool { return u.v.IsZero() }
 
+// UUID returns the UUID.
+func (u UserID) UUID() shared.UUID { return u.v }
+
 // SessionID identifies a session row. It is never sent to clients.
 type SessionID struct{ v shared.UUID }
 
@@ -70,6 +73,9 @@ func (s SessionID) Bytes() []byte { return s.v.Bytes() }
 
 // IsZero reports whether s is the zero value.
 func (s SessionID) IsZero() bool { return s.v.IsZero() }
+
+// UUID returns the UUID.
+func (s SessionID) UUID() shared.UUID { return s.v }
 
 // InvitationID identifies an invitation (UUIDv7). Admins see it.
 type InvitationID struct{ v shared.UUID }

@@ -20,13 +20,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // Mode is the adapter kind (§8.4 descriptor field `kind`).
@@ -50,12 +51,11 @@ type Timeouts struct {
 // descriptor (decoder) or a driver entry (connector), after argv templating.
 type Spec struct {
 	ID       string // instance id (session id / device id): workdir name, log attr
-	Kind     string // "connector", "decoder", "probe": log and metrics label
+	Kind     string // "connector", "decoder", "probe": log label
 	Mode     Mode
 	Path     string   // absolute path of the tool (from tools.* or ResolveTool)
 	Args     []string // argv[1:], already typed and validated by the adapter
 	ToolDirs []string // PATH of the child
-	Env      []string // extra declared variables, KEY=VALUE
 
 	// Workdir, when set, is an existing workdir made by
 	// Supervisor.CreateWorkdir: the instance runs there and Run neither
@@ -80,17 +80,15 @@ type Spec struct {
 	// TouchOnly: stdout output is drained but marks neither readiness nor
 	// activity; only Touch does (connectors: readiness is the IQ socket).
 	TouchOnly bool
-	// Sink, when set, also receives the events of this instance.
+	// Sink, when set, receives the events of this instance.
 	Sink Sink
 	// PerRun, when set, is called before every spawn: it returns the
 	// arguments of this run (fresh loopback ports, §8.2 rule 3) and a side
 	// channel run alongside the process until it exits.
 	PerRun func() (Run, error)
 
-	StderrRules   []Rule
-	OnLine        func(Line) // every accepted stderr line (signal_info parsing)
-	RingSize      int        // default 200 (§8.2 rule 5)
-	UnknownPerSec int        // rate limit of unknown lines, default 10 (§8.4)
+	StderrRules []Rule
+	OnLine      func(Line) // every accepted stderr line (signal_info parsing)
 
 	Timeouts Timeouts
 	Restart  RestartPolicy
@@ -108,15 +106,13 @@ type Run struct {
 	Done func()
 }
 
+// unknownPerSec is the rate limit of unknown stderr lines (§8.4).
+const unknownPerSec = 10
+
 // Options configure the Supervisor.
 type Options struct {
 	RuntimeDir string // node.runtime_dir, e.g. /run/meshsdr-node
 	Logger     *slog.Logger
-	Sink       Sink
-	Metrics    Metrics
-	// HelperPath is the binary re-executed in helper mode to apply Limits.
-	// Empty: os.Executable().
-	HelperPath string
 }
 
 // Supervisor creates instances. One per node.
@@ -129,12 +125,6 @@ func New(opts Options) (*Supervisor, error) {
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
 	}
-	if opts.Metrics == nil {
-		opts.Metrics = noopMetrics{}
-	}
-	if opts.Sink == nil {
-		opts.Sink = func(Event) {}
-	}
 	if err := PrepareRuntimeDir(opts.RuntimeDir); err != nil {
 		return nil, err
 	}
@@ -146,8 +136,7 @@ type Instance struct {
 	s       *Supervisor
 	spec    Spec
 	log     *slog.Logger
-	ring    *Ring[Line]
-	unknown *bucket
+	unknown *rate.Limiter
 	kick    chan struct{}
 	cur     atomic.Pointer[run]
 	dropped atomic.Int64
@@ -155,10 +144,6 @@ type Instance struct {
 	env     []string
 	helper  string
 }
-
-var envKey = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
-
-var reservedEnv = map[string]bool{"PATH": true, "LANG": true, "TZ": true, "HOME": true, "TMPDIR": true}
 
 // NewInstance validates the spec. The tool's presence is not checked here: a
 // missing tool surfaces as ENOENT at spawn, classified UNAVAILABLE.
@@ -180,18 +165,6 @@ func (s *Supervisor) NewInstance(spec Spec) (*Instance, error) {
 			return nil, fmt.Errorf("%w: tool dir %q", ErrInvalidSpec, d)
 		}
 	}
-	for _, kv := range spec.Env {
-		k, v, ok := strings.Cut(kv, "=")
-		if !ok || !envKey.MatchString(k) || reservedEnv[k] || strings.ContainsAny(v, "\x00\n\r") {
-			return nil, fmt.Errorf("%w: env %q", ErrInvalidSpec, k)
-		}
-	}
-	if spec.RingSize == 0 {
-		spec.RingSize = 200
-	}
-	if spec.UnknownPerSec == 0 {
-		spec.UnknownPerSec = 10
-	}
 	if spec.Timeouts.Stop == 0 {
 		spec.Timeouts.Stop = 3 * time.Second
 	}
@@ -202,19 +175,15 @@ func (s *Supervisor) NewInstance(spec Spec) (*Instance, error) {
 		s:       s,
 		spec:    spec,
 		log:     s.opts.Logger.With(slog.String("instance", spec.ID), slog.String("kind", spec.Kind)),
-		ring:    NewRing[Line](spec.RingSize),
-		unknown: newBucket(spec.UnknownPerSec, spec.UnknownPerSec),
+		unknown: rate.NewLimiter(unknownPerSec, unknownPerSec),
 		kick:    make(chan struct{}, 1),
 	}
 	if !spec.Limits.zero() {
-		in.helper = s.opts.HelperPath
-		if in.helper == "" {
-			exe, err := os.Executable()
-			if err != nil {
-				return nil, fmt.Errorf("%w: helper: %w", ErrInvalidSpec, err)
-			}
-			in.helper = exe
+		exe, err := os.Executable()
+		if err != nil {
+			return nil, fmt.Errorf("%w: helper: %w", ErrInvalidSpec, err)
 		}
+		in.helper = exe
 	}
 	in.argv = in.buildArgv(spec.Args)
 	return in, nil
@@ -235,15 +204,6 @@ func (in *Instance) buildArgv(args []string) []string {
 		argv = helperArgv(in.helper, in.spec.Limits, in.spec.Path, argv)
 	}
 	return argv
-}
-
-// Workdir is the instance's private directory (exists only while Run runs,
-// unless Spec.Workdir is set).
-func (in *Instance) Workdir() string {
-	if in.spec.Workdir != "" {
-		return in.spec.Workdir
-	}
-	return filepath.Join(in.s.opts.RuntimeDir, "sessions", in.spec.ID)
 }
 
 // CreateWorkdir creates the private workdir <runtime>/sessions/<id> (0700,
@@ -276,21 +236,17 @@ func (in *Instance) Touch() {
 	}
 }
 
-// Tail returns the last n stderr lines.
-func (in *Instance) Tail(n int) []Line { return in.ring.Tail(n) }
-
 // DroppedLines is the number of rate-limited unknown lines.
 func (in *Instance) DroppedLines() int64 { return in.dropped.Load() }
 
 func (in *Instance) buildEnv(wd string) []string {
-	env := []string{
+	return []string{
 		"PATH=" + strings.Join(in.spec.ToolDirs, ":"),
 		"LANG=C.UTF-8",
 		"TZ=UTC",
 		"HOME=" + wd,
 		"TMPDIR=" + wd,
 	}
-	return append(env, in.spec.Env...)
 }
 
 // Run supervises the instance until ctx is cancelled (graceful stop, returns
@@ -325,10 +281,6 @@ func (in *Instance) Run(ctx context.Context) error {
 	for {
 		res := in.runOnce(ctx, wd)
 		ex := exitInfo(res)
-		in.s.opts.Metrics.ProcessExited(in.spec.Kind, ex.Class)
-		if res.stoppedBy != "ctx" {
-			ex.LastErr = lineTexts(in.ring.Tail(20))
-		}
 		out := decide(in.spec.Mode, res, ex)
 		if in.spec.Probe && errors.Is(out.err, ErrDecoderError) && res.sticky != ClassInputError {
 			out = outcome{state: StateStopped, reason: "completed"}
@@ -360,7 +312,6 @@ func (in *Instance) Run(ctx context.Context) error {
 		}
 		ev.State, ev.Attempt, ev.Delay = StateRetryWait, attempts, pol.Delay(attempts)
 		in.emit(ev)
-		in.s.opts.Metrics.Restarted(in.spec.Kind)
 		if !in.wait(ctx, ev.Delay) {
 			in.emit(Event{State: StateStopped, Reason: "stopped"})
 			return nil
@@ -419,7 +370,6 @@ func (in *Instance) emit(ev Event) {
 		}
 	}
 	in.log.LogAttrs(context.Background(), level, "supervisor transition", attrs...)
-	in.s.opts.Sink(ev)
 	if in.spec.Sink != nil {
 		in.spec.Sink(ev)
 	}
@@ -445,13 +395,10 @@ var stickyRank = map[Class]int{ClassResource: 1, ClassInputError: 2, ClassFatalC
 
 func (r *run) line(l Line) {
 	in := r.in
-	if l.Class == ClassUnknown && !in.unknown.allow(l.Time) {
+	if l.Class == ClassUnknown && !in.unknown.AllowN(l.Time, 1) {
 		in.dropped.Add(1)
-		in.s.opts.Metrics.StderrLine(in.spec.Kind, l.Class, true)
 		return
 	}
-	in.s.opts.Metrics.StderrLine(in.spec.Kind, l.Class, false)
-	in.ring.Add(l)
 	in.log.LogAttrs(context.Background(), slog.LevelDebug, "tool stderr", slog.String("class", string(l.Class)), slog.String("line", l.Text))
 	if rank := stickyRank[l.Class]; rank > 0 {
 		r.mu.Lock()
@@ -565,7 +512,6 @@ func (in *Instance) runOnce(ctx context.Context, wd string) (res result) {
 	}
 	pid := cmd.Process.Pid
 	started := time.Now()
-	in.s.opts.Metrics.ProcessStarted(in.spec.Kind)
 	in.log.LogAttrs(ctx, slog.LevelDebug, "process spawned", slog.Int("pid", pid), slog.Any("argv", in.argv))
 
 	var wg sync.WaitGroup
@@ -745,7 +691,7 @@ func (in *Instance) terminate(pid int, waitCh <-chan error) error {
 
 func exitInfo(res result) ExitInfo {
 	if res.startErr != nil {
-		ex := ExitInfo{Class: ExitError, Code: -1, StartErr: res.startErr.Error()}
+		ex := ExitInfo{Class: ExitError, Code: -1}
 		switch {
 		case errors.Is(res.startErr, fs.ErrNotExist):
 			ex.Class = ExitNotFound
@@ -754,7 +700,7 @@ func exitInfo(res result) ExitInfo {
 		}
 		return ex
 	}
-	ex := ExitInfo{Code: -1, Ran: res.ran}
+	ex := ExitInfo{Code: -1}
 	if res.state == nil {
 		ex.Class = ExitError
 		return ex
@@ -835,14 +781,6 @@ func decide(mode Mode, res result, ex ExitInfo) outcome {
 		o.reason = "exit_error"
 	}
 	return o
-}
-
-func lineTexts(ls []Line) []string {
-	out := make([]string, len(ls))
-	for i, l := range ls {
-		out[i] = l.Text
-	}
-	return out
 }
 
 // ResolveTool finds a bare tool name in the configured directories (never in

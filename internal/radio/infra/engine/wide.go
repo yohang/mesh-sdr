@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/dsp"
-	"github.com/yohang/mesh-sdr/internal/dsp/csdr"
 	"github.com/yohang/mesh-sdr/internal/radio/app"
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
 )
@@ -197,90 +196,20 @@ func (w *wideTap) build(want wideWant) (*wideChannel, error) {
 	return &wideChannel{ep: want.ep, offset: want.offset, ch: ch, ring: dsp.NewRing[complex64](ringSlots(want.ep.rate, want.ep.plan.L), ch.BlockLen())}, nil
 }
 
-// resampler resamples the channel IQ to the tap rate (I and Q apart).
-type resampler struct {
-	in      float64
-	i, q    *csdr.Stage[float32, float32]
-	re, im  []float32
-	oi, oq  []float32
-	out     []complex64
-	outRate int
-}
-
-func newResampler(in float64, out int) (*resampler, error) {
-	r := &resampler{in: in, outRate: out}
-	if in == float64(out) {
-		return r, nil
-	}
-
-	i, err := csdr.NewResampler(in, out)
-	if err != nil {
-		return nil, err
-	}
-
-	q, err := csdr.NewResampler(in, out)
-	if err != nil {
-		i.Close()
-
-		return nil, err
-	}
-
-	r.i, r.q = i, q
-
-	return r, nil
-}
-
-func (r *resampler) close() {
-	if r != nil && r.i != nil {
-		r.i.Close()
-		r.q.Close()
-	}
-}
-
-func (r *resampler) process(iq []complex64) ([]complex64, error) {
-	if r.i == nil {
-		return iq, nil
-	}
-
-	r.re, r.im = r.re[:0], r.im[:0]
-	for _, v := range iq {
-		r.re = append(r.re, real(v))
-		r.im = append(r.im, imag(v))
-	}
-
-	n := int(float64(len(iq)+r.i.Pending())*float64(r.outRate)/r.in) + 64
-	r.oi, r.oq = grow(r.oi, n), grow(r.oq, n)
-
-	ni, err := r.i.Process(r.re, r.oi)
-	if err != nil {
-		return nil, err
-	}
-
-	nq, err := r.q.Process(r.im, r.oq)
-	if err != nil {
-		return nil, err
-	}
-
-	r.out = r.out[:0]
-	for k := range min(ni, nq) {
-		r.out = append(r.out, complex(r.oi[k], r.oq[k]))
-	}
-
-	return r.out, nil
-}
-
 // run is the tap's goroutine: it builds the channel the channelizer asks
 // for, then reads, resamples and delivers its blocks.
 func (w *wideTap) run(ctx context.Context) {
 	var (
 		reader *dsp.Reader[complex64]
 		readOf *wideChannel
-		rs     *resampler
 		tried  wideWant
 		gap    bool
+		// failing: the last block was not resampled (logged once).
+		failing bool
+		rs      = dsp.NewIQResampler(w.rate)
 	)
 
-	defer func() { rs.close() }()
+	defer rs.Close()
 
 	for {
 		w.mu.Lock()
@@ -326,23 +255,14 @@ func (w *wideTap) run(ctx context.Context) {
 			readOf, reader = cur, cur.ring.NewReader()
 			gap = true
 
-			if rs == nil || rs.in != cur.ch.Rate() {
-				rs.close()
+			if err := rs.SetRate(cur.ch.Rate()); err != nil {
+				w.log.Warn("wide decoder resampler not built", slog.Any("error", err))
 
-				nr, err := newResampler(cur.ch.Rate(), w.rate)
-				if err != nil {
-					w.log.Warn("wide decoder resampler not built", slog.Any("error", err))
-
-					if w.fail != nil {
-						w.fail("the decoder input could not be resampled")
-					}
-
-					rs = nil
-
-					return
+				if w.fail != nil {
+					w.fail("the decoder input could not be resampled")
 				}
 
-				rs = nr
+				return
 			}
 		}
 
@@ -357,12 +277,18 @@ func (w *wideTap) run(ctx context.Context) {
 			return
 		}
 
-		out, err := rs.process(iq)
+		out, err := rs.Process(iq, cur.ch.Rate())
 		if err != nil {
-			w.log.Warn("wide decoder resampling failed", slog.Any("error", err))
+			if !failing {
+				w.log.Warn("wide decoder resampling failed", slog.Any("error", err))
+			}
+
+			failing = true
 
 			continue
 		}
+
+		failing = false
 
 		gap = gap || g != nil
 
@@ -381,12 +307,4 @@ func failReason(err error) string {
 	}
 
 	return "the decoder channel could not be built"
-}
-
-func grow(b []float32, n int) []float32 {
-	if cap(b) < n {
-		return make([]float32, n)
-	}
-
-	return b[:n]
 }

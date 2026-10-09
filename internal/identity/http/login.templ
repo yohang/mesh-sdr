@@ -1,14 +1,18 @@
 package http
 
+import "github.com/yohang/mesh-sdr/internal/web/layout"
+
 // loginPage is the sign-in page (AUTH-001, FEATURE_SPEC §10.3): a centred
 // single-column form. There is no sign-up link (invitation only); "Forgot
 // password?" shows when mail is configured. The CSRF header of the form is
 // added by static/js/csrf.js, imported by the shell entry module.
 templ loginPage(f loginForm) {
 	<section class="mx-auto flex w-full max-w-sm flex-col gap-4 p-4" aria-labelledby="login-title">
-		<h1 id="login-title" class="text-2xl font-bold">Sign in</h1>
+		@layout.Title("login-title") {
+			Sign in
+		}
 		if f.Reset {
-			<p class="font-semibold" role="status">Your password was reset. Sign in with the new one.</p>
+			@layout.Notice("", "Your password was reset. Sign in with the new one.")
 		}
 		@loginFormView(f)
 		if f.Forgot {
@@ -21,9 +25,7 @@ templ loginPage(f loginForm) {
 // error after a failed attempt.
 templ loginFormView(f loginForm) {
 	<form id="login-form" class="flex flex-col gap-3" method="post" action="/login" hx-post="/login" hx-target="this" hx-swap="outerHTML">
-		if f.Error != "" {
-			<p id="login-error" class="font-semibold" role="alert">{ f.Error }</p>
-		}
+		@layout.Failure("login-error", f.Error)
 		<input type="hidden" name="next" value={ f.Next }/>
 		<label class="flex flex-col gap-1">
 			<span>Username or e-mail</span>

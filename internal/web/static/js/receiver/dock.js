@@ -9,13 +9,11 @@
 import { syncTopics } from "../events.js";
 import { registerShortcuts } from "../shortcuts.js";
 import { wheelRanges } from "../wheel-range.js";
+import { BUTTON } from "./dom.js";
 import { getEngine } from "./engine.js";
 
 // Volume step of the keyboard (0..1).
 const VOLUME_STEP = 0.05;
-
-// 44 px touch targets on touch screens and below 768 px (UI-007).
-const BUTTON = "rounded border border-border px-3 py-1 text-sm max-md:min-h-11 pointer-coarse:min-h-11";
 
 class MsdrAudioDock extends HTMLElement {
   connectedCallback() {

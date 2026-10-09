@@ -11,14 +11,13 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
-	"github.com/yohang/mesh-sdr/internal/settings"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
-	"github.com/yohang/mesh-sdr/internal/shell"
 )
 
 // Violation codes of setting values. Semantic checks keep the code of the
@@ -29,6 +28,17 @@ const (
 
 // maxLoginBurst bounds auth.login_rate_limit.
 const maxLoginBurst = 100
+
+// maxPolicyText is the maximum length of receiver.usage_policy_text, in
+// characters (the schema maxLength).
+const maxPolicyText = 20000
+
+// errInvalidPolicyText rejects a usage policy the shell cannot show.
+var errInvalidPolicyText = shared.NewError(shared.KindInvalid, "invalid_usage_policy",
+	"usage policy must be 1 to "+strconv.Itoa(maxPolicyText)+" characters")
+
+// ErrUnknownSetting is a key that the [settings] table does not define.
+var ErrUnknownSetting = errors.New("unknown setting")
 
 // settingsPrefix is the hub.toml table of the settings.
 const settingsPrefix = "settings."
@@ -62,13 +72,17 @@ var settingHooks = map[string]func(v any) error{
 	},
 	"receiver.usage_policy_text": func(v any) error {
 		s, _ := v.(string)
-		if strings.TrimSpace(s) == "" {
+
+		s = strings.TrimSpace(s)
+		if s == "" {
 			return nil // empty: the built-in default policy
 		}
 
-		_, err := shell.NewPolicyText(s)
+		if utf8.RuneCountInString(s) > maxPolicyText || !utf8.ValidString(s) {
+			return errInvalidPolicyText
+		}
 
-		return err
+		return nil
 	},
 }
 
@@ -125,20 +139,20 @@ func child(node map[string]any, name string) map[string]any {
 	return c
 }
 
-// ValidateSetting checks a setting value given as JSON, whatever its source
+// DecodeSetting checks a setting value given as JSON, whatever its source
 // (DB row, API write): decode into the key's Go type, semantic check of the
-// key, then the schema keywords. It returns the decoded Go value, or an
-// error: settings.ErrUnknownSetting, or settings.ErrInvalidSetting
-// with one violation per problem (path = the key).
-func ValidateSetting(key string, raw []byte) (any, error) {
+// key, then the schema keywords. It returns the decoded Go value, or the
+// violations (path = the key); the error is ErrUnknownSetting for a key
+// outside the schema.
+func DecodeSetting(key string, raw []byte) (any, []shared.Violation, error) {
 	idx, err := loadSettingsIndex()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	leaf, ok := idx.byKey[key]
 	if !ok {
-		return nil, settings.ErrUnknownSetting.WithDetail("unknown setting " + key)
+		return nil, nil, fmt.Errorf("%w %s", ErrUnknownSetting, key)
 	}
 
 	ptr := reflect.New(leaf.typ)
@@ -146,15 +160,67 @@ func ValidateSetting(key string, raw []byte) (any, error) {
 	dec.DisallowUnknownFields()
 
 	if err := dec.Decode(ptr.Interface()); err != nil || dec.More() {
-		return nil, settings.ErrInvalidSetting.WithViolations(decodeViolation(key, leaf.typ, err))
+		return nil, []shared.Violation{decodeViolation(key, leaf.typ, err)}, nil
 	}
 
 	v := ptr.Elem().Interface()
 	if vs := checkSetting(leaf, v, raw); len(vs) > 0 {
-		return nil, settings.ErrInvalidSetting.WithViolations(vs...)
+		return nil, vs, nil
 	}
 
-	return v, nil
+	return v, nil, nil
+}
+
+// SettingKey is one key of the [settings] table of a hub config.
+type SettingKey struct {
+	// Key is the key without "settings.".
+	Key string
+	// Type is its Go type, Schema its node of the hub JSON Schema.
+	Type   reflect.Type
+	Schema map[string]any
+	// Default is its default value, Value its value in the config, set
+	// from Origin.
+	Default, Value any
+	Origin         Origin
+}
+
+// SettingKeys lists the [settings] keys of a loaded hub config, cfg with
+// the origins of its keys (Meta.Origins), in schema order, and returns the
+// JSON Schema of the [settings] table (its property paths are the keys).
+func SettingKeys(cfg Hub, origins Origins) ([]SettingKey, json.RawMessage, error) {
+	idx, err := loadSettingsIndex()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	defaults := DefaultHub()
+	defLeaves := map[string]leaf{}
+
+	for _, lf := range leaves(&defaults) {
+		defLeaves[lf.key] = lf
+	}
+
+	var out []SettingKey
+
+	for _, lf := range leaves(&cfg) {
+		key, ok := strings.CutPrefix(lf.key, settingsPrefix)
+		if !ok {
+			continue
+		}
+
+		sl := idx.byKey[key]
+		out = append(out, SettingKey{
+			Key: key, Type: sl.typ, Schema: sl.schema, Default: defLeaves[lf.key].value.Interface(), Value: lf.value.Interface(),
+			Origin: origins.Of(lf.key),
+		})
+	}
+
+	schema, err := json.Marshal(idx.schema)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode settings schema: %w", err)
+	}
+
+	return out, schema, nil
 }
 
 func decodeViolation(key string, typ reflect.Type, err error) shared.Violation {
@@ -542,7 +608,7 @@ var settingRules = []settingRule{
 }
 
 // CheckSettings runs the checks across keys on the effective values, given
-// by key (the Go values ValidateSetting returns; ok false when unknown). A
+// by key (the Go values DecodeSetting returns; ok false when unknown). A
 // check runs only when all its keys are known.
 func CheckSettings(get func(key string) (any, bool)) []shared.Violation {
 	var out []shared.Violation

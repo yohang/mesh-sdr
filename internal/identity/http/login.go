@@ -14,6 +14,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/http/redact"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // Login form messages (FEATURE_SPEC §10.3): one generic error, the same
@@ -63,34 +64,16 @@ func SafeNext(next string, routes chi.Routes) string {
 	return u.RequestURI()
 }
 
-func noIndex(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Robots-Tag", "noindex")
-}
-
 func (m *Module) loginPage(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	f := loginForm{
 		Next: SafeNext(r.URL.Query().Get("next"), m.routes), Reset: r.URL.Query().Get("reset") == "1",
 		Forgot: m.resets != nil && m.resets.MailEnabled(),
 	}
-	m.pages.Page(w, r, http.StatusOK, "Sign in", loginPage(f), nil)
+	m.page(w, r, http.StatusOK, "Sign in", loginPage(f), nil)
 }
 
 func (m *Module) loginAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
-	if err := r.ParseForm(); err != nil {
-		status := http.StatusBadRequest
-
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			status = http.StatusRequestEntityTooLarge
-		}
-
-		m.pages.Error(w, r, status)
-
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -108,7 +91,7 @@ func (m *Module) loginAction(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Full page load: the new page fetches the new CSRF token.
-		m.redirect(w, r, f.Next)
+		render.Redirect(w, r, f.Next)
 
 		return
 	}
@@ -131,7 +114,7 @@ func (m *Module) loginAction(w http.ResponseWriter, r *http.Request) {
 		m.logger.ErrorContext(r.Context(), "login failed", slog.Any("error", err))
 	}
 
-	m.pages.Page(w, r, status, "Sign in", loginPage(f), loginFormView(f))
+	m.page(w, r, status, "Sign in", loginPage(f), loginFormView(f))
 }
 
 func humanWait(d time.Duration) string {
@@ -162,5 +145,5 @@ func (m *Module) logoutAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.SetCookie(w, c)
-	m.redirect(w, r, "/")
+	render.Redirect(w, r, "/")
 }

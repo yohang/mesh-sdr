@@ -81,7 +81,7 @@ func TestSkimmerParser(t *testing.T) {
 }
 
 // The text log joins the characters of each frequency into lines (line
-// break, MaxLine characters, LineIdle without a character) and is handed
+// break, maxLine characters, lineIdle without a character) and is handed
 // over when full, when it covers an hour, or when the session ends; never
 // empty.
 func TestTextLog(t *testing.T) {
@@ -105,14 +105,14 @@ func TestTextLog(t *testing.T) {
 		}
 	}
 
-	// Idle: the 1000 Hz line ends after LineIdle.
+	// Idle: the 1000 Hz line ends after lineIdle.
 	if f := l.tick(t0.Add(3 * time.Second)); f != nil {
 		t.Fatalf("saved early: %q", f.Data)
 	}
 
 	l.tick(t0.Add(8 * time.Second))
 
-	// 90 characters: a line of MaxLine, then the rest.
+	// 90 characters: a line of maxLine, then the rest.
 	l.add(rec(10*time.Second, 2000, strings.Repeat("x", 90)), 14_000_000, t0.Add(10*time.Second))
 
 	f := l.flush(t0.Add(11 * time.Second))
@@ -153,7 +153,7 @@ func TestTextLog(t *testing.T) {
 		if f := big.add(app.DecodeRecord{Time: at, Text: strings.Repeat("x", 40) + "\n"}, 1, at); f != nil {
 			n++
 
-			if len(f.Data) < TextLogBytes {
+			if len(f.Data) < textLogBytes {
 				t.Errorf("log of %d bytes", len(f.Data))
 			}
 		}

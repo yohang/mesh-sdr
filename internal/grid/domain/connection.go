@@ -214,7 +214,6 @@ type ConnectionRepository interface {
 	CloseAll(ctx context.Context, reason CloseReason, at time.Time) (int64, error)
 	CloseNode(ctx context.Context, node NodeID, reason CloseReason, at time.Time) (int64, error)
 	ListOpen(ctx context.Context) ([]*Connection, error)
-	CountOpen(ctx context.Context) (int, error)
 	// CountOpenKind counts the open rows of a kind.
 	CountOpenKind(ctx context.Context, kind ConnectionKind) (int, error)
 	// CountOpenNode counts the open rows of a node.

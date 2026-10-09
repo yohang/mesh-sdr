@@ -9,7 +9,7 @@ package config
 //
 // These structs are the source of the settings schema: keys, types,
 // defaults (DefaultSettings), descriptions and constraints. One validator
-// (ValidateSetting) checks every value against that schema, whatever its
+// (DecodeSetting) checks every value against that schema, whatever its
 // source. Annotations specific to settings use jsonschema_extras: x-apply
 // (live|restart, default live), x-public (readable anonymously), x-widget
 // (form control override) and x-label (short label); x-min-duration and

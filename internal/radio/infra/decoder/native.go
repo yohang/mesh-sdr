@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/yohang/mesh-sdr/internal/dsp"
@@ -33,30 +32,21 @@ var textModes = map[string]dsp.TextConfig{
 	"cwdecoder": {Kind: dsp.TextCW},
 }
 
-// TextSettings are the hub settings of the text decoders (Admin ›
-// Decoding), read when a session starts.
-type TextSettings struct {
-	// FFTSize is the secondary FFT size (digimodes_fft_size).
-	FFTSize int
-	// ShowCW: the CW decoder also prints dots and dashes (cw_showcw).
-	ShowCW bool
-}
-
-// DefaultFFTSize is the secondary FFT size without hub settings.
-const DefaultFFTSize = 2048
+// defaultFFTSize is the secondary FFT size without hub settings.
+const defaultFFTSize = 2048
 
 // Text output of the sessions.
 const (
 	// TextSchema names the text.v1 payload: {"text": line}.
 	TextSchema = "text.v1"
-	// MaxLine is the longest line: a longer one is cut, at a space when
-	// there is one in its last LineSlack characters.
-	MaxLine   = 80
-	LineSlack = 20
-	// LineIdle ends a line nothing was added to for that long.
-	LineIdle = 5 * time.Second
-	// PartialEvery is the shortest interval between two partial records.
-	PartialEvery = 250 * time.Millisecond
+	// maxLine is the longest line: a longer one is cut, at a space when
+	// there is one in its last lineSlack characters.
+	maxLine   = 80
+	lineSlack = 20
+	// lineIdle ends a line nothing was added to for that long.
+	lineIdle = 5 * time.Second
+	// partialEvery is the shortest interval between two partial records.
+	partialEvery = 250 * time.Millisecond
 	// textTick checks the idle line while no input arrives.
 	textTick = time.Second
 )
@@ -66,56 +56,40 @@ type TextRecord struct {
 	Text string `json:"text"`
 }
 
-// textQueue is the input buffer of a session: on overflow the oldest
-// blocks are dropped (§8.3).
-const textQueue = InputBuffer
-
 type iqItem struct {
 	samples []complex64
 	rate    float64
 	at      time.Time
-	gap     bool
 }
+
+// iqWeight weighs a block by its duration (µs): the input queue holds
+// inputBuffer of IQ.
+func iqWeight(it iqItem) int { return int(float64(len(it.samples)) * 1e6 / it.rate) }
 
 // textSession is one native text decoder session.
 type textSession struct {
-	ev   app.DecoderEvents
-	log  *slog.Logger
+	sessionBase
+
 	now  func() time.Time
 	cfg  dsp.TextConfig
 	size int
-	wake chan struct{}
-	done chan struct{}
+	in   *dropQueue[iqItem]
 
-	mu     sync.Mutex
-	queue  []iqItem
-	queued int
-	gap    bool
+	// Guarded by mu.
 	offset float64
 	retune bool
 	// fps is the frame rate of the secondary FFT; 0: off.
-	fps    int
-	closed bool
-	// failed: the decoder stopped on an error; input is dropped.
-	failed bool
-	last   app.DecoderStatus
+	fps int
 }
 
 // startText starts a native text decoder session.
 func (r *Runner) startText(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderRun, error) {
 	cfg, ok := textModes[spec.Mode.Name]
 	if !ok || spec.Mode.Input != domain.InputNarrowIQ {
-		return nil, fmt.Errorf("%w for %s", ErrNoAdapter, spec.Mode.Name)
+		return nil, fmt.Errorf("%w for %s", errNoDecoder, spec.Mode.Name)
 	}
 
-	set := TextSettings{FFTSize: DefaultFFTSize}
-	if r.o.Text != nil {
-		set = r.o.Text()
-		if set.FFTSize <= 0 {
-			set.FFTSize = DefaultFFTSize
-		}
-	}
-
+	set := r.o.Settings()
 	cfg.BandwidthHz, cfg.OffsetHz, cfg.ShowCW = spec.Mode.BandwidthHz, spec.OffsetHz, set.ShowCW
 
 	// The chain is built here so that a refused configuration fails the
@@ -126,9 +100,9 @@ func (r *Runner) startText(spec app.DecoderSpec, ev app.DecoderEvents) (app.Deco
 	}
 
 	s := &textSession{
-		ev: ev, now: r.o.Now, cfg: cfg, size: set.FFTSize, offset: spec.OffsetHz,
-		wake: make(chan struct{}, 1), done: make(chan struct{}),
-		log: r.o.Logger.With(slog.String("session_id", spec.Session.String()), slog.String("mode", spec.Mode.Name)),
+		sessionBase: sessionBase{ev: ev, log: r.sessionLog(spec)},
+		now:         r.o.Now, cfg: cfg, size: set.FFTSize, offset: spec.OffsetHz,
+		in: newDropQueue(int(inputBuffer.Microseconds()), iqWeight),
 	}
 
 	go s.run(dec)
@@ -136,43 +110,15 @@ func (r *Runner) startText(spec app.DecoderSpec, ev app.DecoderEvents) (app.Deco
 	return s, nil
 }
 
-// Audio implements app.DecoderRun: text decoders read IQ.
-func (s *textSession) Audio(app.AudioBlock) {}
-
 // IQ implements app.DecoderRun: the block is copied into the input queue;
-// beyond InputBuffer the oldest blocks are dropped.
+// beyond inputBuffer the oldest blocks are dropped.
 func (s *textSession) IQ(b app.IQBlock) {
 	if len(b.Samples) == 0 || b.Rate <= 0 {
 		return
 	}
 
-	s.mu.Lock()
-	if s.closed || s.failed {
-		s.mu.Unlock()
-
-		return
-	}
-
-	limit := int(textQueue.Seconds() * b.Rate)
-	for len(s.queue) > 0 && s.queued+len(b.Samples) > limit {
-		s.queued -= len(s.queue[0].samples)
-		s.queue = s.queue[1:]
-		s.gap = true
-	}
-
-	s.queue = append(s.queue, iqItem{samples: append([]complex64(nil), b.Samples...), rate: b.Rate, at: b.Time, gap: b.Discontinuity || s.gap})
-	s.queued += len(b.Samples)
-	s.gap = false
-	s.mu.Unlock()
-
-	select {
-	case s.wake <- struct{}{}:
-	default:
-	}
+	s.in.push(iqItem{samples: append([]complex64(nil), b.Samples...), rate: b.Rate, at: b.Time}, b.Discontinuity)
 }
-
-// WideIQ implements app.DecoderRun: the text decoders read selector IQ.
-func (s *textSession) WideIQ(app.WideIQBlock) {}
 
 // Retune implements app.DecoderRun.
 func (s *textSession) Retune(offsetHz float64) {
@@ -194,56 +140,20 @@ func (s *textSession) Spectrum(fps int) {
 // Close implements app.DecoderRun: nothing is reported after it.
 func (s *textSession) Close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.closed = true
+	s.mu.Unlock()
 
-	if !s.closed {
-		s.closed = true
-		s.queue = nil
-		close(s.done)
-	}
+	s.in.discard()
 }
 
-// take returns the queued blocks and the pending changes.
-func (s *textSession) take() (items []iqItem, retune bool, offset float64, fps int, closed bool) {
+// changes returns the pending changes.
+func (s *textSession) changes() (retune bool, offset float64, fps int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	items, s.queue, s.queued = s.queue, nil, 0
 	retune, s.retune = s.retune, false
 
-	return items, retune, s.offset, s.fps, s.closed
-}
-
-// fail stops the input of a session whose decoder failed.
-func (s *textSession) fail() {
-	s.mu.Lock()
-	s.failed, s.queue, s.queued = true, nil, 0
-	s.mu.Unlock()
-}
-
-// status reports a status change unless the session is closed.
-func (s *textSession) status(st app.DecoderStatus) {
-	s.mu.Lock()
-	changed := !s.closed && st != s.last
-	if changed {
-		s.last = st
-	}
-	s.mu.Unlock()
-
-	if changed {
-		s.ev.Status(st)
-	}
-}
-
-// emit reports a record unless the session is closed.
-func (s *textSession) emit(rec app.DecodeRecord) {
-	s.mu.Lock()
-	closed := s.closed
-	s.mu.Unlock()
-
-	if !closed && s.ev.Decode != nil {
-		s.ev.Decode(rec)
-	}
+	return retune, s.offset, s.fps
 }
 
 // textChain is the DSP of a session, owned by its goroutine.
@@ -258,10 +168,7 @@ type textChain struct {
 
 func (c *textChain) close() {
 	c.dec.Close()
-
-	if c.rs != nil {
-		c.rs.Close()
-	}
+	c.rs.Close()
 
 	if c.spec != nil {
 		c.spec.Close()
@@ -269,28 +176,28 @@ func (c *textChain) close() {
 }
 
 func (s *textSession) run(dec *dsp.TextDecoder) {
-	c := &textChain{dec: dec}
+	c := &textChain{dec: dec, rs: dsp.NewIQResampler(dsp.TextRate)}
 	defer c.close()
 
-	lines := &lineAssembler{emit: s.emit, now: s.now}
+	lines := &lineAssembler{emit: s.decode, now: s.now}
 	tick := time.NewTicker(textTick)
 	defer tick.Stop()
 
 	for {
 		select {
-		case <-s.done:
-			return
 		case <-tick.C:
 			lines.idle()
 
 			continue
-		case <-s.wake:
+		case <-s.in.wake:
 		}
 
-		items, retune, offset, fps, closed := s.take()
+		items, closed := s.in.take()
 		if closed {
 			return
 		}
+
+		retune, offset, fps := s.changes()
 
 		if retune {
 			if err := c.dec.SetOffset(offset); err != nil {
@@ -303,7 +210,8 @@ func (s *textSession) run(dec *dsp.TextDecoder) {
 		for _, it := range items {
 			if err := s.process(c, lines, it); err != nil {
 				s.log.Error("text decoder failed", slog.Any("error", err))
-				s.fail()
+				// The input is dropped from now on.
+				s.in.discard()
 				s.status(app.DecoderStatus{State: app.DecoderError, Reason: "decoder_failed"})
 
 				return
@@ -342,36 +250,22 @@ func (s *textSession) setSpectrum(c *textChain, fps int) {
 
 // process runs one input block: resampling to the decoder rate, secondary
 // FFT, decoder.
-func (s *textSession) process(c *textChain, lines *lineAssembler, it iqItem) error {
+func (s *textSession) process(c *textChain, lines *lineAssembler, q queued[iqItem]) error {
+	it := q.v
+
 	// Lost input: the line ends, the CW timing and the resampler start
 	// again.
-	if it.gap {
+	if q.gap {
 		lines.flush()
 
 		if err := c.dec.Reset(); err != nil {
 			return err
 		}
 
-		if c.rs != nil {
-			c.rs.Close()
-			c.rs = nil
-		}
+		c.rs.Close()
 	}
 
-	if c.rs == nil || c.rs.InRate() != it.rate {
-		if c.rs != nil {
-			c.rs.Close()
-		}
-
-		rs, err := dsp.NewIQResampler(it.rate, dsp.TextRate)
-		if err != nil {
-			return err
-		}
-
-		c.rs = rs
-	}
-
-	iq, err := c.rs.Process(it.samples)
+	iq, err := c.rs.Process(it.samples, it.rate)
 	if err != nil {
 		return err
 	}
@@ -401,7 +295,7 @@ func (s *textSession) process(c *textChain, lines *lineAssembler, it iqItem) err
 }
 
 // lineAssembler cuts the characters of a decoder into lines: a line ends
-// at a line break, at MaxLine characters or after LineIdle without a new
+// at a line break, at maxLine characters or after lineIdle without a new
 // character. Only printable ASCII is kept (untrusted RF text).
 type lineAssembler struct {
 	emit func(app.DecodeRecord)
@@ -434,7 +328,7 @@ func (l *lineAssembler) feed(text []byte, at time.Time) {
 			l.line = append(l.line, b)
 			added = true
 
-			if len(l.line) >= MaxLine {
+			if len(l.line) >= maxLine {
 				l.wrap(at)
 			}
 		}
@@ -444,7 +338,7 @@ func (l *lineAssembler) feed(text []byte, at time.Time) {
 		l.last = l.now()
 	}
 
-	if len(l.line) > l.sent && l.now().Sub(l.partial) >= PartialEvery {
+	if len(l.line) > l.sent && l.now().Sub(l.partial) >= partialEvery {
 		l.partial, l.sent = l.now(), len(l.line)
 		l.emit(record(string(l.line), l.start, true))
 	}
@@ -454,7 +348,7 @@ func (l *lineAssembler) feed(text []byte, at time.Time) {
 // end; the rest starts the next line.
 func (l *lineAssembler) wrap(at time.Time) {
 	cut := strings.LastIndexByte(string(l.line), ' ')
-	if cut < len(l.line)-LineSlack {
+	if cut < len(l.line)-lineSlack {
 		cut = len(l.line)
 	}
 
@@ -468,9 +362,9 @@ func (l *lineAssembler) wrap(at time.Time) {
 	}
 }
 
-// idle ends a line nothing was added to for LineIdle.
+// idle ends a line nothing was added to for lineIdle.
 func (l *lineAssembler) idle() {
-	if len(l.line) > 0 && l.now().Sub(l.last) >= LineIdle {
+	if len(l.line) > 0 && l.now().Sub(l.last) >= lineIdle {
 		l.flush()
 	}
 }

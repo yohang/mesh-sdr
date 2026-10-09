@@ -5,24 +5,17 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
-	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 //go:generate go tool templ generate
 
-// Renderer renders pages in the app shell (internal/web/render).
-type Renderer interface {
-	Page(w http.ResponseWriter, r *http.Request, status int, page layout.Page, content, fragment templ.Component)
-	Error(w http.ResponseWriter, r *http.Request, status int)
-}
-
 // PagesDeps are the dependencies of the admin page.
 type PagesDeps struct {
-	Render  Renderer
+	Render  *render.Renderer
 	Guard   func(http.Handler) http.Handler // admin role and network (identity)
 	Service *Service
 	// PresetName names a preset ("" when unknown).
@@ -43,16 +36,8 @@ func (m *Pages) Middlewares() []func(http.Handler) http.Handler { return nil }
 // Routes implements internal/http.Module.
 func (m *Pages) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
-		r.Use(m.d.Guard, noIndex)
+		r.Use(m.d.Guard, render.NoIndex)
 		r.Get("/admin/schedules", m.list)
-		r.Head("/admin/schedules", m.list)
-	})
-}
-
-func noIndex(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Robots-Tag", "noindex")
-		next.ServeHTTP(w, r)
 	})
 }
 
@@ -94,8 +79,7 @@ func (m *Pages) list(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, row)
 	}
 
-	m.d.Render.Page(w, r, http.StatusOK, layout.Page{Title: "Schedules", Section: layout.SectionAdmin},
-		layout.AdminPage("schedules", listPage(rows)), nil)
+	m.d.Render.AdminPage(w, r, http.StatusOK, "Schedules", "schedules", listPage(rows), nil)
 }
 
 // explain says why the hub disabled a schedule.

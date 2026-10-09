@@ -8,7 +8,9 @@ import (
 
 // connectionsPage is Admin › Connections (GRID-017): who is connected now.
 templ connectionsPage(v connectionsView) {
-	<h1 class="text-2xl font-semibold">Connections</h1>
+	@layout.Title("") {
+		Connections
+	}
 	<p class="text-fg-muted">Open connections of the presence registry, across every node: receivers, map viewers and pages following the hub events. Client addresses may be masked; an admin can reveal one, which is logged in the audit log.</p>
 	@connectionsTable(v)
 }
@@ -49,7 +51,7 @@ templ connectionsTable(v connectionsView) {
 									<span class="font-mono">{ c.IP }</span>
 									if c.Masked {
 										<form class="inline" method="post" action={ templ.SafeURL("/admin/connections/" + c.ID + "/reveal") } hx-post={ "/admin/connections/" + c.ID + "/reveal" } hx-target="#connections-table" hx-swap="outerMorph">
-											<button type="submit" class="ml-2 underline">Reveal<span class="sr-only"> the address of { c.User }</span></button>
+											<button type="submit" class="ml-2 underline">Reveal<span class="sr-only">the address of { c.User }</span></button>
 										</form>
 									}
 								</td>

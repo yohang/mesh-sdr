@@ -13,6 +13,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/identity/app"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // InvitationsPath is the admin page of invitations (ACC-002).
@@ -58,8 +59,6 @@ func (m *Module) invitationsView(r *http.Request) (invitationsView, error) {
 }
 
 func (m *Module) invitationsPage(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	v, err := m.invitationsView(r)
 	if err != nil {
 		m.pageFailed(w, r, err)
@@ -71,9 +70,7 @@ func (m *Module) invitationsPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) createInvitationAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
@@ -122,8 +119,6 @@ func (m *Module) createInvitationAction(w http.ResponseWriter, r *http.Request) 
 }
 
 func (m *Module) revokeInvitationAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	var err error
 
 	id, perr := domain.ParseInvitationID(chi.URLParam(r, "id"))
@@ -151,8 +146,6 @@ func (m *Module) revokeInvitationAction(w http.ResponseWriter, r *http.Request) 
 }
 
 func (m *Module) testMailAction(w http.ResponseWriter, r *http.Request) {
-	noIndex(w)
-
 	to, err := m.invitations.TestMail(r.Context(), m.Actor(r.Context()))
 
 	v, verr := m.invitationsView(r)
@@ -205,17 +198,17 @@ func (m *Module) invitePage(w http.ResponseWriter, r *http.Request) {
 		}
 
 		f := acceptForm{Token: token, Role: inv.Role().String(), Email: inv.Email().String(), MinLength: m.invitations.MinLength(r.Context())}
-		m.pages.Page(w, r, http.StatusOK, pageTitleInvite, invitePage(f), nil)
+		m.page(w, r, http.StatusOK, pageTitleInvite, invitePage(f), nil)
 
 		return
 	}
 
-	m.pages.Page(w, r, http.StatusConflict, pageTitleInvite, inviteMessage("You are signed in. Sign out, then open the invitation link again."), nil)
+	m.page(w, r, http.StatusConflict, pageTitleInvite, inviteMessage("You are signed in. Sign out, then open the invitation link again."), nil)
 }
 
 func (m *Module) inviteLanding(w http.ResponseWriter, r *http.Request) {
 	setupHeaders(w)
-	m.pages.Page(w, r, http.StatusNotFound, pageTitleInvite, inviteMessage("Open the invitation link again to create your account."), nil)
+	m.page(w, r, http.StatusNotFound, pageTitleInvite, inviteMessage("Open the invitation link again to create your account."), nil)
 }
 
 // inviteRefused shows why an invitation link cannot be used: invalid (404,
@@ -226,9 +219,9 @@ func (m *Module) inviteRefused(w http.ResponseWriter, r *http.Request, err error
 	switch {
 	case errors.As(err, &rl):
 		w.Header().Set("Retry-After", fmt.Sprint(int(rl.RetryAfter().Seconds())))
-		m.pages.Page(w, r, http.StatusTooManyRequests, pageTitleInvite, inviteMessage(fmt.Sprintf(msgThrottled, humanWait(rl.RetryAfter()))), nil)
+		m.page(w, r, http.StatusTooManyRequests, pageTitleInvite, inviteMessage(fmt.Sprintf(msgThrottled, humanWait(rl.RetryAfter()))), nil)
 	case errors.Is(err, domain.ErrInvitationInvalid):
-		m.pages.Page(w, r, http.StatusNotFound, pageTitleInvite, inviteMessage(msgInviteInvalid), nil)
+		m.page(w, r, http.StatusNotFound, pageTitleInvite, inviteMessage(msgInviteInvalid), nil)
 	default:
 		m.logger.ErrorContext(r.Context(), "invitation check failed", slog.Any("error", err))
 		m.pages.Error(w, r, http.StatusInternalServerError)
@@ -238,12 +231,12 @@ func (m *Module) inviteRefused(w http.ResponseWriter, r *http.Request, err error
 func (m *Module) acceptAction(w http.ResponseWriter, r *http.Request) {
 	setupHeaders(w)
 
-	if !m.parseForm(w, r) {
+	if !m.pages.ParseForm(w, r, 0) {
 		return
 	}
 
 	if !m.Principal(r.Context()).IsAnonymous() {
-		m.pages.Page(w, r, http.StatusConflict, pageTitleInvite, inviteMessage("You are signed in. Sign out, then open the invitation link again."), nil)
+		m.page(w, r, http.StatusConflict, pageTitleInvite, inviteMessage("You are signed in. Sign out, then open the invitation link again."), nil)
 
 		return
 	}
@@ -257,7 +250,7 @@ func (m *Module) acceptAction(w http.ResponseWriter, r *http.Request) {
 	password := r.PostForm.Get("password")
 	if password != r.PostForm.Get("confirm_password") {
 		f.Error, f.Field = "The passwords do not match.", "password"
-		m.pages.Page(w, r, http.StatusUnprocessableEntity, pageTitleInvite, invitePage(f), acceptFormView(f))
+		m.page(w, r, http.StatusUnprocessableEntity, pageTitleInvite, invitePage(f), acceptFormView(f))
 
 		return
 	}
@@ -271,7 +264,7 @@ func (m *Module) acceptAction(w http.ResponseWriter, r *http.Request) {
 			http.SetCookie(w, c)
 		}
 
-		m.redirect(w, r, "/")
+		render.Redirect(w, r, "/")
 
 		return
 	}
@@ -296,7 +289,7 @@ func (m *Module) acceptAction(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusUnprocessableEntity
 
 	if f.Field != "" && errors.As(err, &de) {
-		f.Error = sentence(de.Message())
+		f.Error = render.Sentence(de.Message())
 	} else {
 		status = http.StatusInternalServerError
 		f.Error = msgSetupFailed
@@ -304,5 +297,5 @@ func (m *Module) acceptAction(w http.ResponseWriter, r *http.Request) {
 		m.logger.ErrorContext(r.Context(), "invitation acceptance failed", slog.Any("error", err))
 	}
 
-	m.pages.Page(w, r, status, pageTitleInvite, invitePage(f), acceptFormView(f))
+	m.page(w, r, status, pageTitleInvite, invitePage(f), acceptFormView(f))
 }

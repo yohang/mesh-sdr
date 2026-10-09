@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -113,9 +112,7 @@ func (a *app) newHubNodeCmd() *cobra.Command {
 						return err
 					}
 
-					a.print("node %s revoked", args[0])
-
-					return nil
+					return a.printNodeDone(args[0], "revoked")
 				})
 			},
 		},
@@ -129,9 +126,7 @@ func (a *app) newHubNodeCmd() *cobra.Command {
 						return err
 					}
 
-					a.print("node %s removed", args[0])
-
-					return nil
+					return a.printNodeDone(args[0], "removed")
 				})
 			},
 		},
@@ -156,37 +151,40 @@ func (a *app) newNodeToggleCmd(verb string, disabled bool) *cobra.Command {
 					return err
 				}
 
-				a.print("node %s %sd", args[0], verb)
-
-				return nil
+				return a.printNodeDone(args[0], verb+"d")
 			})
 		},
 	}
 }
 
 func (a *app) withNodes(ctx context.Context, fn func(context.Context, *gridapp.Nodes) error) error {
-	cfg, _, logger, err := a.loadHub(ctx, true)
-	if err != nil {
-		return err
+	return a.withHubDB(ctx, true, true, func(h hubEnv) error {
+		s, err := wire.HubNodes(h.cfg, h.logger, h.db)
+		if err != nil {
+			return err
+		}
+
+		return fn(ctx, s)
+	})
+}
+
+// nodeDoneJSON is the --json output of the node commands that change a
+// node's state.
+type nodeDoneJSON struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
+}
+
+// printNodeDone reports a state change of a node ("revoked", "removed",
+// "disabled", "enabled").
+func (a *app) printNodeDone(id, action string) error {
+	if a.json {
+		return a.printJSON(nodeDoneJSON{ID: id, Action: action})
 	}
 
-	adapter, err := wire.OpenDB(ctx, cfg.DB, logger)
-	if err != nil {
-		return err
-	}
+	a.print("node %s %s", id, action)
 
-	defer func() { _ = adapter.Close() }()
-
-	if err := adapter.Migrator().Check(ctx); err != nil {
-		return fmt.Errorf("database not ready: %w", err)
-	}
-
-	s, err := wire.HubNodes(cfg, logger, adapter)
-	if err != nil {
-		return err
-	}
-
-	return fn(ctx, s)
+	return nil
 }
 
 type issuedJSON struct {

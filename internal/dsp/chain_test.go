@@ -378,3 +378,24 @@ func TestDeemphasis(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestS16ConverterRejectsBadRates: a rate of zero or less is refused, on a
+// fresh converter too, and so is an output rate of zero or less.
+func TestS16ConverterRejectsBadRates(t *testing.T) {
+	for _, tt := range []struct{ in, out int }{{0, 12_000}, {-1, 12_000}, {12_000, 0}} {
+		c := NewS16Converter(tt.out)
+
+		if _, err := c.Convert([]float32{0.5}, tt.in); !errors.Is(err, ErrChain) {
+			t.Errorf("Convert at %d → %d Hz: err = %v", tt.in, tt.out, err)
+		}
+
+		c.Close()
+	}
+
+	c := NewS16Converter(12_000)
+	defer c.Close()
+
+	if b, err := c.Convert([]float32{0.5}, 12_000); err != nil || len(b) != 2 {
+		t.Errorf("Convert at the output rate = %v, %v", b, err)
+	}
+}

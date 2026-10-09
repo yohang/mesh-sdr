@@ -92,14 +92,16 @@ import { onThemeChange } from "../tokens.js";
 import { wheelRanges } from "../wheel-range.js";
 import { clearBandpasses } from "./bandpasses.js";
 import { ReceiverBookmarks } from "./bookmarks.js";
+import { BUTTON, el, FIELD, formatMHz, SMALL_BUTTON, TOUCH } from "./dom.js";
 import { getEngine, MIN_BANDWIDTH_HZ, NR_MAX_DB, NR_MIN_DB, SQUELCH_MAX_DB, SQUELCH_MIN_DB } from "./engine.js";
 import { getGrid, unavailable } from "./grid.js";
 import { receiverShortcuts } from "./keys.js";
+import { PICKER_MODES } from "./marks.js";
 import { SidePanel } from "./panel.js";
 import { recordingName, saveFile, wavBlob } from "./recorder.js";
 import { FreqScale } from "./scale.js";
 import { seekBin } from "./seek.js";
-import { getState, setState } from "./session.js";
+import { getState, loadPref, savePref, setState } from "./session.js";
 import { shortcutsHelp } from "./shortcuts-help.js";
 import { Spectrum } from "./spectrum.js";
 import { Waterfall2D } from "./waterfall-2d.js";
@@ -143,10 +145,9 @@ const AUTO_PERCENTILE = 0.2;
 const AUTO_FLOOR_MARGIN_DB = 5;
 const AUTO_PEAK_MARGIN_DB = 5;
 const DEFAULT_LEVELS = { min: -100, max: -20 };
-// Analog modes of the mode picker, in display order (RX-007, DEM-013).
-// Only those the device's node reports are shown. The digital modes come
-// from device.config (DEC-002) and follow them.
-const ANALOG_MODES = ["am", "sam", "nfm", "wfm", "usb", "lsb", "cw", "usbd", "lsbd"];
+// The mode picker shows the PICKER_MODES (marks.js) the device's node
+// reports. The digital modes come from device.config (DEC-002) and follow
+// them.
 // Labels of the modes whose id is not their name.
 const MODE_LABELS = /** @type {Record<string, string>} */ ({ usbd: "DATA", lsbd: "DATA-L" });
 
@@ -177,22 +178,6 @@ const SEEK_NEEDS_SQUELCH = "Set the squelch to seek.";
 // Pointer label offset from the pointer (CSS px).
 const POINTER_LABEL_PX = 12;
 
-/**
- * el creates an element with attributes and optional text content.
- * @param {string} tag @param {Record<string, string>} [attrs] @param {string} [text]
- */
-function el(tag, attrs = {}, text) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-  if (text !== undefined) e.textContent = text;
-  return e;
-}
-
-/** @param {number} hz */
-function formatMHz(hz) {
-  return `${(hz / 1e6).toFixed(6)} MHz`;
-}
-
 /** @param {number} hz signed, as kHz with one decimal */
 function formatKHz(hz) {
   const s = (Math.abs(hz) / 1000).toFixed(1);
@@ -215,31 +200,13 @@ function formatDb(db) {
  * @param {string} text
  * @returns {number | null}
  */
-export function parseFrequency(text) {
+function parseFrequency(text) {
   const m = /^\s*(\d+(?:[.,]\d*)?|[.,]\d+)\s*([kmg]?)(?:hz)?\s*$/i.exec(text);
   if (!m) return null;
   const n = Number(m[1].replace(",", "."));
   const unit = { "": 1e6, k: 1e3, m: 1e6, g: 1e9 }[m[2].toLowerCase()] ?? 1e6;
   const hz = Math.round(n * unit);
   return Number.isFinite(hz) && hz > 0 ? hz : null;
-}
-
-/** @param {string} key @returns {string | null} */
-function loadPref(key) {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-/** @param {string} key @param {string} value */
-function savePref(key, value) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Storage blocked: the choice is not remembered.
-  }
 }
 
 /**
@@ -256,7 +223,7 @@ function savePref(key, value) {
  * @param {Location | URL} loc
  * @returns {Link | null}
  */
-export function parseLink(loc) {
+function parseLink(loc) {
   const m = LINK_PATH.exec(loc.pathname);
   if (!m) return null;
   const q = new URLSearchParams(loc.search);
@@ -265,7 +232,7 @@ export function parseLink(loc) {
   const f = Number(q.get("f"));
   if (q.has("f") && Number.isFinite(f) && f > 0) want.hz = Math.round(f);
   const mode = (q.get("m") ?? "").toLowerCase();
-  if (ANALOG_MODES.includes(mode)) want.mode = mode;
+  if (PICKER_MODES.includes(mode)) want.mode = mode;
   const m2 = (q.get("m2") ?? "").toLowerCase();
   if (/^[a-z0-9_-]{1,24}$/.test(m2)) want.decoder = m2;
   const sql = Number(q.get("sql"));
@@ -317,12 +284,6 @@ function deviceLabel(d) {
  * @property {{label: string, run: () => void}} [action]
  */
 
-// Controls are 44 px touch targets on touch screens and below 768 px
-// (UI-007).
-const TOUCH = "max-md:min-h-11 max-md:min-w-11 pointer-coarse:min-h-11 pointer-coarse:min-w-11";
-const BUTTON = `rounded border border-border px-3 py-1 text-sm ${TOUCH}`;
-const SMALL_BUTTON = `rounded border border-border px-2 py-1 text-sm ${TOUCH}`;
-const FIELD = `rounded border px-2 py-1 ${TOUCH}`;
 const GROUP = "flex flex-wrap items-center gap-2";
 
 class MsdrReceiver extends HTMLElement {
@@ -369,23 +330,29 @@ class MsdrReceiver extends HTMLElement {
         this.spectrum?.push(bins);
       },
     };
-    this.onChange = (/** @type {Event} */ e) => this.changed(/** @type {CustomEvent} */ (e).detail);
-    this.engine.addEventListener("change", this.onChange);
+    // Listeners outside the island, removed together on disconnect.
+    this.listening = new AbortController();
+    const signal = this.listening.signal;
+    this.engine.addEventListener("change", (e) => this.changed(/** @type {CustomEvent} */ (e).detail), { signal });
     this.engine.attachView(this.view);
-    this.onGrid = () => {
-      if (!this.loaded) return;
-      this.renderPicker();
-      this.layout();
-    };
-    this.grid.addEventListener("change", this.onGrid);
-    this.onNotices = () => this.renderEvents();
-    notices.addEventListener("change", this.onNotices);
-    this.onPop = () => {
-      if (this.loaded && parseLink(location)) this.applyLocation(false);
-    };
-    window.addEventListener("popstate", this.onPop);
-    this.onHub = () => this.renderChips();
-    document.body.addEventListener("msdr:events.state", this.onHub);
+    this.grid.addEventListener(
+      "change",
+      () => {
+        if (!this.loaded) return;
+        this.renderPicker();
+        this.layout();
+      },
+      { signal },
+    );
+    notices.addEventListener("change", () => this.renderEvents(), { signal });
+    window.addEventListener(
+      "popstate",
+      () => {
+        if (this.loaded && parseLink(location)) this.applyLocation(false);
+      },
+      { signal },
+    );
+    document.body.addEventListener("msdr:events.state", () => this.renderChips(), { signal });
     this.stopTheme = onThemeChange(() => {
       this.spectrum?.readColors();
       this.scale?.readColors();
@@ -393,18 +360,19 @@ class MsdrReceiver extends HTMLElement {
     this.resize = new ResizeObserver(() => this.sizeCanvases());
     this.resize.observe(this.display);
     // Layout (UI-007): breakpoints, orientation and the sheet's heights.
-    this.onMedia = () => this.layout();
-    this.sheetMedia.addEventListener("change", this.onMedia);
-    this.desktopMedia.addEventListener("change", this.onMedia);
-    this.onResize = () => this.panel.render();
-    window.addEventListener("resize", this.onResize);
+    this.sheetMedia.addEventListener("change", () => this.layout(), { signal });
+    this.desktopMedia.addEventListener("change", () => this.layout(), { signal });
+    window.addEventListener("resize", () => this.panel.render(), { signal });
     this.stopWheel = wheelRanges(this);
     this.stopKeys = registerShortcuts(receiverShortcuts(this));
-    this.onHelp = (/** @type {Event} */ ev) => {
-      ev.preventDefault();
-      this.showHelp();
-    };
-    document.addEventListener("msdr:shortcuts-help", this.onHelp);
+    document.addEventListener(
+      "msdr:shortcuts-help",
+      (ev) => {
+        ev.preventDefault();
+        this.showHelp();
+      },
+      { signal },
+    );
 
     this.lastSpec = 0;
     this.lastText = 0;
@@ -439,20 +407,12 @@ class MsdrReceiver extends HTMLElement {
     this.resize?.disconnect();
     this.stopTheme?.();
     this.bookmarks?.destroy();
-    this.sheetMedia.removeEventListener("change", this.onMedia);
-    this.desktopMedia.removeEventListener("change", this.onMedia);
-    window.removeEventListener("resize", this.onResize);
-    document.removeEventListener("msdr:shortcuts-help", this.onHelp);
+    this.listening?.abort();
     this.stopWheel?.();
     this.stopKeys?.();
     this.panel.detach();
-    this.engine?.removeEventListener("change", this.onChange);
     this.decodersTab?.detach();
     this.engine?.showFFT2(false);
-    this.grid?.removeEventListener("change", this.onGrid);
-    notices.removeEventListener("change", this.onNotices);
-    window.removeEventListener("popstate", this.onPop);
-    document.body.removeEventListener("msdr:events.state", this.onHub);
     if (this.view) this.engine?.detachView(this.view);
     this.wf?.destroy();
     this.wf = undefined;
@@ -493,8 +453,6 @@ class MsdrReceiver extends HTMLElement {
     );
     this.panelToggle.addEventListener("click", () => this.togglePanel());
 
-    // 44 px touch targets (UI-007) on the bookmark controls too.
-    for (const b of [bmk.scanBtn, bmk.findBtn, bmk.ribbonBtn]) b.classList.add(...TOUCH.split(" "));
     const tools = el("div", { class: "flex flex-wrap items-center gap-2" });
     tools.append(bmk.findBtn, this.panelToggle);
     this.toolbar = el("div", { class: "flex flex-wrap items-center justify-between gap-x-4 gap-y-2" });
@@ -1512,7 +1470,7 @@ class MsdrReceiver extends HTMLElement {
     }
 
     const available = new Set(this.chosen()?.modes ?? []);
-    const modes = ANALOG_MODES.filter((m) => available.has(m) || m === d?.mode);
+    const modes = PICKER_MODES.filter((m) => available.has(m) || m === d?.mode);
     const shown = [...this.modes.children].map((b) => /** @type {HTMLElement} */ (b).dataset.mode).join();
     if (shown !== modes.join()) {
       this.modes.replaceChildren(
@@ -1635,7 +1593,7 @@ class MsdrReceiver extends HTMLElement {
         ["Device state", STATE_TEXT[c.state] ?? c.state],
         ["Access", c.login_required ? "Signed-in listeners" : "Everyone"],
       );
-      const modes = ANALOG_MODES.filter((m) => (c.modes ?? []).includes(m));
+      const modes = PICKER_MODES.filter((m) => (c.modes ?? []).includes(m));
       if (modes.length) rows.push(["Modes", modes.map(modeLabel).join(", ")]);
     }
     if (e.device && e.target && c && e.target.device_id === c.id && e.target.node_id === c.node_id) {

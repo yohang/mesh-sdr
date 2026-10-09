@@ -48,9 +48,9 @@ type UserQuery struct {
 	Enabled *bool
 	// NeverLoggedIn keeps users who never signed in.
 	NeverLoggedIn bool
-	// After is the username key of the last row of the previous page.
-	After string
-	Limit int
+	// Offset skips the first users, by username (the previous pages).
+	Offset int
+	Limit  int
 }
 
 // InvitationRepository stores invitations.
@@ -154,7 +154,9 @@ type AuditQuery struct {
 	From, To     time.Time
 	// BeforeID is the id of the last row of the previous page (0: first).
 	BeforeID int64
-	Limit    int
+	// Offset skips the newest matching entries (the previous pages).
+	Offset int
+	Limit  int
 }
 
 // AuditRecord is a stored audit entry with its id.

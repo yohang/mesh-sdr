@@ -11,7 +11,6 @@ package bookmarks
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -20,12 +19,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/a-h/templ"
-
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
-	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // Audit actions.
@@ -35,18 +32,10 @@ const (
 	ActionDelete = "bookmark.delete"
 )
 
-// Listen policies of a device (§7.4 listen_policy).
-const (
-	ListenAnonymous  = "anonymous"
-	ListenRegistered = "registered"
-)
-
 // Device is an enabled device of the registry, as the bookmarks see it.
 type Device struct {
 	ID   shared.DeviceID
 	Name string
-	// ListenPolicy is the effective listen policy: anonymous or registered.
-	ListenPolicy string
 	// ActivePreset is the preset the device runs (zero: none).
 	ActivePreset shared.UUID
 	// Modes are the modes the device's node reports available.
@@ -81,14 +70,8 @@ type Change struct {
 	Bookmark *Bookmark
 }
 
-// Renderer renders pages in the app shell (internal/web/render).
-type Renderer interface {
-	Page(w http.ResponseWriter, r *http.Request, status int, page layout.Page, content, fragment templ.Component)
-	Error(w http.ResponseWriter, r *http.Request, status int)
-}
-
-// Deps are the dependencies of the module. Only DB, Now and Logger are
-// needed by the pack sync (`meshsdr hub migrate`); the hub sets the rest.
+// Deps are the dependencies of the module (the pack sync of `meshsdr hub
+// migrate` is Sync, which needs none of them).
 type Deps struct {
 	DB      *db.DB
 	Audit   audit.Appender
@@ -96,20 +79,19 @@ type Deps struct {
 	Presets Presets
 	// Region returns the bandplan.region setting (r1, r2 or r3).
 	Region func() string
-	// SignedIn reports whether the caller of ctx is a signed-in user.
-	SignedIn func(ctx context.Context) bool
+	// CanListen reports whether the caller of ctx may listen to a device
+	// (the listen policy).
+	CanListen func(ctx context.Context, device shared.DeviceID) (bool, error)
 	// User returns the signed-in user of ctx (zero when anonymous).
 	User func(ctx context.Context) shared.UUID
 	// Changed, when set, is told every committed change of a hub bookmark.
 	Changed func(ctx context.Context, c Change)
-	Render  Renderer
+	Render  *render.Renderer
 	// Guard admits the operators and admins (identity).
-	Guard func(http.Handler) http.Handler
-	// AdminSections returns the admin sections the visitor may open.
-	AdminSections func(r *http.Request) []layout.AdminSection
-	IDs           *shared.UUIDv7Generator
-	Now           func() time.Time
-	Logger        *slog.Logger
+	Guard  func(http.Handler) http.Handler
+	IDs    *shared.UUIDv7Generator
+	Now    func() time.Time
+	Logger *slog.Logger
 }
 
 // Module is the bookmarks module: use cases, JSON API handlers and pages
@@ -117,17 +99,12 @@ type Deps struct {
 type Module struct {
 	d         Deps
 	repo      *Repository
-	packs     *Packs
 	bandplans map[string]*Bandplan
 }
 
-// New parses the embedded packs and band plans and returns the module.
+// New parses the embedded band plans and returns the module. Every
+// dependency is required except Changed.
 func New(d Deps) (*Module, error) {
-	packs, err := LoadPacks()
-	if err != nil {
-		return nil, fmt.Errorf("bookmark packs: %w", err)
-	}
-
 	plans, err := LoadBandplans()
 	if err != nil {
 		return nil, fmt.Errorf("band plans: %w", err)
@@ -137,23 +114,13 @@ func New(d Deps) (*Module, error) {
 		d.IDs = shared.NewUUIDv7Generator()
 	}
 
-	return &Module{d: d, repo: NewRepository(d.DB), packs: packs, bandplans: plans}, nil
+	return &Module{d: d, repo: NewRepository(d.DB), bandplans: plans}, nil
 }
 
-func (m *Module) now() time.Time {
-	if m.d.Now == nil {
-		return time.Now()
-	}
-
-	return m.d.Now()
-}
-
-// Region returns the current band plan region (r1 when unset or invalid).
+// Region returns the current band plan region (r1 when invalid).
 func (m *Module) Region() string {
-	if m.d.Region != nil {
-		if r := m.d.Region(); ValidRegion(r) {
-			return r
-		}
+	if r := m.d.Region(); ValidRegion(r) {
+		return r
 	}
 
 	return "r1"
@@ -161,9 +128,6 @@ func (m *Module) Region() string {
 
 // Bandplan returns the band plan of the current region.
 func (m *Module) Bandplan() *Bandplan { return m.bandplans[m.Region()] }
-
-// Packs returns the parsed packs.
-func (m *Module) Packs() *Packs { return m.packs }
 
 // Range is a frequency range in Hz; the zero value is every frequency.
 type Range struct {
@@ -200,10 +164,6 @@ func (r Range) Bounds() (int64, int64) {
 
 // device returns the enabled device id from the registry.
 func (m *Module) device(ctx context.Context, id string) (Device, bool, error) {
-	if m.d.Devices == nil {
-		return Device{}, false, nil
-	}
-
 	all, err := m.d.Devices.Devices(ctx)
 	if err != nil {
 		return Device{}, false, fmt.Errorf("list devices: %w", err)
@@ -218,18 +178,6 @@ func (m *Module) device(ctx context.Context, id string) (Device, bool, error) {
 	return Device{}, false, nil
 }
 
-// canListen reports whether the caller of ctx may listen to a device.
-func (m *Module) canListen(ctx context.Context, d Device) bool {
-	switch d.ListenPolicy {
-	case ListenAnonymous:
-		return true
-	case ListenRegistered:
-		return m.d.SignedIn != nil && m.d.SignedIn(ctx)
-	default:
-		return false
-	}
-}
-
 // ForDevice returns the bookmarks shown on a device in a range (BMK-001,
 // GET /bookmarks): the general and current region pack rows, and the hub
 // rows whose scope matches the device and its active preset. A device the
@@ -240,7 +188,16 @@ func (m *Module) ForDevice(ctx context.Context, deviceID string, rg Range) ([]*B
 		return nil, err
 	}
 
-	if !ok || !m.canListen(ctx, d) {
+	if !ok {
+		return nil, ErrDeviceNotFound
+	}
+
+	allowed, err := m.d.CanListen(ctx, d.ID)
+	if err != nil {
+		return nil, fmt.Errorf("listen policy of %s: %w", d.ID, err)
+	}
+
+	if !allowed {
 		return nil, ErrDeviceNotFound
 	}
 
@@ -348,11 +305,9 @@ func (m *Module) check(ctx context.Context, d Draft) (Draft, error) {
 
 	add := func(path, code, msg string) { v = append(v, shared.NewViolation(path, shared.Code(code), msg)) }
 
-	devices := []Device{}
-	if m.d.Devices != nil {
-		if devices, err = m.d.Devices.Devices(ctx); err != nil {
-			return Draft{}, fmt.Errorf("list devices: %w", err)
-		}
+	devices, err := m.d.Devices.Devices(ctx)
+	if err != nil {
+		return Draft{}, fmt.Errorf("list devices: %w", err)
 	}
 
 	modes := slices.Clone(AnalogModes)
@@ -430,10 +385,6 @@ func modeHint(modes []string) string {
 }
 
 func (m *Module) presetExists(ctx context.Context, id shared.UUID) (bool, error) {
-	if m.d.Presets == nil {
-		return false, nil
-	}
-
 	all, err := m.d.Presets.Presets(ctx)
 	if err != nil {
 		return false, fmt.Errorf("list presets: %w", err)
@@ -449,19 +400,14 @@ func (m *Module) Create(ctx context.Context, d Draft) (*Bookmark, error) {
 		return nil, err
 	}
 
-	now := m.now()
+	now := m.d.Now()
 
 	id, err := m.d.IDs.New(now)
 	if err != nil {
 		return nil, fmt.Errorf("bookmark id: %w", err)
 	}
 
-	var by shared.UUID
-	if m.d.User != nil {
-		by = m.d.User(ctx)
-	}
-
-	b, err := NewBookmark(id, d, by, now)
+	b, err := NewBookmark(id, d, m.d.User(ctx), now)
 	if err != nil {
 		return nil, err
 	}
@@ -526,7 +472,7 @@ func (m *Module) Update(ctx context.Context, id string, expectedVersion int, d D
 
 		before := auditFields(cur)
 
-		if err := cur.Update(d, expectedVersion, m.now()); err != nil {
+		if err := cur.Update(d, expectedVersion, m.d.Now()); err != nil {
 			return err
 		}
 
@@ -590,13 +536,7 @@ func (m *Module) Delete(ctx context.Context, id string, expectedVersion int) err
 	return nil
 }
 
-func (m *Module) audit(ctx context.Context, r audit.Record) error {
-	if m.d.Audit == nil {
-		return errors.New("bookmarks: no audit appender")
-	}
-
-	return m.d.Audit.Append(ctx, r)
-}
+func (m *Module) audit(ctx context.Context, r audit.Record) error { return m.d.Audit.Append(ctx, r) }
 
 func (m *Module) changed(ctx context.Context, op string, b *Bookmark) {
 	if m.d.Changed != nil {

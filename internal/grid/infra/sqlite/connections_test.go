@@ -92,7 +92,7 @@ func testConnections(t *testing.T, r Repos) {
 		t.Fatalf("close node = %d, %v", n, err)
 	}
 
-	if n := must(repo.CountOpen(ctx)); n != 0 {
+	if n := len(must(repo.ListOpen(ctx))); n != 0 {
 		t.Errorf("open = %d", n)
 	}
 

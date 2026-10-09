@@ -27,18 +27,18 @@ func TestAuditAppenderWritesAuditLog(t *testing.T) {
 	reqCtx := clientip.With(ctx, netip.MustParseAddr("192.0.2.7"))
 	mustAppend(t, aud, reqCtx, audit.Record{Actor: audit.Caller, Action: "node.delete", TargetType: "node", TargetID: "attic", Result: audit.ResultOK})
 
-	entries, err := identitysqlite.NewAuditLog(a).Recent(ctx, 10)
+	recs, err := identitysqlite.NewAuditLog(a).Search(ctx, identitydomain.AuditQuery{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(entries) != 3 {
-		t.Fatalf("entries = %d", len(entries))
+	if len(recs) != 3 {
+		t.Fatalf("entries = %d", len(recs))
 	}
 
 	got := map[string]identitydomain.AuditEntry{}
-	for _, e := range entries {
-		got[e.Action()] = e
+	for _, r := range recs {
+		got[r.Entry.Action()] = r.Entry
 	}
 
 	add, enroll := got["node.add"], got["node.enroll"]

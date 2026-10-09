@@ -302,7 +302,7 @@ func (e *gridEnv) enrollWith(t *testing.T, token domain.EnrollmentToken, caFinge
 
 	select {
 	case res := <-en.Enroller.Done():
-		if err := enroll.WriteFiles(en.Paths, en.Key, res); err != nil {
+		if err := enroll.WriteFiles(en.Paths, en.Key, res.CA.Raw, res.Chain...); err != nil {
 			t.Fatal(err)
 		}
 	case <-time.After(20 * time.Second):

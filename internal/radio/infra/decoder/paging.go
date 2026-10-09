@@ -10,6 +10,7 @@ import (
 
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
 	"github.com/yohang/mesh-sdr/internal/radio/app"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // The paging decoder (DEC-033): multimon-ng decodes FLEX and POCSAG
@@ -25,7 +26,7 @@ const PagingSchema = "paging.v1"
 // message.
 const (
 	maxFlexPending = 256
-	maxFlexBytes   = MaxText
+	maxFlexBytes   = maxText
 )
 
 // pagingArgs runs multimon-ng with FLEX and the three POCSAG rates.
@@ -35,7 +36,7 @@ func pagingArgs(c sessionConfig) []string {
 		cs = "US"
 	}
 
-	return []string{"-c", "-v", "0", "-C", cs, "-t", "raw", "-a", "FLEX", "-a", "POCSAG512", "-a", "POCSAG1200", "-a", "POCSAG2400", "-"}
+	return multimon([]string{"-C", cs}, "FLEX", "POCSAG512", "POCSAG1200", "POCSAG2400")
 }
 
 // PagingRecord is the paging.v1 payload.
@@ -210,7 +211,7 @@ func (p *pagingParser) assemble(capcode, flag, text string) (string, bool) {
 			p.order = append(p.order, capcode)
 		}
 
-		msg := capBytes(prev+text, maxFlexBytes)
+		msg := shared.Truncate(prev+text, maxFlexBytes)
 		if flag == "F" {
 			p.flex[capcode] = msg
 

@@ -77,14 +77,6 @@ func (b *Broker) snapshot() []*Subscription {
 	return out
 }
 
-// Subscribers returns the number of attached subscribers.
-func (b *Broker) Subscribers() int {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	return len(b.subs)
-}
-
 // Attach registers a subscriber with no topic yet.
 func (b *Broker) Attach(v Viewer, authz Authorizer, sink Sink) *Subscription {
 	s := &Subscription{

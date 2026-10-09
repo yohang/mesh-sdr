@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -22,78 +21,8 @@ type bodyFields map[string]closedBody
 
 // closedBody is the closed request body of an operation.
 type closedBody struct {
-	operation string // generated Go name, as in Policy
-	allowed   map[string]bool
-	required  []string
-}
-
-type schemaDoc struct {
-	Ref                  string                     `json:"$ref"`
-	Required             []string                   `json:"required"`
-	Properties           map[string]json.RawMessage `json:"properties"`
-	AdditionalProperties *json.RawMessage           `json:"additionalProperties"`
-}
-
-// loadBodyFields reads the closed request body schemas of an OpenAPI
-// document.
-func loadBodyFields(spec []byte) (bodyFields, error) {
-	var doc struct {
-		Paths      map[string]map[string]json.RawMessage `json:"paths"`
-		Components struct {
-			Schemas map[string]schemaDoc `json:"schemas"`
-		} `json:"components"`
-	}
-
-	if err := json.Unmarshal(spec, &doc); err != nil {
-		return nil, fmt.Errorf("parse OpenAPI document: %w", err)
-	}
-
-	out := bodyFields{}
-
-	for path, item := range doc.Paths {
-		for method, raw := range item {
-			var op struct {
-				ID          string `json:"operationId"`
-				RequestBody struct {
-					Content map[string]struct {
-						Schema schemaDoc `json:"schema"`
-					} `json:"content"`
-				} `json:"requestBody"`
-			}
-
-			if json.Unmarshal(raw, &op) != nil {
-				continue // not an operation (parameters, summary…)
-			}
-
-			media, ok := op.RequestBody.Content["application/json"]
-			if !ok {
-				continue
-			}
-
-			s := media.Schema
-			if name, ok := strings.CutPrefix(s.Ref, "#/components/schemas/"); ok {
-				if s, ok = doc.Components.Schemas[name]; !ok {
-					return nil, fmt.Errorf("%s %s: unknown schema %q", method, path, name)
-				}
-			}
-
-			if s.AdditionalProperties == nil || string(*s.AdditionalProperties) != "false" {
-				continue
-			}
-
-			allowed := map[string]bool{}
-			for p := range s.Properties {
-				allowed[p] = true
-			}
-
-			required := slices.Clone(s.Required)
-			slices.Sort(required)
-
-			out[strings.ToUpper(method)+" "+path] = closedBody{operation: goName(op.ID), allowed: allowed, required: required}
-		}
-	}
-
-	return out, nil
+	allowed  map[string]bool
+	required []string
 }
 
 // rejectUnknownFields refuses JSON bodies with fields their schema does not
@@ -101,27 +30,13 @@ func loadBodyFields(spec []byte) (bodyFields, error) {
 // also refuses bodies without a field their schema requires (400
 // missing_field), which the generated decoder would otherwise read as its
 // zero value (an absent display name would clear it).
-// It runs once the route is matched, and restores the body for the
-// generated decoder. A caller the policy refuses gets the policy's answer:
-// the body is checked only for authorised callers.
-func (f bodyFields) rejectUnknownFields(policy Policy, authz Authorizer) MiddlewareFunc {
-	return func(next http.Handler) http.Handler {
-		return f.handler(next, policy, authz)
-	}
-}
-
-func (f bodyFields) handler(next http.Handler, policy Policy, authz Authorizer) http.Handler {
+// It runs once the route is matched, after the guard refused the callers
+// the access level does not allow, and restores the body for the
+// generated decoder.
+func (f bodyFields) rejectUnknownFields(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, ok := f.of(r)
-		allowed := body.allowed
-
-		if ok {
-			if role, known := policy[body.operation]; !known || authz.Authorize(r.Context(), role) != nil {
-				allowed = nil
-			}
-		}
-
-		if allowed == nil || r.Body == nil || r.Body == http.NoBody {
+		if !ok || r.Body == nil || r.Body == http.NoBody {
 			next.ServeHTTP(w, r)
 
 			return
@@ -146,7 +61,7 @@ func (f bodyFields) handler(next http.Handler, policy Policy, authz Authorizer) 
 		var unknown []string
 
 		for k := range obj {
-			if !allowed[k] {
+			if !body.allowed[k] {
 				unknown = append(unknown, k)
 			}
 		}

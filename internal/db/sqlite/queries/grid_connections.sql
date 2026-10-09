@@ -41,9 +41,6 @@ WHERE closed_at IS NULL AND node_id = sqlc.arg(node_id);
 -- name: ListOpenConnections :many
 SELECT * FROM connections WHERE closed_at IS NULL ORDER BY opened_at, id;
 
--- name: CountOpenConnections :one
-SELECT count(*) FROM connections WHERE closed_at IS NULL;
-
 -- name: CountOpenKindConnections :one
 SELECT count(*) FROM connections WHERE closed_at IS NULL AND kind = ?;
 

@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db/dbtest"
+	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1/ctl"
@@ -43,13 +45,14 @@ func TestDesiredStateCarriesSettings(t *testing.T) {
 	a := dbtest.NewSQLite(t)
 	logger := slog.New(slog.DiscardHandler)
 
+	values := fixedSettings{
+		"listen_policy": "registered", "waterfall.min_db": -110, "waterfall.max_db": -40, "waterfall.palette": "default",
+		"fax_lpm": 60, "fax_min_length": 100, "fax_max_length": 900, "fax_color": true,
+	}
 	d := desiredStates{
-		planner: schedules.NewPlanner(schedules.Deps{Devices: noDevices{}, Logger: logger}),
-		presets: presets.NewService(presets.Deps{Repo: presets.NewPresets(a), Tx: a, Logger: logger}),
-		settings: fixedSettings{
-			"listen_policy": "registered", "waterfall.min_db": -110, "waterfall.max_db": -40, "waterfall.palette": "default",
-			"fax_lpm": 60, "fax_min_length": 100, "fax_max_length": 900, "fax_color": true,
-		},
+		planner:  schedules.NewPlanner(schedules.Deps{Devices: noDevices{}, Logger: logger}),
+		presets:  presets.NewService(presets.Deps{Repo: presets.NewPresets(a), Tx: a, Logger: logger}),
+		settings: values, listen: gridapp.NewListenPolicies(nil, storeListenPolicy{store: values}, logger),
 		now: time.Now,
 	}
 
@@ -89,14 +92,18 @@ func TestSlotSettingsHubToNode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := slotSettings(&got)
+	defaults := config.DefaultSettings().Decoders
+	s := decoderSettings(&got, defaults)
 	if s.WSJTDepths["jt65"] != 1 || s.WSJTDepths["ft8"] != 2 || s.WSJTDepths["q65"] != 2 || len(s.WSJTDepths) != len(wsjtModes) ||
 		!slices.Equal(s.FST4Intervals, []int{60, 1800}) || !slices.Equal(s.Q65Combinations, []string{"A30"}) ||
 		!slices.Equal(s.JS8Profiles, []string{"turbo"}) || s.JS8Depth != 1 {
 		t.Errorf("node settings %+v", s)
 	}
 
-	if s := slotSettings(nil); s.WSJTDepths != nil || s.WSJTDepth != 0 {
+	// Without settings, the enabled lists are the hub defaults.
+	if s := decoderSettings(nil, defaults); s.WSJTDepths != nil || s.WSJTDepth != 0 || !slices.Equal(s.FST4Intervals, []int{15, 30}) ||
+		!slices.Equal(s.FST4WIntervals, []int{120, 300}) || !slices.Equal(s.Q65Combinations, defaults.Q65Combinations) ||
+		!slices.Equal(s.JS8Profiles, defaults.JS8Profiles) {
 		t.Errorf("no settings: %+v", s)
 	}
 }

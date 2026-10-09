@@ -1,10 +1,6 @@
 package cli
 
 import (
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -24,9 +20,9 @@ func (a *app) newCACmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "init",
 		Short: "Create the hub internal CA in <config-dir>/tls (never overwrites)",
-		Long: "Create the hub internal CA: <config-dir>/tls/ca.pem and ca.key (0600).\n" +
+		Long: "Create the hub internal CA: <config-dir>/" + config.CACertFile + " and " + config.CAKeyFile + " (0600).\n" +
 			"The command refuses to run when either file exists. Reference them in hub.toml:\n\n" +
-			"  [tls]\n  ca_cert = \"tls/ca.pem\"\n  ca_key = { file = \"tls/ca.key\" }",
+			"  [tls]\n  ca_cert = \"" + config.CACertFile + "\"\n  ca_key = { file = \"" + config.CAKeyFile + "\" }",
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error { return a.caInit() },
 	})
@@ -41,40 +37,11 @@ type caInitJSON struct {
 }
 
 func (a *app) caInit() error {
-	dir := a.configOptions().Dir
-	if dir == "" {
-		dir = config.DefaultDir
-	}
+	dir := a.configOptions().ResolvedDir()
+	certPath := filepath.Join(dir, config.CACertFile)
+	keyPath := filepath.Join(dir, config.CAKeyFile)
 
-	certPath := filepath.Join(dir, "tls", "ca.pem")
-	keyPath := filepath.Join(dir, "tls", "ca.key")
-
-	certPEM, keyPEM, err := pki.GenerateCA("MeshSDR hub CA", time.Now())
-	if err != nil {
-		return err
-	}
-
-	// Exclusive creation: an existing CA is never replaced, even by a
-	// concurrent run.
-	if err := pki.WriteFileExclusive(keyPath, keyPEM, 0o600); err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return fmt.Errorf("%s already exists: refusing to overwrite the hub CA", keyPath)
-		}
-
-		return err
-	}
-
-	if err := pki.WriteFileExclusive(certPath, certPEM, 0o644); err != nil {
-		_ = os.Remove(keyPath)
-
-		if errors.Is(err, fs.ErrExist) {
-			return fmt.Errorf("%s already exists: refusing to overwrite the hub CA", certPath)
-		}
-
-		return err
-	}
-
-	ca, err := pki.ParseCA(certPEM, keyPEM)
+	ca, err := pki.CreateCA(certPath, keyPath, time.Now())
 	if err != nil {
 		return err
 	}
@@ -87,7 +54,7 @@ func (a *app) caInit() error {
 
 	a.print("created %s and %s", certPath, keyPath)
 	a.print("CA fingerprint (SHA-256): %s", fp)
-	a.print("add to hub.toml:\n\n[tls]\nca_cert = \"tls/ca.pem\"\nca_key = { file = \"tls/ca.key\" }")
+	a.print("add to hub.toml:\n\n[tls]\nca_cert = %q\nca_key = { file = %q }", config.CACertFile, config.CAKeyFile)
 
 	return nil
 }

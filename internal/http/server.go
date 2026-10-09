@@ -43,6 +43,9 @@ func NewRouter(logger *slog.Logger, publicURL string, api http.Handler, modules 
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
 	r.Use(securityHeaders(WorkletScripts(publicURL)))
+	// HEAD requests are served by the GET routes (the read-only pages, the
+	// API GET operations).
+	r.Use(middleware.GetHead)
 
 	for _, m := range modules {
 		r.Use(m.Middlewares()...)

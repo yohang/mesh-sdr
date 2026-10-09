@@ -170,6 +170,19 @@ func (u *User) EmailVerifiedAt() time.Time { return u.emailVerifiedAt }
 // DisplayName returns the display name (zero when none).
 func (u *User) DisplayName() DisplayName { return u.displayName }
 
+// Name returns the name shown for the user: the display name, else the
+// username.
+func (u *User) Name() string { return shownName(u.displayName, u.username) }
+
+// shownName is the display name, else the username.
+func shownName(d DisplayName, u Username) string {
+	if !d.IsZero() {
+		return d.String()
+	}
+
+	return u.String()
+}
+
 // PasswordHash returns the local password hash (zero when none).
 func (u *User) PasswordHash() PasswordHash { return u.passwordHash }
 

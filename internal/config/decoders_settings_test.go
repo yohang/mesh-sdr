@@ -23,8 +23,8 @@ func TestDecoderSlotSettings(t *testing.T) {
 		{"decoders.wsjt_decoding_depths.jt65", `4`, false},
 		{"decoders.js8_decoding_depth", `4`, false},
 	} {
-		if _, err := ValidateSetting(tc.key, []byte(tc.value)); (err == nil) != tc.ok {
-			t.Errorf("%s = %s: %v", tc.key, tc.value, err)
+		if _, vs, err := DecodeSetting(tc.key, []byte(tc.value)); err != nil || (len(vs) == 0) != tc.ok {
+			t.Errorf("%s = %s: %v %v", tc.key, tc.value, vs, err)
 		}
 	}
 }

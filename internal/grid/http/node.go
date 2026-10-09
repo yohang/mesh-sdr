@@ -35,9 +35,9 @@ func NewNodeRouter(control, media http.Handler, logger *slog.Logger) http.Handle
 
 // NewPreEnrollmentRouter returns the node API of a node that is not enrolled
 // yet (TECHNICAL_SPEC §4.2 step 3): only POST /enroll exists and every other
-// path answers 403. Enrollment is served by the one-off `meshsdr node
-// enroll` (ADR 0008 Q13), so /enroll answers 501 here.
-func NewPreEnrollmentRouter(logger *slog.Logger) http.Handler {
+// path answers 403. enroll serves it while `meshsdr node enroll` waits for
+// the hub (ADR 0008 Q13); without it (nil), /enroll answers 501.
+func NewPreEnrollmentRouter(enroll http.HandlerFunc, logger *slog.Logger) http.Handler {
 	r := chi.NewRouter()
 	r.Use(problem.Recoverer(logger))
 
@@ -50,10 +50,14 @@ func NewPreEnrollmentRouter(logger *slog.Logger) http.Handler {
 	r.NotFound(forbidden)
 	r.MethodNotAllowed(forbidden)
 
-	r.Post("/enroll", func(w http.ResponseWriter, r *http.Request) {
-		logger.WarnContext(r.Context(), "enrollment attempt refused: run `meshsdr node enroll` on this node", slog.String("remote_addr", r.RemoteAddr))
-		problem.Write(w, problem.New(http.StatusNotImplemented, problem.CodeNotImplemented, "this node is not waiting for enrollment: run `meshsdr node enroll`"))
-	})
+	if enroll == nil {
+		enroll = func(w http.ResponseWriter, r *http.Request) {
+			logger.WarnContext(r.Context(), "enrollment attempt refused: run `meshsdr node enroll` on this node", slog.String("remote_addr", r.RemoteAddr))
+			problem.Write(w, problem.New(http.StatusNotImplemented, problem.CodeNotImplemented, "this node is not waiting for enrollment: run `meshsdr node enroll`"))
+		}
+	}
+
+	r.Post("/enroll", enroll)
 
 	return r
 }

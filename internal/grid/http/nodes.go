@@ -18,6 +18,7 @@ import (
 	"github.com/yohang/mesh-sdr/internal/http/problem"
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // Admin › Nodes (GRID-005, GRID-009, GRID-015): the node registry with its
@@ -51,6 +52,10 @@ type CapabilityReports interface {
 // ConnectionRegistry reads the open connections (presence registry).
 type ConnectionRegistry interface {
 	List(ctx context.Context) ([]*domain.Connection, error)
+	// ListenersByDevice and NodeListeners count the open media
+	// connections of each device and of a node.
+	ListenersByDevice(ctx context.Context) (map[string]int, error)
+	NodeListeners(ctx context.Context, id domain.NodeID) (int, error)
 }
 
 // certWarnAfter is the share of a node certificate's life after which the
@@ -70,24 +75,6 @@ type nodeRow struct {
 type deviceRow struct {
 	Device *domain.Device
 	Status domain.DeviceStatus
-}
-
-// mediaListeners counts the open media connections per node and per
-// device.
-func mediaListeners(conns []*domain.Connection) (perNode, perDevice map[string]int) {
-	perNode, perDevice = map[string]int{}, map[string]int{}
-
-	for _, c := range conns {
-		if i := c.Info(); i.Kind == domain.ConnectionMedia && i.NodeID != "" {
-			perNode[i.NodeID]++
-
-			if i.DeviceID != "" {
-				perDevice[i.DeviceID]++
-			}
-		}
-	}
-
-	return perNode, perDevice
 }
 
 func newDeviceRow(d *domain.Device, n *domain.Node, perDevice map[string]int) deviceRow {
@@ -189,17 +176,21 @@ func (m *AdminModule) nodesView(r *http.Request) (nodesView, error) {
 		return nodesView{}, err
 	}
 
-	conns, err := m.d.Connections.List(ctx)
+	perDevice, err := m.d.Connections.ListenersByDevice(ctx)
 	if err != nil {
 		return nodesView{}, err
 	}
 
-	listeners, perDevice := mediaListeners(conns)
 	now := m.now()
 	v := nodesView{CanAdmin: m.d.IsAdmin(r)}
 
 	for _, n := range nodes {
-		row := nodeRow{Node: n, Listeners: listeners[n.ID().String()], CertWarn: certWarn(n, now)}
+		listeners, err := m.d.Connections.NodeListeners(ctx, n.ID())
+		if err != nil {
+			return nodesView{}, err
+		}
+
+		row := nodeRow{Node: n, Listeners: listeners, CertWarn: certWarn(n, now)}
 
 		for _, d := range devices {
 			if d.Node() == n.ID() {
@@ -241,15 +232,16 @@ func (m *AdminModule) nodeView(r *http.Request) (nodeView, int) {
 		return nodeView{}, http.StatusInternalServerError
 	}
 
-	conns, err := m.d.Connections.List(ctx)
+	perDevice, err := m.d.Connections.ListenersByDevice(ctx)
+	if err == nil {
+		v.Listeners, err = m.d.Connections.NodeListeners(ctx, n.ID())
+	}
+
 	if err != nil {
-		m.d.Logger.ErrorContext(ctx, "list connections", slog.Any("error", err))
+		m.d.Logger.ErrorContext(ctx, "count listeners", slog.Any("error", err))
 
 		return nodeView{}, http.StatusInternalServerError
 	}
-
-	listeners, perDevice := mediaListeners(conns)
-	v.Listeners = listeners[n.ID().String()]
 
 	for _, d := range devices {
 		v.Devices = append(v.Devices, newDeviceRow(d, n, perDevice))
@@ -305,7 +297,7 @@ func (m *AdminModule) failure(ctx context.Context, action string, err error) (in
 	case errors.Is(err, app.ErrGridDisabled):
 		return http.StatusServiceUnavailable, "The hub internal CA is not configured (tls.ca_cert): nodes cannot be enrolled."
 	case errors.As(err, &de):
-		return problem.StatusOf(de.Kind()), sentence(de.Message())
+		return problem.StatusOf(de.Kind()), render.Sentence(de.Message())
 	}
 
 	m.d.Logger.ErrorContext(ctx, action, slog.Any("error", err))
@@ -313,23 +305,9 @@ func (m *AdminModule) failure(ctx context.Context, action string, err error) (in
 	return http.StatusInternalServerError, "The action failed. Try again later, or see the hub logs."
 }
 
-// sentence capitalises a domain message and ends it with a full stop.
-func sentence(s string) string {
-	if s == "" {
-		return s
-	}
-
-	s = strings.ToUpper(s[:1]) + s[1:]
-	if !strings.HasSuffix(s, ".") {
-		s += "."
-	}
-
-	return s
-}
-
 // addNode declares a node and shows its enrollment token once.
 func (m *AdminModule) addNode(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r) {
+	if !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
@@ -355,7 +333,7 @@ func (m *AdminModule) showToken(w http.ResponseWriter, r *http.Request, issued a
 // nodeAction runs an admin action on the node of the path, then shows its
 // page again with the outcome.
 func (m *AdminModule) nodeAction(w http.ResponseWriter, r *http.Request, action string, run func(id string) (string, error)) {
-	if !parseForm(w, r) {
+	if !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
@@ -443,7 +421,7 @@ func (m *AdminModule) revokeNode(w http.ResponseWriter, r *http.Request) {
 // issueToken re-enrolls a node: its certificate is revoked and a new token
 // is shown once.
 func (m *AdminModule) issueToken(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r) {
+	if !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
@@ -466,13 +444,13 @@ func (m *AdminModule) issueToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *AdminModule) deleteNode(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r) {
+	if !m.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
 	err := m.d.Nodes.Delete(r.Context(), audit.Caller, chi.URLParam(r, "id"))
 	if err == nil {
-		redirect(w, r, "/admin/nodes")
+		render.Redirect(w, r, "/admin/nodes")
 
 		return
 	}
@@ -488,29 +466,5 @@ func (m *AdminModule) deleteNode(w http.ResponseWriter, r *http.Request) {
 	m.renderNode(w, r, status, v)
 }
 
-// redirect sends the browser to path after an action: htmx follows
-// HX-Redirect, other clients a 303.
-func redirect(w http.ResponseWriter, r *http.Request, path string) {
-	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Redirect", path)
-		w.WriteHeader(http.StatusNoContent)
-
-		return
-	}
-
-	http.Redirect(w, r, path, http.StatusSeeOther)
-}
-
 // formBodyLimit bounds the forms of the node pages.
 const formBodyLimit = 16 << 10
-
-func parseForm(w http.ResponseWriter, r *http.Request) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, formBodyLimit)
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid form", http.StatusBadRequest)
-
-		return false
-	}
-
-	return true
-}

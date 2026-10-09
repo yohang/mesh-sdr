@@ -12,7 +12,9 @@ import (
 // untrusted RF text: templ escapes it.
 templ listPage(v listView) {
 	<div class="flex flex-col gap-4">
-		<h1 class="text-2xl font-semibold">Decodes</h1>
+		@layout.Title("") {
+			Decodes
+		}
 		if len(v.Devices) == 0 {
 			if v.SignedIn {
 				<p>No receiver is available.</p>
@@ -49,30 +51,10 @@ templ filtersForm(v listView) {
 				}
 			</select>
 		</div>
-		@timeField("filter-from", "from", "From (UTC)", v.Filter.From, v.Filter.Errors["from"])
-		@timeField("filter-until", "until", "Until (UTC)", v.Filter.Until, v.Filter.Errors["until"])
+		@layout.FilterInput("from", "From (UTC)", "datetime-local", v.Filter.From, v.Filter.Errors["from"])
+		@layout.FilterInput("to", "Until (UTC)", "datetime-local", v.Filter.To, v.Filter.Errors["to"])
 		<button class="rounded border px-3 py-1 font-semibold" type="submit">Filter</button>
 	</form>
-}
-
-templ timeField(id, name, label, value, err string) {
-	<div class="flex flex-col gap-1">
-		<label for={ id } class="font-medium">{ label }</label>
-		<input
-			id={ id }
-			name={ name }
-			type="datetime-local"
-			value={ value }
-			class="rounded border border-border px-2 py-1"
-			if err != "" {
-				aria-invalid="true"
-				aria-describedby={ id + "-error" }
-			}
-		/>
-		if err != "" {
-			<span id={ id + "-error" } class="text-sm text-danger">{ err }</span>
-		}
-	</div>
 }
 
 templ results(v listView) {
@@ -118,8 +100,6 @@ templ results(v listView) {
 				</tbody>
 			</table>
 		}
-		if v.Next != "" {
-			<a class="self-start underline" href={ templ.SafeURL(Path + "?" + v.Next) }>Older messages</a>
-		}
 	}
+	@layout.Pager(v.Paging)
 }

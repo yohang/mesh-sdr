@@ -5,20 +5,20 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/yohang/mesh-sdr/internal/db"
+	"github.com/yohang/mesh-sdr/internal/decodes"
 	"github.com/yohang/mesh-sdr/internal/shared/audit"
 	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 	"github.com/yohang/mesh-sdr/internal/web/layout"
+	"github.com/yohang/mesh-sdr/internal/web/render"
 )
 
 // GalleryPath is the Files section (FIL-001).
@@ -33,18 +33,12 @@ const (
 	ActionBulkDelete = "file.delete_bulk"
 )
 
-// Renderer renders pages in the app shell (internal/web/render).
-type Renderer interface {
-	Page(w http.ResponseWriter, r *http.Request, status int, page layout.Page, content, fragment templ.Component)
-	Error(w http.ResponseWriter, r *http.Request, status int)
-}
-
 // GalleryDeps are the dependencies of the Files section.
 type GalleryDeps struct {
 	Repo   *Files
 	Tx     *db.DB
 	Audit  audit.Appender
-	Render Renderer
+	Render *render.Renderer
 	// Visibility returns the files the caller of ctx may see (listen
 	// policy, ADR 0026).
 	Visibility func(ctx context.Context) Access
@@ -82,19 +76,19 @@ func (g *Gallery) Routes(r chi.Router) {
 	for path, h := range map[string]http.HandlerFunc{GalleryPath: g.list, GalleryPath + "/{id}": g.detail} {
 		h := g.gate(h)
 		r.Get(path, h)
-		r.Head(path, h)
 	}
 
 	r.With(g.d.Operator).Post(GalleryPath+"/{id}/delete", g.delete)
 	r.With(g.d.Admin).Post(GalleryPath+"/delete", g.deleteMatching)
 }
 
-// gate sends a visitor who may see no file to the sign-in page.
+// gate sends a visitor to the sign-in page under the registered global
+// policy when no device is open to visitors.
 func (g *Gallery) gate(next http.HandlerFunc) http.HandlerFunc {
 	guarded := g.d.Listener(next)
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		if g.d.Visibility(r.Context()).Denied {
+		if g.d.Visibility(r.Context()).SignIn {
 			guarded.ServeHTTP(w, r)
 
 			return
@@ -190,9 +184,6 @@ func (f filterForm) query() url.Values {
 	return q
 }
 
-// dateTimeLocal is the value format of a datetime-local input.
-const dateTimeLocal = "2006-01-02T15:04"
-
 // parseFilter reads the filters of a query or form. Invalid values are
 // dropped from the filter and reported.
 func parseFilter(v url.Values) (filterForm, Filter) {
@@ -248,7 +239,7 @@ func parseFilter(v url.Values) (filterForm, Filter) {
 			continue
 		}
 
-		at, err := time.ParseInLocation(dateTimeLocal, t.value, time.UTC)
+		at, err := time.ParseInLocation(layout.DateTimeLocal, t.value, time.UTC)
 		if err != nil {
 			fail(t.name, "Enter a date and time (UTC).")
 
@@ -272,14 +263,14 @@ func parseFilter(v url.Values) (filterForm, Filter) {
 			continue
 		}
 
-		khz, err := strconv.ParseFloat(fr.value, 64)
-		if err != nil || khz <= 0 || khz > 1e9 || math.IsNaN(khz) {
+		hz, ok := render.ParseKHz(fr.value)
+		if !ok || hz <= 0 {
 			fail(fr.name, "Enter a frequency in kHz.")
 
 			continue
 		}
 
-		*fr.to = int64(math.Round(khz * 1000))
+		*fr.to = hz
 	}
 
 	if f.FreqMin > 0 && f.FreqMax > 0 && f.FreqMax < f.FreqMin {
@@ -336,25 +327,10 @@ type galleryView struct {
 	Devices       []deviceOption
 	Modes         []string
 	Files         []Entry
-	Page          int
-	More          bool
+	Paging        layout.Paging
 	Notice        string
 	Policy        string
 	CanBulkDelete bool
-}
-
-// pageURL returns the gallery URL of page n with the current filters.
-func (v galleryView) pageURL(n int) string {
-	q := v.Filter.query()
-	if n > 1 {
-		q.Set("page", strconv.Itoa(n))
-	}
-
-	if len(q) == 0 {
-		return GalleryPath
-	}
-
-	return GalleryPath + "?" + q.Encode()
 }
 
 // Notices shown after a redirect (?done=…).
@@ -366,10 +342,7 @@ func (g *Gallery) list(w http.ResponseWriter, r *http.Request) {
 	ff, f := parseFilter(q)
 	vis := g.d.Visibility(ctx)
 
-	page, err := strconv.Atoi(q.Get("page"))
-	if err != nil || page < 1 || page > 10_000 {
-		page = 1
-	}
+	page := render.PageOf(q)
 
 	list, err := g.d.Repo.List(ctx, f, vis, (page-1)*PageSize, PageSize+1)
 	if err != nil {
@@ -411,18 +384,24 @@ func (g *Gallery) list(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := galleryView{
-		Filter: ff, Devices: visible, Modes: modes, Files: list, Page: page, Policy: g.d.Policy().String(),
+		Filter: ff, Devices: visible, Modes: modes, Files: list, Policy: g.d.Policy().String(),
+		Paging: layout.Paging{
+			Label: "Pages of files", Prev: "Newer files", Next: "Older files", Path: GalleryPath, Query: ff.query(), Page: page,
+		},
 		Notice: notices[q.Get("done")], CanBulkDelete: g.d.CanBulkDelete(ctx),
 	}
 
 	if n := q.Get("deleted"); q.Get("done") == "bulk" && n != "" {
 		if c, err := strconv.ParseInt(n, 10, 64); err == nil && c >= 0 {
 			v.Notice = strconv.FormatInt(c, 10) + " files were deleted."
+			if c == 1 {
+				v.Notice = "1 file was deleted."
+			}
 		}
 	}
 
 	if len(list) > PageSize {
-		v.Files, v.More = list[:PageSize], true
+		v.Files, v.Paging.More = list[:PageSize], true
 	}
 
 	g.d.Render.Page(w, r, http.StatusOK, layout.Page{Title: "Files", Section: layout.SectionFiles}, galleryPage(v), nil)
@@ -501,7 +480,7 @@ func (g *Gallery) delete(w http.ResponseWriter, r *http.Request) {
 		g.d.Logger.ErrorContext(ctx, "delete a file", slog.String("file_id", id.String()), slog.Any("error", err))
 		g.d.Render.Error(w, r, http.StatusInternalServerError)
 	default:
-		redirect(w, r, GalleryPath+"?done=deleted")
+		render.Redirect(w, r, GalleryPath+"?done=deleted")
 	}
 }
 
@@ -511,10 +490,7 @@ const formBodyLimit = 8 << 10
 func (g *Gallery) deleteMatching(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	r.Body = http.MaxBytesReader(w, r.Body, formBodyLimit)
-	if err := r.ParseForm(); err != nil {
-		g.d.Render.Error(w, r, http.StatusBadRequest)
-
+	if !g.d.Render.ParseForm(w, r, formBodyLimit) {
 		return
 	}
 
@@ -538,20 +514,7 @@ func (g *Gallery) deleteMatching(w http.ResponseWriter, r *http.Request) {
 	q := ff.query()
 	q.Set("done", "bulk")
 	q.Set("deleted", strconv.FormatInt(n, 10))
-	redirect(w, r, GalleryPath+"?"+q.Encode())
-}
-
-// redirect sends a full-page redirect, for htmx (HX-Redirect) and plain
-// requests (303).
-func redirect(w http.ResponseWriter, r *http.Request, path string) {
-	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Redirect", path)
-		w.WriteHeader(http.StatusNoContent)
-
-		return
-	}
-
-	http.Redirect(w, r, path, http.StatusSeeOther)
+	render.Redirect(w, r, GalleryPath+"?"+q.Encode())
 }
 
 // WriteContent writes the content of a file Visible returned to w.
@@ -569,13 +532,6 @@ func (g *Gallery) Thumbnail(ctx context.Context, e Entry) ([]byte, error) {
 	return g.d.Repo.Thumbnail(ctx, e.ID)
 }
 
-// decodesPath is the Decodes page (FEATURE_SPEC §10.11).
-const decodesPath = "/decodes"
-
-// decodesTimeLayout is the time filter of the Decodes page (UTC, to the
-// minute).
-const decodesTimeLayout = "2006-01-02T15:04"
-
 // decodesURL links the decoded messages related to a file (FIL-007): the
 // messages of its device and mode during its reception, a minute around.
 func decodesURL(e Entry) string {
@@ -587,8 +543,8 @@ func decodesURL(e Entry) string {
 	q := url.Values{}
 	q.Set("mode", e.Mode)
 	q.Set("device", e.DeviceID)
-	q.Set("from", e.ReceivedStart.UTC().Add(-time.Minute).Format(decodesTimeLayout))
-	q.Set("until", end.UTC().Add(2*time.Minute).Format(decodesTimeLayout))
+	q.Set("from", e.ReceivedStart.UTC().Add(-time.Minute).Format(layout.DateTimeLocal))
+	q.Set("to", end.UTC().Add(2*time.Minute).Format(layout.DateTimeLocal))
 
-	return decodesPath + "?" + q.Encode()
+	return decodes.Path + "?" + q.Encode()
 }

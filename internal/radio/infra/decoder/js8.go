@@ -26,13 +26,11 @@ func js8Profiles(s Settings) []profile {
 		depth = 3
 	}
 
-	enabled := orDefault(s.JS8Profiles, DefaultJS8Profiles)
-
 	var out []profile
 
-	for _, name := range JS8Speeds {
+	for _, name := range js8SpeedOrder {
 		sp, ok := js8Speeds[name]
-		if !ok || !slices.Contains(enabled, name) {
+		if !ok || !slices.Contains(s.JS8Profiles, name) {
 			continue
 		}
 

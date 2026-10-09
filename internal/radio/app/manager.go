@@ -17,7 +17,6 @@ import (
 const (
 	DefaultLinger      = 10 * time.Second
 	DefaultAutoRecover = 15 * time.Minute
-	ProbeTimeout       = 5 * time.Second
 )
 
 // Options configure a Manager.
@@ -36,8 +35,8 @@ type Options struct {
 	MaxDemods int
 }
 
-// DefaultMaxDemods is the interim node-wide demodulator cap (ADR 0019).
-const DefaultMaxDemods = 32
+// DefaultNodeMaxDemods is the interim node-wide demodulator cap (ADR 0019).
+const DefaultNodeMaxDemods = 32
 
 // Manager runs the devices of the node, one goroutine each.
 type Manager struct {
@@ -60,7 +59,7 @@ func NewManager(o Options) (*Manager, error) {
 	}
 
 	if o.MaxDemods <= 0 {
-		o.MaxDemods = DefaultMaxDemods
+		o.MaxDemods = DefaultNodeMaxDemods
 	}
 
 	m := &Manager{o: o, runners: map[string]*runner{}}
@@ -431,14 +430,11 @@ func (r *runner) probe(ctx context.Context) {
 		return
 	}
 
-	pctx, cancel := context.WithTimeout(ctx, ProbeTimeout)
-	defer cancel()
-
 	r.mu.Lock()
 	p := r.dev.Params()
 	r.mu.Unlock()
 
-	if err := r.m.o.Sources.Probe(pctx, p); err != nil {
+	if err := r.m.o.Sources.Probe(ctx, p); err != nil {
 		r.log.Warn("device unavailable: its tool cannot run", slog.Any("error", err))
 		r.mu.Lock()
 		_ = r.dev.Transition(domain.StateUnavailable, "tool_missing", 0)

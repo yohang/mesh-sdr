@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/identity/domain"
 )
 
@@ -49,18 +50,12 @@ func NewSessionReaper(sessions domain.SessionRepository, retention Retention, no
 
 // Reap deletes every session that ended more than the session retention
 // ago and returns how many were deleted.
-func (r *SessionReaper) Reap(ctx context.Context) (int, error) {
+func (r *SessionReaper) Reap(ctx context.Context) (int64, error) {
 	cutoff := r.now().Add(-r.retention.SessionRetention())
-	total := 0
 
-	for {
-		n, err := r.sessions.DeleteEndedBefore(ctx, cutoff, sessionReapBatchSz)
-		total += n
-
-		if err != nil || n < sessionReapBatchSz {
-			return total, err
-		}
-	}
+	return db.Batched(ctx, sessionReapBatchSz, func(ctx context.Context, batch int) (int, error) {
+		return r.sessions.DeleteEndedBefore(ctx, cutoff, batch)
+	})
 }
 
 // Job names and periods (TECHNICAL_SPEC §7.3 "Retention jobs").
@@ -76,11 +71,7 @@ const (
 func (r *SessionReaper) Name() string { return JobSessionsReap }
 
 // Run implements the jobs scheduler's Job.
-func (r *SessionReaper) Run(ctx context.Context) (int64, error) {
-	n, err := r.Reap(ctx)
-
-	return int64(n), err
-}
+func (r *SessionReaper) Run(ctx context.Context) (int64, error) { return r.Reap(ctx) }
 
 // ActionRetentionPurge records a purge of the audit log by its retention
 // job.
@@ -115,21 +106,9 @@ func (p *AuditPurger) Run(ctx context.Context) (int64, error) {
 	retention := p.retention.AuditRetention()
 	cutoff := p.now().Add(-retention)
 
-	var (
-		total int64
-		err   error
-	)
-
-	for {
-		var n int
-
-		n, err = p.audit.DeleteBefore(ctx, cutoff, auditPurgeBatch)
-		total += int64(n)
-
-		if err != nil || n < auditPurgeBatch {
-			break
-		}
-	}
+	total, err := db.Batched(ctx, auditPurgeBatch, func(ctx context.Context, batch int) (int, error) {
+		return p.audit.DeleteBefore(ctx, cutoff, batch)
+	})
 
 	if total == 0 {
 		return 0, err
