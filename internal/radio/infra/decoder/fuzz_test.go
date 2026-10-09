@@ -80,3 +80,30 @@ func TestJSCLongContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func FuzzParseAIVDM(f *testing.F) {
+	for _, s := range []string{
+		"!AIVDM,1,1,,A,13HOI:001swcL5@KcnL9s7tt0000,0*48",
+		nmea("!AIVDM,1,1,,A,55?MbV02;H;s<HtKR20EHE:0@T4@Dn2222222216L961O5Gf0NSQEp6ClRp888888888880,2"),
+		nmea("!AIVDM,1,1,,A,H5NJ;PP005l4ot5Isbl03wsUkP06,0"),
+		nmea("!AIVDM,1,1,,A,K5NJ;PP005l4ot5Isbl0,0"),
+		nmea("!AIVDM,1,1,,A,0,5"),
+		"!AIVDM,1,1,,A,,0*",
+	} {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(_ *testing.T, s string) {
+		_, _ = parseAIVDM(s)
+	})
+}
+
+func FuzzParseDSC(f *testing.F) {
+	for _, s := range []string{dscSelcall, dscDistress, dscError, dscBadECC, `{ "format": "x", "loc": "99.999S999.999E" }`, "{"} {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(_ *testing.T, line string) {
+		_, _ = parseDSC(line, time.Time{}, true)
+	})
+}
