@@ -36,6 +36,14 @@ type Server struct {
 	StatusHandlers
 	BookmarkHandlers
 	FileHandlers
+	MapHandlers
+}
+
+// MapHandlers serve GET /map/features and GET /map/config; the map
+// features module implements them (internal/mapfeatures).
+type MapHandlers interface {
+	GetMapFeatures(ctx context.Context, req GetMapFeaturesRequestObject) (GetMapFeaturesResponseObject, error)
+	GetMapConfig(ctx context.Context, req GetMapConfigRequestObject) (GetMapConfigResponseObject, error)
 }
 
 // BookmarkHandlers serve GET /bookmarks and GET /bandplan; the bookmarks

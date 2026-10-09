@@ -27,6 +27,7 @@ import (
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
 	identitysqlite "github.com/yohang/mesh-sdr/internal/identity/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/jobs"
+	"github.com/yohang/mesh-sdr/internal/mapfeatures"
 	"github.com/yohang/mesh-sdr/internal/presets"
 	"github.com/yohang/mesh-sdr/internal/schedules"
 	"github.com/yohang/mesh-sdr/internal/settings"
@@ -115,12 +116,18 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	// Decoded messages (DEC-047): stored from the control channels, shown
 	// on the Decodes page.
+	// Map features (MAP-002): projected from the decodes at ingest.
+	mapf := newMap(mapDeps{
+		adapter: adapter, broker: h.broker, policies: h.listen, identity: h.idm.HTTP, features: h.features, store: settingsStore,
+		now: now, logger: logger,
+	})
+
 	decoded := newDecodes(decodesDeps{
-		adapter: adapter, grid: g, broker: h.broker, identity: h.idm.HTTP, features: h.features, store: settingsStore,
+		adapter: adapter, grid: g, broker: h.broker, identity: h.idm.HTTP, features: h.features, mapf: mapf, store: settingsStore,
 		render: h.shell.Renderer, now: now, logger: logger,
 	})
 
-	scheduler, retention, err := newJobs(adapter, g.connRepo, h.idm, h.sch, decoded, settingsStore, g.audit, filesRetention, filesPolicy, logger)
+	scheduler, retention, err := newJobs(adapter, g.connRepo, h.idm, h.sch, decoded, mapf, settingsStore, g.audit, filesRetention, filesPolicy, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jobs: %w", err)
 	}
@@ -136,6 +143,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 
 	router, err := h.newRouter(hubPages{
 		effective: effective, retention: retention, gallery: gallery, bookmarks: bm, events: eventsModule, decodes: decoded,
+		mapf: mapf,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -281,6 +289,7 @@ type hubPages struct {
 	bookmarks *bookmarks.Module
 	events    *events.Module
 	decodes   *decodes.Module
+	mapf      *mapfeatures.Module
 }
 
 // newAPI builds the /api/v1 handler, and the handlers of the status alias.
@@ -298,6 +307,7 @@ func (h *hubModules) newAPI(p hubPages) (http.Handler, api.StatusHandlers, error
 		FeatureHandlers:  api.NewFeatureHandlers(h.idm.HTTP, h.features),
 		BookmarkHandlers: p.bookmarks,
 		FileHandlers:     api.NewFileHandlers(p.gallery),
+		MapHandlers:      p.mapf,
 	}, h.idm.HTTP, h.cfg.Gateway.MaxBody.Bytes(), component(h.logger, "http.api"))
 	if err != nil {
 		return nil, api.StatusHandlers{}, fmt.Errorf("api: %w", err)

@@ -62,6 +62,10 @@ type Deps struct {
 	// Published, when set, is told every stored message after its commit
 	// (decode.new).
 	Published func(ctx context.Context, m Message)
+	// Stored, when set, is told every stored message inside the ingestion
+	// transaction (the map projection, TECHNICAL_SPEC §7.3 "Transactional
+	// outbox" rule 1); its error fails the batch.
+	Stored func(ctx context.Context, m Message) error
 	// DeviceNode returns the node of a device of the registry (ok false:
 	// unknown device). A node stores messages of its own devices only.
 	DeviceNode func(ctx context.Context, device string) (node string, ok bool, err error)
