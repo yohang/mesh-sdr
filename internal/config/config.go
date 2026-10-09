@@ -225,6 +225,7 @@ type DeviceConfig struct {
 	MaxDemods         int       `toml:"max_demods" env:"-" jsonschema:"minimum=0,maximum=1000,description=Demodulators the device runs at once (0: interim default 16)."`
 	AutoRecover       *bool     `toml:"auto_recover" env:"-" jsonschema:"description=Restart a failed device every 15 minutes (default true)."`
 	Driver            Driver    `toml:"driver" env:"-" jsonschema:"description=Connector settings (rtl_sdr\\, rtl_tcp)."`
+	GPS               GeoPoint  `toml:"gps" env:"-" jsonschema:"description=Device position in decimal degrees (WGS 84)\\, when its antenna is not at the node position: the map shows the device on its own (MAP-007). Unset: the node position."`
 }
 
 // Driver is the [devices.<id>.driver] table (§7.4 example).
@@ -289,6 +290,9 @@ type NodeSection struct {
 	IPCPortRange   string `toml:"ipc_port_range" env:"IPC_PORT_RANGE" jsonschema:"pattern=^[0-9]{4\\,5}-[0-9]{4\\,5}$,description=Loopback ports for the connector IQ and control sockets (lo-hi)."`
 	MaxDemods      int    `toml:"max_demods" env:"MAX_DEMODS" jsonschema:"minimum=1,maximum=1000,description=Demodulators the node runs at once\\, all devices together (interim default 32)."`
 	WSNotSentLowat Size   `toml:"ws_notsent_lowat" env:"WS_NOTSENT_LOWAT" jsonschema:"description=TCP_NOTSENT_LOWAT of the node API sockets: bounds the kernel send buffering of media WebSockets (ADR 0004)."`
+	// GPS is the node location (MAP-007), reported to the hub with the
+	// devices; unset, the map places the node at the station position.
+	GPS GeoPoint `toml:"gps" env:"GPS" jsonschema:"description=Node position in decimal degrees (WGS 84)\\, shown on the map with its devices (MAP-007). Unset: the station position (receiver.gps). In the env: \"<lat>\\,<lon>\"."`
 }
 
 // NodeDecoders is the [decoders] table of the node: its decoder resources
