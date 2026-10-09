@@ -112,6 +112,26 @@ func TestAISArgs(t *testing.T) {
 	}
 }
 
+// TestAISPosition: 181° and 91° (not available) give no position, the
+// limits do.
+func TestAISPosition(t *testing.T) {
+	for _, tc := range []struct {
+		lon, lat, per int
+		ok            bool
+	}{
+		{181 * 600_000, 91 * 600_000, 600_000, false},
+		{181 * 600_000, 0, 600_000, false},
+		{0, 91 * 600_000, 600_000, false},
+		{181 * 600, 91 * 600, 600, false},
+		{-180 * 600_000, 90 * 600_000, 600_000, true},
+		{180 * 600, -90 * 600, 600, true},
+	} {
+		if lon, lat := position(tc.lon, tc.lat, tc.per); (lon != nil && lat != nil) != tc.ok || (lon == nil) != (lat == nil) {
+			t.Errorf("position(%d, %d, %d) = %v, %v", tc.lon, tc.lat, tc.per, lon, lat)
+		}
+	}
+}
+
 // aisBurst returns the channel bits (NRZI, ±1) of an AIS burst: training
 // sequence, flag, the message bytes (MSB first in the message, each byte
 // sent LSB first) and their FCS, bit-stuffed, flag.
