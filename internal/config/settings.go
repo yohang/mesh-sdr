@@ -189,14 +189,13 @@ type SettingsWSJTDepths struct {
 // keyless tile providers the browser loads directly.
 var BaseLayers = []string{
 	"osm", "opentopomap", "esri_world_imagery", "esri_world_street_map", "esri_world_topo_map",
-	"cartodb_positron", "cartodb_dark_matter", "cartodb_voyager",
 }
 
 // SettingsMap is the [settings.map] table (MAP-004, MAP-007, MAP-011,
 // MAP-012, MAP-013): Admin › Map.
 type SettingsMap struct {
-	BaseLayers       []string `toml:"base_layers" env:"BASE_LAYERS" jsonschema:"minItems=1,maxItems=8,enum=osm,enum=opentopomap,enum=esri_world_imagery,enum=esri_world_street_map,enum=esri_world_topo_map,enum=cartodb_positron,enum=cartodb_dark_matter,enum=cartodb_voyager" jsonschema_extras:"x-public=true,x-label=Base layers" jsonschema_description:"Base layers offered on the map, one per line: osm, opentopomap, esri_world_imagery, esri_world_street_map, esri_world_topo_map, cartodb_positron, cartodb_dark_matter or cartodb_voyager."`
-	DefaultBaseLayer string   `toml:"default_base_layer" env:"DEFAULT_BASE_LAYER" jsonschema:"enum=osm,enum=opentopomap,enum=esri_world_imagery,enum=esri_world_street_map,enum=esri_world_topo_map,enum=cartodb_positron,enum=cartodb_dark_matter,enum=cartodb_voyager" jsonschema_extras:"x-public=true,x-label=Default base layer,x-enum-labels=OpenStreetMap,x-enum-labels=OpenTopoMap,x-enum-labels=Esri World Imagery,x-enum-labels=Esri World Street Map,x-enum-labels=Esri World Topo Map,x-enum-labels=CARTO Positron,x-enum-labels=CARTO Dark Matter,x-enum-labels=CARTO Voyager" jsonschema_description:"Base layer the map opens with. Must be one of the offered base layers."`
+	BaseLayers       []string `toml:"base_layers" env:"BASE_LAYERS" jsonschema:"minItems=1,maxItems=5,enum=osm,enum=opentopomap,enum=esri_world_imagery,enum=esri_world_street_map,enum=esri_world_topo_map" jsonschema_extras:"x-public=true,x-label=Base layers" jsonschema_description:"Base layers offered on the map, one per line: osm, opentopomap, esri_world_imagery, esri_world_street_map or esri_world_topo_map."`
+	DefaultBaseLayer string   `toml:"default_base_layer" env:"DEFAULT_BASE_LAYER" jsonschema:"enum=osm,enum=opentopomap,enum=esri_world_imagery,enum=esri_world_street_map,enum=esri_world_topo_map" jsonschema_extras:"x-public=true,x-label=Default base layer,x-enum-labels=OpenStreetMap,x-enum-labels=OpenTopoMap,x-enum-labels=Esri World Imagery,x-enum-labels=Esri World Street Map,x-enum-labels=Esri World Topo Map" jsonschema_description:"Base layer the map opens with. Must be one of the offered base layers."`
 	// PositionRetentionS is the lifetime of a map position without a TTL
 	// of its own (MAP-012).
 	PositionRetentionS int `toml:"position_retention_s" env:"POSITION_RETENTION_S" jsonschema:"minimum=60,maximum=604800" jsonschema_extras:"x-public=true,x-label=Position lifetime (s)" jsonschema_description:"A position, a locator or a station heard again restarts its lifetime; without a new report it leaves the map after this many seconds (60 to 604800)."`

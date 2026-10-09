@@ -265,9 +265,8 @@ trusted_proxies = []
 # Map (Admin › Map): base layers, lifetimes and report filtering.
 [settings.map]
 # Base layers offered: osm, opentopomap, esri_world_imagery,
-# esri_world_street_map, esri_world_topo_map, cartodb_positron,
-# cartodb_dark_matter, cartodb_voyager (default: all of them).
-# base_layers = ["osm", "opentopomap", "cartodb_positron"]
+# esri_world_street_map, esri_world_topo_map (default: all of them).
+# base_layers = ["osm", "opentopomap", "esri_world_imagery"]
 # default_base_layer = "osm"             # one of base_layers
 # position_retention_s = 7200            # positions and locators leave the map after this long (60..604800 s)
 # max_calls = 5                          # call lines kept (0..100; 0: none)

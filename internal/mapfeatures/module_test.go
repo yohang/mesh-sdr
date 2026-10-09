@@ -535,8 +535,8 @@ func TestLayers(t *testing.T) {
 		}
 	}
 
-	got := Layers([]string{"cartodb_voyager", "nope", "osm", "cartodb_voyager"})
-	if len(got) != 2 || got[0].ID != "cartodb_voyager" || got[1].ID != "osm" {
+	got := Layers([]string{"esri_world_imagery", "cartodb_voyager", "osm", "esri_world_imagery"})
+	if len(got) != 2 || got[0].ID != "esri_world_imagery" || got[1].ID != "osm" {
 		t.Errorf("layers %+v", got)
 	}
 
