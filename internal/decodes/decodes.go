@@ -69,6 +69,9 @@ type Deps struct {
 	// DeviceNode returns the node of a device of the registry (ok false:
 	// unknown device). A node stores messages of its own devices only.
 	DeviceNode func(ctx context.Context, device string) (node string, ok bool, err error)
+	// MapLink, when set, returns the Map link of a message (MAP-016:
+	// /map?callsign=…), "" when it locates nothing.
+	MapLink func(m Message) string
 	// Modes are the digital modes of the catalogue (the mode filter).
 	Modes []Mode
 	// Dedup returns the duplicate key rounding of a mode: its frequency

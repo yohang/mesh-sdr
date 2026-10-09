@@ -86,6 +86,9 @@ templ results(v listView) {
 									<span aria-hidden="true">…</span>
 									<span class="sr-only">(continues)</span>
 								}
+								if link := v.mapLink(m.Message); link != "" {
+									<a href={ templ.SafeURL(link) } class="block font-sans text-sm">Show on the map</a>
+								}
 								if len(m.Calls) > 0 {
 									<span class="block font-sans text-sm text-fg-muted">
 										if m.Frames > 1 {

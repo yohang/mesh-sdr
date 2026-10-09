@@ -2,6 +2,7 @@ package mapfeatures
 
 import (
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -58,4 +59,16 @@ func (m *Module) page(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.d.Render.Page(w, r, http.StatusOK, layout.Page{Title: "Map", Section: layout.SectionMap}, mapPage(v), nil)
+}
+
+// Link is the Map link of a decoded message (MAP-016): /map?callsign=<the
+// station it locates>, "" when it puts nothing on the map.
+func Link(d Decode) string {
+	for _, r := range project(d, Settings{}).reports {
+		if f := r.feature; f.Kind == KindAPRS || f.Kind == KindLocator {
+			return Path + "?" + url.Values{"callsign": {f.Subject}}.Encode()
+		}
+	}
+
+	return ""
 }
