@@ -173,7 +173,7 @@ const helpPath = "/about";
 // section.
 async function checkShellControls(url, mode, scheme, name, viewport) {
   const where = `shell controls [mode ${mode}, os ${scheme}, ${name}]`;
-  const context = await browser.newContext({ baseURL: url, colorScheme: scheme, viewport });
+  const context = await newContext({ baseURL: url, colorScheme: scheme, viewport });
   await signIn(context, where);
 
   const page = await context.newPage();
@@ -210,12 +210,33 @@ async function checkShellControls(url, mode, scheme, name, viewport) {
 
 const browser = await chromium.launch();
 
+// A transparent 1×1 PNG: the map tiles of the third-party providers the
+// CSP allows (MAP-004) are answered locally, so the check needs no network
+// and never loads a provider's tiles. A tile the CSP blocks never reaches
+// this route and still fails the run (console message).
+const blankPNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+// newContext opens a browser context whose requests to other origins than
+// the hub get the blank tile.
+async function newContext(options) {
+  const context = await browser.newContext(options);
+  const hub = new URL(options.baseURL).origin;
+  await context.route(
+    (u) => u.origin !== hub,
+    (route) => route.fulfill({ status: 200, contentType: "image/png", body: blankPNG }),
+  );
+  return context;
+}
+
 for (const { mode, url } of hubs) {
   await waitForHub(url);
 
   for (const scheme of schemes) {
     for (const [name, viewport] of Object.entries(viewports)) {
-      const context = await browser.newContext({ baseURL: url, colorScheme: scheme, viewport });
+      const context = await newContext({ baseURL: url, colorScheme: scheme, viewport });
 
       let signedIn = false;
 
@@ -247,7 +268,7 @@ for (const { mode, url } of hubs) {
       // announces the new page; the swapped page must pass axe too. It runs
       // in a fresh anonymous context.
       await context.close();
-      const navContext = await browser.newContext({ baseURL: url, colorScheme: scheme, viewport });
+      const navContext = await newContext({ baseURL: url, colorScheme: scheme, viewport });
       const where = `/ → /policy boosted [mode ${mode}, os ${scheme}, ${name}]`;
       const page = await navContext.newPage();
       watch(page, where);
