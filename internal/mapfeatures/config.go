@@ -45,6 +45,16 @@ var layers = []Layer{
 	},
 }
 
+// Overlays are the tile overlays of the map (MAP-005): keyless, loaded by
+// the browser directly and offered whatever the base layers. The Maidenhead
+// grid and the day/night terminator are drawn by the browser.
+var Overlays = []Layer{
+	{
+		ID: "openseamap", Name: "OpenSeaMap seamarks", URL: "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
+		Attribution: "Seamarks © OpenSeaMap contributors", MaxZoom: 18,
+	},
+}
+
 // Layers returns the known base layers of ids, in the order of ids; unknown
 // and repeated ids are skipped.
 func Layers(ids []string) []Layer {
@@ -60,13 +70,13 @@ func Layers(ids []string) []Layer {
 	return out
 }
 
-// TileOrigins returns the HTTPS origins the browser loads the tiles of the
-// known base layers of ids from (the CSP img-src, MAP-004): one per
-// subdomain of a {s} template.
-func TileOrigins(ids []string) []string {
+// tileOrigins returns the HTTPS origins the browser loads the tiles of
+// layers from (the CSP img-src, MAP-004): one per subdomain of a {s}
+// template.
+func tileOrigins(layers []Layer) []string {
 	var out []string
 
-	for _, l := range Layers(ids) {
+	for _, l := range layers {
 		rest, ok := strings.CutPrefix(l.URL, "https://")
 		if !ok {
 			continue

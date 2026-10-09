@@ -81,19 +81,13 @@ func (m *Module) GetMapConfig(ctx context.Context, _ api.GetMapConfigRequestObje
 
 	c := m.d.Config()
 	out := api.GetMapConfig200JSONResponse{
-		StationName: c.StationName, DefaultBaseLayer: c.DefaultBaseLayer, BaseLayers: []api.MapLayer{},
+		StationName: c.StationName, DefaultBaseLayer: c.DefaultBaseLayer, BaseLayers: apiLayers(Layers(c.BaseLayers)), Overlays: apiLayers(Overlays),
 		PositionRetentionS: c.PositionRetentionS, MaxCalls: c.MaxCalls, CallRetentionS: c.CallRetentionS,
 		Links: api.MapLinks{
 			CallsignUrl: optional(c.Links.Callsign), VesselUrl: optional(c.Links.Vessel), FlightUrl: optional(c.Links.Flight),
 			ModesUrl: optional(c.Links.ModeS), SondeUrl: optional(c.Links.Sonde),
 		},
 		Receivers: []api.MapReceiver{},
-	}
-
-	for _, l := range Layers(c.BaseLayers) {
-		out.BaseLayers = append(out.BaseLayers, api.MapLayer{
-			Id: l.ID, Name: l.Name, Url: l.URL, Subdomains: optional(l.Subdomains), Attribution: l.Attribution, MaxZoom: l.MaxZoom,
-		})
 	}
 
 	for _, r := range Receivers(devices, c.Station, c.StationName, c.PreciseReceivers) {
@@ -110,6 +104,18 @@ func (m *Module) GetMapConfig(ctx context.Context, _ api.GetMapConfigRequestObje
 	}
 
 	return out, nil
+}
+
+// apiLayers is the API view of tile layers.
+func apiLayers(layers []Layer) []api.MapLayer {
+	out := make([]api.MapLayer, 0, len(layers))
+	for _, l := range layers {
+		out = append(out, api.MapLayer{
+			Id: l.ID, Name: l.Name, Url: l.URL, Subdomains: optional(l.Subdomains), Attribution: l.Attribution, MaxZoom: l.MaxZoom,
+		})
+	}
+
+	return out
 }
 
 func optional(s string) *string {

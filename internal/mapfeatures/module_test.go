@@ -545,7 +545,8 @@ func TestLayers(t *testing.T) {
 	}
 }
 
-// GET /map/config carries the layers, lifetimes, links and receivers.
+// GET /map/config carries the layers, overlays, lifetimes, links and
+// receivers.
 func TestGetMapConfig(t *testing.T) {
 	e := newEnv(t)
 	e.config = ConfigSettings{
@@ -561,7 +562,7 @@ func TestGetMapConfig(t *testing.T) {
 	c := res.(api.GetMapConfig200JSONResponse)
 	if c.StationName != "Lille" || len(c.BaseLayers) != 2 || *c.BaseLayers[1].Subdomains != "abc" || c.DefaultBaseLayer != "osm" ||
 		c.PositionRetentionS != 7200 || c.MaxCalls != 5 || c.CallRetentionS != 300 || *c.Links.CallsignUrl != "https://www.qrzcq.com/call/{}" ||
-		c.Links.VesselUrl != nil || len(c.Receivers) != 1 || c.Receivers[0].Locator != "JO10" || c.Receivers[0].Precise ||
+		c.Links.VesselUrl != nil || len(c.Overlays) != 1 || c.Overlays[0].Id != "openseamap" || len(c.Receivers) != 1 || c.Receivers[0].Locator != "JO10" || c.Receivers[0].Precise ||
 		len(c.Receivers[0].Devices) != 1 || c.Receivers[0].Devices[0].Id != "vhf" {
 		t.Errorf("config %+v", c)
 	}

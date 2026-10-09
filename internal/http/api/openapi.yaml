@@ -414,11 +414,11 @@ paths:
     get:
       operationId: getMapConfig
       x-meshsdr-access: anonymous
-      summary: Map configuration (MAP-004, MAP-007, MAP-011, MAP-012, MAP-015)
+      summary: Map configuration (MAP-004, MAP-005, MAP-007, MAP-011, MAP-012, MAP-015)
       description: |
         What the map island needs besides the features: the offered base
         layers (keyless tile URLs the browser loads directly) and the
-        default one, the lifetimes of positions and call lines, the most
+        default one, the tile overlays, the lifetimes of positions and call lines, the most
         call lines shown, the lookup link templates (one `{}` placeholder,
         to be replaced by the URL-encoded value), and the receivers: one
         marker per node position, per device with a position of its own,
@@ -948,12 +948,17 @@ components:
     MapConfig:
       type: object
       additionalProperties: false
-      required: [station_name, base_layers, default_base_layer, position_retention_s, max_calls, call_retention_s, links, receivers]
+      required: [station_name, base_layers, overlays, default_base_layer, position_retention_s, max_calls, call_retention_s, links, receivers]
       properties:
         station_name:
           type: string
         base_layers:
           type: array
+          items:
+            $ref: "#/components/schemas/MapLayer"
+        overlays:
+          type: array
+          description: Tile overlays the visitor may turn on (MAP-005), over any base layer.
           items:
             $ref: "#/components/schemas/MapLayer"
         default_base_layer:

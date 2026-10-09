@@ -41,13 +41,15 @@ func (m *Module) Routes(r chi.Router) {
 }
 
 // ImageSources implements internal/http.ImageSources: the origins of the
-// tiles of the offered base layers, for the CSP img-src (MAP-004).
+// tiles of the offered base layers and of the overlays, for the CSP img-src
+// (MAP-004, MAP-005).
 func (m *Module) ImageSources() []string {
-	if m.d.Config == nil {
-		return nil
+	var ids []string
+	if m.d.Config != nil {
+		ids = m.d.Config().BaseLayers
 	}
 
-	return TileOrigins(m.d.Config().BaseLayers)
+	return tileOrigins(append(Layers(ids), Overlays...))
 }
 
 // page serves the Map page (FEATURE_SPEC §10.10): the toolbar, the map
