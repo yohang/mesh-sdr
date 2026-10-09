@@ -38,6 +38,9 @@ type Settings struct {
 	FFTSize int
 	// ShowCW: the CW decoder also prints dots and dashes (cw_showcw).
 	ShowCW bool
+	// DSCShowErrors keeps the DSC error lines: runs of symbols that are
+	// not a call (dsc_show_errors).
+	DSCShowErrors bool
 	// FAX are the FAX settings (fax_*); a zero LPM takes defaultFAX.
 	FAX FAXSettings
 	// WSJTDepth is wsjt_decoding_depth (1 to 3, default 3).
@@ -148,7 +151,7 @@ func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderR
 	switch spec.Mode.Family {
 	case domain.FamilyImage:
 		return r.startImage(spec, ev)
-	case domain.FamilyTextModes:
+	case domain.FamilyTextModes, domain.FamilyDSC:
 		return r.startText(spec, ev)
 	case domain.FamilyWSJT, domain.FamilyJS8:
 		return r.startSlots(spec, ev)
