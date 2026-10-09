@@ -132,6 +132,20 @@ func TestAircraftMerge(t *testing.T) {
 	if _, ok := e.get(t, "aircraft:TS628@vhf"); ok {
 		t.Error("a flight feature next to its aircraft")
 	}
+
+	// A known aircraft whose record brings a new flight takes the
+	// aircraft of that flight.
+	e.ingest(t, aircraftAt(5*time.Second, "3C6586", map[string]any{"icao": "3C6586", "lat": 52.0, "lon": 4.0}))
+	e.ingest(t, aircraftAt(6*time.Second, "DLH9LF acars", map[string]any{"flight": "DLH9LF", "lat": 52.1, "lon": 4.1}))
+	e.ingest(t, aircraftAt(7*time.Second, "3C6586 DLH9LF", map[string]any{"icao": "3C6586", "flight": "DLH9LF"}))
+
+	if _, ok := e.get(t, "aircraft:DLH9LF@vhf"); ok {
+		t.Error("a flight feature next to its known aircraft")
+	}
+
+	if f, _ := e.get(t, "aircraft:3C6586@vhf"); f.Details["flight"] != "DLH9LF" || len(aircraftLog(f.Details["log"])) != 3 {
+		t.Errorf("known aircraft not merged: %+v", f.Details)
+	}
 }
 
 // Untrusted values are validated: an unknown aircraft, junk text and

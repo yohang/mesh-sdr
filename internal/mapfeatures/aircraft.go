@@ -154,15 +154,17 @@ func (m *Module) ingestAircraft(ctx context.Context, d Decode, s Settings, now t
 		return nil
 	}
 
-	others, err := m.repo.OfKind(ctx, d.DeviceID, KindAircraft)
-	if err != nil {
-		return err
-	}
+	var others []Feature
 
 	subject := r.icao
 	if subject == "" {
 		// Without an address: the device's aircraft of the same tail, else
 		// flight, else a new one keyed by them.
+		var err error
+		if others, err = m.repo.OfKind(ctx, d.DeviceID, KindAircraft); err != nil {
+			return err
+		}
+
 		subject = matchAircraft(others, "registration", r.tail)
 		if subject == "" {
 			subject = matchAircraft(others, "flight", r.flight)
@@ -189,10 +191,17 @@ func (m *Module) ingestAircraft(ctx context.Context, d Decode, s Settings, now t
 	}
 
 	// An aircraft known by its tail or flight only moves under its
-	// address: its log comes along.
+	// address: its log comes along. Such an aircraft can only exist while
+	// the addressed one lacks that tail or flight (else it would have
+	// joined it): the device's aircraft are read only then, not on every
+	// record of a known aircraft.
 	var merged []Feature
 
-	if r.icao != "" {
+	if r.icao != "" && ((r.tail != "" && prev.Details["registration"] != r.tail) || (r.flight != "" && prev.Details["flight"] != r.flight)) {
+		if others, err = m.repo.OfKind(ctx, d.DeviceID, KindAircraft); err != nil {
+			return err
+		}
+
 		for _, o := range others {
 			if o.Key != key && o.Details["icao"] == nil &&
 				((r.tail != "" && o.Details["registration"] == r.tail) || (r.flight != "" && o.Details["flight"] == r.flight)) {
