@@ -119,7 +119,7 @@ func projectAPRS(d Decode, s Settings) projection {
 		return projection{}
 	}
 
-	key := string(KindAPRS) + ":" + subject
+	key := KeyOf(KindAPRS, subject, d.DeviceID)
 
 	if (p.Type == "object" || p.Type == "item") && p.Live != nil && !*p.Live {
 		return projection{kills: []string{key}}
@@ -161,7 +161,7 @@ func projectAPRS(d Decode, s Settings) projection {
 	}
 
 	f := Feature{
-		Key: key, Kind: KindAPRS, Source: SourceDecode, DeviceID: d.DeviceID, Lat: &lat, Lon: &lon,
+		Key: key, Kind: KindAPRS, Subject: subject, Source: SourceDecode, DeviceID: d.DeviceID, Lat: &lat, Lon: &lon,
 		Geometry: Geometry{Type: GeometryPoint, Lat: &lat, Lon: &lon}, Details: details,
 		UpdatedAt: d.At, ExpiresAt: d.At.Add(s.PositionRetention),
 	}
@@ -295,20 +295,20 @@ func locatorFeature(d Decode, s Settings, call, locator string) (Feature, bool) 
 	}
 
 	return Feature{
-		Key: string(KindLocator) + ":" + call, Kind: KindLocator, Source: SourceDecode, DeviceID: d.DeviceID, Lat: &lat, Lon: &lon,
+		Key: KeyOf(KindLocator, call, d.DeviceID), Kind: KindLocator, Subject: call, Source: SourceDecode, DeviceID: d.DeviceID, Lat: &lat, Lon: &lon,
 		Geometry: Geometry{Type: GeometryLocator, Locator: sq.Locator}, Details: details,
 		UpdatedAt: d.At, ExpiresAt: d.At.Add(s.PositionRetention),
 	}, true
 }
 
-// callKey is the key of the call line between two stations, whichever
-// called.
-func callKey(a, b string) string {
+// callSubject is the subject of the call line between two stations,
+// whichever called.
+func callSubject(a, b string) string {
 	if b < a {
 		a, b = b, a
 	}
 
-	return string(KindCall) + ":" + a + ">" + b
+	return a + ">" + b
 }
 
 func validPosition(lat, lon float64) bool {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"testing"
@@ -125,13 +126,13 @@ func TestIngestPublishesAfterCommit(t *testing.T) {
 
 	e.m.Flush(context.Background(), "n1")
 
-	if got := describe(e.take()); !slices.Equal(got, []string{"upsert aprs:F4ABC-9"}) {
+	if got := describe(e.take()); !slices.Equal(got, []string{"upsert aprs:F4ABC-9@vhf"}) {
 		t.Errorf("published %v", got)
 	}
 
 	e.ingest(t, aprsAt(t0.Add(time.Minute), "F4ABC-9", 50.1, 3), aprsAt(t0.Add(2*time.Minute), "F4ABC-9", 50.1, 3))
 
-	f, ok := e.get(t, "aprs:F4ABC-9")
+	f, ok := e.get(t, "aprs:F4ABC-9@vhf")
 	if !ok || *f.Lat != 50.1 || len(f.Geometry.Track) != 1 || f.Geometry.Track[0] != (LatLon{Lat: 50, Lon: 3}) ||
 		!f.ExpiresAt.Equal(t0.Add(2*time.Minute+2*time.Hour)) {
 		t.Errorf("feature %+v", f)
@@ -150,7 +151,7 @@ func TestIngestPublishesAfterCommit(t *testing.T) {
 	e.m.Discard("n1")
 	e.m.Flush(context.Background(), "n1")
 
-	if _, ok := e.get(t, "aprs:F5XYZ"); ok || len(e.take()) != 0 {
+	if _, ok := e.get(t, "aprs:F5XYZ@vhf"); ok || len(e.take()) != 0 {
 		t.Error("rolled-back report kept or published")
 	}
 }
@@ -163,17 +164,19 @@ func TestTrackBounded(t *testing.T) {
 		e.ingest(t, aprsAt(t0.Add(time.Duration(i)*time.Second), "F4ABC-9", float64(i)/100, 3))
 	}
 
-	f, _ := e.get(t, "aprs:F4ABC-9")
+	f, _ := e.get(t, "aprs:F4ABC-9@vhf")
 	if n := len(f.Geometry.Track); n != MaxTrack || f.Geometry.Track[n-1].Lat != float64(MaxTrack+3)/100 {
 		t.Errorf("track of %d points, last %+v", n, f.Geometry.Track[n-1])
 	}
 }
 
-// A feature carries nothing another device reported: a station heard by a
-// second device leaves the map of the first device's viewers and starts a
-// new track, and a call line joins only the locators of its own device.
+// Every device has its own features: a station heard by two devices is two
+// features of the same kind and subject, each with its own track, filters
+// and call lines; a call line joins only the locators of its own device,
+// and the call cap applies per device.
 func TestFeaturesStayPerDevice(t *testing.T) {
 	e := newEnv(t)
+	e.settings.MaxCalls = 1
 
 	other := func(d Decode) Decode {
 		d.DeviceID = "hf"
@@ -183,29 +186,47 @@ func TestFeaturesStayPerDevice(t *testing.T) {
 
 	e.ingest(t, aprsAt(t0, "F4ABC-9", 50, 3))
 	e.ingest(t, other(aprsAt(t0.Add(time.Minute), "F4ABC-9", 50.1, 3)))
+	// An older report on vhf is still newer than vhf's own row.
+	e.ingest(t, aprsAt(t0.Add(30*time.Second), "F4ABC-9", 50.2, 3))
 
-	f, _ := e.get(t, "aprs:F4ABC-9")
-	if f.DeviceID != "hf" || len(f.Geometry.Track) != 0 {
-		t.Errorf("feature %+v", f)
+	mine, _ := e.get(t, "aprs:F4ABC-9@vhf")
+	theirs, _ := e.get(t, "aprs:F4ABC-9@hf")
+
+	if mine.DeviceID != "vhf" || *mine.Lat != 50.2 || len(mine.Geometry.Track) != 1 || mine.Subject != "F4ABC-9" ||
+		theirs.DeviceID != "hf" || *theirs.Lat != 50.1 || len(theirs.Geometry.Track) != 0 || theirs.Subject != "F4ABC-9" {
+		t.Errorf("features %+v %+v", mine, theirs)
 	}
 
-	if got := describe(e.take()); !slices.Equal(got, []string{"upsert aprs:F4ABC-9", "remove aprs:F4ABC-9 deleted vhf", "upsert aprs:F4ABC-9"}) {
+	if got := describe(e.take()); !slices.Equal(got, []string{"upsert aprs:F4ABC-9@vhf", "upsert aprs:F4ABC-9@hf", "upsert aprs:F4ABC-9@vhf"}) {
 		t.Errorf("published %v", got)
 	}
 
-	wsjt := func(payload string) Decode {
+	wsjt := func(at time.Duration, payload string) Decode {
 		d := dec(schemaWSJT, "ft8", payload)
-		d.At = t0.Add(2 * time.Minute)
+		d.At = t0.Add(at)
 
 		return d
 	}
 
-	e.ingest(t, other(wsjt(`{"msg":"CQ DL1ABC JO62","callsign":"DL1ABC","locator":"JO62"}`)),
-		wsjt(`{"msg":"CQ K1ABC FN42","callsign":"K1ABC","locator":"FN42"}`),
-		wsjt(`{"msg":"DL1ABC K1ABC RR73","callsign":"K1ABC","callee":"DL1ABC"}`))
+	e.ingest(t, other(wsjt(2*time.Minute, `{"msg":"CQ DL1ABC JO62","callsign":"DL1ABC","locator":"JO62"}`)),
+		wsjt(2*time.Minute, `{"msg":"CQ K1ABC FN42","callsign":"K1ABC","locator":"FN42"}`),
+		wsjt(2*time.Minute, `{"msg":"DL1ABC K1ABC RR73","callsign":"K1ABC","callee":"DL1ABC"}`))
 
-	if _, ok := e.get(t, "call:DL1ABC>K1ABC"); ok {
+	if _, ok := e.get(t, "call:DL1ABC>K1ABC@vhf"); ok {
 		t.Error("call line joins a locator of another device")
+	}
+
+	// One call line on each device: the cap of one does not remove the
+	// other's.
+	e.ingest(t, other(wsjt(3*time.Minute, `{"msg":"CQ F4XYZ JN18","callsign":"F4XYZ","locator":"JN18"}`)),
+		other(wsjt(3*time.Minute, `{"msg":"F4XYZ DL1ABC JO62","callsign":"DL1ABC","locator":"JO62"}`)),
+		wsjt(3*time.Minute, `{"msg":"CQ F4XYZ JN18","callsign":"F4XYZ","locator":"JN18"}`),
+		wsjt(4*time.Minute, `{"msg":"F4XYZ K1ABC FN42","callsign":"K1ABC","locator":"FN42"}`))
+
+	for _, key := range []string{"call:DL1ABC>F4XYZ@hf", "call:F4XYZ>K1ABC@vhf"} {
+		if _, ok := e.get(t, key); !ok {
+			t.Errorf("%s missing", key)
+		}
 	}
 }
 
@@ -239,7 +260,7 @@ func TestReportFiltering(t *testing.T) {
 			for i, d := range reports {
 				e.ingest(t, d)
 
-				f, ok := e.get(t, "aprs:F4ABC-9")
+				f, ok := e.get(t, "aprs:F4ABC-9@vhf")
 				if !ok || *f.Lat != tc.want[i] {
 					t.Errorf("after report %d: %+v %v, want lat %g", i, f.Lat, ok, tc.want[i])
 				}
@@ -256,11 +277,11 @@ func TestKilledObject(t *testing.T) {
 
 	e.ingest(t, dec(schemaAPRS, "aprs", `{"type":"object","key":"LEADER","live":false,"lat":45,"lon":5}`))
 
-	if _, ok := e.get(t, "aprs:LEADER"); ok {
+	if _, ok := e.get(t, "aprs:LEADER@vhf"); ok {
 		t.Error("killed object kept")
 	}
 
-	if got := describe(e.take()); !slices.Equal(got, []string{"remove aprs:LEADER deleted vhf"}) {
+	if got := describe(e.take()); !slices.Equal(got, []string{"remove aprs:LEADER@vhf deleted vhf"}) {
 		t.Errorf("published %v", got)
 	}
 
@@ -290,7 +311,7 @@ func TestCallLines(t *testing.T) {
 	e.ingest(t, wsjt(15*time.Second, `{"msg":"CQ K1ABC FN42","callsign":"K1ABC","locator":"FN42"}`))
 	e.ingest(t, wsjt(30*time.Second, `{"msg":"DL1ABC K1ABC RR73","callsign":"K1ABC","callee":"DL1ABC"}`))
 
-	f, ok := e.get(t, "call:DL1ABC>K1ABC")
+	f, ok := e.get(t, "call:DL1ABC>K1ABC@vhf")
 	if !ok || f.Kind != KindCall || f.Lat != nil || f.Geometry.Type != GeometryLine || f.Geometry.From.Callsign != "K1ABC" ||
 		f.Geometry.To.Locator != "JO62" || f.Geometry.To.Lat != 52.5 || !f.ExpiresAt.Equal(t0.Add(30*time.Second+5*time.Minute)) {
 		t.Fatalf("call %+v", f)
@@ -302,12 +323,12 @@ func TestCallLines(t *testing.T) {
 	e.ingest(t, wsjt(45*time.Second, `{"msg":"CQ F4ABC JN18","callsign":"F4ABC","locator":"JN18"}`),
 		wsjt(60*time.Second, `{"msg":"F4ABC K1ABC FN42","callsign":"K1ABC","locator":"FN42"}`))
 
-	if _, ok := e.get(t, "call:DL1ABC>K1ABC"); ok {
+	if _, ok := e.get(t, "call:DL1ABC>K1ABC@vhf"); ok {
 		t.Error("oldest call kept beyond max_calls")
 	}
 
 	if got := describe(e.take()); !slices.Equal(got, []string{
-		"upsert locator:F4ABC", "upsert locator:K1ABC", "upsert call:F4ABC>K1ABC", "remove call:DL1ABC>K1ABC deleted vhf",
+		"upsert locator:F4ABC@vhf", "upsert locator:K1ABC@vhf", "upsert call:F4ABC>K1ABC@vhf", "remove call:DL1ABC>K1ABC@vhf deleted vhf",
 	}) {
 		t.Errorf("published %v", got)
 	}
@@ -316,7 +337,7 @@ func TestCallLines(t *testing.T) {
 	e.settings.MaxCalls = 0
 	e.ingest(t, wsjt(75*time.Second, `{"msg":"DL1ABC F4ABC RR73","callsign":"F4ABC","callee":"DL1ABC"}`))
 
-	if _, ok := e.get(t, "call:DL1ABC>F4ABC"); ok {
+	if _, ok := e.get(t, "call:DL1ABC>F4ABC@vhf"); ok {
 		t.Error("call line with max_calls 0")
 	}
 }
@@ -335,11 +356,11 @@ func TestExpire(t *testing.T) {
 		t.Fatalf("expired %d, %v", n, err)
 	}
 
-	if got := describe(e.take()); !slices.Equal(got, []string{"remove aprs:OLD expired vhf"}) {
+	if got := describe(e.take()); !slices.Equal(got, []string{"remove aprs:OLD@vhf expired vhf"}) {
 		t.Errorf("published %v", got)
 	}
 
-	if _, ok := e.get(t, "aprs:NEW"); !ok {
+	if _, ok := e.get(t, "aprs:NEW@vhf"); !ok {
 		t.Error("live feature deleted")
 	}
 }
@@ -361,13 +382,17 @@ func TestGetMapFeatures(t *testing.T) {
 	}
 
 	list := res.(api.GetMapFeatures200JSONResponse).Features
-	if len(list) != 1 || list[0].Key != "aprs:F4ABC-9" || *list[0].DeviceId != "vhf" || *list[0].ExpiresAt != t0.Add(2*time.Hour).UnixMilli() ||
+	if res.(api.GetMapFeatures200JSONResponse).Truncated {
+		t.Error("truncated")
+	}
+
+	if len(list) != 1 || list[0].Key != "aprs:F4ABC-9@vhf" || *list[0].DeviceId != "vhf" || *list[0].ExpiresAt != t0.Add(2*time.Hour).UnixMilli() ||
 		string(list[0].Geometry) != `{"type":"point","lat":50,"lon":3}` {
 		t.Fatalf("features %+v", list)
 	}
 
 	// The upsert event carries the same view.
-	f, _ := e.get(t, "aprs:F4ABC-9")
+	f, _ := e.get(t, "aprs:F4ABC-9@vhf")
 	if a, b := asJSON(t, ViewOf(f)), asJSON(t, list[0]); !reflect.DeepEqual(a, b) {
 		t.Errorf("event view %v\nAPI view %v", a, b)
 	}
@@ -400,6 +425,43 @@ func asJSON(t *testing.T, v any) any {
 	}
 
 	return out
+}
+
+// GET /map/features lists the newest MaxFeatures features and says when
+// older ones were left out.
+func TestGetMapFeaturesTruncated(t *testing.T) {
+	e := newEnv(t)
+
+	err := e.m.d.DB.WithinTx(context.Background(), func(ctx context.Context) error {
+		for i := range MaxFeatures + 1 {
+			lat := 45.0
+			f := Feature{
+				Key: KeyOf(KindAPRS, fmt.Sprint("S", i), "vhf"), Kind: KindAPRS, Subject: fmt.Sprint("S", i), Source: SourceDecode,
+				DeviceID: "vhf", Lat: &lat, Lon: &lat, Geometry: Geometry{Type: GeometryPoint}, Details: map[string]any{},
+				UpdatedAt: t0.Add(time.Duration(i) * time.Millisecond), ExpiresAt: t0.Add(time.Hour),
+			}
+
+			if err := e.m.repo.Upsert(ctx, f); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := e.m.GetMapFeatures(context.Background(), api.GetMapFeaturesRequestObject{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out := res.(api.GetMapFeatures200JSONResponse)
+	if !out.Truncated || len(out.Features) != MaxFeatures || out.Features[0].Subject != fmt.Sprint("S", MaxFeatures) ||
+		out.Features[MaxFeatures-1].Subject != "S1" {
+		t.Errorf("truncated %v, %d features, first %s", out.Truncated, len(out.Features), out.Features[0].Subject)
+	}
 }
 
 // MAP-007: receivers are grouped per node position, per device position of

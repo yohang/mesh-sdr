@@ -5,8 +5,10 @@
 // map_features in the ingest transaction and published as
 // map.feature.upsert / map.feature.remove deltas after the commit; the
 // expiry job; the receiver markers; and GET /api/v1/map/features and
-// /api/v1/map/config. Every feature belongs to the device that reported
-// it: a visitor sees the features of the devices they may listen to.
+// /api/v1/map/config. Every device has its own features (key
+// <kind>:<subject>@<device>), with its own track, filters and call cap: a
+// visitor sees the features of the devices they may listen to, and the map
+// merges a subject heard by several devices.
 package mapfeatures
 
 import (
@@ -68,10 +70,16 @@ type Geometry struct {
 	To      *Endpoint `json:"to,omitempty"`
 }
 
-// Feature is one map feature. Details holds plain-text values only.
+// Feature is one map feature of one device. Details holds plain-text
+// values only.
 type Feature struct {
-	Key      string
-	Kind     Kind
+	// Key is `<kind>:<subject>@<device>` (KeyOf): every device has its own
+	// features.
+	Key  string
+	Kind Kind
+	// Subject identifies what the feature shows across devices: a
+	// callsign, an object name, a call ("DL1ABC>F4ABC").
+	Subject  string
 	Source   string
 	DeviceID string
 	// Lat and Lon are nil for call lines.
@@ -88,6 +96,7 @@ type Feature struct {
 type View struct {
 	Key       string         `json:"key"`
 	Kind      string         `json:"kind"`
+	Subject   string         `json:"subject"`
 	Source    string         `json:"source"`
 	DeviceID  string         `json:"device_id,omitempty"`
 	Lat       *float64       `json:"lat,omitempty"`
@@ -101,7 +110,7 @@ type View struct {
 // ViewOf returns the view of a feature.
 func ViewOf(f Feature) View {
 	v := View{
-		Key: f.Key, Kind: string(f.Kind), Source: f.Source, DeviceID: f.DeviceID, Lat: f.Lat, Lon: f.Lon,
+		Key: f.Key, Kind: string(f.Kind), Subject: f.Subject, Source: f.Source, DeviceID: f.DeviceID, Lat: f.Lat, Lon: f.Lon,
 		Geometry: f.Geometry, Details: f.Details, UpdatedAt: f.UpdatedAt.UnixMilli(),
 	}
 
@@ -116,6 +125,15 @@ func ViewOf(f Feature) View {
 
 	return v
 }
+
+// KeyOf returns the key of the feature of a device: kind, subject and
+// device.
+func KeyOf(kind Kind, subject, device string) string {
+	return string(kind) + ":" + subject + "@" + device
+}
+
+// MaxFeatures bounds GET /map/features: the newest features only.
+const MaxFeatures = 5000
 
 // Removal reasons of map.feature.remove.
 const (

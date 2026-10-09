@@ -219,7 +219,7 @@ func TestFT8EndToEnd(t *testing.T) {
 	var loc string
 
 	err = e.adapter.Reader(context.Background()).QueryRowContext(context.Background(),
-		`SELECT json_extract(geometry, '$.locator') FROM map_features WHERE feature_key = 'locator:K1ABC' AND device_id = 'vhf'`).Scan(&loc)
+		`SELECT json_extract(geometry, '$.locator') FROM map_features WHERE feature_key = 'locator:K1ABC@vhf' AND subject = 'K1ABC' AND device_id = 'vhf'`).Scan(&loc)
 	if err != nil || loc != "FN42" {
 		t.Errorf("map feature locator %q: %v", loc, err)
 	}
