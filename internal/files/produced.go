@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -228,26 +229,18 @@ type Filter struct {
 	FreqMax  int64     // Hz
 }
 
-// Access tells which files a viewer may see (listen_policy, ADR 0026).
+// Access tells which files a viewer may see (listen_policy, ADR 0026):
+// every file, or the files of the devices the viewer may listen to. The
+// zero value shows none.
 type Access struct {
-	// Denied hides every file (an anonymous visitor under the registered
-	// global policy).
-	Denied bool
-	// HiddenDevices are the devices whose files the viewer may not see.
-	HiddenDevices []string
+	// All shows every file (a signed-in user).
+	All bool
+	// Devices are the devices whose files the viewer may see otherwise.
+	Devices []string
 }
+
+// Denied reports whether the viewer may see no file at all.
+func (v Access) Denied() bool { return !v.All && len(v.Devices) == 0 }
 
 // Allows reports whether the viewer may see a file of device.
-func (v Access) Allows(device string) bool {
-	if v.Denied {
-		return false
-	}
-
-	for _, d := range v.HiddenDevices {
-		if d == device {
-			return false
-		}
-	}
-
-	return true
-}
+func (v Access) Allows(device string) bool { return v.All || slices.Contains(v.Devices, device) }

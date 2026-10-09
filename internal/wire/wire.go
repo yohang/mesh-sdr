@@ -307,7 +307,7 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 	var filesAccess *fileAccess
 
 	filesGate := shell.GateFunc(func(ctx context.Context) bool {
-		return filesAccess != nil && !filesAccess.visibility(ctx).Denied
+		return filesAccess != nil && !filesAccess.visibility(ctx).Denied()
 	})
 	shellModule := shell.New(shell.Deps{
 		Settings: settingsStore, AdminGate: adminGate, FilesGate: filesGate, User: operatorLinks(userOf, operatorGate.Allows), Logger: logger,

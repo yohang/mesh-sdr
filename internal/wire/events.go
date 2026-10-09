@@ -49,12 +49,12 @@ func reloadListen(p *gridapp.ListenPolicies, b *events.Broker, logger *slog.Logg
 	return func(ctx context.Context) {
 		changed, err := p.Refresh(ctx)
 		if err != nil {
+			// The view is dropped: the sockets re-authorise against a
+			// fresh load, failing closed while it fails.
 			logger.ErrorContext(ctx, "reload listen policies", slog.Any("error", err))
-
-			return
 		}
 
-		if changed {
+		if changed || err != nil {
 			b.RecheckAll()
 		}
 	}

@@ -85,11 +85,8 @@ func signedInListener(t *testing.T) identitydomain.Principal {
 // feature summary all follow grid/app.ListenPolicies. Visitors get the
 // devices whose effective policy is anonymous (the device override, else
 // the global policy); signed-in listeners every enabled device; a global
-// policy that is missing, invalid or unreadable counts as registered. The
-// files keep their own rule for visitors (ADR 0026, wire/files.go): none
-// unless the global policy is anonymous, then all but the devices the
-// view restricts (a device the view does not list follows the global
-// policy).
+// policy that is missing, invalid or unreadable counts as registered.
+// Signed-in users also see the files of every device.
 func TestListenPolicySingleSource(t *testing.T) {
 	ctx := context.Background()
 	a := dbtest.NewSQLite(t)
@@ -197,8 +194,7 @@ func TestListenPolicySingleSource(t *testing.T) {
 
 					want := dv.enabled && (!anonymous || policy == domain.ListenAnonymous)
 
-					wantFiles := !anonymous ||
-						(effectiveGlobal == domain.ListenAnonymous && (!dv.enabled || policy == domain.ListenAnonymous))
+					wantFiles := !anonymous || want // signed-in users see every file
 
 					_, bmErr := bm.ForDevice(ctx, id, everything)
 					if bmErr != nil && !errors.Is(bmErr, bookmarks.ErrDeviceNotFound) {

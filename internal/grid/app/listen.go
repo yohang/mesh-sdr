@@ -27,7 +27,7 @@ type GlobalListenPolicy interface {
 //
 // The view of the devices is cached: Refresh reloads it when the policies
 // may have changed (a listen_policy setting change, a device report, a
-// forgotten device).
+// forgotten device). Loads run under the lock, one at a time.
 type ListenPolicies struct {
 	devices DeviceLister
 	policy  GlobalListenPolicy
@@ -80,15 +80,19 @@ func (p *ListenPolicies) View(ctx context.Context) (ListenView, error) {
 	return v, nil
 }
 
-// Refresh reloads the view and reports whether it changed.
+// Refresh reloads the view and reports whether it changed. A failed
+// reload drops the view: the readers fail closed until a load succeeds.
+// Loads are serialised, so an older load never replaces a newer one.
 func (p *ListenPolicies) Refresh(ctx context.Context) (bool, error) {
-	v, err := p.load(ctx)
-	if err != nil {
-		return false, err
-	}
-
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	v, err := p.load(ctx)
+	if err != nil {
+		p.view = nil
+
+		return false, err
+	}
 
 	changed := p.view == nil || !maps.Equal(p.view.devices, v.devices)
 	p.view = &v
@@ -158,13 +162,13 @@ func (v ListenView) AnyAnonymous() bool {
 	return false
 }
 
-// Restricted returns the listed devices anonymous visitors may not listen
-// to, sorted.
-func (v ListenView) Restricted() []string {
+// Listenable returns the listed devices a caller (anonymous or signed in)
+// may listen to, sorted.
+func (v ListenView) Listenable(anonymous bool) []string {
 	var out []string
 
 	for d, lp := range v.devices {
-		if !allowed(lp, true) {
+		if allowed(lp, anonymous) {
 			out = append(out, d)
 		}
 	}

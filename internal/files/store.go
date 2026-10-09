@@ -359,20 +359,25 @@ func paramsOf(f Filter) filterParams {
 // List returns the complete produced files matching f that v may see,
 // newest reception first: at most limit from offset.
 func (r *Files) List(ctx context.Context, f Filter, v Access, offset, limit int) ([]Entry, error) {
-	if v.Denied {
+	if v.Denied() {
 		return nil, nil
 	}
 
-	hidden, err := json.Marshal(append([]string{}, v.HiddenDevices...))
-	if err != nil {
-		return nil, fmt.Errorf("hidden devices: %w", err)
+	var visible any
+	if !v.All {
+		b, err := json.Marshal(v.Devices)
+		if err != nil {
+			return nil, fmt.Errorf("visible devices: %w", err)
+		}
+
+		visible = string(b)
 	}
 
 	p := paramsOf(f)
 
 	rows, err := sqlc.New(r.db.Reader(ctx)).ListProducedFiles(ctx, sqlc.ListProducedFilesParams{
 		MimeLike: p.mimeLike, DeviceID: p.device, Mode: p.mode, FromUtc: p.from, ToUtc: p.to, FreqMin: p.freqMin,
-		FreqMax: p.freqMax, HiddenDevices: string(hidden), OffsetRows: int64(offset), LimitRows: int64(limit),
+		FreqMax: p.freqMax, VisibleDevices: visible, OffsetRows: int64(offset), LimitRows: int64(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list files: %w", err)

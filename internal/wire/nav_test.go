@@ -6,10 +6,14 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/yohang/mesh-sdr/internal/grid/domain"
+	gridsqlite "github.com/yohang/mesh-sdr/internal/grid/infra/sqlite"
 	"github.com/yohang/mesh-sdr/internal/http/api"
 	"github.com/yohang/mesh-sdr/internal/http/api/apitest"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+	shared "github.com/yohang/mesh-sdr/internal/shared/domain"
 )
 
 // page fetches an HTML page with the client's session.
@@ -48,6 +52,25 @@ func TestShellNavigationByRole(t *testing.T) {
 	}
 
 	h := newContractHub(t, v, map[string]identitydomain.Role{"listener": identitydomain.RoleListener, "admin": identitydomain.RoleAdmin})
+
+	// Visitors open Files when some device is anonymous-listenable.
+	ctx, now := context.Background(), time.Now()
+	if err := gridsqlite.NewNodeRepository(h.adapter).Create(ctx,
+		domain.NewNode(domain.MustNodeID("attic"), domain.MustNodeName("attic"), domain.MustNodeURL("https://attic:8074"), now)); err != nil {
+		t.Fatal(err)
+	}
+
+	hf, err := domain.NewReportedDevice(domain.MustNodeID("attic"), domain.DeviceSpec{
+		ID: shared.MustDeviceID("hf"), Name: "HF", Type: "rtl_sdr", Enabled: true, FreqMin: 1, FreqMax: 2, SampleRates: []int64{1},
+		ListenPolicy: domain.ListenAnonymous,
+	}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := gridsqlite.NewDeviceRepository(h.adapter).Save(ctx, hf); err != nil {
+		t.Fatal(err)
+	}
 
 	const adminLink = `<a href="/admin" data-section="admin"`
 

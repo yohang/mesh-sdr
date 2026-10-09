@@ -89,7 +89,7 @@ WHERE blob_state = 'complete' AND deleted_at IS NULL
   AND (sqlc.narg(to_utc) IS NULL OR received_start_utc < sqlc.narg(to_utc))
   AND (sqlc.narg(freq_min) IS NULL OR frequency_hz >= sqlc.narg(freq_min))
   AND (sqlc.narg(freq_max) IS NULL OR frequency_hz <= sqlc.narg(freq_max))
-  AND (device_id IS NULL OR device_id NOT IN (SELECT value FROM json_each(sqlc.arg(hidden_devices))))
+  AND (sqlc.narg(visible_devices) IS NULL OR device_id IN (SELECT value FROM json_each(sqlc.narg(visible_devices))))
 ORDER BY received_start_utc DESC, id DESC
 LIMIT sqlc.arg(limit_rows) OFFSET sqlc.arg(offset_rows);
 

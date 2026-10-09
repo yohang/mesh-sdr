@@ -94,7 +94,7 @@ func (g *Gallery) gate(next http.HandlerFunc) http.HandlerFunc {
 	guarded := g.d.Listener(next)
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		if g.d.Visibility(r.Context()).Denied {
+		if g.d.Visibility(r.Context()).Denied() {
 			guarded.ServeHTTP(w, r)
 
 			return
