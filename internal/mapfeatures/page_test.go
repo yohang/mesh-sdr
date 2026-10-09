@@ -100,3 +100,22 @@ func TestTileOrigins(t *testing.T) {
 		t.Errorf("no layers: %v", got)
 	}
 }
+
+// A decode that locates a station links to it on the map; others do not.
+func TestLink(t *testing.T) {
+	tests := []struct {
+		d    Decode
+		want string
+	}{
+		{aprsAt(t0, "F4ABC-9", 50, 3), "/map?callsign=F4ABC-9"},
+		{dec(schemaWSJT, "ft8", `{"msg":"CQ DL1ABC JO62","callsign":"DL1ABC","locator":"JO62"}`), "/map?callsign=DL1ABC"},
+		{dec(schemaWSJT, "ft8", `{"msg":"DL1ABC F4ABC -10","callsign":"F4ABC"}`), ""},
+		{dec("other.v1", "x", `{}`), ""},
+	}
+
+	for _, tt := range tests {
+		if got := Link(tt.d); got != tt.want {
+			t.Errorf("Link(%s) = %q, want %q", tt.d.Payload, got, tt.want)
+		}
+	}
+}

@@ -240,6 +240,20 @@ func TestListPage(t *testing.T) {
 		t.Errorf("rows %d", strings.Count(body, "align-top"))
 	}
 
+	// A message that locates a station links to it on the map (MAP-016).
+	e.m.d.MapLink = func(m Message) string {
+		if m.Text == "<b>x</b>" {
+			return "/map?callsign=F4ABC-9"
+		}
+
+		return ""
+	}
+	if _, body := get(t, e, Path); strings.Count(body, "Show on the map") != 1 || !strings.Contains(body, `<a href="/map?callsign=F4ABC-9"`) {
+		t.Errorf("map link: %d", strings.Count(body, "Show on the map"))
+	}
+
+	e.m.d.MapLink = nil
+
 	// The next page holds the rest, newest first.
 	_, body = get(t, e, Path+"?page=2")
 	if strings.Count(body, "align-top") != 3 || !strings.Contains(body, `<a href="/decodes">Newer messages</a>`) || strings.Contains(body, "Older messages") {
