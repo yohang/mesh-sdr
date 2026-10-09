@@ -2,17 +2,17 @@
     {
         "name" : "NAVTEX",
         "frequency" : 489000,
-        "modulation" : "sitorb"
+        "modulation" : "navtex"
     },
     {
         "name" : "NAVTEX",
         "frequency" : 517000,
-        "modulation" : "sitorb"
+        "modulation" : "navtex"
     },
     {
         "name" : "NAVTEX",
         "frequency" : 4208500,
-        "modulation" : "sitorb"
+        "modulation" : "navtex"
     },
     {
         "name" : "MSI",
