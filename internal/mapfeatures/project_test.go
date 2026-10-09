@@ -36,7 +36,7 @@ func TestProject(t *testing.T) {
 			name: "aprs position",
 			d: dec(schemaAPRS, "aprs", `{"source":"F4ABC-9","type":"position","key":"F4ABC-9","hops":[],"lat":50.6,"lon":3.06,
 				"symbol":"/>","course":90,"speed_kmh":30.5,"altitude_m":120,"comment":"hi\u0007 there","weather":{"temp_c":12.5}}`),
-			keys: []string{"aprs:F4ABC-9"},
+			keys: []string{"aprs:F4ABC-9@vhf"},
 			check: func(t *testing.T, f Feature) {
 				t.Helper()
 
@@ -55,18 +55,18 @@ func TestProject(t *testing.T) {
 		},
 		{
 			name: "aprs digipeated", d: dec(schemaAPRS, "aprs", `{"type":"mic-e","key":"F4ABC-9","hops":["F1ZZZ-1"],"lat":50,"lon":3}`),
-			keys: []string{"aprs:F4ABC-9"}, indirect: true,
+			keys: []string{"aprs:F4ABC-9@vhf"}, indirect: true,
 		},
 		{
-			name: "aprs third party", indirect: true, keys: []string{"aprs:F5XYZ"},
+			name: "aprs third party", indirect: true, keys: []string{"aprs:F5XYZ@vhf"},
 			d: dec(schemaAPRS, "aprs", `{"type":"thirdparty","key":"F5XYZ","hops":["IGATE"],"forwarded":{"type":"position","key":"F5XYZ","hops":[],"lat":45,"lon":5}}`),
 		},
 		{
-			name: "aprs object", keys: []string{"aprs:LEADER"},
+			name: "aprs object", keys: []string{"aprs:LEADER@vhf"},
 			d: dec(schemaAPRS, "aprs", `{"type":"object","key":"LEADER","name":"LEADER","source":"F4ABC","live":true,"lat":45,"lon":5}`),
 		},
 		{
-			name: "aprs killed item", kills: []string{"aprs:LEADER"},
+			name: "aprs killed item", kills: []string{"aprs:LEADER@vhf"},
 			d: dec(schemaAPRS, "aprs", `{"type":"item","key":"LEADER","name":"LEADER","live":false,"lat":45,"lon":5}`),
 		},
 		{name: "aprs status", d: dec(schemaAPRS, "aprs", `{"type":"status","key":"F4ABC","comment":"on air"}`)},
@@ -74,7 +74,7 @@ func TestProject(t *testing.T) {
 		{name: "aprs no key", d: dec(schemaAPRS, "aprs", `{"type":"position","key":"\u0001","lat":45,"lon":3}`)},
 		{name: "aprs garbage", d: dec(schemaAPRS, "aprs", `[1,2]`)},
 		{
-			name: "wsjt cq", keys: []string{"locator:DL1ABC"},
+			name: "wsjt cq", keys: []string{"locator:DL1ABC@vhf"},
 			d: dec(schemaWSJT, "ft8", `{"mode":"FT8","msg":"CQ DL1ABC JO62","callsign":"DL1ABC","locator":"JO62","db":-12}`),
 			check: func(t *testing.T, f Feature) {
 				t.Helper()
@@ -86,7 +86,7 @@ func TestProject(t *testing.T) {
 			},
 		},
 		{
-			name: "wsjt answer with locator", keys: []string{"locator:DL1ABC"}, calls: []call{{from: "DL1ABC", to: "K1ABC"}},
+			name: "wsjt answer with locator", keys: []string{"locator:DL1ABC@vhf"}, calls: []call{{from: "DL1ABC", to: "K1ABC"}},
 			d: dec(schemaWSJT, "ft8", `{"msg":"K1ABC DL1ABC JO62","callsign":"DL1ABC","locator":"JO62"}`),
 		},
 		{
@@ -94,13 +94,13 @@ func TestProject(t *testing.T) {
 			d: dec(schemaWSJT, "ft8", `{"msg":"DL1ABC K1ABC RR73","callsign":"K1ABC","callee":"DL1ABC"}`),
 		},
 		{
-			name: "wspr beacon", keys: []string{"locator:K1ABC"},
+			name: "wspr beacon", keys: []string{"locator:K1ABC@vhf"},
 			d: dec(schemaWSJT, "wspr", `{"mode":"WSPR","msg":"K1ABC FN42 33","callsign":"K1ABC","locator":"FN42","dbm":33}`),
 		},
 		{name: "wsjt bad locator", d: dec(schemaWSJT, "ft8", `{"msg":"CQ DL1ABC ZZ99","callsign":"DL1ABC","locator":"ZZ99"}`)},
 		{name: "wsjt bad callsign", d: dec(schemaWSJT, "ft8", `{"msg":"CQ <x> JO62","callsign":"<x>","locator":"JO62"}`)},
 		{
-			name: "js8 heartbeat", keys: []string{"locator:F4ABC"},
+			name: "js8 heartbeat", keys: []string{"locator:F4ABC@vhf"},
 			d: dec(schemaJS8, "js8", `{"frame":"heartbeat","callsign":"F4ABC","to":"@ALLCALL","locator":"JN18eu","db":-5}`),
 			check: func(t *testing.T, f Feature) {
 				t.Helper()
@@ -140,8 +140,12 @@ func TestProject(t *testing.T) {
 	}
 }
 
-func TestCallKey(t *testing.T) {
-	if callKey("K1ABC", "DL1ABC") != "call:DL1ABC>K1ABC" || callKey("DL1ABC", "K1ABC") != "call:DL1ABC>K1ABC" {
-		t.Error(callKey("K1ABC", "DL1ABC"))
+func TestCallSubject(t *testing.T) {
+	if callSubject("K1ABC", "DL1ABC") != "DL1ABC>K1ABC" || callSubject("DL1ABC", "K1ABC") != "DL1ABC>K1ABC" {
+		t.Error(callSubject("K1ABC", "DL1ABC"))
+	}
+
+	if KeyOf(KindCall, "DL1ABC>K1ABC", "vhf") != "call:DL1ABC>K1ABC@vhf" {
+		t.Error(KeyOf(KindCall, "DL1ABC>K1ABC", "vhf"))
 	}
 }

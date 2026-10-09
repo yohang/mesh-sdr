@@ -47,7 +47,7 @@ func (r *Repository) Upsert(ctx context.Context, f Feature) error {
 	}
 
 	p := sqlc.UpsertMapFeatureParams{
-		FeatureKey: f.Key, Kind: string(f.Kind), Source: f.Source, DeviceID: nullString(f.DeviceID),
+		FeatureKey: f.Key, Kind: string(f.Kind), Subject: f.Subject, Source: f.Source, DeviceID: nullString(f.DeviceID),
 		Lat: nullFloat(f.Lat), Lon: nullFloat(f.Lon), Geometry: sql.NullString{String: geometry, Valid: true}, Details: details,
 		UpdatedAt: f.UpdatedAt.UnixMilli(),
 	}
@@ -73,9 +73,10 @@ func (r *Repository) Delete(ctx context.Context, key string) (bool, error) {
 	return n > 0, nil
 }
 
-// List returns the features of devices not expired at now, oldest first.
-func (r *Repository) List(ctx context.Context, devices []string, now time.Time) ([]Feature, error) {
-	if len(devices) == 0 {
+// List returns the newest limit features of devices not expired at now,
+// newest first.
+func (r *Repository) List(ctx context.Context, devices []string, now time.Time, limit int) ([]Feature, error) {
+	if len(devices) == 0 || limit <= 0 {
 		return []Feature{}, nil
 	}
 
@@ -84,7 +85,9 @@ func (r *Repository) List(ctx context.Context, devices []string, now time.Time) 
 		return nil, err
 	}
 
-	rows, err := sqlc.New(r.db.Reader(ctx)).ListMapFeatures(ctx, sqlc.ListMapFeaturesParams{DevicesJson: string(list), NowMs: sql.NullInt64{Int64: now.UnixMilli(), Valid: true}})
+	rows, err := sqlc.New(r.db.Reader(ctx)).ListMapFeatures(ctx, sqlc.ListMapFeaturesParams{
+		DevicesJson: string(list), NowMs: sql.NullInt64{Int64: now.UnixMilli(), Valid: true}, MaxRows: int64(limit),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("list map features: %w", err)
 	}
@@ -92,11 +95,13 @@ func (r *Repository) List(ctx context.Context, devices []string, now time.Time) 
 	return featuresOf(rows)
 }
 
-// OfKind returns the features of a kind, newest first.
-func (r *Repository) OfKind(ctx context.Context, kind Kind) ([]Feature, error) {
-	rows, err := sqlc.New(r.db.Reader(ctx)).ListMapFeaturesOfKind(ctx, string(kind))
+// OfKind returns the features of a kind of a device, newest first.
+func (r *Repository) OfKind(ctx context.Context, device string, kind Kind) ([]Feature, error) {
+	rows, err := sqlc.New(r.db.Reader(ctx)).ListDeviceMapFeaturesOfKind(ctx, sqlc.ListDeviceMapFeaturesOfKindParams{
+		DeviceID: nullString(device), Kind: string(kind),
+	})
 	if err != nil {
-		return nil, fmt.Errorf("list map features of kind %s: %w", kind, err)
+		return nil, fmt.Errorf("list map features of kind %s of %s: %w", kind, device, err)
 	}
 
 	return featuresOf(rows)
@@ -137,7 +142,7 @@ func featuresOf(rows []sqlc.MapFeature) ([]Feature, error) {
 
 func featureOf(row sqlc.MapFeature) (Feature, error) {
 	f := Feature{
-		Key: row.FeatureKey, Kind: Kind(row.Kind), Source: row.Source, DeviceID: row.DeviceID.String,
+		Key: row.FeatureKey, Kind: Kind(row.Kind), Subject: row.Subject, Source: row.Source, DeviceID: row.DeviceID.String,
 		UpdatedAt: time.UnixMilli(row.UpdatedAt).UTC(),
 	}
 

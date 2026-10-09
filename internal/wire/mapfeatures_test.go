@@ -153,7 +153,7 @@ func TestMapFollowsListenPolicies(t *testing.T) {
 	}
 
 	err := a.WithinTx(ctx, func(ctx context.Context) error {
-		for _, d := range []mapfeatures.Decode{aprs("open", "F4OPEN"), aprs("closed", "F4CLOSED")} {
+		for _, d := range []mapfeatures.Decode{aprs("open", "F4ABC"), aprs("closed", "F4ABC"), aprs("closed", "F4CLOSED")} {
 			if err := m.Ingest(ctx, d); err != nil {
 				return err
 			}
@@ -168,8 +168,8 @@ func TestMapFollowsListenPolicies(t *testing.T) {
 	m.Flush(ctx, "attic")
 
 	want := map[string][]string{
-		"anonymous": {"map.feature.upsert aprs:F4OPEN"},
-		"listener":  {"map.feature.upsert aprs:F4OPEN", "map.feature.upsert aprs:F4CLOSED"},
+		"anonymous": {"map.feature.upsert aprs:F4ABC@open"},
+		"listener":  {"map.feature.upsert aprs:F4ABC@open", "map.feature.upsert aprs:F4ABC@closed", "map.feature.upsert aprs:F4CLOSED@closed"},
 	}
 
 	for name, cctx := range callers {
@@ -185,6 +185,11 @@ func TestMapFollowsListenPolicies(t *testing.T) {
 		var keys []string
 		for _, f := range res.(api.GetMapFeatures200JSONResponse).Features {
 			keys = append(keys, "map.feature.upsert "+f.Key)
+
+			// The island groups by kind and subject across devices.
+			if f.Kind != api.MapFeatureKindAprs || mapfeatures.KeyOf(mapfeatures.KindAPRS, f.Subject, *f.DeviceId) != f.Key {
+				t.Errorf("%s: kind %s subject %s device %s", f.Key, f.Kind, f.Subject, *f.DeviceId)
+			}
 		}
 
 		slices.Sort(keys)
@@ -199,7 +204,7 @@ func TestMapFollowsListenPolicies(t *testing.T) {
 		}
 
 		receivers := cfg.(api.GetMapConfig200JSONResponse).Receivers
-		if n := len(want[name]); len(receivers) != 1 || len(receivers[0].Devices) != n || receivers[0].Name != "Attic" {
+		if n := min(len(want[name]), 2); len(receivers) != 1 || len(receivers[0].Devices) != n || receivers[0].Name != "Attic" {
 			t.Errorf("%s receivers %+v", name, receivers)
 		}
 	}
@@ -211,11 +216,11 @@ func TestMapFollowsListenPolicies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := sinks["anonymous"].take(); !slices.Equal(got, []string{"map.feature.remove aprs:F4OPEN"}) {
+	if got := sinks["anonymous"].take(); !slices.Equal(got, []string{"map.feature.remove aprs:F4ABC@open"}) {
 		t.Errorf("anonymous removals %v", got)
 	}
 
-	if got := sinks["listener"].take(); len(got) != 2 {
+	if got := sinks["listener"].take(); len(got) != 3 {
 		t.Errorf("listener removals %v", got)
 	}
 

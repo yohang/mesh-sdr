@@ -64,14 +64,7 @@ func (m *Module) report(ctx context.Context, node string, r report, s Settings, 
 			return nil
 		}
 
-		// The track carries positions only from the same device: the
-		// viewers of this device may not see the previous one. Those
-		// viewers get the removal of the feature, which leaves their device.
-		if prev.DeviceID == f.DeviceID {
-			f.Geometry.Track = track(prev, f)
-		} else {
-			m.queue(node, Change{Remove: &Removal{Key: f.Key, Reason: ReasonDeleted, DeviceID: prev.DeviceID}})
-		}
+		f.Geometry.Track = track(prev, f)
 	}
 
 	return m.upsert(ctx, node, f)
@@ -118,7 +111,7 @@ func (m *Module) call(ctx context.Context, d Decode, c call, s Settings, now tim
 	}
 
 	f := Feature{
-		Key: callKey(c.from, c.to), Kind: KindCall, Source: SourceDecode, DeviceID: d.DeviceID,
+		Key: KeyOf(KindCall, callSubject(c.from, c.to), d.DeviceID), Kind: KindCall, Subject: callSubject(c.from, c.to), Source: SourceDecode, DeviceID: d.DeviceID,
 		Geometry: Geometry{Type: GeometryLine, From: &from, To: &to}, Details: details,
 		UpdatedAt: d.At, ExpiresAt: d.At.Add(s.CallRetention),
 	}
@@ -127,23 +120,23 @@ func (m *Module) call(ctx context.Context, d Decode, c call, s Settings, now tim
 		return err
 	}
 
-	return m.capCalls(ctx, d.NodeID, s.MaxCalls)
+	return m.capCalls(ctx, d.NodeID, d.DeviceID, s.MaxCalls)
 }
 
-// located returns the locator of a station still on the map, reported by
-// device: a line shows only what the viewers of its device may see.
+// located returns the locator of a station still on the map of device: a
+// line joins only what the viewers of its device may see.
 func (m *Module) located(ctx context.Context, station, device string, now time.Time) (Endpoint, bool, error) {
-	f, ok, err := m.repo.Get(ctx, string(KindLocator)+":"+station)
-	if err != nil || !ok || f.DeviceID != device || f.Lat == nil || f.Lon == nil || (!f.ExpiresAt.IsZero() && !f.ExpiresAt.After(now)) {
+	f, ok, err := m.repo.Get(ctx, KeyOf(KindLocator, station, device))
+	if err != nil || !ok || f.Lat == nil || f.Lon == nil || (!f.ExpiresAt.IsZero() && !f.ExpiresAt.After(now)) {
 		return Endpoint{}, false, err
 	}
 
 	return Endpoint{Lat: *f.Lat, Lon: *f.Lon, Callsign: station, Locator: f.Geometry.Locator}, true, nil
 }
 
-// capCalls keeps the newest max call lines (MAP-011).
-func (m *Module) capCalls(ctx context.Context, node string, max int) error {
-	calls, err := m.repo.OfKind(ctx, KindCall)
+// capCalls keeps the newest max call lines of a device (MAP-011).
+func (m *Module) capCalls(ctx context.Context, node, device string, max int) error {
+	calls, err := m.repo.OfKind(ctx, device, KindCall)
 	if err != nil || len(calls) <= max {
 		return err
 	}

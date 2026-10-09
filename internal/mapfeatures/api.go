@@ -10,12 +10,13 @@ import (
 
 var _ api.MapHandlers = (*Module)(nil)
 
-// Features returns the features the caller of ctx may see: those of the
-// devices they may listen to, not expired.
-func (m *Module) Features(ctx context.Context) ([]Feature, error) {
+// Features returns the newest MaxFeatures features the caller of ctx may
+// see (those of the devices they may listen to, not expired), newest
+// first, and whether older ones were left out.
+func (m *Module) Features(ctx context.Context) ([]Feature, bool, error) {
 	devices, err := m.d.Visible(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("visible devices: %w", err)
+		return nil, false, fmt.Errorf("visible devices: %w", err)
 	}
 
 	ids := make([]string, 0, len(devices))
@@ -23,17 +24,22 @@ func (m *Module) Features(ctx context.Context) ([]Feature, error) {
 		ids = append(ids, d.ID)
 	}
 
-	return m.repo.List(ctx, ids, m.d.Now())
+	list, err := m.repo.List(ctx, ids, m.d.Now(), MaxFeatures+1)
+	if err != nil || len(list) <= MaxFeatures {
+		return list, false, err
+	}
+
+	return list[:MaxFeatures], true, nil
 }
 
 // GetMapFeatures implements api.MapHandlers (GET /map/features).
 func (m *Module) GetMapFeatures(ctx context.Context, _ api.GetMapFeaturesRequestObject) (api.GetMapFeaturesResponseObject, error) {
-	list, err := m.Features(ctx)
+	list, truncated, err := m.Features(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	out := api.GetMapFeatures200JSONResponse{Features: make([]api.MapFeature, 0, len(list))}
+	out := api.GetMapFeatures200JSONResponse{Features: make([]api.MapFeature, 0, len(list)), Truncated: truncated}
 
 	for _, f := range list {
 		v, err := apiFeature(f)
@@ -61,7 +67,7 @@ func apiFeature(f Feature) (api.MapFeature, error) {
 	}
 
 	return api.MapFeature{
-		Key: v.Key, Kind: api.MapFeatureKind(v.Kind), Source: api.MapFeatureSource(v.Source), DeviceId: optional(v.DeviceID),
+		Key: v.Key, Kind: api.MapFeatureKind(v.Kind), Subject: v.Subject, Source: api.MapFeatureSource(v.Source), DeviceId: optional(v.DeviceID),
 		Lat: v.Lat, Lon: v.Lon, Geometry: geometry, Details: details, UpdatedAt: v.UpdatedAt, ExpiresAt: v.ExpiresAt,
 	}, nil
 }
