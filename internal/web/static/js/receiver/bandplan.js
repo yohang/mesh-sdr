@@ -10,6 +10,8 @@
 // engine's display settings, kept across navigation), remembered by this
 // browser as a convenience (localStorage).
 
+import { loadPref, savePref } from "./session.js";
+
 const VISIBLE_KEY = "msdr.receiver.bandplan";
 const TAGS = new Set(["hamradio", "broadcast", "public", "service"]);
 
@@ -23,20 +25,12 @@ const TAGS = new Set(["hamradio", "broadcast", "public", "service"]);
 
 /** @returns {boolean} the visibility this browser remembers */
 export function rememberedVisible() {
-  try {
-    return localStorage.getItem(VISIBLE_KEY) === "on";
-  } catch {
-    return false;
-  }
+  return loadPref(VISIBLE_KEY) === "on";
 }
 
 /** @param {boolean} on */
 export function rememberVisible(on) {
-  try {
-    localStorage.setItem(VISIBLE_KEY, on ? "on" : "off");
-  } catch {
-    // Storage blocked: not remembered.
-  }
+  savePref(VISIBLE_KEY, on ? "on" : "off");
 }
 
 export class BandplanRibbon {

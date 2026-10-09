@@ -20,6 +20,8 @@
 // shortcuts help (UI-015) and, in the sheet, the control bar groups that
 // do not fit the compact bar (More).
 
+import { BUTTON, el } from "./dom.js";
+
 /** @typedef {"peek" | "half" | "full"} Snap */
 
 const SNAPS = /** @type {Snap[]} */ (["peek", "half", "full"]);
@@ -27,17 +29,6 @@ const SNAPS = /** @type {Snap[]} */ (["peek", "half", "full"]);
 const TAP_PX = 6;
 const SHEET_BUTTON =
   "inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border text-lg leading-none disabled:opacity-50";
-
-/**
- * el creates an element with attributes and optional text content.
- * @param {string} tag @param {Record<string, string>} [attrs] @param {string} [text]
- */
-function el(tag, attrs = {}, text) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-  if (text !== undefined) e.textContent = text;
-  return e;
-}
 
 /**
  * @typedef {object} Tab
@@ -101,7 +92,7 @@ export class SidePanel {
 
     // View header: title and Close.
     this.viewTitle = el("h2", { class: "min-w-0 flex-1 text-lg font-semibold focus:outline-none", tabindex: "-1" });
-    this.viewClose = el("button", { type: "button", class: "rounded border border-border px-3 py-1 text-sm max-md:min-h-11 pointer-coarse:min-h-11", "aria-keyshortcuts": "Escape" }, "Close");
+    this.viewClose = el("button", { type: "button", class: BUTTON, "aria-keyshortcuts": "Escape" }, "Close");
     this.viewClose.addEventListener("click", () => this.closeView());
     this.viewHead = el("div", { class: "flex items-center gap-2 border-b border-border p-3" });
     this.viewHead.append(this.viewTitle, this.viewClose);

@@ -6,6 +6,7 @@
 // below it, not live) names the band shown, the decoder offset and
 // bandwidth, and the strongest signal, updated at most once a second.
 
+import { el, SMALL_BUTTON, TOUCH } from "./dom.js";
 import { levelLUT, paletteRGBA } from "./palette.js";
 
 /** Rows of history drawn. */
@@ -15,17 +16,6 @@ const SUMMARY_EVERY_MS = 1000;
 /** Levels: from below the noise floor to this much above it (dB). */
 const FLOOR_MARGIN_DB = 5;
 const RANGE_DB = 45;
-
-/**
- * el creates an element with attributes and optional text content.
- * @param {string} tag @param {Record<string, string>} [attrs] @param {string} [text]
- */
-function el(tag, attrs = {}, text) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-  if (text !== undefined) e.textContent = text;
-  return e;
-}
 
 /** @param {number} hz */
 function signed(hz) {
@@ -57,8 +47,8 @@ export class SecondaryWaterfall {
 
     const form = el("form", { class: "flex flex-wrap items-end gap-2 text-sm" });
     const label = el("label", { for: "rx-fft2-offset", class: "font-medium" }, "Decoder offset (Hz)");
-    this.offset = /** @type {HTMLInputElement} */ (el("input", { id: "rx-fft2-offset", type: "number", step: "1", class: "w-28 rounded border border-border px-2 py-1" }));
-    const set = el("button", { type: "submit", class: "rounded border border-border px-2 py-1" }, "Set");
+    this.offset = /** @type {HTMLInputElement} */ (el("input", { id: "rx-fft2-offset", type: "number", step: "1", class: `w-28 rounded border border-border px-2 py-1 ${TOUCH}` }));
+    const set = el("button", { type: "submit", class: SMALL_BUTTON }, "Set");
     form.append(label, this.offset, set);
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();

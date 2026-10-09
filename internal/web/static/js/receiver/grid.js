@@ -12,7 +12,9 @@
 // preset switch or centre move by an operator, node messages, a refused
 // token refresh. When the node comes back, the engine reconnects at once.
 
+import { getJSON } from "../csrf.js";
 import { notify } from "../notify.js";
+import { formatMHz } from "./dom.js";
 import { getEngine } from "./engine.js";
 
 const FEATURES_URL = "/api/v1/features";
@@ -86,9 +88,7 @@ class Grid extends EventTarget {
   load() {
     this.loading ??= (async () => {
       try {
-        const res = await fetch(FEATURES_URL, { credentials: "same-origin", headers: { Accept: "application/json" } });
-        if (!res.ok) throw new Error(`features API answered ${res.status}`);
-        const body = await res.json();
+        const body = await getJSON(FEATURES_URL);
         this.devices = Array.isArray(body?.devices) ? body.devices : [];
         this.nodes = new Map((Array.isArray(body?.nodes) ? body.nodes : []).map((/** @type {Node} */ n) => [n.id, n]));
         this.error = false;
@@ -163,11 +163,6 @@ export function getGrid() {
   return grid;
 }
 
-/** @param {number} hz */
-function mhz(hz) {
-  return `${(hz / 1e6).toFixed(6)} MHz`;
-}
-
 // installReceiverNotices notifies what happens to the device listened to.
 export function installReceiverNotices() {
   const g = getGrid();
@@ -205,7 +200,7 @@ export function installReceiverNotices() {
     if (s.kind === "preset") {
       notify({ level: "info", text: `An operator switched ${name} to the preset ${s.preset || "(unnamed)"}.` });
     } else {
-      notify({ level: "info", text: `An operator moved the centre of ${name} to ${mhz(s.centerHz)}.` });
+      notify({ level: "info", text: `An operator moved the centre of ${name} to ${formatMHz(s.centerHz)}.` });
     }
   });
   e.addEventListener("message", (ev) => {

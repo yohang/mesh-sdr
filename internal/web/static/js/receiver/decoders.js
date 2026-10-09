@@ -16,6 +16,7 @@
 // (secondary.js) and, at the top of their card, the line being printed
 // (partial decodes).
 
+import { el, formatMHz, SMALL_BUTTON, TOUCH } from "./dom.js";
 import { saveFile } from "./recorder.js";
 import { SecondaryWaterfall } from "./secondary.js";
 
@@ -66,17 +67,6 @@ const THREAD_GAP_MS = 5 * 60 * 1000;
  * @property {HTMLSpanElement} callsEl
  */
 
-/**
- * el creates an element with attributes and optional text content.
- * @param {string} tag @param {Record<string, string>} [attrs] @param {string} [text]
- */
-function el(tag, attrs = {}, text) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-  if (text !== undefined) e.textContent = text;
-  return e;
-}
-
 /** Characters kept per skimmer signal. */
 const SKIMMER_TEXT = 80;
 
@@ -97,7 +87,7 @@ function utcTime(ms) {
 
 /** @param {number} hz */
 function mhz(hz) {
-  return hz > 0 ? (hz / 1e6).toFixed(6) : "";
+  return hz > 0 ? formatMHz(hz, { unit: false }) : "";
 }
 
 /**
@@ -223,7 +213,7 @@ export class DecodersTab {
       ...modes.map((m) => {
         const id = `rx-variant-${m.mode.replace(/[^a-z0-9-]/gi, "")}`;
         const wrap = el("div", { class: "flex items-center gap-2 text-sm" });
-        const select = /** @type {HTMLSelectElement} */ (el("select", { id, class: "rounded border border-border px-2 py-1" }));
+        const select = /** @type {HTMLSelectElement} */ (el("select", { id, class: `rounded border border-border px-2 py-1 ${TOUCH}` }));
         for (const v of m.variants) select.append(el("option", { value: v }, v));
         select.value = kept.get(m.mode) ?? m.variants[0];
         select.addEventListener("change", () => {
@@ -254,7 +244,7 @@ export class DecodersTab {
     const section = el("section", { class: "flex flex-col gap-2 rounded border border-border p-2", "aria-labelledby": `${id}-title` });
     const head = el("div", { class: "flex items-center gap-2" });
     const title = el("h3", { id: `${id}-title`, class: "min-w-0 flex-1 font-semibold" }, this.label(mode));
-    const clear = el("button", { type: "button", class: "rounded border border-border px-2 py-1 text-sm" }, "Clear");
+    const clear = el("button", { type: "button", class: SMALL_BUTTON }, "Clear");
     head.append(title, clear);
     const list = /** @type {HTMLOListElement} */ (el("ol", { class: "flex max-h-80 flex-col gap-1 overflow-y-auto font-mono text-sm", "aria-label": `${this.label(mode)} messages, newest first`, tabindex: "0" }));
     const live = el("p", { class: "break-all whitespace-pre-wrap font-mono text-sm text-fg-muted" });
@@ -331,7 +321,7 @@ export class DecodersTab {
     canvas.height = height;
     scroll.append(canvas);
     const caption = el("figcaption", { class: "text-sm text-fg-muted" });
-    const save = /** @type {HTMLButtonElement} */ (el("button", { type: "button", class: "self-start rounded border border-border px-2 py-1 text-sm" }, "Save image"));
+    const save = /** @type {HTMLButtonElement} */ (el("button", { type: "button", class: `self-start ${SMALL_BUTTON}` }, "Save image"));
     figure.append(scroll, caption, save);
     c.list.before(figure);
     /** @type {ImageView} */

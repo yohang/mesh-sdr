@@ -2,10 +2,10 @@
 // internal/protocol/rxv1: 24-byte little-endian binary header, FFT u8 dB and
 // IMA ADPCM payload prefixes, JSON envelopes. Plain ES module, JSDoc types.
 
-export const HEADER_SIZE = 24;
-export const MAGIC = 0xa5;
-export const FRAME_VERSION = 1;
-export const MAX_FRAME_BYTES = 64 * 1024;
+const HEADER_SIZE = 24;
+const MAGIC = 0xa5;
+const FRAME_VERSION = 1;
+const MAX_FRAME_BYTES = 64 * 1024;
 
 export const FrameType = Object.freeze({ FFT: 0x01, AUDIO: 0x02, FFT2: 0x03, AUDIO_HD: 0x04 });
 export const Codec = Object.freeze({ PCM_S16LE: 0x00, ADPCM_IMA: 0x01, OPUS: 0x02, FFT_U8_DB: 0x10, FFT_F32_DB: 0x11 });

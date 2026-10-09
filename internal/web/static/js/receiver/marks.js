@@ -2,8 +2,13 @@
 // bookmarks and bandplan dial frequencies, in one sorted list, and the
 // helpers the bar, the Bookmarks tab, the search and the scanner share.
 
-// Analog modes a demodulator can run (RX-007; no digital mode before M2).
+// Analog modes a bookmark tunes, in display order (RX-007): the catalogue
+// of Go bookmarks.AnalogModes.
 export const ANALOG_MODES = ["am", "sam", "nfm", "wfm", "usb", "lsb", "cw"];
+// Modes of the receiver's mode picker and deep links (RX-007, DEM-013): the
+// analog modes and the DATA modes (usbd, lsbd), which bookmarks do not
+// take as modulation.
+export const PICKER_MODES = [...ANALOG_MODES, "usbd", "lsbd"];
 
 /**
  * @typedef {object} Mark a marker of the bookmark bar
@@ -95,10 +100,4 @@ export function tuneMode(modulation, underlying, modes) {
 /** @param {"hub" | "pack" | "dial"} origin */
 export function originText(origin) {
   return { hub: "hub bookmark", pack: "pack bookmark", dial: "dial frequency" }[origin];
-}
-
-/** @param {number} hz as MHz, three to six decimals */
-export function formatMHz(hz) {
-  const s = (hz / 1e6).toFixed(6).replace(/0{1,3}$/, "");
-  return `${s} MHz`;
 }

@@ -53,6 +53,15 @@ let seq = 0;
 // connection), for the receiver's hub chip (UI-022).
 let state = "idle";
 
+/**
+ * backoff is the exponential retry delay before jitter: min doubled per
+ * attempt n (from 0), at most max.
+ * @param {number} n @param {number} min @param {number} max
+ */
+export function backoff(n, min, max) {
+  return Math.min(max, min * 2 ** n);
+}
+
 // eventsState returns the connection state: idle, connecting, open,
 // closed (reconnecting) or stopped.
 export function eventsState() {
@@ -234,7 +243,7 @@ function onClose(code) {
   }
 
   // Exponential back-off with full jitter; 4429 waits at least retry_after_ms.
-  const cap = Math.min(MAX_DELAY, MIN_DELAY * 2 ** attempt++);
+  const cap = backoff(attempt++, MIN_DELAY, MAX_DELAY);
   const delay = Math.max(retryAfter, Math.random() * cap);
   retryAfter = 0;
   timer = setTimeout(() => {
