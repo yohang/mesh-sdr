@@ -43,6 +43,9 @@ type DeviceFeatures struct {
 	// PresetName names it ("" when unknown to the hub).
 	ActivePreset shared.UUID
 	PresetName   string
+	// Position is the device's reported position (MAP-007), nil when its
+	// node config sets none.
+	Position *domain.Position
 }
 
 // NodeFeatures describes the node of listed devices: its name, whether it
@@ -186,6 +189,10 @@ func (f *Features) Summary(ctx context.Context) (Summary, error) {
 			ID: d.ID(), Node: d.Node(), Name: d.Name(), Type: d.Type(), Online: d.Online(), NodeOnline: connected[d.Node()], State: state,
 			Status: d.Status(connected[d.Node()], n), Modes: modes(caps, d.Type()), ListenPolicy: effective(d, global),
 			Listeners: n, ActivePreset: d.ActivePreset(),
+		}
+
+		if p, ok := d.Position(); ok {
+			df.Position = &p
 		}
 
 		if !df.ActivePreset.IsZero() && f.d.PresetName != nil {

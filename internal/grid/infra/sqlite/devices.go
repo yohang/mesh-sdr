@@ -20,6 +20,15 @@ type deviceCapabilities struct {
 	domain.DeviceFlags
 
 	Config *domain.DeviceConfig `json:"config,omitempty"`
+	// GPS is the reported position (MAP-007).
+	GPS *storedPosition `json:"gps,omitempty"`
+}
+
+// storedPosition is a device position in devices.capabilities.
+type storedPosition struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
+	Own bool    `json:"own"`
 }
 
 // DeviceRepository implements domain.DeviceRepository.
@@ -74,7 +83,12 @@ func (r *DeviceRepository) Save(ctx context.Context, d *domain.Device) error {
 		return fmt.Errorf("encode sample rates: %w", err)
 	}
 
-	flags, err := json.Marshal(deviceCapabilities{DeviceFlags: s.Flags, Config: s.Config})
+	stored := deviceCapabilities{DeviceFlags: s.Flags, Config: s.Config}
+	if p := s.Position; p != nil {
+		stored.GPS = &storedPosition{Lat: p.Lat(), Lon: p.Lon(), Own: p.Own()}
+	}
+
+	flags, err := json.Marshal(stored)
 	if err != nil {
 		return fmt.Errorf("encode capabilities: %w", err)
 	}
@@ -143,9 +157,20 @@ func deviceFromRow(row sqlc.Device) (*domain.Device, error) {
 		center = &v
 	}
 
+	var position *domain.Position
+
+	if g := caps.GPS; g != nil {
+		p, err := domain.NewPosition(g.Lat, g.Lon, g.Own)
+		if err != nil {
+			return nil, fmt.Errorf("device %s position: %w", row.ID, err)
+		}
+
+		position = &p
+	}
+
 	return domain.RehydrateDevice(domain.DeviceSnapshot{
 		ID: row.ID, Node: row.NodeID, Name: row.Name, Type: row.Type, FreqMin: row.FreqMin, FreqMax: row.FreqMax,
-		SampleRates: rates, Flags: caps.DeviceFlags, Config: caps.Config, Online: row.Online != 0, State: domain.RuntimeState(row.RuntimeState),
+		SampleRates: rates, Flags: caps.DeviceFlags, Config: caps.Config, Position: position, Online: row.Online != 0, State: domain.RuntimeState(row.RuntimeState),
 		StateAt: fromMS(row.RuntimeStateAt), Reason: row.RuntimeReason.String, ActivePreset: preset, CenterFreq: center,
 		SortOrder: int(row.SortOrder), ReportedAt: fromMS(row.ReportedAt),
 	})
