@@ -7,7 +7,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/dsp/csdr"
 )
 
-// The native text decoders (DEC-006 to DEC-012) on libcsdr++ kernels, with
+// The native text decoders (DEC-006 to DEC-012, MAR-002, MAR-003) on
+// libcsdr++ kernels, with
 // the chains and parameters of OpenWebRX+ (csdr/chain/digimodes.py,
 // owrx/dsp.py): they read the selector IQ of the listener's demodulator at
 // TextRate, move the signal at the secondary offset to 0 Hz and band-pass
@@ -29,6 +30,11 @@ const (
 	TextRTTY TextKind = "rtty"
 	// TextSITORB: the RTTY chain with SITOR-B (FEC) and CCIR 476.
 	TextSITORB TextKind = "sitorb"
+	// TextNAVTEX: the SITOR-B chain keeping the NAVTEX messages only.
+	TextNAVTEX TextKind = "navtex"
+	// TextDSC: the RTTY chain with CCIR 493 and the DSC decoder: one JSON
+	// line per call.
+	TextDSC TextKind = "dsc"
 	// TextCW: AGC, CW decoder.
 	TextCW TextKind = "cw"
 )
@@ -41,7 +47,7 @@ type TextConfig struct {
 	// BandwidthHz is the half width of the secondary band-pass: the
 	// selector keeps ±BandwidthHz around the offset.
 	BandwidthHz float64
-	// Invert swaps mark and space (RTTY, SITOR-B).
+	// Invert swaps mark and space (RTTY, SITOR-B, NAVTEX, DSC).
 	Invert bool
 	// ShowCW also prints the dots and dashes (cw_showcw).
 	ShowCW bool
@@ -49,9 +55,12 @@ type TextConfig struct {
 	OffsetHz float64
 }
 
-// sitorbErrors are the invalid codes in a row before SITOR-B resyncs (the
-// libcsdr++ default).
-const sitorbErrors = 4
+// sitorbErrors and ccir493Errors are the invalid codes in a row before
+// SITOR-B or CCIR 493 resyncs (the libcsdr++ defaults).
+const (
+	sitorbErrors  = 4
+	ccir493Errors = 4
+)
 
 // lowpassTransition is the transition of the RTTY and SITOR-B low-pass
 // (the pycsdr default).
@@ -70,7 +79,7 @@ func (c TextConfig) Validate() error {
 		return fmt.Errorf("%w: text decoder offset %g Hz", ErrChain, c.OffsetHz)
 	case c.Kind == TextCW:
 		return nil
-	case c.Kind != TextPSK && c.Kind != TextRTTY && c.Kind != TextSITORB:
+	case c.Kind != TextPSK && c.Kind != TextRTTY && c.Kind != TextSITORB && c.Kind != TextNAVTEX && c.Kind != TextDSC:
 		return fmt.Errorf("%w: text decoder %q", ErrChain, c.Kind)
 	case c.Baud < 10 || c.Baud > 300:
 		return fmt.Errorf("%w: text decoder baud rate %g", ErrChain, c.Baud)
@@ -92,20 +101,23 @@ type TextDecoder struct {
 	symbols *csdr.Stage[complex64, complex64]
 	bits    *csdr.ByteStage[complex64]
 
-	// RTTY, SITOR-B
+	// RTTY, SITOR-B, NAVTEX, DSC
 	fm      *csdr.Stage[complex64, float32]
 	lp      *csdr.Stage[float32, float32]
 	timing  *csdr.Stage[float32, float32]
 	framing *csdr.ByteStage[float32]
 
-	// chars turns PSK bits, Baudot or CCIR 476 codes into characters.
+	// chars turns PSK bits, Baudot or CCIR 476 codes into characters, or
+	// CCIR 493 symbols into DSC JSON lines.
 	chars *csdr.ByteStage[byte]
+	// navtex keeps the NAVTEX messages of the characters.
+	navtex *csdr.ByteStage[byte]
 
 	cw *csdr.CW
 
-	c1, c2  []complex64
-	f1, f2  []float32
-	b1, out []byte
+	c1, c2      []complex64
+	f1, f2      []float32
+	b1, b2, out []byte
 }
 
 // NewTextDecoder builds a decoder. Close releases it.
@@ -157,7 +169,7 @@ func (d *TextDecoder) build() error {
 		d.chars, err = csdr.NewVaricode()
 
 		return err
-	case TextRTTY, TextSITORB:
+	case TextRTTY, TextSITORB, TextNAVTEX, TextDSC:
 		if d.fm, err = csdr.NewFMDemod(); err != nil {
 			return err
 		}
@@ -187,11 +199,27 @@ func (d *TextDecoder) build() error {
 			return err
 		}
 
+		if cfg.Kind == TextDSC {
+			if d.framing, err = csdr.NewCCIR493(ccir493Errors, cfg.Invert); err != nil {
+				return err
+			}
+
+			d.chars, err = csdr.NewDSC()
+
+			return err
+		}
+
 		if d.framing, err = csdr.NewSitorB(sitorbErrors, cfg.Invert); err != nil {
 			return err
 		}
 
-		d.chars, err = csdr.NewCCIR476()
+		if d.chars, err = csdr.NewCCIR476(); err != nil {
+			return err
+		}
+
+		if cfg.Kind == TextNAVTEX {
+			d.navtex, err = csdr.NewNAVTEX()
+		}
 
 		return err
 	default:
@@ -257,7 +285,7 @@ func floatStep(s *csdr.Stage[float32, float32], in []float32, buf *[]float32) ([
 
 // byteStep runs a byte stage into buf.
 func byteStep[T csdr.Symbol](s *csdr.ByteStage[T], in []T, buf *[]byte) ([]byte, error) {
-	*buf = Grow(*buf, len(in)+s.Pending()+stepMargin)
+	*buf = Grow(*buf, s.OutputLen(len(in))+stepMargin)
 
 	n, err := s.Process(in, *buf)
 	if err != nil {
@@ -268,8 +296,8 @@ func byteStep[T csdr.Symbol](s *csdr.ByteStage[T], in []T, buf *[]byte) ([]byte,
 }
 
 // Process runs a block of selector IQ at TextRate through the decoder and
-// returns the characters decoded, raw (untrusted RF text, not sanitised),
-// valid until the next call.
+// returns the characters decoded (DSC: JSON lines), raw (untrusted RF
+// text, not sanitised), valid until the next call.
 func (d *TextDecoder) Process(iq []complex64) ([]byte, error) {
 	sel, err := complexStep(d.shift.Stage, iq, &d.c1)
 	if err != nil {
@@ -321,7 +349,16 @@ func (d *TextDecoder) Process(iq []complex64) ([]byte, error) {
 			return nil, err
 		}
 
-		return byteStep(d.chars, codes, &d.out)
+		if d.navtex == nil {
+			return byteStep(d.chars, codes, &d.out)
+		}
+
+		chars, err := byteStep(d.chars, codes, &d.b2)
+		if err != nil {
+			return nil, err
+		}
+
+		return byteStep(d.navtex, chars, &d.out)
 	}
 }
 
@@ -346,6 +383,7 @@ func (d *TextDecoder) Close() {
 	d.bits.Close()
 	d.framing.Close()
 	d.chars.Close()
+	d.navtex.Close()
 
 	if d.cw != nil {
 		d.cw.Close()
