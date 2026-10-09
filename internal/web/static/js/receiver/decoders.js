@@ -281,8 +281,8 @@ export class DecodersTab {
     if (p.partial || !text) return;
     if (p.schema === "js8.v1" && this.thread(c, p, text)) return;
     const li = el("li", { class: "break-all whitespace-pre-wrap" });
-    // Paging: a colour per address, besides the address in the text.
-    const address = p.schema === "paging.v1" ? p.payload?.address : undefined;
+    // Paging and DSC: a colour per address or caller, besides it in the text.
+    const address = p.schema === "paging.v1" ? p.payload?.address : p.schema === "dsc.v1" ? p.payload?.src : undefined;
     if (typeof address === "string") {
       li.classList.add("border-l-4", "pl-1");
       li.style.borderLeftColor = `hsl(${hue(address)} 70% 45%)`;

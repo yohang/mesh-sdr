@@ -186,6 +186,18 @@ var digitalModes = []DigitalMode{
 		Name: "sitorb", Label: "SITOR-B", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
 		SecondaryFFT: true, BandwidthHz: 210, DedupStep: textDedupStep,
 	},
+	// MAR-002: NAVTEX (518 and 490 kHz), the SITOR-B chain keeping the
+	// messages (ZCZC to NNNN).
+	{
+		Name: "navtex", Label: "NAVTEX", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
+		SecondaryFFT: true, BandwidthHz: 210, DedupStep: textDedupStep,
+	},
+	// MAR-003: native DSC (HF/MF), 100 Bd 170 Hz shift, CCIR 493 and the
+	// DSC decoder.
+	{
+		Name: "dsc", Label: "DSC", Cap: CapNativeDSP, Family: FamilyDSC, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
+		SecondaryFFT: true, BandwidthHz: 210, DedupStep: textDedupStep,
+	},
 	// DEC-012: native CW decoder, 75 Hz selector.
 	{
 		Name: "cwdecoder", Label: "CW Decoder", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
@@ -259,6 +271,7 @@ const (
 	FamilyPacket    = "packet"
 	FamilySkimmer   = "skimmer"
 	FamilyISM       = "ism"
+	FamilyDSC       = "dsc"
 )
 
 // textDedupStep rounds the frequency of text decoders in the duplicate
