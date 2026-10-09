@@ -5,7 +5,7 @@
 // from radio data: it is set with textContent, never as HTML, and every
 // value put in a link is URL-encoded.
 
-import { el } from "../receiver/dom.js";
+import { el, formatMHz } from "../receiver/dom.js";
 import { agoText, distanceKm, finite, latLonText, utcText } from "./geo.js";
 import { typeOf } from "./kinds.js";
 
@@ -59,14 +59,6 @@ function scalar(v) {
 }
 
 /**
- * freqText is a frequency in MHz.
- * @param {number} hz
- */
-export function freqText(hz) {
-  return `${(hz / 1e6).toFixed(6).replace(/0{1,3}$/, "")} MHz`;
-}
-
-/**
  * deviceName names a device: its name, else its id.
  * @param {DetailContext} ctx @param {string} id
  */
@@ -80,7 +72,7 @@ export function deviceName(ctx, id) {
  * known.
  * @param {DetailContext} ctx @param {string} device @param {Record<string, any>} details
  */
-export function receiverLink(ctx, device, details) {
+function receiverLink(ctx, device, details) {
   const d = ctx.devices.get(device);
   if (!d) return null;
   const q = new URLSearchParams();
@@ -94,7 +86,7 @@ export function receiverLink(ctx, device, details) {
  * decodesLink is the Decodes page filtered by a device and a mode.
  * @param {string} device @param {Record<string, any>} details
  */
-export function decodesLink(device, details) {
+function decodesLink(device, details) {
   const q = new URLSearchParams({ device });
   if (typeof details.mode === "string" && details.mode) q.set("mode", details.mode);
   return `/decodes?${q}`;
@@ -215,7 +207,7 @@ export function renderDetail(e, ctx) {
   row(dl, "Last heard", `${utcText(f.updated_at)} (${agoText(f.updated_at, ctx.now)})`);
   if (finite(e.expires_at)) row(dl, "Shown until", utcText(e.expires_at));
   if (typeof d.mode === "string" && d.mode) row(dl, "Mode", d.mode);
-  if (finite(d.freq_hz) && d.freq_hz > 0) row(dl, "Frequency", freqText(d.freq_hz));
+  if (finite(d.freq_hz) && d.freq_hz > 0) row(dl, "Frequency", formatMHz(d.freq_hz, { trim: true }));
   for (const [key, label, format] of FIELDS) {
     const v = d[key];
     if (v === undefined || v === null || v === "") continue;

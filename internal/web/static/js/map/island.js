@@ -630,7 +630,8 @@ class MapIsland extends HTMLElement {
     const op = opacity(e, this.now);
     // The heading tick is sized in pixels: redrawn at every zoom.
     const zoom = finite(e.feature?.details.course) ? this.map.getZoom() : "";
-    const sig = [e.feature?.key, e.updated_at, this.rendererKind, zoom, id === this.selected, this.colorVersion].join("|");
+    // Receivers have no report time: their place and name are compared.
+    const sig = [e.feature?.key, e.updated_at, e.at, e.subject, this.rendererKind, zoom, id === this.selected, this.colorVersion].join("|");
     if (old && old.sig === sig) {
       old.style(op);
       return;
