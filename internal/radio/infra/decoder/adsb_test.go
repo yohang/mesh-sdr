@@ -17,8 +17,8 @@ import (
 	"github.com/yohang/mesh-sdr/internal/shared/process"
 )
 
-// testdata/readsb-aircraft.json is the aircraft.json readsb 3.14.1630
-// (Debian trixie) wrote for adsbFrames, modulated at 2.4 MS/s and read
+// testdata/readsb-aircraft.json is the aircraft.json readsb 3.16.17 (the
+// image's build) wrote for adsbFrames, modulated at 2.4 MS/s and read
 // from stdin as SC16, with --lat 52 --lon 4: an airliner with a DF5
 // squawk, an emergency (7700) and an aircraft on the ground.
 
@@ -48,7 +48,9 @@ func readsbFixture(t *testing.T) []byte {
 // An aircraft is reported when its message count grew; its record is its
 // whole state, its time the poll time minus its age.
 func TestAircraftPollerFixture(t *testing.T) {
-	parse := newAircraftPoller(sessionConfig{})
+	var p aircraftPoller
+
+	parse := p.read
 	at := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	data := readsbFixture(t)
 
@@ -93,9 +95,11 @@ func TestAircraftPollerFixture(t *testing.T) {
 		t.Errorf("same file: progress %v, %d records", progress, len(recs))
 	}
 
-	// One aircraft heard again, the clock advanced.
-	next := strings.Replace(strings.Replace(string(data), `"now" : 291581.045`, `"now" : 291582.045`, 1), `"messages":16,`, `"messages":17,`, 1)
-	if recs, progress := parse([]byte(next), at.Add(2*time.Second)); !progress || len(recs) != 1 || !strings.HasPrefix(recs[0].Text, "A4F3B2 N123AB ground") {
+	// One aircraft heard again, its position not (a record carries a
+	// position only when it is new), the clock advanced.
+	next := strings.NewReplacer(`"now" : 1791625971.003`, `"now" : 1791625972.003`, `"seen_pos":0.000,`, `"seen_pos":1.000,`,
+		`"messages":17,`, `"messages":18,`).Replace(string(data))
+	if recs, progress := parse([]byte(next), at.Add(2*time.Second)); !progress || len(recs) != 1 || recs[0].Text != "A4F3B2 N123AB ground" {
 		t.Errorf("next file: progress %v, records %+v", progress, recs)
 	}
 
@@ -161,7 +165,8 @@ func TestReadsbArgs(t *testing.T) {
 }
 
 // adsbIQ modulates frames (PPM, 0.5 µs pulses after the 8 µs preamble)
-// into one second of 2.4 MS/s IQ, one frame every 50 ms, cycling.
+// into one second of 2.4 MS/s IQ, one frame every 50 ms, cycling; no
+// frames: noise only.
 func adsbIQ(t *testing.T, frames []string) []complex64 {
 	t.Helper()
 
@@ -180,6 +185,10 @@ func adsbIQ(t *testing.T, frames []string) []complex64 {
 	}
 
 	for k := range 20 {
+		if len(frames) == 0 {
+			break
+		}
+
 		msg, err := hex.DecodeString(frames[k%len(frames)])
 		if err != nil {
 			t.Fatal(err)
@@ -217,10 +226,21 @@ func adsbIQ(t *testing.T, frames []string) []complex64 {
 
 // ADS-B through readsb (AIR-004): the wide IQ as SC16 on stdin, the
 // aircraft list polled from the workdir.
+// The second run starts with 4 s of noise only: readsb starts on input
+// without any message.
 func TestADSBDecodesReadsb(t *testing.T) {
 	if _, err := process.ResolveTool("readsb", dirs); err != nil {
 		t.Skip("readsb not installed")
 	}
+
+	t.Run("signal", func(t *testing.T) { runADSB(t, 0) })
+	t.Run("quiet start", func(t *testing.T) { runADSB(t, 4*time.Second) })
+}
+
+// runADSB feeds quiet of noise, then the frames in real time, to an ADS-B
+// session until the three aircraft are reported.
+func runADSB(t *testing.T, quiet time.Duration) {
+	t.Helper()
 
 	mode, err := domain.DigitalModeOf("adsb")
 	if err != nil {
@@ -242,6 +262,7 @@ func TestADSBDecodesReadsb(t *testing.T) {
 	t.Cleanup(run.Close)
 
 	iq := adsbIQ(t, adsbFrames)
+	noise := adsbIQ(t, nil)
 	block := mode.InputRate / 50
 
 	// Positions need both CPR frames of each aircraft: wait for the three
@@ -262,11 +283,18 @@ func TestADSBDecodesReadsb(t *testing.T) {
 		return len(got) == 3
 	}
 
-	deadline := time.Now().Add(20 * time.Second)
+	start := time.Now()
+	deadline := start.Add(quiet + 20*time.Second)
 
 	for i := 0; time.Now().Before(deadline) && !done(); i += block {
 		i %= len(iq)
-		run.WideIQ(app.WideIQBlock{Samples: iq[i:min(i+block, len(iq))], Rate: mode.InputRate, Time: time.Now()})
+
+		in := iq
+		if time.Since(start) < quiet {
+			in = noise
+		}
+
+		run.WideIQ(app.WideIQBlock{Samples: in[i:min(i+block, len(in))], Rate: mode.InputRate, Time: time.Now()})
 		time.Sleep(20 * time.Millisecond)
 	}
 

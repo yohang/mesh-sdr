@@ -213,9 +213,9 @@ type toolSpec struct {
 	// textLog: the live records of a session are kept as text logs and
 	// sent to Files (FIL-005: the skimmers).
 	textLog bool
-	// poll, when set, is the output file the tool rewrites in its workdir
-	// (readsb): the session polls it instead of reading stdout lines.
-	poll *workdirPoll
+	// aircraftJSON: the tool is readsb, whose aircraft.json in the
+	// workdir the session polls instead of reading stdout lines.
+	aircraftJSON bool
 }
 
 // lineParser parses one output line of a tool into zero or more records.
@@ -264,7 +264,7 @@ var toolSpecs = map[string]toolSpec{
 	"rttyskimmer": {
 		tool: "csdr-rttyskimmer", args: skimmerArgs, rules: skimmerRules, iq: iqRealS16, lines: newSkimmerParser("RTTY"), textLog: true,
 	},
-	"adsb":  {tool: "readsb", args: readsbArgs, rules: readsbRules, iq: iqSC16, poll: readsbPoll},
+	"adsb":  {tool: "readsb", args: readsbArgs, rules: readsbRules, iq: iqSC16, aircraftJSON: true},
 	"ism":   {tool: "rtl_433", args: ismArgs, rules: rtl433Rules, iq: iqCF32, lines: newISMParser("ISM")},
 	"wmbus": {tool: "rtl_433", args: wmbusArgs, rules: rtl433Rules, iq: iqCF32, lines: newISMParser("WMBUS")},
 }
@@ -342,8 +342,8 @@ func (r *Runner) startTool(spec app.DecoderSpec, ev app.DecoderEvents) (app.Deco
 		ps.Prepare = writeDirewolfConfig
 		ps.PerRun = s.kissRun(ps.Args)
 		ps.Stdout = func(ctx context.Context, rd io.Reader) error { return s.direwolfStdout(ctx, rd, parse) }
-	case ts.poll != nil:
-		s.pollSpec(&ps, ts.poll, cfg)
+	case ts.aircraftJSON:
+		s.readsbSpec(&ps)
 	default:
 		parse := ts.lines(cfg)
 		ps.Stdout = func(_ context.Context, rd io.Reader) error {
