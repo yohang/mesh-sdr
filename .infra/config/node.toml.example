@@ -65,9 +65,9 @@ ca_cert = "tls/ca.pem"
 # External programs. A tool is its tools.<name> absolute path when set,
 # otherwise found by name in tools.dirs, which is also the PATH of every
 # tool (the node's own PATH is never used). The node image ships
-# rtl_connector, rtl_tcp_connector (owrx_connector), csdr-cwskimmer and
-# csdr-rttyskimmer in /usr/local/bin, and the decoders jt9, wsprd (wsjtx), js8 (js8call),
-# direwolf, multimon-ng, rtl_433 and readsb in /usr/bin. The node probes the
+# rtl_connector, rtl_tcp_connector (owrx_connector), csdr-cwskimmer,
+# csdr-rttyskimmer and readsb in /usr/local/bin, and the decoders jt9, wsprd (wsjtx), js8 (js8call),
+# direwolf, multimon-ng and rtl_433 in /usr/bin. The node probes the
 # decoders at start and when the hub asks (DEC-001): a missing one makes
 # its digital modes unavailable. direwolf (packet) always writes the
 # symlink /tmp/kisstnc to its KISS pseudo-terminal: on a bare-metal
@@ -85,7 +85,7 @@ dirs = ["/usr/local/bin", "/usr/bin"]
 # rtl_433 = "/usr/bin/rtl_433"
 # csdr_cwskimmer = "/usr/local/bin/csdr-cwskimmer"
 # csdr_rttyskimmer = "/usr/local/bin/csdr-rttyskimmer"
-# readsb = "/usr/bin/readsb"
+# readsb = "/usr/local/bin/readsb"
 
 # Decoder resources of this node. The decoding settings are hub settings
 # (Admin › Decoding), pushed to the node.

@@ -23,14 +23,15 @@ ARG RTLSDR_VERSION=2.0.2-2+b1
 ARG LIBUSB_VERSION=2:1.0.28-1
 ARG CA_CERTIFICATES_VERSION=20250419
 # External decoders run by the node (ADR 0017 decision 6): wsjtx (jt9,
-# wsprd), js8call (js8), direwolf, multimon-ng, rtl_433, readsb (ADS-B,
-# ADR 0029).
+# wsprd), js8call (js8), direwolf, multimon-ng, rtl_433.
 ARG WSJTX_VERSION=2.7.0+repack-1
 ARG JS8CALL_VERSION=2.2.0+ds-5+b1
 ARG DIREWOLF_VERSION=1.7+dfsg-2+deb13u1
 ARG MULTIMON_NG_VERSION=1.3.1+dfsg-1
 ARG RTL_433_VERSION=25.02-1+deb13u1
-ARG READSB_VERSION=3.14.1630+git20240609.adc080d-1
+# Build dependencies of readsb.
+ARG ZSTD_VERSION=1.5.7+dfsg-1
+ARG ZLIB_VERSION=1:1.3.dfsg+really1.3.1-1+b1
 
 # Native components built from source (ADR 0014, ADR 0019). Upstream
 # publishes no release tarballs: the GitHub tag archives are pinned by
@@ -42,11 +43,16 @@ ARG OWRX_CONNECTOR_SHA256=63a7bccf5beab0220136829850b46df56c79ddb4b6d77d9ea191d1
 # csdr-skimmer (formerly csdr-cwskimmer): csdr-cwskimmer and csdr-rttyskimmer.
 ARG CSDR_SKIMMER_VERSION=1.12
 ARG CSDR_SKIMMER_SHA256=2156bd5e8b2aeae756482040c9aad8f48a1658e02499441047ec877b9992f562
+# readsb (ADS-B, ADR 0029): 3.16.17 or later, whose ifile input keeps one
+# wall clock on stdin (trixie's 3.14.1630 mixes two and stops writing its
+# JSON).
+ARG READSB_VERSION=3.16.17
+ARG READSB_SHA256=6e06af15e24c3dc8311013ae4c782346ecc66ee1273636d410109b80009b64c0
 
 
 # csdr 0.18.x (luarvique fork), owrx_connector (rtl_connector,
 # rtl_tcp_connector; no Soapy), csdr-cwskimmer and csdr-rttyskimmer
-# (csdr-skimmer), installed
+# (csdr-skimmer) and readsb, installed
 # under /usr/local and staged in /opt/natives with their licence texts.
 FROM ${DEBIAN_IMAGE} AS natives
 
@@ -61,11 +67,16 @@ ARG OWRX_CONNECTOR_VERSION
 ARG OWRX_CONNECTOR_SHA256
 ARG CSDR_SKIMMER_VERSION
 ARG CSDR_SKIMMER_SHA256
+ARG READSB_VERSION
+ARG READSB_SHA256
+ARG ZSTD_VERSION
+ARG ZLIB_VERSION
 
 RUN apt-get update; \
     apt-get install -y --no-install-recommends \
       ca-certificates curl g++ cmake make pkg-config \
-      "libfftw3-dev=${FFTW_VERSION}" "libsamplerate0-dev=${SAMPLERATE_VERSION}" "librtlsdr-dev=${RTLSDR_VERSION}"; \
+      "libfftw3-dev=${FFTW_VERSION}" "libsamplerate0-dev=${SAMPLERATE_VERSION}" "librtlsdr-dev=${RTLSDR_VERSION}" \
+      "libzstd-dev=${ZSTD_VERSION}" "zlib1g-dev=${ZLIB_VERSION}"; \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -103,6 +114,21 @@ RUN curl -fsSL -o csdr-skimmer.tar.gz "https://github.com/luarvique/csdr-skimmer
     mkdir -p "${out}/usr/share/doc/csdr-skimmer"; \
     install -m 0755 "csdr-skimmer-${CSDR_SKIMMER_VERSION}/csdr-cwskimmer" "csdr-skimmer-${CSDR_SKIMMER_VERSION}/csdr-rttyskimmer" "${out}/usr/local/bin/"; \
     cp "csdr-skimmer-${CSDR_SKIMMER_VERSION}/LICENSE" "${out}/usr/share/doc/csdr-skimmer/"
+
+# readsb with only its file input (ifile: no rtl-sdr, no interactive
+# mode); it links libzstd and zlib, present in the base images. The
+# version string leaves out the build date.
+RUN curl -fsSL -o readsb.tar.gz "https://github.com/wiedehopf/readsb/archive/refs/tags/v${READSB_VERSION}.tar.gz"; \
+    echo "${READSB_SHA256}  readsb.tar.gz" | sha256sum -c -; \
+    tar xzf readsb.tar.gz; \
+    make -C "readsb-${READSB_VERSION}" -j"$(nproc)" DISABLE_INTERACTIVE=yes READSB_VERSION="${READSB_VERSION}" readsb; \
+    out=/opt/natives; \
+    mkdir -p "${out}/usr/share/doc/readsb/compat"; \
+    install -m 0755 "readsb-${READSB_VERSION}/readsb" "${out}/usr/local/bin/"; \
+    cp "readsb-${READSB_VERSION}/LICENSE" "readsb-${READSB_VERSION}/COPYING" "${out}/usr/share/doc/readsb/"; \
+    sed -n '1,/\*\//p' "readsb-${READSB_VERSION}/fasthash.h" > "${out}/usr/share/doc/readsb/fasthash-LICENSE"; \
+    cp "readsb-${READSB_VERSION}/compat/clock_gettime/LICENSE" "${out}/usr/share/doc/readsb/compat/clock_gettime-LICENSE"; \
+    cp "readsb-${READSB_VERSION}/compat/clock_nanosleep/LICENSE" "${out}/usr/share/doc/readsb/compat/clock_nanosleep-LICENSE"
 
 
 FROM ${GO_IMAGE} AS base
@@ -158,14 +184,13 @@ ARG JS8CALL_VERSION
 ARG DIREWOLF_VERSION
 ARG MULTIMON_NG_VERSION
 ARG RTL_433_VERSION
-ARG READSB_VERSION
 
 # External decoders (ADR 0017 decision 6), on PATH for the dev node and the
 # tests, same pins as the runtime.
 RUN apt-get update; \
     apt-get install -y --no-install-recommends \
       "wsjtx=${WSJTX_VERSION}" "js8call=${JS8CALL_VERSION}" "direwolf=${DIREWOLF_VERSION}" \
-      "multimon-ng=${MULTIMON_NG_VERSION}" "rtl-433=${RTL_433_VERSION}" "readsb=${READSB_VERSION}"; \
+      "multimon-ng=${MULTIMON_NG_VERSION}" "rtl-433=${RTL_433_VERSION}"; \
     rm -rf /var/lib/apt/lists/*
 
 # Root-installed binaries, built with throwaway caches so /cache stays empty for the dev user
@@ -240,7 +265,6 @@ ARG JS8CALL_VERSION
 ARG DIREWOLF_VERSION
 ARG MULTIMON_NG_VERSION
 ARG RTL_433_VERSION
-ARG READSB_VERSION
 
 # wsjtx and js8call pull Qt 5 and Boost (accepted).
 RUN apt-get update; \
@@ -248,7 +272,7 @@ RUN apt-get update; \
       "ca-certificates=${CA_CERTIFICATES_VERSION}" "libfftw3-single3=${FFTW_VERSION}" \
       "libsamplerate0=${SAMPLERATE_VERSION}" "librtlsdr0=${RTLSDR_VERSION}" "libusb-1.0-0=${LIBUSB_VERSION}" \
       "wsjtx=${WSJTX_VERSION}" "js8call=${JS8CALL_VERSION}" "direwolf=${DIREWOLF_VERSION}" \
-      "multimon-ng=${MULTIMON_NG_VERSION}" "rtl-433=${RTL_433_VERSION}" "readsb=${READSB_VERSION}"; \
+      "multimon-ng=${MULTIMON_NG_VERSION}" "rtl-433=${RTL_433_VERSION}"; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd -g 65532 nonroot; \
     useradd -u 65532 -g 65532 -d /home/nonroot -m -s /usr/sbin/nologin nonroot; \
@@ -301,12 +325,13 @@ ARG OWRX_CONNECTOR_VERSION
 ARG OWRX_CONNECTOR_SHA256
 ARG CSDR_SKIMMER_VERSION
 ARG CSDR_SKIMMER_SHA256
+ARG READSB_VERSION
+ARG READSB_SHA256
 ARG WSJTX_VERSION
 ARG JS8CALL_VERSION
 ARG DIREWOLF_VERSION
 ARG MULTIMON_NG_VERSION
 ARG RTL_433_VERSION
-ARG READSB_VERSION
 
 # Debian source versions are the binary versions without the binNMU suffix.
 RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources; \
@@ -320,11 +345,13 @@ RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.s
     echo "${OWRX_CONNECTOR_SHA256}  owrx_connector-${OWRX_CONNECTOR_VERSION}.tar.gz" | sha256sum -c -; \
     curl -fsSL -o "csdr-skimmer-${CSDR_SKIMMER_VERSION}.tar.gz" "https://github.com/luarvique/csdr-skimmer/archive/refs/tags/${CSDR_SKIMMER_VERSION}.tar.gz"; \
     echo "${CSDR_SKIMMER_SHA256}  csdr-skimmer-${CSDR_SKIMMER_VERSION}.tar.gz" | sha256sum -c -; \
+    curl -fsSL -o "readsb-${READSB_VERSION}.tar.gz" "https://github.com/wiedehopf/readsb/archive/refs/tags/v${READSB_VERSION}.tar.gz"; \
+    echo "${READSB_SHA256}  readsb-${READSB_VERSION}.tar.gz" | sha256sum -c -; \
     cd /sources/debian; \
     apt-get source --download-only "fftw3=${FFTW_VERSION%+b*}" "rtl-sdr=${RTLSDR_VERSION%+b*}" \
       "libsamplerate=${SAMPLERATE_VERSION%+b*}" "libusb-1.0=${LIBUSB_VERSION%+b*}" \
       "wsjtx=${WSJTX_VERSION%+b*}" "js8call=${JS8CALL_VERSION%+b*}" "direwolf=${DIREWOLF_VERSION%+b*}" \
-      "multimon-ng=${MULTIMON_NG_VERSION%+b*}" "rtl-433=${RTL_433_VERSION%+b*}" "readsb=${READSB_VERSION%+b*}"; \
+      "multimon-ng=${MULTIMON_NG_VERSION%+b*}" "rtl-433=${RTL_433_VERSION%+b*}"; \
     rm -rf /var/lib/apt/lists/*
 
 # The source of MeshSDR itself (the files the binaries are built from),
