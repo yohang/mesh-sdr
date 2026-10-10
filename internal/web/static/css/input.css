@@ -717,6 +717,7 @@
 .map-sym-call::before { content: "╌" / ""; color: var(--msdr-color-bmk-dial); font-weight: 700; }
 .map-sym-receiver::before { content: "▲" / ""; color: var(--msdr-color-bmk-hub); }
 .map-sym-other::before { content: "◆" / ""; color: var(--msdr-color-info); }
+.map-sym-static::before { content: "★" / ""; color: var(--msdr-color-fg); }
 
 /* Band and mode swatches of the colour legend (MAP-010); the name next to
    each is the cue. The isolated entry also has a check mark and bold text. */
@@ -757,6 +758,19 @@
 
   &::before { content: "▲" / ""; }
   &[data-selected]::before { content: "▲" / ""; font-size: 1.6rem; }
+}
+
+/* Static markers (MAP-017, Leaflet divIcon): a star with an outline. */
+.map-stage .map-static {
+  display: grid;
+  place-items: center;
+  color: var(--msdr-color-fg);
+  font-size: 1.25rem;
+  line-height: 1;
+  text-shadow: 0 0 2px var(--msdr-color-surface), 0 0 2px var(--msdr-color-surface);
+
+  &::before { content: "★" / ""; }
+  &[data-selected]::before { font-size: 1.6rem; color: var(--msdr-color-focus); }
 }
 
 /* Tile attribution (MAP-004): plain text set by the island. */

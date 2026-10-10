@@ -144,6 +144,12 @@ func (h *Hub) validate(o Origins) []Problem {
 		c.fail("tls.ca_cert", CodeRequired, "tls.ca_cert is required with tls.ca_key")
 	}
 
+	if d := h.Map.StaticMarkersDir; d != "" {
+		if _, err := ReadStaticMarkers(d); err != nil {
+			c.fail("map.static_markers_dir", CodeInvalidValue, "static markers: "+err.Error())
+		}
+	}
+
 	c.log(h.Log)
 	c.settings(h)
 

@@ -42,7 +42,7 @@ import { getState, loadPref, savePref, setState } from "../receiver/session.js";
 import { el } from "../receiver/dom.js";
 import { onThemeChange, readToken } from "../tokens.js";
 import { ColourLegend, colourKey, hamBands, SERIES } from "./colours.js";
-import { renderDetail, renderSquare } from "./detail.js";
+import { nameOf, renderDetail, renderSquare } from "./detail.js";
 import { finite, isLocator, locatorBounds } from "./geo.js";
 import { greatCircle } from "./greatcircle.js";
 import { maidenheadGrid } from "./grid.js";
@@ -651,7 +651,7 @@ class MapIsland extends HTMLElement {
       const found = this.find(q.toUpperCase(), true);
       if (found) {
         this.select(found.id, { centre: true, opener: input });
-        this.say(`Found ${found.subject}.`);
+        this.say(`Found ${nameOf(found)}.`);
         return;
       }
       const b = isLocator(q) ? locatorBounds(q) : null;
@@ -952,6 +952,23 @@ class MapIsland extends HTMLElement {
       return { group, style };
     }
 
+    if (e.kind === "static") {
+      const name = `Static marker ${nameOf(e)}`;
+      const marker = L.marker(e.at, {
+        icon: L.divIcon({ className: "map-static", iconSize: [24, 24], iconAnchor: [12, 12] }),
+        title: name,
+        keyboard: true,
+        riseOnHover: true,
+      });
+      group.addLayer(marker);
+      marker.on("add", () => {
+        const icon = marker.getElement();
+        icon?.setAttribute("aria-label", name);
+        if (selected) icon?.setAttribute("data-selected", "");
+      });
+      return { group, style: (/** @type {number} */ op) => marker.setOpacity(op) };
+    }
+
     const f = /** @type {import("./store.js").Feature} */ (e.feature);
     const g = f.geometry;
     if (g.type === "line") {
@@ -1104,7 +1121,7 @@ class MapIsland extends HTMLElement {
       const stations = this.stationsIn(e.subject, (x) => this.byNode(x));
       body.replaceChildren(renderSquare(stations, this.context(), (x, opener) => this.select(x.id, { opener })));
     } else {
-      title.textContent = e.subject || "(unnamed)";
+      title.textContent = nameOf(e) || "(unnamed)";
       body.replaceChildren(renderDetail(e, this.context()));
     }
     if (e.at && !this.querySelector("[data-map-stage]")?.hidden) {

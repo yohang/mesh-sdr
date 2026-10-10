@@ -122,6 +122,10 @@ func newHub(ctx context.Context, cfg config.Hub, origins config.Origins, logger 
 		render: h.shell.Renderer, now: now, logger: logger,
 	})
 
+	if err := syncStaticMarkers(ctx, mapf, cfg.Map.StaticMarkersDir); err != nil {
+		return nil, nil, err
+	}
+
 	decoded := newDecodes(decodesDeps{
 		adapter: adapter, grid: g, broker: h.broker, identity: h.idm.HTTP, features: h.features, mapf: mapf, store: settingsStore,
 		render: h.shell.Renderer, now: now, logger: logger,

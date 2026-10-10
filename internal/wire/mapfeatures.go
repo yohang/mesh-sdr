@@ -2,9 +2,11 @@ package wire
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/yohang/mesh-sdr/internal/config"
 	"github.com/yohang/mesh-sdr/internal/db"
 	"github.com/yohang/mesh-sdr/internal/decodes"
 	"github.com/yohang/mesh-sdr/internal/events"
@@ -66,6 +68,34 @@ func newMap(d mapDeps) *mapfeatures.Module {
 	})
 }
 
+// syncStaticMarkers replaces the static map markers by those of
+// map.static_markers_dir (MAP-017); none when it is unset. The files were
+// checked at config load: one that turned invalid since is a config error.
+func syncStaticMarkers(ctx context.Context, m *mapfeatures.Module, dir string) error {
+	var markers []mapfeatures.Static
+
+	if dir != "" {
+		list, err := config.ReadStaticMarkers(dir)
+		if err != nil {
+			return &config.Error{Role: config.RoleHub, Problems: []config.Problem{{
+				Key: "map.static_markers_dir", Code: config.CodeInvalidValue, Message: "static markers: " + err.Error(),
+			}}}
+		}
+
+		for _, s := range list {
+			markers = append(markers, mapfeatures.Static{
+				File: s.File, ID: s.ID, Name: s.Name, Lat: s.Lat, Lon: s.Lon, Comment: s.Comment, URL: s.URL,
+			})
+		}
+	}
+
+	if err := m.SyncStatic(ctx, markers); err != nil {
+		return fmt.Errorf("static map markers: %w", err)
+	}
+
+	return nil
+}
+
 // mapConfig reads the map configuration settings.
 func mapConfig(s *settings.Snapshot) mapfeatures.ConfigSettings {
 	c := mapfeatures.ConfigSettings{
@@ -124,21 +154,32 @@ func mapDevices(features *gridapp.Features, id interface {
 }
 
 // mapChanged publishes a committed map change on the map topic, to the
-// viewers who may listen to the feature's device. A feature without a
-// device, or listen policies that cannot be read, reach nobody (fail
-// closed).
+// viewers who may listen to the feature's device. The static markers of
+// the config (mapfeatures.Public) reach every viewer; any other feature
+// without a device, or listen policies that cannot be read, reach nobody
+// (fail closed).
 func mapChanged(b events.Publisher, policies *gridapp.ListenPolicies, logger *slog.Logger) func(context.Context, mapfeatures.Change) {
 	return func(ctx context.Context, c mapfeatures.Change) {
 		ev := events.Event{Topic: topicMap}
 
-		var device string
+		var (
+			device string
+			public bool
+		)
 
 		switch {
 		case c.Upsert != nil:
 			ev.Type, ev.Payload, device = rxv1.TypeMapFeatureUpsert.String(), mapfeatures.ViewOf(*c.Upsert), c.Upsert.DeviceID
+			public = mapfeatures.Public(*c.Upsert)
 		case c.Remove != nil:
-			ev.Type, ev.Payload, device = rxv1.TypeMapFeatureRemove.String(), *c.Remove, c.Remove.DeviceID
+			ev.Type, ev.Payload, device, public = rxv1.TypeMapFeatureRemove.String(), *c.Remove, c.Remove.DeviceID, c.Remove.Public
 		default:
+			return
+		}
+
+		if public {
+			b.Publish(ctx, ev)
+
 			return
 		}
 

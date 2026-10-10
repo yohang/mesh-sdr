@@ -47,7 +47,7 @@ const FIELDS = [
   ["dbm", "Power", (v) => `${v} dBm`],
   ["ambiguity", "Position ambiguity", (v) => `${v} digit${v === 1 ? "" : "s"}`],
 ];
-const OWN = new Set(["label", "mode", "freq_hz", "hops", "weather", ...FIELDS.map((f) => f[0])]);
+const OWN = new Set(["label", "mode", "freq_hz", "hops", "weather", "url", ...FIELDS.map((f) => f[0])]);
 
 /** @param {string} key */
 function human(key) {
@@ -61,6 +61,33 @@ function scalar(v) {
   if (finite(v)) return String(Math.round(v * 1000) / 1000);
   if (typeof v === "boolean") return v ? "Yes" : "No";
   return null;
+}
+
+/**
+ * nameOf names an entity: a static marker by its name, others by their
+ * subject.
+ * @param {import("./store.js").Entity} e
+ */
+export function nameOf(e) {
+  const label = e.feature?.details.label;
+  return e.kind === "static" && typeof label === "string" && label ? label : e.subject;
+}
+
+/**
+ * markerLink is the link of a static marker (MAP-017): http or https only,
+ * in a new tab.
+ * @param {unknown} href
+ */
+function markerLink(href) {
+  try {
+    const u = new URL(String(href));
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    const a = el("a", { href: u.href, target: "_blank", rel: "noopener noreferrer", class: "underline" }, u.host);
+    a.append(el("span", { class: "sr-only" }, " (opens in a new tab)"));
+    return a;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -227,7 +254,8 @@ export function renderDetail(e, ctx) {
     const dist = g.type === "line" ? "" : distanceText(ctx, e.devices[0], e.at);
     if (dist) row(dl, "Distance", dist);
   }
-  row(dl, "Last heard", `${utcText(f.updated_at)} (${agoText(f.updated_at, ctx.now)})`);
+  // A static marker is not heard: it is the admin's.
+  if (e.kind !== "static") row(dl, "Last heard", `${utcText(f.updated_at)} (${agoText(f.updated_at, ctx.now)})`);
   if (finite(e.expires_at)) row(dl, "Shown until", utcText(e.expires_at));
   if (typeof d.mode === "string" && d.mode) row(dl, "Mode", d.mode);
   if (finite(d.freq_hz) && d.freq_hz > 0) row(dl, "Frequency", formatMHz(d.freq_hz, { trim: true }));
@@ -255,6 +283,8 @@ export function renderDetail(e, ctx) {
     if (text) row(dl, human(k), text);
   }
   if (Array.isArray(g.track) && g.track.length > 0) row(dl, "Track", `${g.track.length + 1} positions`);
+  const link = e.kind === "static" && d.url ? markerLink(d.url) : null;
+  if (link) row(dl, "Link", link);
   const links = lookupLinks(f, ctx.links);
   if (links.length > 0) {
     const span = el("span", { class: "flex flex-col gap-1" });

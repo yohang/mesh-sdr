@@ -135,6 +135,17 @@ allowed_networks = ["0.0.0.0/0", "::/0"]
 # the right-most hop that is not a trusted proxy. Default: none.
 trusted_proxies = []
 
+[map]
+# Static map markers (MAP-017): every *.json file of this directory (relative
+# to the config dir) is a JSON array of markers, read at hub start and shown
+# read-only to every visitor of the map:
+#   [{"id": "club", "name": "Radio club", "lat": 50.63, "lon": 3.06,
+#     "comment": "Thursday evenings", "url": "https://example.org/"}]
+# id: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$, unique in its file (so is the file
+# name); name 1 to 128 characters; comment and url optional (http or https).
+# An invalid file stops the hub (exit 78). Empty: no static markers.
+# static_markers_dir = "markers"
+
 # Admin settings (ADR 0010), MESHSDR_SETTINGS__<TABLE>__<KEY>. Each key set
 # here or in the env is locked: read-only in the admin UI, which shows its
 # origin. Leave a key commented out to keep it admin-editable (DB setting,
