@@ -387,4 +387,12 @@ func TestIngestSampled(t *testing.T) {
 	if len(e.published) != 5 {
 		t.Errorf("published %d", len(e.published))
 	}
+
+	// An interval below a millisecond thins nothing.
+	e.m.d.Sample = func(Message) (string, time.Duration) { return "4CA1FA", time.Microsecond }
+	e.ingest(t, "n1", aircraft(t0.Add(50*time.Second), "4CA1FA", "4CA1FA 14000 ft"), aircraft(t0.Add(51*time.Second), "4CA1FA", "4CA1FA 14100 ft"))
+
+	if len(e.published) != 7 {
+		t.Errorf("published %d after a sub-millisecond interval", len(e.published))
+	}
 }

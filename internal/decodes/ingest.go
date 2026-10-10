@@ -238,7 +238,7 @@ func (m *Module) sample(r *row) bool {
 	}
 
 	subject, every := m.d.Sample(r.Message)
-	if subject == "" || every <= 0 {
+	if subject == "" || every < time.Millisecond {
 		return false
 	}
 
