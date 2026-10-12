@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/url"
 	"os"
@@ -23,7 +24,7 @@ type HubMap struct {
 // StaticMarker is one marker of a static marker file (MAP-017).
 type StaticMarker struct {
 	// File is the name of its file without .json: its id is unique there.
-	File    string
+	File    string  `json:"-"`
 	ID      string  `json:"id"`
 	Name    string  `json:"name"`
 	Lat     float64 `json:"lat"`
@@ -81,18 +82,30 @@ func readMarkerFile(path string) ([]StaticMarker, error) {
 		return nil, errors.New("file name must match " + markerID.String() + " before .json")
 	}
 
+	// A FIFO or device would block or never end: regular files only, and
+	// the cap holds even if the file grows after the check.
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
 
-	if info.Size() > maxMarkerFileSize {
-		return nil, fmt.Errorf("larger than %d bytes", maxMarkerFileSize)
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
 	}
 
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	b, err := io.ReadAll(io.LimitReader(f, maxMarkerFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(b) > maxMarkerFileSize {
+		return nil, fmt.Errorf("larger than %d bytes", maxMarkerFileSize)
 	}
 
 	dec := json.NewDecoder(bytes.NewReader(b))
@@ -101,6 +114,10 @@ func readMarkerFile(path string) ([]StaticMarker, error) {
 	var markers []StaticMarker
 	if err := dec.Decode(&markers); err != nil {
 		return nil, fmt.Errorf("want a JSON array of {id, name, lat, lon, comment?, url?}: %w", err)
+	}
+
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("want a JSON array of {id, name, lat, lon, comment?, url?}: data after the array")
 	}
 
 	seen := map[string]bool{}

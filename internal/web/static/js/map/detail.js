@@ -10,7 +10,7 @@ import { el, formatMHz } from "../receiver/dom.js";
 import { colourKey } from "./colours.js";
 import { agoText, distanceKm, finite, latLonText, utcText } from "./geo.js";
 import { typeOf } from "./kinds.js";
-import { lookupLinks } from "./links.js";
+import { lookupLinks, newTabLink, webURL } from "./links.js";
 
 /**
  * @typedef {object} DeviceInfo a device the visitor may listen to
@@ -71,23 +71,6 @@ function scalar(v) {
 export function nameOf(e) {
   const label = e.feature?.details.label;
   return e.kind === "static" && typeof label === "string" && label ? label : e.subject;
-}
-
-/**
- * markerLink is the link of a static marker (MAP-017): http or https only,
- * in a new tab.
- * @param {unknown} href
- */
-function markerLink(href) {
-  try {
-    const u = new URL(String(href));
-    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
-    const a = el("a", { href: u.href, target: "_blank", rel: "noopener noreferrer", class: "underline" }, u.host);
-    a.append(el("span", { class: "sr-only" }, " (opens in a new tab)"));
-    return a;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -283,8 +266,8 @@ export function renderDetail(e, ctx) {
     if (text) row(dl, human(k), text);
   }
   if (Array.isArray(g.track) && g.track.length > 0) row(dl, "Track", `${g.track.length + 1} positions`);
-  const link = e.kind === "static" && d.url ? markerLink(d.url) : null;
-  if (link) row(dl, "Link", link);
+  const url = e.kind === "static" && typeof d.url === "string" ? webURL(d.url) : null;
+  if (url) row(dl, "Link", newTabLink(url, url.host));
   const links = lookupLinks(f, ctx.links);
   if (links.length > 0) {
     const span = el("span", { class: "flex flex-col gap-1" });

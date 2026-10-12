@@ -17,6 +17,9 @@ func TestStaticMarkers(t *testing.T) {
 	}{
 		{"valid", good, ""},
 		{"empty array", `[]`, ""},
+		{"too large", "[]" + strings.Repeat(" ", 1<<20), "larger than"},
+		{"trailing data", `[] [{"id": "a"}]`, "data after the array"},
+		{"file field", `[{"id": "a", "File": "x", "name": "A", "lat": 1, "lon": 2}]`, "unknown field"},
 		{"not an array", `{"id": "a"}`, "a.json: want a JSON array"},
 		{"unknown field", `[{"id": "a", "name": "A", "lat": 1, "lon": 2, "colour": "red"}]`, "unknown field"},
 		{"bad id", `[{"id": "-a", "name": "A", "lat": 1, "lon": 2}]`, "marker 1: id"},

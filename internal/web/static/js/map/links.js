@@ -8,17 +8,26 @@ import { el } from "../receiver/dom.js";
 const CALLSIGN = /^[A-Z0-9/]{3,16}$/;
 
 /**
- * lookupURL fills a template; null when it is unset or not an http(s) URL.
- * @param {unknown} template @param {string} value
+ * webURL parses an http or https URL; null for anything else.
+ * @param {string} href
  */
-function lookupURL(template, value) {
-  if (typeof template !== "string" || !template.includes("{}") || !value) return null;
+export function webURL(href) {
   try {
-    const u = new URL(template.replace("{}", encodeURIComponent(value)));
+    const u = new URL(href);
     return u.protocol === "https:" || u.protocol === "http:" ? u : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * newTabLink is a link to an http or https URL (webURL), in a new tab.
+ * @param {URL} u @param {string} text
+ */
+export function newTabLink(u, text) {
+  const a = el("a", { href: u.href, target: "_blank", rel: "noopener noreferrer", class: "underline" }, text);
+  a.append(el("span", { class: "sr-only" }, " (opens in a new tab)"));
+  return a;
 }
 
 /**
@@ -63,11 +72,10 @@ export function lookupLinks(f, templates) {
   /** @type {HTMLElement[]} */
   const out = [];
   for (const [name, value] of lookups(f)) {
-    const u = lookupURL(templates[name], value);
-    if (!u) continue;
-    const a = el("a", { href: u.href, target: "_blank", rel: "noopener noreferrer", class: "underline" }, `${value} on ${u.host}`);
-    a.append(el("span", { class: "sr-only" }, " (opens in a new tab)"));
-    out.push(a);
+    const template = templates[name];
+    if (typeof template !== "string" || !template.includes("{}") || !value) continue;
+    const u = webURL(template.replace("{}", encodeURIComponent(value)));
+    if (u) out.push(newTabLink(u, `${value} on ${u.host}`));
   }
   return out;
 }
