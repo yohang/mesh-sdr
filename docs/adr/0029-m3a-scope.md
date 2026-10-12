@@ -15,7 +15,7 @@ M3 ("Map & tracking", milestone #5) has 46 open tickets in five epics: Map, Avia
   - **M3a** "Map & tracking" keeps every MAP ticket (P3 included), MAR-001/002/003 and AIR-004/006/007.
   - **M3b** "Aviation, sondes & LoRa" (new milestone) takes AIR-001/002/003/005, SND-001..007, LORA-001..007 and the Radiosondes and LoRa epics.
 - **Tools**:
-  - ADS-B uses the pinned trixie apt `readsb` in the runtime stage, in place of dump1090-fa.
+  - ADS-B uses `readsb` 3.16.17 built from a pinned upstream tarball in the `natives` stage, in place of dump1090-fa. The trixie package (3.14) is not used: its stdin input loses its clock after the first decoded message and stops writing JSON.
   - NAVTEX and DSC wrap libcsdr++ through the cgo shim (ADR 0014); AIS is `direwolf -B AIS`.
   - The source-built M3b tools come from pinned tarballs in the `natives` stage.
 - **Map library**: vendored Leaflet 1.9.4 (BSD-2) only. Great-circle lines, the day/night terminator and the Maidenhead grid are small in-house ES modules; no Leaflet plugin.
