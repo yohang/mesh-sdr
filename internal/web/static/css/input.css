@@ -760,14 +760,15 @@
   &[data-selected]::before { content: "▲" / ""; font-size: 1.6rem; }
 }
 
-/* Static markers (MAP-017, Leaflet divIcon): a star with an outline. */
+/* Static markers (MAP-017, Leaflet divIcon): a star with an outline, ink on
+   a paper halo whatever the theme, as the tiles keep their colors. */
 .map-stage .map-static {
   display: grid;
   place-items: center;
-  color: var(--msdr-color-fg);
+  color: var(--msdr-color-map-ink);
   font-size: 1.25rem;
   line-height: 1;
-  text-shadow: 0 0 2px var(--msdr-color-surface), 0 0 2px var(--msdr-color-surface);
+  text-shadow: 0 0 2px var(--msdr-color-map-paper), 0 0 2px var(--msdr-color-map-paper);
 
   &::before { content: "★" / ""; }
   &[data-selected]::before { font-size: 1.6rem; color: var(--msdr-color-focus); }

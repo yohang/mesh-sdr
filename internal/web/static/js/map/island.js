@@ -296,7 +296,8 @@ class MapIsland extends HTMLElement {
         getJSON(CONFIG_URL),
         getJSON(FEATURES_URL),
         getJSON(DEVICES_URL),
-        // Without the band plan, squares and calls are coloured by mode only.
+        // Without the band plan, squares and calls are coloured by mode
+        // (keyMode).
         getJSON(BANDPLAN_URL).catch(() => null),
       ]);
       if (!this.isConnected) return;
@@ -627,7 +628,13 @@ class MapIsland extends HTMLElement {
    * @param {Entity} e
    */
   keyOf(e) {
-    return e.feature && COLOURED.has(e.kind) ? colourKey(this.colourMode, e.feature.details, this.bands) : null;
+    return e.feature && COLOURED.has(e.kind) ? colourKey(this.keyMode(), e.feature.details, this.bands) : null;
+  }
+
+  // keyMode is the colour mode applied: by mode while the band plan is not
+  // loaded.
+  keyMode() {
+    return this.colourMode === "band" && this.bands.length === 0 ? "mode" : this.colourMode;
   }
 
   /**
@@ -720,7 +727,8 @@ class MapIsland extends HTMLElement {
    * @param {Entity} e
    */
   byNode(e) {
-    if (!this.node) return true;
+    // Static markers (MAP-017) belong to no node: always kept.
+    if (!this.node || e.kind === "static") return true;
     if (e.receiver) return e.receiver.devices.some((d) => this.devices.get(d.id)?.node_id === this.node) || e.id === `receiver:node:${this.node}`;
     return e.devices.some((d) => this.devices.get(d)?.node_id === this.node);
   }
@@ -1007,8 +1015,9 @@ class MapIsland extends HTMLElement {
     return { group, style };
   }
 
-  // updateCounts sets the legend counts: entities per type, and squares
-  // and calls per band or mode (whatever is isolated).
+  // updateCounts sets the legend counts: entities per type, and located
+  // stations (not squares) and calls per band or mode (whatever is
+  // isolated).
   updateCounts() {
     /** @type {Map<string, number>} */
     const counts = new Map();
@@ -1031,7 +1040,7 @@ class MapIsland extends HTMLElement {
       // What was isolated is gone: show everything again.
       this.isolate("");
     }
-    this.keys?.render(this.colourMode, entries, this.isolated);
+    this.keys?.render(this.keyMode(), entries, this.isolated);
     for (const t of TYPES) {
       const item = this.legend?.get(t.id);
       if (!item) continue;

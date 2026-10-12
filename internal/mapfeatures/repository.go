@@ -74,14 +74,10 @@ func (r *Repository) Delete(ctx context.Context, key string) (bool, error) {
 }
 
 // List returns the newest limit features of devices not expired at now,
-// with the static markers of the config, newest first.
+// newest first.
 func (r *Repository) List(ctx context.Context, devices []string, now time.Time, limit int) ([]Feature, error) {
-	if limit <= 0 {
+	if len(devices) == 0 || limit <= 0 {
 		return []Feature{}, nil
-	}
-
-	if devices == nil {
-		devices = []string{}
 	}
 
 	list, err := json.Marshal(devices)
@@ -106,6 +102,16 @@ func (r *Repository) OfKind(ctx context.Context, device string, kind Kind) ([]Fe
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list map features of kind %s of %s: %w", kind, device, err)
+	}
+
+	return featuresOf(rows)
+}
+
+// Static returns the static markers of the config (MAP-017).
+func (r *Repository) Static(ctx context.Context) ([]Feature, error) {
+	rows, err := sqlc.New(r.db.Reader(ctx)).ListStaticMapFeatures(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list static map features: %w", err)
 	}
 
 	return featuresOf(rows)

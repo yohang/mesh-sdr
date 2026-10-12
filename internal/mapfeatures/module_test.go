@@ -428,7 +428,7 @@ func asJSON(t *testing.T, v any) any {
 }
 
 // GET /map/features lists the newest MaxFeatures features and says when
-// older ones were left out.
+// older ones were left out; the static markers come on top, never cut.
 func TestGetMapFeaturesTruncated(t *testing.T) {
 	e := newEnv(t)
 
@@ -452,14 +452,18 @@ func TestGetMapFeaturesTruncated(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := e.m.SyncStatic(context.Background(), []Static{{File: "club", ID: "a", Name: "Club", Lat: 1, Lon: 2}}); err != nil {
+		t.Fatal(err)
+	}
+
 	res, err := e.m.GetMapFeatures(context.Background(), api.GetMapFeaturesRequestObject{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	out := res.(api.GetMapFeatures200JSONResponse)
-	if !out.Truncated || len(out.Features) != MaxFeatures || out.Features[0].Subject != fmt.Sprint("S", MaxFeatures) ||
-		out.Features[MaxFeatures-1].Subject != "S1" {
+	if !out.Truncated || len(out.Features) != MaxFeatures+1 || out.Features[0].Subject != fmt.Sprint("S", MaxFeatures) ||
+		out.Features[MaxFeatures-1].Subject != "S1" || out.Features[MaxFeatures].Key != "static:club:a" {
 		t.Errorf("truncated %v, %d features, first %s", out.Truncated, len(out.Features), out.Features[0].Subject)
 	}
 }

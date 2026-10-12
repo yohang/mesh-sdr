@@ -12,7 +12,8 @@ var _ api.MapHandlers = (*Module)(nil)
 
 // Features returns the newest MaxFeatures features the caller of ctx may
 // see (those of the devices they may listen to, not expired), newest
-// first, and whether older ones were left out.
+// first, and whether older ones were left out, then the static markers of
+// the config, which every visitor sees and the cap never cuts (MAP-017).
 func (m *Module) Features(ctx context.Context) ([]Feature, bool, error) {
 	devices, err := m.d.Visible(ctx)
 	if err != nil {
@@ -25,11 +26,21 @@ func (m *Module) Features(ctx context.Context) ([]Feature, bool, error) {
 	}
 
 	list, err := m.repo.List(ctx, ids, m.d.Now(), MaxFeatures+1)
-	if err != nil || len(list) <= MaxFeatures {
-		return list, false, err
+	if err != nil {
+		return nil, false, err
 	}
 
-	return list[:MaxFeatures], true, nil
+	truncated := len(list) > MaxFeatures
+	if truncated {
+		list = list[:MaxFeatures]
+	}
+
+	static, err := m.repo.Static(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return append(list, static...), truncated, nil
 }
 
 // GetMapFeatures implements api.MapHandlers (GET /map/features).

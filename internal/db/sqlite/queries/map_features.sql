@@ -15,11 +15,9 @@ DELETE FROM map_features WHERE feature_key = ?;
 
 -- name: ListMapFeatures :many
 -- ListMapFeatures returns the newest max_rows features not expired at
--- now_ms of the devices of devices_json (a JSON array), and the static
--- markers of the config (no device, shown to everyone), newest first.
+-- now_ms of the devices of devices_json (a JSON array), newest first.
 SELECT * FROM map_features
-WHERE (device_id IN (SELECT value FROM json_each(sqlc.arg(devices_json)))
-       OR (device_id IS NULL AND kind = 'static' AND source = 'config'))
+WHERE device_id IN (SELECT value FROM json_each(sqlc.arg(devices_json)))
   AND (expires_at IS NULL OR expires_at > sqlc.arg(now_ms))
 ORDER BY updated_at DESC, feature_key
 LIMIT sqlc.arg(max_rows);
@@ -38,6 +36,13 @@ DELETE FROM map_features WHERE feature_key IN (
     ORDER BY f.expires_at LIMIT sqlc.arg(max_rows)
 )
 RETURNING feature_key, device_id;
+
+-- name: ListStaticMapFeatures :many
+-- ListStaticMapFeatures returns the static markers of the config: no
+-- device, shown to everyone (MAP-017).
+SELECT * FROM map_features
+WHERE device_id IS NULL AND kind = 'static' AND source = 'config'
+ORDER BY feature_key;
 
 -- name: DeleteStaticMapFeatures :many
 -- DeleteStaticMapFeatures deletes the static markers of the config and

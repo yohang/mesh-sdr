@@ -39,6 +39,7 @@ func TestStaticMarkers(t *testing.T) {
 				"hub.toml":          minimalHub + "[map]\nstatic_markers_dir = \"markers\"\n",
 				"markers/a.json":    tt.file,
 				"markers/notes.txt": "ignored",
+				"markers/.a.json":   "not JSON, hidden",
 			})
 
 			cfg, _, err := LoadHub(Options{Dir: dir, Env: map[string]string{}})

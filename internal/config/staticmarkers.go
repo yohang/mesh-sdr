@@ -45,7 +45,8 @@ const (
 // markerID is the pattern of a marker id and of a marker file name.
 var markerID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
-// ReadStaticMarkers reads the *.json files of dir, in lexical order: each
+// ReadStaticMarkers reads the *.json files of dir but hidden ones, in
+// lexical order: each
 // is a JSON array of {id, name, lat, lon, comment?, url?}. An unreadable
 // or invalid file is an error naming it.
 func ReadStaticMarkers(dir string) ([]StaticMarker, error) {
@@ -61,6 +62,11 @@ func ReadStaticMarkers(dir string) ([]StaticMarker, error) {
 	var out []StaticMarker
 
 	for _, path := range files {
+		// Hidden files (editor backups, .#locks) are not markers.
+		if strings.HasPrefix(filepath.Base(path), ".") {
+			continue
+		}
+
 		markers, err := readMarkerFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)

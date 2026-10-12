@@ -1,8 +1,9 @@
 // Colour mode of the map (MAP-009, MAP-010): locator squares and call lines
 // are coloured by band (the amateur bands of the band plan, GET
-// /api/v1/bandplan) or by mode, or all in their type's color (Off). The
-// legend lists the bands or modes on the map, each with its swatch, its
-// name and its count; selecting one isolates it (aria-pressed, a check mark
+// /api/v1/bandplan; by mode while it is not loaded) or by mode, or all in
+// their type's color (Off). The legend lists the bands or modes on the map,
+// each with its swatch, its name and its count of stations (locator
+// reports, not squares) and calls; selecting one isolates it (aria-pressed, a check mark
 // and a sentence say which), selecting it again shows them all. The colors
 // are the eight --msdr-color-series-* tokens: the name in the legend, the
 // detail panel and the list view is the cue, never the color alone.
