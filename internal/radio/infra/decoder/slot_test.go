@@ -211,7 +211,7 @@ func TestCatalogueDecoders(t *testing.T) {
 		switch m.Family {
 		case domain.FamilyImage:
 			ok = m.Name == app.FileSSTV || m.Name == app.FileFAX
-		case domain.FamilyTextModes:
+		case domain.FamilyTextModes, domain.FamilyDSC:
 			_, ok = textModes[m.Name]
 		case domain.FamilyWSJT, domain.FamilyJS8:
 			ok = m.Slot > 0 && m.Input == domain.InputAudio && len(profiles(m.Name, all)) > 0

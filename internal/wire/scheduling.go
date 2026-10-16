@@ -49,7 +49,8 @@ var wsjtModes = []string{"ft8", "ft4", "jt65", "jt9", "wspr", "fst4", "fst4w", "
 func stateDecoders(s settingsReader) *ctl.StateDecoders {
 	d := &ctl.StateDecoders{
 		MaxRestarts: s.Int("decoders.max_restarts"), DigimodesFFTSize: s.Int("decoders.digimodes_fft_size"), ShowCW: s.Bool("decoders.cw_showcw"),
-		WSJTDepth: s.Int("decoders.wsjt_decoding_depth"), WSJTDepths: map[string]int{},
+		DSCShowErrors: s.Bool("decoders.dsc_show_errors"),
+		WSJTDepth:     s.Int("decoders.wsjt_decoding_depth"), WSJTDepths: map[string]int{},
 		Q65Combinations: s.Strings("decoders.q65_enabled_combinations"), JS8Profiles: s.Strings("decoders.js8_enabled_profiles"),
 		JS8Depth:     s.Int("decoders.js8_decoding_depth"),
 		PagingFilter: s.Bool("decoders.paging_filter"), PagingCharset: s.String("decoders.paging_charset"),

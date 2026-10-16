@@ -142,9 +142,12 @@ type SettingsDecoders struct {
 	MaxRestarts int `toml:"max_restarts" env:"MAX_RESTARTS" jsonschema:"minimum=1,maximum=100" jsonschema_extras:"x-label=Restarts before a decoder gives up" jsonschema_description:"A decoder process that exits unexpectedly this many times within 5 minutes stops restarting: the session shows an error and retries every 10 minutes, or when the listener selects the decoder again (1 to 100). Applies to sessions started from now on."`
 	// DigimodesFFTSize is the size of the secondary FFT of the text
 	// decoders (DEC-004).
-	DigimodesFFTSize int `toml:"digimodes_fft_size" env:"DIGIMODES_FFT_SIZE" jsonschema:"enum=512,enum=1024,enum=2048,enum=4096" jsonschema_extras:"x-label=Decoder waterfall FFT size" jsonschema_description:"Size of the FFT of the decoder waterfall of PSK, RTTY, SITOR-B and CW (Receiver › Decoders): 512, 1024, 2048 or 4096 bins over 12 kHz. Applies to decoders started from now on."`
+	DigimodesFFTSize int `toml:"digimodes_fft_size" env:"DIGIMODES_FFT_SIZE" jsonschema:"enum=512,enum=1024,enum=2048,enum=4096" jsonschema_extras:"x-label=Decoder waterfall FFT size" jsonschema_description:"Size of the FFT of the decoder waterfall of PSK, RTTY, SITOR-B, NAVTEX, DSC and CW (Receiver › Decoders): 512, 1024, 2048 or 4096 bins over 12 kHz. Applies to decoders started from now on."`
 	// ShowCW: the CW decoder also prints dots and dashes (DEC-012).
 	ShowCW bool `toml:"cw_showcw" env:"CW_SHOWCW" jsonschema_extras:"x-label=Show CW symbols" jsonschema_description:"The CW decoder also prints the dots and dashes it receives. Applies to decoders started from now on."`
+	// DSCShowErrors keeps what the DSC decoder could not decode as a call
+	// (MAR-003).
+	DSCShowErrors bool `toml:"dsc_show_errors" env:"DSC_SHOW_ERRORS" jsonschema_extras:"x-label=Show DSC errors" jsonschema_description:"The DSC decoder also reports the symbols it received but could not decode as a call. Applies to decoders started from now on."`
 	// WSJTDecodingDepth and WSJTDecodingDepths are the depths of the WSJT
 	// decoders (DEC-024).
 	WSJTDecodingDepth  int                `toml:"wsjt_decoding_depth" env:"WSJT_DECODING_DEPTH" jsonschema:"minimum=1,maximum=3" jsonschema_extras:"x-label=WSJT decoding depth" jsonschema_description:"Decoding depth of the WSJT-X decoders (FT8, FT4, JT65, JT9, WSPR, FST4, FST4W, Q65) without a depth of their own: 1 fast, 2 normal, 3 deep (more decodes, more CPU)."`
@@ -242,7 +245,7 @@ func DefaultSettings() Settings {
 		Decoders: SettingsDecoders{
 			MaxRestarts: 5, DigimodesFFTSize: 2048, WSJTDecodingDepth: 3, WSJTDecodingDepths: SettingsWSJTDepths{JT65: 1},
 			FST4Intervals: []string{"15", "30"}, FST4WIntervals: []string{"120", "300"}, Q65Combinations: []string{"A30", "E120", "C60"},
-			JS8Profiles: []string{"normal", "slow"}, JS8DecodingDepth: 3, PagingCharset: "US",
+			JS8Profiles: []string{"normal", "slow"}, JS8DecodingDepth: 3, PagingCharset: "US", DSCShowErrors: true,
 		},
 		Invitations:   SettingsInvitations{TTLHours: 168},
 		PasswordReset: SettingsPasswordReset{TTLMinutes: 30},

@@ -186,6 +186,18 @@ var digitalModes = []DigitalMode{
 		Name: "sitorb", Label: "SITOR-B", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
 		SecondaryFFT: true, BandwidthHz: 210, DedupStep: textDedupStep,
 	},
+	// MAR-002: NAVTEX (518 and 490 kHz), the SITOR-B chain keeping the
+	// messages (ZCZC to NNNN).
+	{
+		Name: "navtex", Label: "NAVTEX", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
+		SecondaryFFT: true, BandwidthHz: 210, DedupStep: textDedupStep,
+	},
+	// MAR-003: native DSC (HF/MF), 100 Bd 170 Hz shift, CCIR 493 and the
+	// DSC decoder.
+	{
+		Name: "dsc", Label: "DSC", Cap: CapNativeDSP, Family: FamilyDSC, Underlying: []string{"usb"}, Input: InputNarrowIQ, InputRate: TextRate,
+		SecondaryFFT: true, BandwidthHz: 210, DedupStep: textDedupStep,
+	},
 	// DEC-012: native CW decoder, 75 Hz selector.
 	{
 		Name: "cwdecoder", Label: "CW Decoder", Cap: CapNativeDSP, Family: FamilyTextModes, Underlying: []string{"usb", "lsb"}, Input: InputNarrowIQ,
@@ -209,6 +221,14 @@ var digitalModes = []DigitalMode{
 	// DEC-031, DEC-032: direwolf (AX.25 1200 Bd) on FM audio at 48 kHz,
 	// APRS parsed on the node.
 	{Name: "packet", Label: "Packet", Cap: CapDirewolf, Family: FamilyPacket, Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 48000, DedupStep: 1000},
+	// MAR-001: AIS, direwolf -B AIS (9600 Bd GMSK) on the FM discriminator
+	// of a 48 kHz wide IQ channel (±12.5 kHz) at the demodulator's offset,
+	// one AIS channel per demodulator: the NFM audio (limiter,
+	// de-emphasis, listener band) does not carry GMSK.
+	{
+		Name: "ais", Label: "AIS", Cap: CapDirewolf, Family: FamilyAIS, Underlying: []string{"nfm"}, Input: InputWideIQ, InputRate: 48000,
+		BandLow: -12500, BandHigh: 12500, DedupStep: 1000,
+	},
 	// DEC-033: multimon-ng with FLEX and POCSAG 512/1200/2400 at 22 050 Hz.
 	{Name: "page", Label: "Page", Cap: CapMultimonNG, Family: FamilyPaging, Underlying: []string{"nfm"}, Input: InputAudio, InputRate: 22050, DedupStep: 1000},
 	// DEC-036: multimon-ng EAS (SAME headers) at 22 050 Hz.
@@ -259,6 +279,8 @@ const (
 	FamilyPacket    = "packet"
 	FamilySkimmer   = "skimmer"
 	FamilyISM       = "ism"
+	FamilyDSC       = "dsc"
+	FamilyAIS       = "ais"
 )
 
 // textDedupStep rounds the frequency of text decoders in the duplicate

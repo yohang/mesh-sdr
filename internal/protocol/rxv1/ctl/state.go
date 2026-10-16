@@ -84,6 +84,9 @@ type StateDecoders struct {
 	DigimodesFFTSize int `json:"digimodes_fft_size,omitempty"`
 	// ShowCW: the CW decoder also prints dots and dashes.
 	ShowCW bool `json:"cw_showcw,omitempty"`
+	// DSCShowErrors: the DSC decoder also reports what it could not decode
+	// as a call.
+	DSCShowErrors bool `json:"dsc_show_errors,omitempty"`
 	// The settings of the slot decoders (additive fields, DEC-024,
 	// DEC-021…023, DEC-029); zero values take the node defaults.
 	//

@@ -137,6 +137,82 @@ func TestTextDecoderOffset(t *testing.T) {
 	}
 }
 
+// dscCall is a DSC routine individual call (ITU-R M.493 format 120) from
+// 227006760 to 002275300: telecommands 100 (F3E/G3E all modes) and 126
+// (none), working frequency 8414.0 kHz, EOS 117 (acknowledgement
+// requested), with its error check character.
+func dscCall() []int {
+	msg := []int{120, 0, 22, 75, 30, 0, 100, 22, 70, 6, 76, 0, 100, 126, 8, 41, 40, 8, 41, 40, 117}
+	ecc := 0
+
+	for _, c := range msg {
+		ecc ^= c
+	}
+
+	return append(append([]int{120}, msg...), ecc, 117, 117)
+}
+
+// TestMarineDecoders decodes NAVTEX (MAR-002) and DSC (MAR-003) signals at
+// an offset, with noise: NAVTEX keeps the message only, DSC writes one JSON
+// line per call.
+func TestMarineDecoders(t *testing.T) {
+	const (
+		rate   = dsp.TextRate
+		offset = 1500.0
+	)
+
+	tests := []struct {
+		name       string
+		cfg        dsp.TextConfig
+		iq         []complex64
+		want, drop []string
+	}{
+		{
+			name: "navtex",
+			cfg:  dsp.TextConfig{Kind: dsp.TextNAVTEX, Baud: 100, BandwidthHz: 210, OffsetHz: offset},
+			iq:   dsptest.SITORB("RYRY BEFORE\r\nZCZC EA01\r\nGALE WARNING FITZROY\r\nNNNN\r\n\nAFTER THE END\r\n", 170, rate, offset),
+			want: []string{"ZCZC EA01\r\nGALE WARNING FITZROY\r\nNNNN\r\n\n"},
+			drop: []string{"BEFORE", "AFTER"},
+		},
+		{
+			name: "dsc",
+			cfg:  dsp.TextConfig{Kind: dsp.TextDSC, Baud: 100, BandwidthHz: 210, OffsetHz: offset},
+			iq:   dsptest.DSC(dscCall(), 170, rate, offset),
+			want: []string{
+				`{ "format": "selcall", "src": "227006760", "dst": "002275300", "rxfreq": "8414000", "txfreq": "8414000", "category": "routine",` +
+					` "cmd1": 100, "cmd2": 126, "eos": "arq", "ecc": true, "timestamp": `,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := dsp.NewTextDecoder(tc.cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+
+			iq := append([]complex64(nil), tc.iq...)
+			dsptest.AddNoise(iq, 0.02, 3)
+
+			got := decodeAll(t, d, iq)
+
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Fatalf("decoded %q, want %q in it", got, w)
+				}
+			}
+
+			for _, w := range tc.drop {
+				if strings.Contains(got, w) {
+					t.Fatalf("decoded %q, %q kept", got, w)
+				}
+			}
+		})
+	}
+}
+
 // TestCWShowSymbols: cw_showcw prints the dots and dashes too (DEC-012).
 func TestCWShowSymbols(t *testing.T) {
 	iq := dsptest.CW("TEST TEST TEST", 20, dsp.TextRate, 800)

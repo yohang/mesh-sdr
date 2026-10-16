@@ -13,11 +13,12 @@ import (
 	"github.com/yohang/mesh-sdr/internal/radio/domain"
 )
 
-// The native text decoders (DEC-006 to DEC-012): libcsdr++ chains run in
-// the node, one goroutine per session (ADR 0014), fed by the selector IQ
-// of the listener's demodulator. They print characters; the session cuts
-// them into lines: the listener sees the line being printed (partial
-// records), the hub gets each whole line (decode.batch).
+// The native text decoders (DEC-006 to DEC-012, MAR-002, MAR-003):
+// libcsdr++ chains run in the node, one goroutine per session (ADR 0014),
+// fed by the selector IQ of the listener's demodulator. They print
+// characters; the session cuts them into lines: the listener sees the line
+// being printed (partial records), the hub gets each whole line
+// (decode.batch). The DSC decoder writes JSON lines, parsed into records.
 
 // textModes are the chains of the native text decoders, by mode name, with
 // the OpenWebRX+ parameters (owrx/dsp.py); the selector band is the
@@ -29,6 +30,8 @@ var textModes = map[string]dsp.TextConfig{
 	"rtty450":   {Kind: dsp.TextRTTY, Baud: 50, Invert: true},
 	"rtty85":    {Kind: dsp.TextRTTY, Baud: 50, Invert: true},
 	"sitorb":    {Kind: dsp.TextSITORB, Baud: 100},
+	"navtex":    {Kind: dsp.TextNAVTEX, Baud: 100},
+	"dsc":       {Kind: dsp.TextDSC, Baud: 100},
 	"cwdecoder": {Kind: dsp.TextCW},
 }
 
@@ -74,6 +77,8 @@ type textSession struct {
 	cfg  dsp.TextConfig
 	size int
 	in   *dropQueue[iqItem]
+	// dscErrors keeps the DSC error lines (dsc_show_errors).
+	dscErrors bool
 
 	// Guarded by mu.
 	offset float64
@@ -101,7 +106,7 @@ func (r *Runner) startText(spec app.DecoderSpec, ev app.DecoderEvents) (app.Deco
 
 	s := &textSession{
 		sessionBase: sessionBase{ev: ev, log: r.sessionLog(spec)},
-		now:         r.o.Now, cfg: cfg, size: set.FFTSize, offset: spec.OffsetHz,
+		now:         r.o.Now, cfg: cfg, size: set.FFTSize, offset: spec.OffsetHz, dscErrors: set.DSCShowErrors,
 		in: newDropQueue(int(inputBuffer.Microseconds()), iqWeight),
 	}
 
@@ -179,7 +184,7 @@ func (s *textSession) run(dec *dsp.TextDecoder) {
 	c := &textChain{dec: dec, rs: dsp.NewIQResampler(dsp.TextRate)}
 	defer c.close()
 
-	lines := &lineAssembler{emit: s.decode, now: s.now}
+	lines := s.sink()
 	tick := time.NewTicker(textTick)
 	defer tick.Stop()
 
@@ -222,6 +227,29 @@ func (s *textSession) run(dec *dsp.TextDecoder) {
 	}
 }
 
+// textSink turns the output of a text decoder into records.
+type textSink interface {
+	// feed adds the output of a block whose first sample is at.
+	feed(text []byte, at time.Time)
+	// idle ends what was printed long enough ago.
+	idle()
+	// flush ends what is being printed (lost input).
+	flush()
+}
+
+// sink returns the output of the session: JSON lines for DSC, otherwise
+// text lines, tagged with their message header for NAVTEX.
+func (s *textSession) sink() textSink {
+	switch s.cfg.Kind {
+	case dsp.TextDSC:
+		return &dscLines{emit: s.decode, showErrors: s.dscErrors}
+	case dsp.TextNAVTEX:
+		return &lineAssembler{emit: (&navtexTagger{emit: s.decode}).record, now: s.now}
+	default:
+		return &lineAssembler{emit: s.decode, now: s.now}
+	}
+}
+
 // setSpectrum builds, rebuilds at a new frame rate or drops the secondary
 // FFT.
 func (s *textSession) setSpectrum(c *textChain, fps int) {
@@ -250,7 +278,7 @@ func (s *textSession) setSpectrum(c *textChain, fps int) {
 
 // process runs one input block: resampling to the decoder rate, secondary
 // FFT, decoder.
-func (s *textSession) process(c *textChain, lines *lineAssembler, q queued[iqItem]) error {
+func (s *textSession) process(c *textChain, lines textSink, q queued[iqItem]) error {
 	it := q.v
 
 	// Lost input: the line ends, the CW timing and the resampler start

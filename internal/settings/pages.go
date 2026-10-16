@@ -90,8 +90,8 @@ var formPages = []formPage{
 			{ID: "supervision", Title: "Decoder processes", Keys: []string{"decoders.max_restarts"}},
 			{ID: "fax", Title: "FAX", Description: "HF FAX decoder (DEC-038): nodes apply these settings to the FAX decoders started from now on. Pages shorter than the shortest length are not saved to Files.",
 				Keys: []string{"fax_lpm", "fax_min_length", "fax_max_length", "fax_postprocess", "fax_color", "fax_am"}},
-			{ID: "text", Title: "Text decoders", Description: "PSK, RTTY, SITOR-B and CW decoders of the receiver.",
-				Keys: []string{"decoders.digimodes_fft_size", "decoders.cw_showcw"}},
+			{ID: "text", Title: "Text decoders", Description: "PSK, RTTY, SITOR-B, NAVTEX, DSC and CW decoders of the receiver.",
+				Keys: []string{"decoders.digimodes_fft_size", "decoders.cw_showcw", "decoders.dsc_show_errors"}},
 			{
 				ID: "wsjt", Title: "WSJT-X decoders", Description: "Depths and slot periods of FT8, FT4, JT65, JT9, WSPR, FST4, FST4W and Q65. A change applies from the next slot of the running decoders.",
 				Keys: []string{

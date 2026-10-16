@@ -38,6 +38,9 @@ type Settings struct {
 	FFTSize int
 	// ShowCW: the CW decoder also prints dots and dashes (cw_showcw).
 	ShowCW bool
+	// DSCShowErrors keeps the DSC error lines: runs of symbols that are
+	// not a call (dsc_show_errors).
+	DSCShowErrors bool
 	// FAX are the FAX settings (fax_*); a zero LPM takes defaultFAX.
 	FAX FAXSettings
 	// WSJTDepth is wsjt_decoding_depth (1 to 3, default 3).
@@ -148,7 +151,7 @@ func (r *Runner) Start(spec app.DecoderSpec, ev app.DecoderEvents) (app.DecoderR
 	switch spec.Mode.Family {
 	case domain.FamilyImage:
 		return r.startImage(spec, ev)
-	case domain.FamilyTextModes:
+	case domain.FamilyTextModes, domain.FamilyDSC:
 		return r.startText(spec, ev)
 	case domain.FamilyWSJT, domain.FamilyJS8:
 		return r.startSlots(spec, ev)
@@ -168,6 +171,9 @@ const (
 	// iqRealS16: the real part, as s16le (the skimmers, OpenWebRX+'s
 	// RealPart on a band above the dial).
 	iqRealS16
+	// iqFMS16: the FM discriminator output, flat (no de-emphasis), as
+	// s16le (AIS through direwolf, OpenWebRX+'s FmDemod).
+	iqFMS16
 )
 
 // toolSpec is the descriptor of a decoder tool (§8.4): its program, its
@@ -227,6 +233,7 @@ var toolSpecs = map[string]toolSpec{
 	"page":    {tool: "multimon-ng", args: pagingArgs, rules: multimonRules, lines: newPagingParser},
 	"eas":     {tool: "multimon-ng", args: easArgs, rules: multimonRules, lines: lineOf(parseEAS)},
 	"packet":  {tool: "direwolf", args: direwolfArgs, rules: direwolfRules, frames: newPacketParser},
+	"ais":     {tool: "direwolf", args: aisArgs, rules: direwolfRules, iq: iqFMS16, frames: newAISParser},
 	"cwskimmer": {
 		tool: "csdr-cwskimmer", args: skimmerArgs, rules: skimmerRules, iq: iqRealS16, lines: newSkimmerParser("CW"), textLog: true,
 	},
@@ -383,6 +390,7 @@ type toolSession struct {
 
 	// Guarded by mu.
 	conv *dsp.S16Converter
+	disc dsp.FMDiscriminator
 	raw  []byte
 	// kiss is the KISS link of direwolf's current run.
 	kiss *kissRun
@@ -406,13 +414,25 @@ func (s *toolSession) Audio(b app.AudioBlock) {
 }
 
 // WideIQ implements app.DecoderRun: the wide IQ (at the tool's input rate)
-// is written as cf32 or as the s16le real part to the stdin buffer (never
-// blocking).
+// is written as cf32, as the s16le real part or as the s16le FM
+// discriminator output to the stdin buffer (never blocking).
 func (s *toolSession) WideIQ(b app.WideIQBlock) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.closed || b.Rate != s.rate || s.iq == iqNone || len(b.Samples) == 0 {
+		return
+	}
+
+	if s.iq == iqFMS16 {
+		if b.Discontinuity {
+			s.disc.Reset()
+		}
+
+		if out := s.convert(s.conv, app.AudioBlock{Samples: s.disc.Process(b.Samples), Rate: b.Rate}); len(out) > 0 {
+			_, _ = s.buf.Write(out)
+		}
+
 		return
 	}
 
