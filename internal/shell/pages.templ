@@ -56,14 +56,6 @@ templ receiverPage(siteName string, st StationView, descHTML string, rx receiver
 	</msdr-receiver>
 }
 
-// placeholderPage is a section whose module does not exist yet.
-templ placeholderPage(title, notice string) {
-	@layout.Title("") {
-		{ title }
-	}
-	<p class="mt-2 text-fg-muted">{ notice }</p>
-}
-
 // policyPage renders the usage policy. policyHTML is goldmark output, which
 // carries no raw HTML nor dangerous URLs (see markdown.go).
 templ policyPage(policyHTML string) {

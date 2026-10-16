@@ -93,7 +93,7 @@ func TestSecurityHeaders(t *testing.T) {
 			t.Fatalf("%s: nonce %q too short", path, nonce)
 		}
 
-		if got := hdr.Get("Content-Security-Policy"); got != httpserver.ContentSecurityPolicy(nonce) {
+		if got := hdr.Get("Content-Security-Policy"); got != httpserver.ContentSecurityPolicy(nonce, nil, nil) {
 			t.Errorf("%s: CSP = %q", path, got)
 		}
 	}
@@ -102,7 +102,7 @@ func TestSecurityHeaders(t *testing.T) {
 		t.Errorf("nonce reused across requests: %v", nonces)
 	}
 
-	csp := httpserver.ContentSecurityPolicy("n")
+	csp := httpserver.ContentSecurityPolicy("n", nil, nil)
 	for _, d := range []string{"script-src 'nonce-n';", "frame-ancestors 'none'", "style-src 'self';", "default-src 'none'"} {
 		if !strings.Contains(csp, d) {
 			t.Errorf("CSP lacks %q: %s", d, csp)
@@ -153,6 +153,41 @@ func TestWorkletCSP(t *testing.T) {
 		if script, _, _ := strings.Cut(csp[strings.Index(csp, "script-src"):], ";"); strings.Contains(script, banned) {
 			t.Errorf("script-src contains %q: %s", banned, script)
 		}
+	}
+}
+
+// tiles is a module with image origins (the map tiles), some invalid.
+type tiles struct {
+	module
+
+	origins []string
+}
+
+func (m *tiles) ImageSources() []string { return m.origins }
+
+// TestImageSourcesCSP checks that img-src lists the valid HTTPS origins of
+// the modules that have some, read on every response, and drops the rest.
+func TestImageSourcesCSP(t *testing.T) {
+	m := &tiles{module: module{"page"}, origins: []string{
+		"https://tile.openstreetmap.org", "https://a.tile.opentopomap.org", "https://tile.openstreetmap.org",
+		"http://insecure.example", "https://*.example", "https://evil.example; script-src *", "https://x.example/path", "",
+	}}
+	h := httpserver.NewRouter(slog.New(slog.DiscardHandler), "", http.NotFoundHandler(), m)
+
+	csp := func() string {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/page", nil))
+
+		return rec.Header().Get("Content-Security-Policy")
+	}
+
+	if got := csp(); !strings.Contains(got, "; img-src 'self' data: https://tile.openstreetmap.org https://a.tile.opentopomap.org; ") {
+		t.Errorf("img-src: %s", got)
+	}
+
+	m.origins = nil
+	if got := csp(); !strings.Contains(got, "; img-src 'self' data:; ") {
+		t.Errorf("img-src without origins: %s", got)
 	}
 }
 

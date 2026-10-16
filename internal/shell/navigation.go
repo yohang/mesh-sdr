@@ -32,17 +32,6 @@ var sections = []layout.Link{
 	{Section: layout.SectionAdmin, Label: "Admin", Href: "/admin"},
 }
 
-// sectionLink returns the navigation link of a section.
-func sectionLink(id string) layout.Link {
-	for _, l := range sections {
-		if l.Section == id {
-			return l
-		}
-	}
-
-	return layout.Link{}
-}
-
 // nav returns the sections the visitor of ctx may open, in order. A section
 // without a gate is never shown, so the navigation fails closed.
 func nav(ctx context.Context, gates map[string]Gate) []layout.Link {

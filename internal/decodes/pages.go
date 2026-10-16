@@ -61,6 +61,17 @@ type listView struct {
 	// Retention is the retention notice ("Decodes are kept for N days").
 	Retention string
 	Paging    layout.Paging
+	// MapLink returns the Map link of a message ("" for none).
+	MapLink func(m Message) string
+}
+
+// mapLink returns the Map link of a message, "" for none.
+func (v listView) mapLink(m Message) string {
+	if v.MapLink == nil {
+		return ""
+	}
+
+	return v.MapLink(m)
 }
 
 // deviceName names a device of the view.
@@ -108,7 +119,7 @@ func (m *Module) listPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v := listView{Filter: f, Devices: devices, Modes: m.d.Modes, SignedIn: m.d.SignedIn(ctx), Rows: []Entry{}}
+	v := listView{Filter: f, Devices: devices, Modes: m.d.Modes, SignedIn: m.d.SignedIn(ctx), Rows: []Entry{}, MapLink: m.d.MapLink}
 
 	if d := m.d.Retention(); d > 0 {
 		v.Retention = "Decoded messages are kept for " + strconv.Itoa(int(d.Hours()/24)) + " days."

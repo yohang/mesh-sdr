@@ -60,6 +60,7 @@ func newDecodes(d decodesDeps) *decodes.Module {
 		Published:  decodeNew(d.broker, logger),
 		Stored:     stored,
 		DeviceNode: deviceNode(d.grid.deviceRepo),
+		MapLink:    func(m decodes.Message) string { return mapfeatures.Link(mapDecode(m)) },
 		Modes:      catalogueModes(),
 		Dedup:      dedupOf,
 		Render:     d.render, Now: d.now, Logger: logger,

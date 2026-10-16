@@ -1,6 +1,9 @@
 package mapfeatures
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 // Layer is a base layer of the map (MAP-004): a keyless tile provider the
 // browser loads directly.
@@ -51,6 +54,36 @@ func Layers(ids []string) []Layer {
 		i := slices.IndexFunc(layers, func(l Layer) bool { return l.ID == id })
 		if i >= 0 && !slices.ContainsFunc(out, func(l Layer) bool { return l.ID == id }) {
 			out = append(out, layers[i])
+		}
+	}
+
+	return out
+}
+
+// TileOrigins returns the HTTPS origins the browser loads the tiles of the
+// known base layers of ids from (the CSP img-src, MAP-004): one per
+// subdomain of a {s} template.
+func TileOrigins(ids []string) []string {
+	var out []string
+
+	for _, l := range Layers(ids) {
+		rest, ok := strings.CutPrefix(l.URL, "https://")
+		if !ok {
+			continue
+		}
+
+		host, _, _ := strings.Cut(rest, "/")
+
+		subdomains := []string{""}
+		if strings.Contains(host, "{s}") {
+			subdomains = strings.Split(l.Subdomains, "")
+		}
+
+		for _, s := range subdomains {
+			o := "https://" + strings.ReplaceAll(host, "{s}", s)
+			if !slices.Contains(out, o) {
+				out = append(out, o)
+			}
 		}
 	}
 
