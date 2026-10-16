@@ -4,7 +4,7 @@
 // detail panel as the map. Text is set with textContent only.
 
 import { el } from "../receiver/dom.js";
-import { deviceName, placeText } from "./detail.js";
+import { deviceName, keyText, nameOf, placeText } from "./detail.js";
 import { utcText } from "./geo.js";
 import { typeOf } from "./kinds.js";
 
@@ -19,9 +19,10 @@ import { typeOf } from "./kinds.js";
 
 /** @type {Column[]} */
 const COLUMNS = [
-  { id: "name", label: "Name", key: (e) => e.subject.toLowerCase() },
+  { id: "name", label: "Name", key: (e) => nameOf(e).toLowerCase() },
   { id: "type", label: "Type", key: (e) => typeOf(e.kind).one },
   { id: "place", label: "Locator or position", key: (e) => placeText(e) },
+  { id: "key", label: "Band and mode", key: (e, ctx) => keyText(ctx, e.feature?.details ?? {}) },
   { id: "heard", label: "Last heard (UTC)", key: (e) => e.updated_at },
   { id: "by", label: "Heard by", key: (e, ctx) => e.devices.map((d) => deviceName(ctx, d)).join(", ") },
 ];
@@ -89,12 +90,13 @@ export class ListView {
     for (const e of sorted) {
       const tr = el("tr", { class: "border-b border-border align-top" });
       const name = el("td", { class: "py-1 pr-4" });
-      const b = el("button", { type: "button", class: "text-left font-medium text-accent underline" }, e.subject || "(unnamed)");
+      const b = el("button", { type: "button", class: "text-left font-medium text-accent underline" }, nameOf(e) || "(unnamed)");
       b.addEventListener("click", () => this.open(e, b));
       name.append(b);
       tr.append(name);
       tr.append(el("td", { class: "py-1 pr-4" }, typeOf(e.kind).one));
       tr.append(el("td", { class: "py-1 pr-4" }, placeText(e)));
+      tr.append(el("td", { class: "py-1 pr-4" }, keyText(ctx, e.feature?.details ?? {})));
       tr.append(el("td", { class: "whitespace-nowrap py-1 pr-4 font-mono tabular-nums" }, e.updated_at ? utcText(e.updated_at).slice(0, 19) : "—"));
       tr.append(el("td", { class: "py-1 pr-4" }, e.devices.map((d) => deviceName(ctx, d)).join(", ")));
       body.append(tr);

@@ -386,18 +386,20 @@ paths:
     get:
       operationId: getMapFeatures
       x-meshsdr-access: anonymous
-      summary: Current map features (MAP-002)
+      summary: Current map features (MAP-002, MAP-017)
       description: |
         The features on the map that are not expired: APRS stations and
         objects, WSJT and JS8 locators, call lines. Every device has its
         own features (a station heard by two devices is two features with
         the same `kind` and `subject`, which the map merges); the caller
         gets the features of the enabled devices they may listen to
-        (effective listen policy), and nothing else: the newest 5000 by
-        `updated_at`, newest first, with `truncated` set when older ones
-        were left out. The map island loads them once, then follows the
-        `map.feature.upsert` and `map.feature.remove` events of the `map`
-        topic of `/api/ws`, and loads them again after a reconnection.
+        (effective listen policy), the newest 5000 by `updated_at`, newest
+        first, with `truncated` set when older ones were left out; then
+        every static marker of the config (MAP-017: no device, public, not
+        counted in the 5000), and nothing else. The map island loads them
+        once, then follows the `map.feature.upsert` and
+        `map.feature.remove` events of the `map` topic of `/api/ws`, and
+        loads them again after a reconnection.
         Times are Unix milliseconds. Every text value is untrusted radio
         data: plain text, to be inserted as text, never as HTML.
       tags: [map]
@@ -414,11 +416,11 @@ paths:
     get:
       operationId: getMapConfig
       x-meshsdr-access: anonymous
-      summary: Map configuration (MAP-004, MAP-007, MAP-011, MAP-012, MAP-015)
+      summary: Map configuration (MAP-004, MAP-005, MAP-007, MAP-011, MAP-012, MAP-015)
       description: |
         What the map island needs besides the features: the offered base
         layers (keyless tile URLs the browser loads directly) and the
-        default one, the lifetimes of positions and call lines, the most
+        default one, the tile overlays, the lifetimes of positions and call lines, the most
         call lines shown, the lookup link templates (one `{}` placeholder,
         to be replaced by the URL-encoded value), and the receivers: one
         marker per node position, per device with a position of its own,
@@ -901,7 +903,7 @@ components:
       properties:
         key:
           type: string
-          description: Key `<kind>:<subject>@<device_id>` (aprs:F4ABC-9@vhf, locator:DL1ABC@hf, call:DL1ABC>F4ABC@hf).
+          description: Key `<kind>:<subject>@<device_id>` (aprs:F4ABC-9@vhf, locator:DL1ABC@hf, call:DL1ABC>F4ABC@hf), or `static:<file>:<id>` for a static marker of the config (MAP-017).
         kind:
           type: string
           enum: [aircraft, vessel, aprs, sonde, meshtastic, lora, locator, call, station, repeater, receiver, static, node, other]
@@ -917,7 +919,7 @@ components:
           enum: [decode, mqtt, web_cache, config, gps]
         device_id:
           type: string
-          description: The device that reported the feature.
+          description: The device that reported the feature; absent for a static marker of the config (kind static, source config), which every visitor sees.
         lat:
           type: number
           format: double
@@ -935,7 +937,7 @@ components:
           x-go-type: json.RawMessage
         details:
           type: object
-          description: Plain-text attributes by kind (label, mode, freq_hz, callsign, locator, symbol, comment, course, speed_kmh, altitude_m, hops, weather…).
+          description: Plain-text attributes by kind (label, mode, freq_hz, callsign, locator, symbol, comment, course, speed_kmh, altitude_m, hops, weather…); a static marker has label, comment and url (http or https only).
           x-go-type: json.RawMessage
         updated_at:
           type: integer
@@ -948,12 +950,17 @@ components:
     MapConfig:
       type: object
       additionalProperties: false
-      required: [station_name, base_layers, default_base_layer, position_retention_s, max_calls, call_retention_s, links, receivers]
+      required: [station_name, base_layers, overlays, default_base_layer, position_retention_s, max_calls, call_retention_s, links, receivers]
       properties:
         station_name:
           type: string
         base_layers:
           type: array
+          items:
+            $ref: "#/components/schemas/MapLayer"
+        overlays:
+          type: array
+          description: Tile overlays the visitor may turn on (MAP-005), over any base layer.
           items:
             $ref: "#/components/schemas/MapLayer"
         default_base_layer:

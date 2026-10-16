@@ -235,6 +235,52 @@ func TestMapFollowsListenPolicies(t *testing.T) {
 	if got := rec.take(); len(got) != 0 {
 		t.Errorf("published without a listen view or a device: %+v", got)
 	}
+
+	// The static markers of the config (MAP-017) have no device and reach
+	// every visitor, on REST and on the socket; re-synced without them,
+	// their removal does too.
+	if err := m.SyncStatic(ctx, []mapfeatures.Static{{File: "club", ID: "a", Name: "Club", Lat: 50, Lon: 3}}); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, cctx := range callers {
+		if got := sinks[name].take(); !slices.Equal(got, []string{"map.feature.upsert static:club:a"}) {
+			t.Errorf("%s static events %v", name, got)
+		}
+
+		res, err := m.GetMapFeatures(cctx, api.GetMapFeaturesRequestObject{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		list := res.(api.GetMapFeatures200JSONResponse).Features
+		if len(list) != 1 || list[0].Key != "static:club:a" || list[0].Kind != api.MapFeatureKindStatic || list[0].DeviceId != nil {
+			t.Errorf("%s REST static features %+v", name, list)
+		}
+	}
+
+	if err := m.SyncStatic(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	for name := range callers {
+		if got := sinks[name].take(); !slices.Equal(got, []string{"map.feature.remove static:club:a"}) {
+			t.Errorf("%s static removals %v", name, got)
+		}
+	}
+
+	// Only a static marker of the config bypasses the device rule.
+	for _, f := range []mapfeatures.Feature{
+		{Key: "static:decode", Kind: mapfeatures.KindStatic, Source: mapfeatures.SourceDecode},
+		{Key: "aprs:config", Kind: mapfeatures.KindAPRS, Source: mapfeatures.SourceConfig},
+		{Key: "static:closed", Kind: mapfeatures.KindStatic, Source: mapfeatures.SourceConfig, DeviceID: "closed"},
+	} {
+		mapChanged(broker, listen, quiet)(ctx, mapfeatures.Change{Upsert: &f})
+	}
+
+	if got := sinks["anonymous"].take(); len(got) != 0 {
+		t.Errorf("anonymous got features of no or a closed device: %v", got)
+	}
 }
 
 // The node reports each device's position: its own, else the node's

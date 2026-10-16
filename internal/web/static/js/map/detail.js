@@ -1,13 +1,16 @@
-// Detail panel of the map (MAP-014, FEATURE_SPEC §10.10): the fields of
-// the selected entity, its distance from the receiver that heard it, when
-// it was last heard, its path and the actions "Tune receiver" (deep link
-// to the Receiver, RX-028, MAP-016) and "Show decodes". Every value comes
-// from radio data: it is set with textContent, never as HTML, and every
-// value put in a link is URL-encoded.
+// Detail panel of the map (MAP-009, MAP-014, MAP-015, FEATURE_SPEC
+// §10.10): the fields of the selected entity, its distance from the
+// receiver that heard it, when it was last heard, its path, its lookup
+// links and the actions "Tune receiver" (deep link to the Receiver, RX-028,
+// MAP-016) and "Show decodes"; for a locator square, the stations heard in
+// it. Every value comes from radio data: it is set with textContent, never
+// as HTML, and every value put in a link is URL-encoded.
 
 import { el, formatMHz } from "../receiver/dom.js";
+import { colourKey } from "./colours.js";
 import { agoText, distanceKm, finite, latLonText, utcText } from "./geo.js";
 import { typeOf } from "./kinds.js";
+import { lookupLinks, newTabLink, webURL } from "./links.js";
 
 /**
  * @typedef {object} DeviceInfo a device the visitor may listen to
@@ -20,6 +23,8 @@ import { typeOf } from "./kinds.js";
  * @typedef {object} DetailContext
  * @property {Map<string, DeviceInfo>} devices
  * @property {import("./store.js").Receiver[]} receivers
+ * @property {import("./colours.js").Band[]} bands the amateur bands
+ * @property {Record<string, unknown>} links the lookup link templates
  * @property {number} now
  */
 
@@ -42,7 +47,7 @@ const FIELDS = [
   ["dbm", "Power", (v) => `${v} dBm`],
   ["ambiguity", "Position ambiguity", (v) => `${v} digit${v === 1 ? "" : "s"}`],
 ];
-const OWN = new Set(["label", "mode", "freq_hz", "hops", "weather", ...FIELDS.map((f) => f[0])]);
+const OWN = new Set(["label", "mode", "freq_hz", "hops", "weather", "url", ...FIELDS.map((f) => f[0])]);
 
 /** @param {string} key */
 function human(key) {
@@ -56,6 +61,16 @@ function scalar(v) {
   if (finite(v)) return String(Math.round(v * 1000) / 1000);
   if (typeof v === "boolean") return v ? "Yes" : "No";
   return null;
+}
+
+/**
+ * nameOf names an entity: a static marker by its name, others by their
+ * subject.
+ * @param {import("./store.js").Entity} e
+ */
+export function nameOf(e) {
+  const label = e.feature?.details.label;
+  return e.kind === "static" && typeof label === "string" && label ? label : e.subject;
 }
 
 /**
@@ -90,6 +105,24 @@ function decodesLink(device, details) {
   const q = new URLSearchParams({ device });
   if (typeof details.mode === "string" && details.mode) q.set("mode", details.mode);
   return `/decodes?${q}`;
+}
+
+/**
+ * bandText is the amateur band of a report ("" when none).
+ * @param {DetailContext} ctx @param {Record<string, any>} details
+ */
+function bandText(ctx, details) {
+  const k = colourKey("band", details, ctx.bands);
+  return k && k.series >= 0 ? k.label : "";
+}
+
+/**
+ * keyText is the band and mode of a report, such as "20m FT8".
+ * @param {DetailContext} ctx @param {Record<string, any>} details
+ */
+export function keyText(ctx, details) {
+  const mode = typeof details.mode === "string" ? details.mode.toUpperCase() : "";
+  return [bandText(ctx, details), mode].filter(Boolean).join(" ");
 }
 
 /**
@@ -204,10 +237,13 @@ export function renderDetail(e, ctx) {
     const dist = g.type === "line" ? "" : distanceText(ctx, e.devices[0], e.at);
     if (dist) row(dl, "Distance", dist);
   }
-  row(dl, "Last heard", `${utcText(f.updated_at)} (${agoText(f.updated_at, ctx.now)})`);
+  // A static marker is not heard: it is the admin's.
+  if (e.kind !== "static") row(dl, "Last heard", `${utcText(f.updated_at)} (${agoText(f.updated_at, ctx.now)})`);
   if (finite(e.expires_at)) row(dl, "Shown until", utcText(e.expires_at));
   if (typeof d.mode === "string" && d.mode) row(dl, "Mode", d.mode);
   if (finite(d.freq_hz) && d.freq_hz > 0) row(dl, "Frequency", formatMHz(d.freq_hz, { trim: true }));
+  const band = bandText(ctx, d);
+  if (band) row(dl, "Band", band);
   for (const [key, label, format] of FIELDS) {
     const v = d[key];
     if (v === undefined || v === null || v === "") continue;
@@ -230,10 +266,46 @@ export function renderDetail(e, ctx) {
     if (text) row(dl, human(k), text);
   }
   if (Array.isArray(g.track) && g.track.length > 0) row(dl, "Track", `${g.track.length + 1} positions`);
+  const url = e.kind === "static" && typeof d.url === "string" ? webURL(d.url) : null;
+  if (url) row(dl, "Link", newTabLink(url, url.host));
+  const links = lookupLinks(f, ctx.links);
+  if (links.length > 0) {
+    const span = el("span", { class: "flex flex-col gap-1" });
+    span.append(...links);
+    row(dl, "Look up", span);
+  }
   if (e.devices.length > 0) {
     out.append(el("h3", { class: "mt-3 font-semibold" }, "Heard by"));
     out.append(actions(ctx, e));
   }
+  return out;
+}
+
+/**
+ * renderSquare returns the body of the detail panel of a locator square:
+ * its stations, newest first, each a button that opens its own detail.
+ * @param {import("./store.js").Entity[]} stations
+ * @param {DetailContext} ctx
+ * @param {(e: import("./store.js").Entity, opener: HTMLElement) => void} open
+ * @returns {DocumentFragment}
+ */
+export function renderSquare(stations, ctx, open) {
+  const out = document.createDocumentFragment();
+  const dl = el("dl", { class: "mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm" });
+  row(dl, "Type", "Locator square");
+  row(dl, "Stations", String(stations.length));
+  out.append(dl, el("h3", { class: "mt-3 font-semibold" }, "Heard in this square"));
+  const list = el("ul", { class: "flex flex-col gap-1 text-sm" });
+  for (const e of [...stations].sort((a, b) => b.updated_at - a.updated_at)) {
+    const li = el("li", { class: "flex flex-wrap items-baseline gap-x-2" });
+    const b = el("button", { type: "button", class: "font-medium text-accent underline max-md:min-h-11" }, e.subject);
+    b.addEventListener("click", () => open(e, b));
+    const d = e.feature?.details ?? {};
+    const loc = typeof d.locator === "string" ? d.locator : "";
+    li.append(b, el("span", { class: "text-fg-muted" }, [loc, keyText(ctx, d), agoText(e.updated_at, ctx.now)].filter(Boolean).join(" · ")));
+    list.append(li);
+  }
+  out.append(list);
   return out;
 }
 

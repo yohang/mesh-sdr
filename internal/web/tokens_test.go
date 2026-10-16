@@ -12,7 +12,7 @@ import (
 )
 
 // colorToken matches a color token definition: --msdr-color-x: light-dark(#light, #dark);
-var colorToken = regexp.MustCompile(`(?m)^\s*--msdr-color-([a-z-]+):\s*light-dark\(\s*(#[0-9a-fA-F]{6})\s*,\s*(#[0-9a-fA-F]{6})\s*\);`)
+var colorToken = regexp.MustCompile(`(?m)^\s*--msdr-color-([a-z0-9-]+):\s*light-dark\(\s*(#[0-9a-fA-F]{6})\s*,\s*(#[0-9a-fA-F]{6})\s*\);`)
 
 // tokens returns the light and dark value of every color token in input.css.
 func tokens(t *testing.T) (light, dark map[string]string) {
@@ -98,6 +98,16 @@ func TestTokenContrast(t *testing.T) {
 		}
 	}
 
+	// Map colour mode (MAP-010): squares, lines and legend swatches.
+	for _, bg := range backgrounds {
+		for i := 1; i <= 8; i++ {
+			pairs = append(pairs, pair{fmt.Sprintf("series-%d", i), bg, 3})
+		}
+	}
+
+	// Map grid labels (MAP-005): ink on a paper halo.
+	pairs = append(pairs, pair{"map-ink", "map-paper", 4.5})
+
 	// Bandplan ribbon (RX-029): band names (fg) on the tag colors.
 	for _, tag := range []string{"hamradio", "broadcast", "public", "service", "other"} {
 		pairs = append(pairs, pair{"fg", "band-" + tag, 4.5})
@@ -142,7 +152,7 @@ func TestTokenInitialValues(t *testing.T) {
 
 	light, _ := tokens(t)
 
-	props := regexp.MustCompile(`@property --msdr-color-([a-z-]+) \{[^}]*initial-value: (#[0-9a-fA-F]{6});`).FindAllStringSubmatch(string(css), -1)
+	props := regexp.MustCompile(`@property --msdr-color-([a-z0-9-]+) \{[^}]*initial-value: (#[0-9a-fA-F]{6});`).FindAllStringSubmatch(string(css), -1)
 	if len(props) != len(light) {
 		t.Errorf("%d @property rules for %d color tokens", len(props), len(light))
 	}

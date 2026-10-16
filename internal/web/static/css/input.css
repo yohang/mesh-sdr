@@ -47,6 +47,16 @@
 @property --msdr-color-band-public { syntax: "<color>"; inherits: true; initial-value: #d1fae5; }
 @property --msdr-color-band-service { syntax: "<color>"; inherits: true; initial-value: #fce7f3; }
 @property --msdr-color-band-other { syntax: "<color>"; inherits: true; initial-value: #e5e7eb; }
+@property --msdr-color-series-1 { syntax: "<color>"; inherits: true; initial-value: #1d4ed8; }
+@property --msdr-color-series-2 { syntax: "<color>"; inherits: true; initial-value: #c2410c; }
+@property --msdr-color-series-3 { syntax: "<color>"; inherits: true; initial-value: #15803d; }
+@property --msdr-color-series-4 { syntax: "<color>"; inherits: true; initial-value: #7e22ce; }
+@property --msdr-color-series-5 { syntax: "<color>"; inherits: true; initial-value: #be123c; }
+@property --msdr-color-series-6 { syntax: "<color>"; inherits: true; initial-value: #0e7490; }
+@property --msdr-color-series-7 { syntax: "<color>"; inherits: true; initial-value: #a16207; }
+@property --msdr-color-series-8 { syntax: "<color>"; inherits: true; initial-value: #a21caf; }
+@property --msdr-color-map-ink { syntax: "<color>"; inherits: true; initial-value: #1b1f24; }
+@property --msdr-color-map-paper { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
 
 :root {
   color-scheme: light dark;
@@ -84,6 +94,28 @@
   --msdr-color-band-public: light-dark(#d1fae5, #134e3a);
   --msdr-color-band-service: light-dark(#fce7f3, #4a1d3a);
   --msdr-color-band-other: light-dark(#e5e7eb, #2a313c);
+
+  /*
+   * Map colour mode (MAP-010): one color per band or mode of the locator
+   * squares and call lines, with the name as the cue. They meet 3:1 (UI
+   * graphics) on bg, surface and surface-raised.
+   */
+  --msdr-color-series-1: light-dark(#1d4ed8, #60a5fa);
+  --msdr-color-series-2: light-dark(#c2410c, #fb923c);
+  --msdr-color-series-3: light-dark(#15803d, #4ade80);
+  --msdr-color-series-4: light-dark(#7e22ce, #c084fc);
+  --msdr-color-series-5: light-dark(#be123c, #fb7185);
+  --msdr-color-series-6: light-dark(#0e7490, #22d3ee);
+  --msdr-color-series-7: light-dark(#a16207, #facc15);
+  --msdr-color-series-8: light-dark(#a21caf, #f472b6);
+
+  /*
+   * Map overlays (MAP-005, MAP-006): the tiles keep their colors in both
+   * themes, so the grid and the night shading do too: ink lines and
+   * shading, grid labels in ink on a paper halo (4.5:1).
+   */
+  --msdr-color-map-ink: light-dark(#1b1f24, #1b1f24);
+  --msdr-color-map-paper: light-dark(#ffffff, #ffffff);
 
   /* Typography. */
   --msdr-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -685,6 +717,35 @@
 .map-sym-call::before { content: "╌" / ""; color: var(--msdr-color-bmk-dial); font-weight: 700; }
 .map-sym-receiver::before { content: "▲" / ""; color: var(--msdr-color-bmk-hub); }
 .map-sym-other::before { content: "◆" / ""; color: var(--msdr-color-info); }
+.map-sym-static::before { content: "★" / ""; color: var(--msdr-color-fg); }
+
+/* Band and mode swatches of the colour legend (MAP-010); the name next to
+   each is the cue. The isolated entry also has a check mark and bold text. */
+.map-swatch::before { content: "■" / ""; }
+.map-series-1::before { color: var(--msdr-color-series-1); }
+.map-series-2::before { color: var(--msdr-color-series-2); }
+.map-series-3::before { color: var(--msdr-color-series-3); }
+.map-series-4::before { color: var(--msdr-color-series-4); }
+.map-series-5::before { color: var(--msdr-color-series-5); }
+.map-series-6::before { color: var(--msdr-color-series-6); }
+.map-series-7::before { color: var(--msdr-color-series-7); }
+.map-series-8::before { color: var(--msdr-color-series-8); }
+
+.map-key:hover { background: var(--msdr-color-surface-raised); }
+.map-key[aria-pressed="true"] { font-weight: 700; }
+
+/* Maidenhead grid labels (MAP-005): centred on their cell, ink on a paper
+   halo whatever the tiles. */
+.map-stage .map-grid-label > span {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  color: var(--msdr-color-map-ink);
+  font-family: var(--msdr-font-mono);
+  font-size: var(--msdr-text-xs);
+  font-weight: 700;
+  white-space: nowrap;
+  text-shadow: 0 0 2px var(--msdr-color-map-paper), 0 0 2px var(--msdr-color-map-paper), 0 0 3px var(--msdr-color-map-paper);
+}
 
 /* Receiver markers (Leaflet divIcon): a triangle with an outline. */
 .map-stage .map-receiver {
@@ -697,6 +758,20 @@
 
   &::before { content: "▲" / ""; }
   &[data-selected]::before { content: "▲" / ""; font-size: 1.6rem; }
+}
+
+/* Static markers (MAP-017, Leaflet divIcon): a star with an outline, ink on
+   a paper halo whatever the theme, as the tiles keep their colors. */
+.map-stage .map-static {
+  display: grid;
+  place-items: center;
+  color: var(--msdr-color-map-ink);
+  font-size: 1.25rem;
+  line-height: 1;
+  text-shadow: 0 0 2px var(--msdr-color-map-paper), 0 0 2px var(--msdr-color-map-paper);
+
+  &::before { content: "★" / ""; }
+  &[data-selected]::before { font-size: 1.6rem; color: var(--msdr-color-focus); }
 }
 
 /* Tile attribution (MAP-004): plain text set by the island. */

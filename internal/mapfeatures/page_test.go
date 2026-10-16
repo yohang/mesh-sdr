@@ -75,9 +75,10 @@ func TestMapPage(t *testing.T) {
 	}
 }
 
-// The tile origins of the offered layers, one per subdomain, feed the CSP.
+// The tile origins of the offered layers, one per subdomain, and of the
+// overlays feed the CSP.
 func TestTileOrigins(t *testing.T) {
-	got := TileOrigins([]string{"osm", "opentopomap", "esri_world_imagery", "esri_world_topo_map", "nope"})
+	got := tileOrigins(Layers([]string{"osm", "opentopomap", "esri_world_imagery", "esri_world_topo_map", "nope"}))
 	want := []string{
 		"https://tile.openstreetmap.org",
 		"https://a.tile.opentopomap.org", "https://b.tile.opentopomap.org", "https://c.tile.opentopomap.org",
@@ -91,11 +92,11 @@ func TestTileOrigins(t *testing.T) {
 	e := newEnv(t)
 	e.config = ConfigSettings{BaseLayers: []string{"osm"}}
 
-	if got := e.m.ImageSources(); !slices.Equal(got, []string{"https://tile.openstreetmap.org"}) {
+	if got := e.m.ImageSources(); !slices.Equal(got, []string{"https://tile.openstreetmap.org", "https://tiles.openseamap.org"}) {
 		t.Errorf("ImageSources = %v", got)
 	}
 
-	if got := TileOrigins(nil); len(got) != 0 {
+	if got := tileOrigins(nil); len(got) != 0 {
 		t.Errorf("no layers: %v", got)
 	}
 }

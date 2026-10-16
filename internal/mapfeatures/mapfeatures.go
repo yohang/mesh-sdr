@@ -4,7 +4,8 @@
 // locators and the call lines between located stations), stored in
 // map_features in the ingest transaction and published as
 // map.feature.upsert / map.feature.remove deltas after the commit; the
-// expiry job; the receiver markers; GET /api/v1/map/features and
+// static markers of the config, synced at hub start and public (MAP-017);
+// the expiry job; the receiver markers; GET /api/v1/map/features and
 // /api/v1/map/config; and the Map page (MAP-001), whose island
 // (static/js/map/) draws them. Every device has its own features (key
 // <kind>:<subject>@<device>), with its own track, filters and call cap: a
@@ -31,10 +32,15 @@ const (
 	KindAPRS    Kind = "aprs"
 	KindLocator Kind = "locator"
 	KindCall    Kind = "call"
+	KindStatic  Kind = "static"
 )
 
-// SourceDecode is the source of the features projected from decodes.
-const SourceDecode = "decode"
+// Feature sources: projected from decodes, or static markers of the config
+// (MAP-017).
+const (
+	SourceDecode = "decode"
+	SourceConfig = "config"
+)
 
 // Geometry types.
 const (
@@ -128,6 +134,14 @@ func ViewOf(f Feature) View {
 	return v
 }
 
+// Public tells whether every visitor sees a feature: only the static
+// markers of the config, which have no device (MAP-017). Every other
+// feature is seen by those who may listen to its device, and by nobody
+// without one.
+func Public(f Feature) bool {
+	return f.Kind == KindStatic && f.Source == SourceConfig && f.DeviceID == ""
+}
+
 // KeyOf returns the key of the feature of a device: kind, subject and
 // device.
 func KeyOf(kind Kind, subject, device string) string {
@@ -148,6 +162,8 @@ type Removal struct {
 	Key      string `json:"key"`
 	Reason   string `json:"reason"`
 	DeviceID string `json:"-"`
+	// Public: a static marker of the config, removed for every visitor.
+	Public bool `json:"-"`
 }
 
 // Change is a committed change of the map: an upsert or a removal.

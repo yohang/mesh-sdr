@@ -428,7 +428,7 @@ func asJSON(t *testing.T, v any) any {
 }
 
 // GET /map/features lists the newest MaxFeatures features and says when
-// older ones were left out.
+// older ones were left out; the static markers come on top, never cut.
 func TestGetMapFeaturesTruncated(t *testing.T) {
 	e := newEnv(t)
 
@@ -452,14 +452,18 @@ func TestGetMapFeaturesTruncated(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := e.m.SyncStatic(context.Background(), []Static{{File: "club", ID: "a", Name: "Club", Lat: 1, Lon: 2}}); err != nil {
+		t.Fatal(err)
+	}
+
 	res, err := e.m.GetMapFeatures(context.Background(), api.GetMapFeaturesRequestObject{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	out := res.(api.GetMapFeatures200JSONResponse)
-	if !out.Truncated || len(out.Features) != MaxFeatures || out.Features[0].Subject != fmt.Sprint("S", MaxFeatures) ||
-		out.Features[MaxFeatures-1].Subject != "S1" {
+	if !out.Truncated || len(out.Features) != MaxFeatures+1 || out.Features[0].Subject != fmt.Sprint("S", MaxFeatures) ||
+		out.Features[MaxFeatures-1].Subject != "S1" || out.Features[MaxFeatures].Key != "static:club:a" {
 		t.Errorf("truncated %v, %d features, first %s", out.Truncated, len(out.Features), out.Features[0].Subject)
 	}
 }
@@ -545,7 +549,8 @@ func TestLayers(t *testing.T) {
 	}
 }
 
-// GET /map/config carries the layers, lifetimes, links and receivers.
+// GET /map/config carries the layers, overlays, lifetimes, links and
+// receivers.
 func TestGetMapConfig(t *testing.T) {
 	e := newEnv(t)
 	e.config = ConfigSettings{
@@ -561,7 +566,7 @@ func TestGetMapConfig(t *testing.T) {
 	c := res.(api.GetMapConfig200JSONResponse)
 	if c.StationName != "Lille" || len(c.BaseLayers) != 2 || *c.BaseLayers[1].Subdomains != "abc" || c.DefaultBaseLayer != "osm" ||
 		c.PositionRetentionS != 7200 || c.MaxCalls != 5 || c.CallRetentionS != 300 || *c.Links.CallsignUrl != "https://www.qrzcq.com/call/{}" ||
-		c.Links.VesselUrl != nil || len(c.Receivers) != 1 || c.Receivers[0].Locator != "JO10" || c.Receivers[0].Precise ||
+		c.Links.VesselUrl != nil || len(c.Overlays) != 1 || c.Overlays[0].Id != "openseamap" || len(c.Receivers) != 1 || c.Receivers[0].Locator != "JO10" || c.Receivers[0].Precise ||
 		len(c.Receivers[0].Devices) != 1 || c.Receivers[0].Devices[0].Id != "vhf" {
 		t.Errorf("config %+v", c)
 	}

@@ -36,6 +36,7 @@ type Hub struct {
 	TLS     HubTLS                `toml:"tls" envPrefix:"TLS__" jsonschema:"description=Hub internal CA for hub <-> node mTLS (ADR 0008). Without it the grid is disabled."`
 	Nodes   map[string]ConfigNode `toml:"nodes" env:"-" jsonschema:"description=Nodes declared in the hub config\\, keyed by node id. They are locked in Admin > Nodes. File-only (no env override)."`
 	Log     Log                   `toml:"log" envPrefix:"LOG__" jsonschema:"description=Process logging."`
+	Map     HubMap                `toml:"map" envPrefix:"MAP__" jsonschema:"description=Map data read from files at hub start (MAP-017)."`
 
 	Settings Settings `toml:"settings" envPrefix:"SETTINGS__" jsonschema_description:"Admin settings (ADR 0010). Each key set in a file or the env is locked (read-only in the admin UI); unset keys fall back to the DB setting, then to the default."`
 
@@ -272,6 +273,7 @@ func (h *Hub) resolvePaths(dir string) {
 	h.TLS.CACert = ResolvePath(dir, h.TLS.CACert)
 	h.Gateway.TLSCert = ResolvePath(dir, h.Gateway.TLSCert)
 	h.Gateway.TLSKey = ResolvePath(dir, h.Gateway.TLSKey)
+	h.Map.StaticMarkersDir = ResolvePath(dir, h.Map.StaticMarkersDir)
 }
 
 func (n *Node) resolvePaths(dir string) {

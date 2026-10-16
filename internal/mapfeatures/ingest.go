@@ -172,7 +172,7 @@ func (m *Module) remove(ctx context.Context, node, key, reason string) error {
 		return err
 	}
 
-	m.queue(node, Change{Remove: &Removal{Key: key, Reason: reason, DeviceID: f.DeviceID}})
+	m.queue(node, Change{Remove: &Removal{Key: key, Reason: reason, DeviceID: f.DeviceID, Public: Public(f)}})
 
 	return nil
 }

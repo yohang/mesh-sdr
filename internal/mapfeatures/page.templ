@@ -1,8 +1,9 @@
 package mapfeatures
 
 // mapPage is the Map section (FEATURE_SPEC §10.10, MAP-001): the toolbar
-// (search, layers, legend, list view, UTC clock), the map with its layers
-// panel and legend, the detail panel and the list view. The island
+// (search, colour mode, layers, legend, list view, UTC clock), the map with
+// its layers panel (base layer, overlays) and legend (feature types, bands
+// or modes), the detail panel and the list view. The island
 // (static/js/map/island.js) fills them from GET /api/v1/map/config and
 // /map/features, then follows the map topic of /api/ws. Every value it
 // shows from a feature is set with textContent.
@@ -24,6 +25,14 @@ templ mapPage(v mapView) {
 				/>
 				<button type="submit" class="button max-md:min-h-11">Find</button>
 			</form>
+			<label class="flex items-center gap-1 text-sm" data-map-colour-label hidden>
+				Colours
+				<select id="map-colour" name="colour" class="rounded border border-border bg-surface px-2 py-1 max-md:min-h-11" data-map-colour>
+					<option value="band">By band</option>
+					<option value="mode">By mode</option>
+					<option value="off">Off</option>
+				</select>
+			</label>
 			<button type="button" class="button max-md:min-h-11" aria-expanded="false" aria-controls="map-layers" data-map-toggle="layers" hidden>Layers</button>
 			<button type="button" class="button max-md:min-h-11" aria-expanded="false" aria-controls="map-legend" data-map-toggle="legend" hidden>Legend</button>
 			<button type="button" class="button max-md:min-h-11" aria-pressed="false" data-map-list-toggle hidden>Show as list</button>
@@ -54,6 +63,10 @@ templ mapPage(v mapView) {
 							<legend class="text-sm font-medium">Base layer</legend>
 							<div class="mt-1 flex flex-col gap-1" data-map-bases></div>
 						</fieldset>
+						<fieldset class="mt-3">
+							<legend class="text-sm font-medium">Overlays</legend>
+							<div class="mt-1 flex flex-col gap-1" data-map-overlays></div>
+						</fieldset>
 					</section>
 					<section id="map-legend" class="map-panel map-legend" aria-labelledby="map-legend-title" hidden>
 						<h2 id="map-legend-title" class="font-semibold">Features</h2>
@@ -61,6 +74,7 @@ templ mapPage(v mapView) {
 							<legend class="sr-only">Feature types shown on the map</legend>
 							<ul class="flex flex-col gap-1" data-map-types></ul>
 						</fieldset>
+						<div data-map-keys hidden></div>
 					</section>
 				</div>
 				<div data-map-list hidden></div>

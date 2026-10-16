@@ -7,6 +7,7 @@
 // expires_at, whether or not the hub's removal arrived.
 
 import { finite, locatorBounds } from "./geo.js";
+import { greatCircle } from "./greatcircle.js";
 
 /**
  * @typedef {object} Feature a map feature (MapFeature of the API)
@@ -71,7 +72,7 @@ function valid(f) {
 
 /**
  * position returns where a feature is drawn: its point, the centre of its
- * locator square, or the middle of its line.
+ * locator square, or the middle of its great circle line.
  * @param {Feature} f
  * @returns {[number, number] | null}
  */
@@ -81,7 +82,8 @@ function position(f) {
     const a = g.from;
     const b = g.to;
     if (!a || !b || ![a.lat, a.lon, b.lat, b.lon].every(finite)) return null;
-    return [(a.lat + b.lat) / 2, (a.lon + b.lon) / 2];
+    const path = greatCircle([a.lat, a.lon], [b.lat, b.lon]).flat();
+    return path[Math.floor(path.length / 2)];
   }
   if (finite(f.lat) && finite(f.lon)) return [f.lat, f.lon];
   if (finite(g.lat) && finite(g.lon)) return [g.lat, g.lon];

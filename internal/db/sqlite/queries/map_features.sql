@@ -36,3 +36,15 @@ DELETE FROM map_features WHERE feature_key IN (
     ORDER BY f.expires_at LIMIT sqlc.arg(max_rows)
 )
 RETURNING feature_key, device_id;
+
+-- name: ListStaticMapFeatures :many
+-- ListStaticMapFeatures returns the static markers of the config: no
+-- device, shown to everyone (MAP-017).
+SELECT * FROM map_features
+WHERE device_id IS NULL AND kind = 'static' AND source = 'config'
+ORDER BY feature_key;
+
+-- name: DeleteStaticMapFeatures :many
+-- DeleteStaticMapFeatures deletes the static markers of the config and
+-- returns their keys.
+DELETE FROM map_features WHERE kind = 'static' AND source = 'config' RETURNING feature_key;
