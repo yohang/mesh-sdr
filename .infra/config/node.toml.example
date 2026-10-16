@@ -32,6 +32,10 @@ ws_notsent_lowat = "16KiB"
 # Demodulators the node runs at once, all devices together (interim
 # default; devices.<id>.max_demods caps each device, default 16).
 max_demods = 32
+# Node position (MAP-007), reported to the hub: the map shows one marker
+# per node position with its devices. Unset: the station position
+# (receiver.gps). In the env: MESHSDR_NODE__GPS="50.63,3.06".
+# gps = { lat = 50.63, lon = 3.06 }
 
 # RAM buffer of node events while the hub is unreachable; on overflow the
 # node drops diagnostics, then map updates, then decodes (oldest first).
@@ -146,6 +150,7 @@ memory = "0"
 # scheduler_enabled = true
 # auto_recover = true                # restart a failed device every 15 min
 # max_demods = 16                    # demodulators of this device at once
+# gps = { lat = 50.64, lon = 3.07 }  # antenna elsewhere than the node: its own map marker (MAP-007)
 # [devices.vhf-rtl.driver]
 # device = "0"                       # rtl_sdr: device index or serial (default 0); rtl_tcp: host:port
 # ppm = 1                            # frequency correction (-1000..1000)

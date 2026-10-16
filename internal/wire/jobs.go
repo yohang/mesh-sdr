@@ -16,12 +16,13 @@ import (
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	"github.com/yohang/mesh-sdr/internal/identity"
 	identityapp "github.com/yohang/mesh-sdr/internal/identity/app"
+	"github.com/yohang/mesh-sdr/internal/mapfeatures"
 	"github.com/yohang/mesh-sdr/internal/settings"
 )
 
 // newJobs builds the hub's jobs scheduler with the retention jobs, and the
 // retention view (ADM-011, ADR 0010).
-func newJobs(adapter *db.DB, conns griddomain.ConnectionRepository, idm *identity.Module, sch *scheduling, decoded *decodes.Module, values jobs.RetentionValues,
+func newJobs(adapter *db.DB, conns griddomain.ConnectionRepository, idm *identity.Module, sch *scheduling, decoded *decodes.Module, mapf *mapfeatures.Module, values jobs.RetentionValues,
 	audit audit.Appender, filesRetention *files.Retention, filesPolicy func() files.RetentionPolicy, logger *slog.Logger,
 ) (*jobs.Scheduler, *jobs.Retention, error) {
 	sched := jobs.NewScheduler(jobs.NewRuns(adapter), adapter, time.Now, component(logger, "jobs.scheduler"))
@@ -42,6 +43,8 @@ func newJobs(adapter *db.DB, conns griddomain.ConnectionRepository, idm *identit
 	sched.Register(filesRetention, files.RetentionEvery)
 
 	sched.Register(jobs.Func(decodes.JobPurge, decoded.PurgeOld), decodes.PurgeEvery)
+	// MAP-012: expired map features leave the map.
+	sched.Register(jobs.Func(mapfeatures.JobExpire, mapf.Expire), mapfeatures.ExpireEvery)
 
 	stats := map[string]*jobs.TableStats{}
 

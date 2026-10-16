@@ -70,6 +70,12 @@ var settingHooks = map[string]func(v any) error{
 
 		return nil
 	},
+	"links.callsign_url": linkTemplate,
+	"links.vessel_url":   linkTemplate,
+	"links.flight_url":   linkTemplate,
+	"links.modes_url":    linkTemplate,
+	"links.sonde_url":    linkTemplate,
+	"links.geoip_url":    linkTemplate,
 	"receiver.usage_policy_text": func(v any) error {
 		s, _ := v.(string)
 
@@ -84,6 +90,25 @@ var settingHooks = map[string]func(v any) error{
 
 		return nil
 	},
+}
+
+// errLinkTemplate rejects a lookup link template (ADM-032).
+var errLinkTemplate = shared.NewError(shared.KindInvalid, "invalid_link_template",
+	"must be an http or https URL with exactly one {} placeholder")
+
+// linkTemplate checks a lookup link template: empty (no link), or an http
+// or https URL with exactly one {} placeholder.
+func linkTemplate(v any) error {
+	s, _ := v.(string)
+	if s == "" {
+		return nil
+	}
+
+	if strings.Count(s, "{}") != 1 || !isHTTPURL(strings.Replace(s, "{}", "x", 1)) || strings.ContainsAny(s, " \t\r\n\\") {
+		return errLinkTemplate
+	}
+
+	return nil
 }
 
 // loadSettingsIndex builds the index from the generated hub schema, so that
@@ -590,6 +615,17 @@ var settingRules = []settingRule{
 		if lock <= delay {
 			return []shared.Violation{shared.NewViolation("auth.lockout.lock_after", CodeInvalidValue,
 				fmt.Sprintf("must be greater than auth.lockout.delay_after (%d)", delay))}
+		}
+
+		return nil
+	}},
+	{[]string{"map.base_layers", "map.default_base_layer"}, func(get func(string) any) []shared.Violation {
+		layers, _ := get("map.base_layers").([]string)
+		def, _ := get("map.default_base_layer").(string)
+
+		if !slices.Contains(layers, def) {
+			return []shared.Violation{shared.NewViolation("map.default_base_layer", CodeInvalidValue,
+				"must be one of the offered base layers (map.base_layers)")}
 		}
 
 		return nil

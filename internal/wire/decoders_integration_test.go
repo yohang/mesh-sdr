@@ -121,8 +121,8 @@ func TestZVEIEndToEnd(t *testing.T) {
 // TestFT8EndToEnd: the FT8 signal of the fake connector, sent in every 15 s
 // UTC slot, is recorded by the node into slot files, decoded by jt9 through
 // the batch queue, sent to the listener with its frequency and stored by
-// the hub with the slot's time (DEC-016, DEC-025, DEC-026, DEC-027). It
-// takes up to two slots.
+// the hub with the slot's time (DEC-016, DEC-025, DEC-026, DEC-027), which
+// puts its locator on the map (MAP-002). It takes up to two slots.
 func TestFT8EndToEnd(t *testing.T) {
 	if _, err := process.ResolveTool("jt9", []string{"/usr/local/bin", "/usr/bin"}); err != nil {
 		t.Skip("jt9 not installed")
@@ -214,4 +214,13 @@ func TestFT8EndToEnd(t *testing.T) {
 
 		return err == nil && n >= 1
 	})
+	// The hub projects the locator onto the map in the same transaction
+	// (MAP-002).
+	var loc string
+
+	err = e.adapter.Reader(context.Background()).QueryRowContext(context.Background(),
+		`SELECT json_extract(geometry, '$.locator') FROM map_features WHERE feature_key = 'locator:K1ABC@vhf' AND subject = 'K1ABC' AND device_id = 'vhf'`).Scan(&loc)
+	if err != nil || loc != "FN42" {
+		t.Errorf("map feature locator %q: %v", loc, err)
+	}
 }

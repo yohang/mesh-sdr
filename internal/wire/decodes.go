@@ -13,6 +13,7 @@ import (
 	gridapp "github.com/yohang/mesh-sdr/internal/grid/app"
 	griddomain "github.com/yohang/mesh-sdr/internal/grid/domain"
 	identitydomain "github.com/yohang/mesh-sdr/internal/identity/domain"
+	"github.com/yohang/mesh-sdr/internal/mapfeatures"
 	"github.com/yohang/mesh-sdr/internal/protocol/rxv1"
 	radiodomain "github.com/yohang/mesh-sdr/internal/radio/domain"
 	"github.com/yohang/mesh-sdr/internal/settings"
@@ -31,10 +32,12 @@ type decodesDeps struct {
 	}
 	// features gives the enabled devices.
 	features *gridapp.Features
-	store    *settings.Store
-	render   *render.Renderer
-	now      func() time.Time
-	logger   *slog.Logger
+	// mapf projects the stored messages onto the map (nil: none).
+	mapf   *mapfeatures.Module
+	store  *settings.Store
+	render *render.Renderer
+	now    func() time.Time
+	logger *slog.Logger
 }
 
 // newDecodes builds the decoded messages module (DEC-047): the decode.batch
@@ -43,6 +46,11 @@ type decodesDeps struct {
 func newDecodes(d decodesDeps) *decodes.Module {
 	logger := component(d.logger, "decodes.module")
 
+	var stored func(ctx context.Context, m decodes.Message) error
+	if d.mapf != nil {
+		stored = func(ctx context.Context, m decodes.Message) error { return d.mapf.Ingest(ctx, mapDecode(m)) }
+	}
+
 	m := decodes.New(decodes.Deps{
 		DB:         d.adapter,
 		Visible:    visibleDevices(d),
@@ -50,6 +58,7 @@ func newDecodes(d decodesDeps) *decodes.Module {
 		Retention:  func() time.Duration { return d.store.Duration("retention.decoded_messages.max_age") },
 		MaxRows:    func() int { return d.store.Int("retention.decoded_messages.max_rows") },
 		Published:  decodeNew(d.broker, logger),
+		Stored:     stored,
 		DeviceNode: deviceNode(d.grid.deviceRepo),
 		Modes:      catalogueModes(),
 		Dedup:      dedupOf,
@@ -63,9 +72,19 @@ func newDecodes(d decodesDeps) *decodes.Module {
 		c.OnApplied(func(ctx context.Context, id griddomain.NodeID, types []rxv1.MessageType) {
 			if slices.Contains(types, rxv1.TypeDecodeBatch) {
 				m.Flush(ctx, id.String())
+
+				if d.mapf != nil {
+					d.mapf.Flush(ctx, id.String())
+				}
 			}
 		})
-		c.OnFailed(func(id griddomain.NodeID) { m.Discard(id.String()) })
+		c.OnFailed(func(id griddomain.NodeID) {
+			m.Discard(id.String())
+
+			if d.mapf != nil {
+				d.mapf.Discard(id.String())
+			}
+		})
 	}
 
 	return m

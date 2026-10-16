@@ -203,3 +203,45 @@ func TestAdminPurgeNow(t *testing.T) {
 		t.Errorf("job runs = %d", n)
 	}
 }
+
+// Admin › Map edits the map settings (MAP-004, MAP-015): the default layer
+// must be offered, link templates need one {}; GET /api/v1/map/config
+// serves the saved values.
+func TestAdminMapSettings(t *testing.T) {
+	h := newAdminHub(t, nil)
+	b := h.browser("root")
+
+	res, body := b.do(http.MethodGet, "/admin/map", "", "", nil)
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `name="map.base_layers"`) || !strings.Contains(string(body), `name="links.callsign_url"`) ||
+		!strings.Contains(string(body), `aria-current="page"`) {
+		t.Fatalf("GET /admin/map = %d", res.StatusCode)
+	}
+
+	layers := url.Values{"section": {"layers"}, "map.base_layers": {"opentopomap\nesri_world_topo_map"}, "map.default_base_layer": {"osm"}}
+	if res, form := b.form("/admin/map", layers, true); res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(form, "offered base layers") {
+		t.Errorf("default layer not offered = %d %s", res.StatusCode, form)
+	}
+
+	layers.Set("map.default_base_layer", "esri_world_topo_map")
+
+	if res, form := b.form("/admin/map", layers, true); res.StatusCode != http.StatusOK || !strings.Contains(form, "Saved.") {
+		t.Errorf("layers = %d %s", res.StatusCode, form)
+	}
+
+	links := url.Values{"section": {"links"}, "links.callsign_url": {"https://example.org/call"}}
+	if res, form := b.form("/admin/map", links, true); res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(form, "{}") {
+		t.Errorf("link without placeholder = %d %s", res.StatusCode, form)
+	}
+
+	links.Set("links.callsign_url", "https://example.org/call/{}")
+
+	if res, form := b.form("/admin/map", links, true); res.StatusCode != http.StatusOK || !strings.Contains(form, "Saved.") {
+		t.Errorf("links = %d %s", res.StatusCode, form)
+	}
+
+	res, body = b.do(http.MethodGet, "/api/v1/map/config", "", "", nil)
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"default_base_layer":"esri_world_topo_map"`) ||
+		!strings.Contains(string(body), `"callsign_url":"https://example.org/call/{}"`) || strings.Contains(string(body), `"id":"osm"`) {
+		t.Errorf("GET /api/v1/map/config = %d %s", res.StatusCode, body)
+	}
+}

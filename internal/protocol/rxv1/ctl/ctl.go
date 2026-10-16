@@ -137,6 +137,24 @@ type Device struct {
 	// Config are the driver values of the node config (SRC-022), shown
 	// read-only by the hub; nil when the node does not report them.
 	Config *DeviceConfig `json:"config,omitempty"`
+	// GPS is the position of the device (MAP-007; additive field): its own
+	// devices.<id>.gps, else the node.gps of its node; nil when neither is
+	// set.
+	GPS *Position `json:"gps,omitempty"`
+}
+
+// Position sources of a device.
+const (
+	PositionDevice = "device"
+	PositionNode   = "node"
+)
+
+// Position is a position in decimal degrees (WGS 84) and where it comes
+// from: the device's own position (device) or its node's (node).
+type Position struct {
+	Lat    float64 `json:"lat"`
+	Lon    float64 `json:"lon"`
+	Source string  `json:"source"`
 }
 
 // DeviceConfig are the [devices.<id>.driver] values of a device, as set in
