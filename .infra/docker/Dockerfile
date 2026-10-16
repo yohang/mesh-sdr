@@ -29,6 +29,9 @@ ARG JS8CALL_VERSION=2.2.0+ds-5+b1
 ARG DIREWOLF_VERSION=1.7+dfsg-2+deb13u1
 ARG MULTIMON_NG_VERSION=1.3.1+dfsg-1
 ARG RTL_433_VERSION=25.02-1+deb13u1
+# Build dependencies of readsb.
+ARG ZSTD_VERSION=1.5.7+dfsg-1
+ARG ZLIB_VERSION=1:1.3.dfsg+really1.3.1-1+b1
 
 # Native components built from source (ADR 0014, ADR 0019). Upstream
 # publishes no release tarballs: the GitHub tag archives are pinned by
@@ -40,11 +43,16 @@ ARG OWRX_CONNECTOR_SHA256=63a7bccf5beab0220136829850b46df56c79ddb4b6d77d9ea191d1
 # csdr-skimmer (formerly csdr-cwskimmer): csdr-cwskimmer and csdr-rttyskimmer.
 ARG CSDR_SKIMMER_VERSION=1.12
 ARG CSDR_SKIMMER_SHA256=2156bd5e8b2aeae756482040c9aad8f48a1658e02499441047ec877b9992f562
+# readsb (ADS-B, ADR 0029): 3.16.17 or later, whose ifile input keeps one
+# wall clock on stdin (trixie's 3.14.1630 mixes two and stops writing its
+# JSON).
+ARG READSB_VERSION=3.16.17
+ARG READSB_SHA256=6e06af15e24c3dc8311013ae4c782346ecc66ee1273636d410109b80009b64c0
 
 
 # csdr 0.18.x (luarvique fork), owrx_connector (rtl_connector,
 # rtl_tcp_connector; no Soapy), csdr-cwskimmer and csdr-rttyskimmer
-# (csdr-skimmer), installed
+# (csdr-skimmer) and readsb, installed
 # under /usr/local and staged in /opt/natives with their licence texts.
 FROM ${DEBIAN_IMAGE} AS natives
 
@@ -59,11 +67,16 @@ ARG OWRX_CONNECTOR_VERSION
 ARG OWRX_CONNECTOR_SHA256
 ARG CSDR_SKIMMER_VERSION
 ARG CSDR_SKIMMER_SHA256
+ARG READSB_VERSION
+ARG READSB_SHA256
+ARG ZSTD_VERSION
+ARG ZLIB_VERSION
 
 RUN apt-get update; \
     apt-get install -y --no-install-recommends \
       ca-certificates curl g++ cmake make pkg-config \
-      "libfftw3-dev=${FFTW_VERSION}" "libsamplerate0-dev=${SAMPLERATE_VERSION}" "librtlsdr-dev=${RTLSDR_VERSION}"; \
+      "libfftw3-dev=${FFTW_VERSION}" "libsamplerate0-dev=${SAMPLERATE_VERSION}" "librtlsdr-dev=${RTLSDR_VERSION}" \
+      "libzstd-dev=${ZSTD_VERSION}" "zlib1g-dev=${ZLIB_VERSION}"; \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -101,6 +114,21 @@ RUN curl -fsSL -o csdr-skimmer.tar.gz "https://github.com/luarvique/csdr-skimmer
     mkdir -p "${out}/usr/share/doc/csdr-skimmer"; \
     install -m 0755 "csdr-skimmer-${CSDR_SKIMMER_VERSION}/csdr-cwskimmer" "csdr-skimmer-${CSDR_SKIMMER_VERSION}/csdr-rttyskimmer" "${out}/usr/local/bin/"; \
     cp "csdr-skimmer-${CSDR_SKIMMER_VERSION}/LICENSE" "${out}/usr/share/doc/csdr-skimmer/"
+
+# readsb with only its file input (ifile: no rtl-sdr, no interactive
+# mode); it links libzstd and zlib, present in the base images. The
+# version string leaves out the build date.
+RUN curl -fsSL -o readsb.tar.gz "https://github.com/wiedehopf/readsb/archive/refs/tags/v${READSB_VERSION}.tar.gz"; \
+    echo "${READSB_SHA256}  readsb.tar.gz" | sha256sum -c -; \
+    tar xzf readsb.tar.gz; \
+    make -C "readsb-${READSB_VERSION}" -j"$(nproc)" DISABLE_INTERACTIVE=yes READSB_VERSION="${READSB_VERSION}" readsb; \
+    out=/opt/natives; \
+    mkdir -p "${out}/usr/share/doc/readsb/compat"; \
+    install -m 0755 "readsb-${READSB_VERSION}/readsb" "${out}/usr/local/bin/"; \
+    cp "readsb-${READSB_VERSION}/LICENSE" "readsb-${READSB_VERSION}/COPYING" "${out}/usr/share/doc/readsb/"; \
+    sed -n '1,/\*\//p' "readsb-${READSB_VERSION}/fasthash.h" > "${out}/usr/share/doc/readsb/fasthash-LICENSE"; \
+    cp "readsb-${READSB_VERSION}/compat/clock_gettime/LICENSE" "${out}/usr/share/doc/readsb/compat/clock_gettime-LICENSE"; \
+    cp "readsb-${READSB_VERSION}/compat/clock_nanosleep/LICENSE" "${out}/usr/share/doc/readsb/compat/clock_nanosleep-LICENSE"
 
 
 FROM ${GO_IMAGE} AS base
@@ -297,6 +325,8 @@ ARG OWRX_CONNECTOR_VERSION
 ARG OWRX_CONNECTOR_SHA256
 ARG CSDR_SKIMMER_VERSION
 ARG CSDR_SKIMMER_SHA256
+ARG READSB_VERSION
+ARG READSB_SHA256
 ARG WSJTX_VERSION
 ARG JS8CALL_VERSION
 ARG DIREWOLF_VERSION
@@ -315,6 +345,8 @@ RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.s
     echo "${OWRX_CONNECTOR_SHA256}  owrx_connector-${OWRX_CONNECTOR_VERSION}.tar.gz" | sha256sum -c -; \
     curl -fsSL -o "csdr-skimmer-${CSDR_SKIMMER_VERSION}.tar.gz" "https://github.com/luarvique/csdr-skimmer/archive/refs/tags/${CSDR_SKIMMER_VERSION}.tar.gz"; \
     echo "${CSDR_SKIMMER_SHA256}  csdr-skimmer-${CSDR_SKIMMER_VERSION}.tar.gz" | sha256sum -c -; \
+    curl -fsSL -o "readsb-${READSB_VERSION}.tar.gz" "https://github.com/wiedehopf/readsb/archive/refs/tags/v${READSB_VERSION}.tar.gz"; \
+    echo "${READSB_SHA256}  readsb-${READSB_VERSION}.tar.gz" | sha256sum -c -; \
     cd /sources/debian; \
     apt-get source --download-only "fftw3=${FFTW_VERSION%+b*}" "rtl-sdr=${RTLSDR_VERSION%+b*}" \
       "libsamplerate=${SAMPLERATE_VERSION%+b*}" "libusb-1.0=${LIBUSB_VERSION%+b*}" \

@@ -45,6 +45,7 @@ type Settings struct {
 	Files     SettingsFiles     `toml:"files" envPrefix:"FILES__" jsonschema:"description=Retention of the files the nodes send (FIL-004)."`
 	Grid      SettingsGrid      `toml:"grid" envPrefix:"GRID__" jsonschema:"description=Node health (GRID-009)."`
 	Decoders  SettingsDecoders  `toml:"decoders" envPrefix:"DECODERS__" jsonschema:"description=Decoding settings pushed to the nodes (Admin › Decoding)."`
+	Aircraft  SettingsAircraft  `toml:"aircraft" envPrefix:"AIRCRAFT__" jsonschema:"description=Aircraft lifetimes on the map (Admin › Decoding)."`
 	Map       SettingsMap       `toml:"map" envPrefix:"MAP__" jsonschema:"description=Map layers, retention and report filtering (Admin › Map)."`
 	Links     SettingsLinks     `toml:"links" envPrefix:"LINKS__" jsonschema:"description=Lookup link templates (MAP-015)."`
 
@@ -174,6 +175,12 @@ type SettingsDecoders struct {
 	ISMReportLevels bool `toml:"ism_report_levels" env:"ISM_REPORT_LEVELS" jsonschema_extras:"x-label=ISM signal levels" jsonschema_description:"The ISM and Wireless M-Bus decoders keep the signal level, SNR and noise of each message (rtl_433 -M level). Applies to sessions started from now on."`
 }
 
+// SettingsAircraft is the [settings.aircraft] table (AIR-006, ADM-033):
+// the lifetime of an aircraft position on the map, per mode.
+type SettingsAircraft struct {
+	ADSBTTLS int `toml:"adsb_ttl_s" env:"ADSB_TTL_S" jsonschema:"minimum=30,maximum=86400" jsonschema_extras:"x-label=ADS-B position lifetime (s)" jsonschema_description:"An aircraft leaves the map this many seconds after its last ADS-B position (30 to 86400)."`
+}
+
 // SettingsWSJTDepths is the [settings.decoders.wsjt_decoding_depths]
 // table: the decoding depth of each WSJT mode, 0 for the global one
 // (DEC-024).
@@ -287,6 +294,7 @@ func DefaultSettings() Settings {
 			FST4Intervals: []string{"15", "30"}, FST4WIntervals: []string{"120", "300"}, Q65Combinations: []string{"A30", "E120", "C60"},
 			JS8Profiles: []string{"normal", "slow"}, JS8DecodingDepth: 3, PagingCharset: "US", DSCShowErrors: true,
 		},
+		Aircraft: SettingsAircraft{ADSBTTLS: 900},
 		Map: SettingsMap{
 			BaseLayers: slices.Clone(BaseLayers), DefaultBaseLayer: "osm",
 			PositionRetentionS: 7200, MaxCalls: 5, CallRetentionS: 300, PreferRecentReports: true,

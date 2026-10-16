@@ -37,7 +37,9 @@ type Decode struct {
 	Schema   string
 	FreqHz   int64
 	At       time.Time
-	Payload  json.RawMessage
+	// Text is the plain-text rendering (the aircraft message log).
+	Text    string
+	Payload json.RawMessage
 }
 
 // report is a feature a decode reports.

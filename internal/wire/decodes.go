@@ -63,6 +63,7 @@ func newDecodes(d decodesDeps) *decodes.Module {
 		MapLink:    func(m decodes.Message) string { return mapfeatures.Link(mapDecode(m)) },
 		Modes:      catalogueModes(),
 		Dedup:      dedupOf,
+		Sample:     sampleOf,
 		Render:     d.render, Now: d.now, Logger: logger,
 	})
 
@@ -134,6 +135,18 @@ func dedupOf(mode string) (int64, time.Duration) {
 	}
 
 	return 0, 0
+}
+
+// sampleOf thins the stored messages of a high-rate mode of the
+// catalogue: one per subject (the aircraft address) per interval.
+func sampleOf(m decodes.Message) (string, time.Duration) {
+	for _, mode := range radiodomain.DigitalModes() {
+		if mode.Name == m.Mode && mode.SampleInterval > 0 {
+			return mapfeatures.Subject(m.Schema, m.Payload), mode.SampleInterval
+		}
+	}
+
+	return "", 0
 }
 
 // visibleDevices returns the enabled devices the visitor may listen to

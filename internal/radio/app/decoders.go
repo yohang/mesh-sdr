@@ -140,6 +140,8 @@ type DecoderSpec struct {
 	Mode    domain.DigitalMode
 	// Variant is the decoder variant of the mode ("" for none).
 	Variant string
+	// Device is the device of the demodulator ("" in tests).
+	Device string
 	// OffsetHz is the secondary offset of a text decoder (DEC-005): the
 	// frequency of the signal relative to the dial.
 	OffsetHz float64

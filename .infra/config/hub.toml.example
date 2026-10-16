@@ -263,6 +263,10 @@ trusted_proxies = []
 # fst4w = 0
 # q65 = 0
 
+# Aircraft (Admin › Decoding): lifetime of an aircraft position on the map.
+[settings.aircraft]
+# adsb_ttl_s = 900                       # an aircraft leaves the map this long after its last ADS-B position (30..86400 s)
+
 # Map (Admin › Map): base layers, lifetimes and report filtering.
 [settings.map]
 # Base layers offered: osm, opentopomap, esri_world_imagery,

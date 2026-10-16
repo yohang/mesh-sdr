@@ -64,7 +64,8 @@ type Deps struct {
 	Published func(ctx context.Context, m Message)
 	// Stored, when set, is told every stored message inside the ingestion
 	// transaction (the map projection, TECHNICAL_SPEC §7.3 "Transactional
-	// outbox" rule 1); its error fails the batch.
+	// outbox" rule 1), and every message thinned out by Sample (ID 0); its
+	// error fails the batch.
 	Stored func(ctx context.Context, m Message) error
 	// DeviceNode returns the node of a device of the registry (ok false:
 	// unknown device). A node stores messages of its own devices only.
@@ -76,7 +77,12 @@ type Deps struct {
 	Modes []Mode
 	// Dedup returns the duplicate key rounding of a mode: its frequency
 	// step (Hz) and time bucket (ADR 0028).
-	Dedup  func(mode string) (step int64, bucket time.Duration)
+	Dedup func(mode string) (step int64, bucket time.Duration)
+	// Sample returns how a message of a high-rate mode is thinned
+	// (TECHNICAL_SPEC §7.1 "Volume control"): at most one stored message
+	// per subject (an aircraft) per interval; the others still reach
+	// Stored (the map). every 0: the message is not thinned.
+	Sample func(m Message) (subject string, every time.Duration)
 	Render *render.Renderer
 	Now    func() time.Time
 	Logger *slog.Logger

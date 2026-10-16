@@ -96,7 +96,7 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 	core := uint64(0)
 	runner := decoder.NewRunner(decoder.Options{
 		Supervisor: sup, Tools: tools, Settings: dec.settings, Reprobe: dec.reprobe, Logger: component(logger, "radio.infra.decoder.runner"),
-		Queue: dec.queue, ClockSynced: dec.clockSynced,
+		Queue: dec.queue, ClockSynced: dec.clockSynced, Position: devicePosition(cfg),
 		Limits: process.Limits{
 			Nice: lim.Nice, OpenFiles: uint64(lim.OpenFiles), AddressSpace: uint64(lim.Memory.Bytes()), Core: &core, NoNewPrivs: true,
 		},
@@ -109,6 +109,25 @@ func newRadio(cfg config.Node, logger *slog.Logger, reporter radioapp.Reporter, 
 	waterfall := ctl.StateWaterfall{MinDB: w.MinDB, MaxDB: w.MaxDB, Palette: w.Palette}
 
 	return m, radiohttp.NewStreams(m, state, decoding, waterfall, component(logger, "radio.http.streams")), sources, toolbox, nil
+}
+
+// devicePosition returns the position of a device of the node config (its
+// own, else the node's, MAP-007): the receiver position of the ADS-B
+// decoder.
+func devicePosition(cfg config.Node) func(device string) (float64, float64, bool) {
+	return func(device string) (float64, float64, bool) {
+		d, ok := cfg.Devices[device]
+		if !ok {
+			return 0, 0, false
+		}
+
+		p := positionOf(cfg.Node.GPS, d.GPS)
+		if p == nil {
+			return 0, 0, false
+		}
+
+		return p.Lat, p.Lon, true
+	}
 }
 
 // radioDecoding are the node services the decoders use: the hub

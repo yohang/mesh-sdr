@@ -58,6 +58,7 @@ var toolProbes = map[string]toolProbe{
 	"rtl_433":          {args: []string{"-V"}, match: regexp.MustCompile(`rtl_433 version (\d+\.\d+(?:\.\d+)?)`)},
 	"csdr-cwskimmer":   {args: []string{"-h"}, match: regexp.MustCompile(`CW Skimmer`)},
 	"csdr-rttyskimmer": {args: []string{"-h"}, match: regexp.MustCompile(`RTTY Skimmer`)},
+	"readsb":           {args: []string{"--version"}, match: regexp.MustCompile(`readsb version: (\d+\.\d+(?:\.\d+)?)`)},
 }
 
 // capProbe is a decoder capability: the tools it needs and the lowest
@@ -81,6 +82,7 @@ var capProbes = []capProbe{
 	{cap: domain.CapRTL433, tools: []string{"rtl_433"}},
 	{cap: domain.CapSkimmer, tools: []string{"csdr-cwskimmer"}},
 	{cap: domain.CapRTTYSkimmer, tools: []string{"csdr-rttyskimmer"}},
+	{cap: domain.CapReadsb, tools: []string{"readsb"}},
 	{cap: domain.CapNativeDSP},
 }
 

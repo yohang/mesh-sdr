@@ -25,6 +25,9 @@ const (
 	// is the CW one.
 	CapRTTYSkimmer = "cap:skimmer-rtty"
 	CapNativeDSP   = "cap:native-dsp"
+	// CapReadsb is the ADS-B decoder (AIR-004): readsb, a dump1090 fork,
+	// in place of the spec's cap:dump1090 (ADR 0029).
+	CapReadsb = "cap:readsb"
 )
 
 // DecoderInput is what a decoder reads (§8.3 "Secondary decoder").
@@ -87,6 +90,11 @@ type DigitalMode struct {
 	// BandLow and BandHigh are the pass band (Hz from the dial) of a wide
 	// IQ input; it is cut to the input rate.
 	BandLow, BandHigh float64
+	// SampleInterval thins the stored messages of a high-rate mode
+	// (TECHNICAL_SPEC §7.1 "Volume control"): the hub keeps at most one
+	// per subject (an aircraft) per interval, the map still gets every
+	// update. 0: every message is kept.
+	SampleInterval time.Duration
 }
 
 // TextRate is the input rate of the native text decoders and of their
@@ -256,7 +264,22 @@ var digitalModes = []DigitalMode{
 		Name: "wmbus", Label: "WMBus", Cap: CapRTL433, Family: FamilyISM, Underlying: []string{"nfm", "am"}, Input: InputWideIQ, InputRate: 1_200_000,
 		BandLow: -125_000, BandHigh: 125_000, DedupStep: 1000,
 	},
+	// AIR-004: readsb on 2.4 MS/s of IQ around the dial (its demodulator's
+	// rate), the whole band (a device below 2.4 MS/s cannot serve it). No
+	// secondary FFT; one stored message per aircraft per SampleInterval.
+	{
+		Name: "adsb", Label: "ADS-B", Cap: CapReadsb, Family: FamilyAircraft, Underlying: []string{"am"}, Input: InputWideIQ, InputRate: ADSBRate,
+		BandLow: -ADSBRate / 2, BandHigh: ADSBRate / 2, DedupStep: 1000, SampleInterval: SampleInterval,
+	},
 }
+
+// ADSBRate is the input rate of the ADS-B decoder (AIR-004).
+const ADSBRate = 2_400_000
+
+// SampleInterval is decodes.sample_interval (TECHNICAL_SPEC §7.1, default
+// 30 s; not a setting yet): the stored messages of a high-rate mode are
+// thinned to one per subject per interval.
+const SampleInterval = 30 * time.Second
 
 // SlotRate is the input rate of the slot decoders: 12 kHz mono WAV
 // (DEC-026).
@@ -281,6 +304,7 @@ const (
 	FamilyISM       = "ism"
 	FamilyDSC       = "dsc"
 	FamilyAIS       = "ais"
+	FamilyAircraft  = "aircraft"
 )
 
 // textDedupStep rounds the frequency of text decoders in the duplicate
